@@ -10,8 +10,12 @@ set -e
 REPO="https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main"
 AGENT_IMAGE="ghcr.io/nic01asfr/qgis-agent:latest"
 HUB_IMAGE="ghcr.io/nic01asfr/qgis-hub:latest"
+WORKSPACE_IMAGE="ghcr.io/nic01asfr/qgisremotemcp:latest"
+GPU_IMAGE="ghcr.io/nic01asfr/geoai-gpu:latest"
 HELM_RELEASE_AGENT="qgis-agent"
 HELM_RELEASE_HUB="qgis-mcp-bridge"
+HELM_RELEASE_WORKSPACE="qgis-workspace"
+HELM_RELEASE_GPU="geoai-gpu"
 
 # Détection automatique du namespace depuis le serviceaccount K8s monté.
 # C'est la source la plus fiable dans n'importe quel pod Onyxia.
@@ -100,11 +104,63 @@ helm upgrade --install "$HELM_RELEASE_AGENT" ide/jupyter-python \
     --set-string "extraEnvVars[4].value=$NAMESPACE" \
     2>&1
 
+# 3. Workspace QGIS Desktop (noVNC + MCP server)
+echo "▸ Déploiement workspace QGIS Desktop ($HELM_RELEASE_WORKSPACE)..."
+helm upgrade --install "$HELM_RELEASE_WORKSPACE" ide/jupyter-python \
+    --namespace "$NAMESPACE" \
+    --set service.image.custom.enabled=true \
+    --set "service.image.custom.version=$WORKSPACE_IMAGE" \
+    --set "init.personalInit=$REPO/server_init.sh" \
+    --set "networking.user.enabled=true" \
+    --set "networking.user.ports[0]=8080" \
+    --set "networking.user.ports[1]=8100" \
+    --set "networking.user.ports[2]=6080" \
+    --set "persistence.enabled=true" \
+    --set "persistence.size=10Gi" \
+    --set "global.suspend=false" \
+    --set "extraEnvVars[0].name=SERVICE_NAME" \
+    --set-string "extraEnvVars[0].value=qgis-workspace" \
+    --set "extraEnvVars[1].name=ONYXIA_USER" \
+    --set-string "extraEnvVars[1].value=$USERNAME" \
+    --set "extraEnvVars[2].name=SSPCLOUD_NAMESPACE" \
+    --set-string "extraEnvVars[2].value=$NAMESPACE" \
+    2>&1
+
+# 4. Pod GPU GeoAI (SAM3 + DeepForest) — scale 0 au démarrage, réveillé à la demande
+echo "▸ Déploiement pod GPU GeoAI ($HELM_RELEASE_GPU — suspendu, démarré à la demande)..."
+helm repo add inseefrlab https://inseefrlab.github.io/helm-charts-interactive-services --force-update 2>/dev/null
+helm repo update inseefrlab 2>/dev/null
+helm upgrade --install "$HELM_RELEASE_GPU" inseefrlab/jupyter-pytorch-gpu \
+    --namespace "$NAMESPACE" \
+    --set service.image.custom.enabled=true \
+    --set "service.image.custom.version=$GPU_IMAGE" \
+    --set "init.personalInit=$REPO/server_init.sh" \
+    --set "networking.user.enabled=true" \
+    --set "networking.user.ports[0]=8000" \
+    --set "persistence.enabled=true" \
+    --set "persistence.size=20Gi" \
+    --set "global.suspend=true" \
+    --set "resources.limits.nvidia\\.com/gpu=1" \
+    --set "nodeSelector.gpu-vram=16GB" \
+    --set "extraEnvVars[0].name=SERVICE_NAME" \
+    --set-string "extraEnvVars[0].value=geoai-gpu" \
+    --set "extraEnvVars[1].name=SERVER_PORT" \
+    --set-string "extraEnvVars[1].value=8000" \
+    --set "extraEnvVars[2].name=ONYXIA_USER" \
+    --set-string "extraEnvVars[2].value=$USERNAME" \
+    --set "extraEnvVars[3].name=SSPCLOUD_NAMESPACE" \
+    --set-string "extraEnvVars[3].value=$NAMESPACE" \
+    --set "extraEnvVars[4].name=GEOAI_GPU_SERVICE_NAME" \
+    --set-string "extraEnvVars[4].value=$HELM_RELEASE_GPU" \
+    2>&1
+
 echo ""
-echo "⏳ Attente démarrage des services (~60s)..."
+echo "⏳ Attente démarrage agent + hub + workspace (~90s)..."
 kubectl rollout status statefulset/${HELM_RELEASE_HUB}-jupyter-python \
     -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
 kubectl rollout status statefulset/${HELM_RELEASE_AGENT}-jupyter-python \
+    -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
+kubectl rollout status statefulset/${HELM_RELEASE_WORKSPACE}-jupyter-python \
     -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
 
 # Récupérer l'URL réelle depuis l'ingress créé par le chart

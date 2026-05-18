@@ -59,3 +59,28 @@ jobs:
           tags: |
             ghcr.io/${{ env.OWNER }}/qgis-hub:latest
             ghcr.io/${{ env.OWNER }}/qgis-hub:${{ github.sha }}
+
+  build-workspace:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push qgis-workspace (QGIS Desktop + noVNC + MCP)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.workspace
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER }}/qgisremotemcp:latest
+            ghcr.io/${{ env.OWNER }}/qgisremotemcp:${{ github.sha }}
