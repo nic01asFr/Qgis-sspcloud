@@ -10,7 +10,8 @@ set -e
 
 SERVICE_NAME="${SERVICE_NAME:-service}"
 SERVER_MODULE="${SERVER_MODULE:-}"
-SERVER_PORT="${SERVER_PORT:-8100}"
+# Port 8888 = port Jupyter du chart → readiness probe OK, ingress standard actif
+SERVER_PORT="${SERVER_PORT:-8888}"
 ONYXIA_USER="${ONYXIA_USER:-}"
 
 echo "[init] Service: $SERVICE_NAME | Module: $SERVER_MODULE | Port: $SERVER_PORT"

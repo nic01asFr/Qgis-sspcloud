@@ -70,10 +70,6 @@ helm upgrade --install "$HELM_RELEASE_HUB" ide/jupyter-python \
     --set service.image.custom.enabled=true \
     --set "service.image.custom.version=$HUB_IMAGE" \
     --set "init.personalInit=$REPO/server_init.sh" \
-    --set "networking.user.enabled=true" \
-    --set "networking.user.ports[0]=8100" \
-    --set "ingress.hostname=$HUB_HOST" \
-    --set "ingress.userHostname=$HUB_USER_HOST" \
     --set "persistence.enabled=true" \
     --set "persistence.size=5Gi" \
     --set "global.suspend=false" \
@@ -82,7 +78,7 @@ helm upgrade --install "$HELM_RELEASE_HUB" ide/jupyter-python \
     --set "extraEnvVars[1].name=SERVER_MODULE" \
     --set-string "extraEnvVars[1].value=hub.main:app" \
     --set "extraEnvVars[2].name=SERVER_PORT" \
-    --set-string "extraEnvVars[2].value=8100" \
+    --set-string "extraEnvVars[2].value=8888" \
     --set "extraEnvVars[3].name=ONYXIA_USER" \
     --set-string "extraEnvVars[3].value=$USERNAME" \
     --set "extraEnvVars[4].name=SSPCLOUD_NAMESPACE" \
@@ -96,10 +92,6 @@ helm upgrade --install "$HELM_RELEASE_AGENT" ide/jupyter-python \
     --set service.image.custom.enabled=true \
     --set "service.image.custom.version=$AGENT_IMAGE" \
     --set "init.personalInit=$REPO/server_init.sh" \
-    --set "networking.user.enabled=true" \
-    --set "networking.user.ports[0]=8100" \
-    --set "ingress.hostname=$AGENT_HOST" \
-    --set "ingress.userHostname=$AGENT_USER_HOST" \
     --set "persistence.enabled=true" \
     --set "persistence.size=5Gi" \
     --set "global.suspend=false" \
@@ -108,7 +100,7 @@ helm upgrade --install "$HELM_RELEASE_AGENT" ide/jupyter-python \
     --set "extraEnvVars[1].name=SERVER_MODULE" \
     --set-string "extraEnvVars[1].value=agent.main:app" \
     --set "extraEnvVars[2].name=SERVER_PORT" \
-    --set-string "extraEnvVars[2].value=8100" \
+    --set-string "extraEnvVars[2].value=8888" \
     --set "extraEnvVars[3].name=ONYXIA_USER" \
     --set-string "extraEnvVars[3].value=$USERNAME" \
     --set "extraEnvVars[4].name=SSPCLOUD_NAMESPACE" \
@@ -171,8 +163,8 @@ kubectl rollout status statefulset/${HELM_RELEASE_HUB}-jupyter-python \
 kubectl rollout status statefulset/${HELM_RELEASE_AGENT}-jupyter-python \
     -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
 
-# Le desk est servi par le hub — URL sur le port user du hub
-DESK_URL="https://${HUB_USER_HOST}/desk"
+# Le desk est servi par le hub sur l'ingress standard (port 8888 remplacé par uvicorn)
+DESK_URL="https://${HUB_HOST}/desk"
 
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
