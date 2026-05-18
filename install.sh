@@ -60,7 +60,7 @@ helm upgrade --install "$HELM_RELEASE_HUB" ide/jupyter-python \
     --set "service.image.custom.version=$HUB_IMAGE" \
     --set "init.personalInit=$REPO/server_init.sh" \
     --set "networking.user.enabled=true" \
-    --set "networking.user.port=8100" \
+    --set "networking.user.ports[0]=8100" \
     --set "persistence.enabled=true" \
     --set "persistence.size=5Gi" \
     --set "global.suspend=false" \
@@ -84,7 +84,7 @@ helm upgrade --install "$HELM_RELEASE_AGENT" ide/jupyter-python \
     --set "service.image.custom.version=$AGENT_IMAGE" \
     --set "init.personalInit=$REPO/server_init.sh" \
     --set "networking.user.enabled=true" \
-    --set "networking.user.port=8100" \
+    --set "networking.user.ports[0]=8100" \
     --set "persistence.enabled=true" \
     --set "persistence.size=5Gi" \
     --set "global.suspend=false" \
@@ -107,7 +107,18 @@ kubectl rollout status statefulset/${HELM_RELEASE_HUB}-jupyter-python \
 kubectl rollout status statefulset/${HELM_RELEASE_AGENT}-jupyter-python \
     -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
 
-DESK_URL="https://user-${USERNAME}-${HELM_RELEASE_AGENT}-bridge.user.lab.sspcloud.fr/desk"
+# Récupérer l'URL réelle depuis l'ingress créé par le chart
+AGENT_USER_HOST=$(kubectl get ingress -n "$NAMESPACE" \
+    -l "app.kubernetes.io/instance=${HELM_RELEASE_AGENT}" \
+    -o jsonpath='{.items[*].spec.rules[*].host}' 2>/dev/null | tr ' ' '\n' \
+    | grep -v "^$" | tail -1)
+
+if [ -n "$AGENT_USER_HOST" ]; then
+    DESK_URL="https://${AGENT_USER_HOST}/desk"
+else
+    # Fallback : convention Onyxia userHostname
+    DESK_URL="https://user-${USERNAME}-${HELM_RELEASE_AGENT}-user.user.lab.sspcloud.fr/desk"
+fi
 
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
@@ -117,5 +128,8 @@ echo "║   Ton bureau de travail QGIS :"
 echo "║   $DESK_URL"
 echo "║"
 echo "║   Bookmarke ce lien — c'est ton espace personnel."
+echo "║"
+echo "║   Note : le bureau QGIS Desktop (noVNC) se lancera"
+echo "║   automatiquement à la demande depuis le bureau."
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
