@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
+<meta name="theme-color" content="#000091">
+<title>{{ active_study.name if active_study else 'Bureau de travail' }} — CEREMA</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/utility/utility.min.css">
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
+  font-family:Marianne,arial,sans-serif}
+
+/* Layout hybride : Publications = drawer overlay (superpose le canvas) ;
+   Chat = sidebar grid (décale le canvas, ne le couvre pas).
+   Canvas QGIS prend tout l'espace entre le bord gauche et le chat panel. */
+.desk{display:grid;
+  grid-template-columns:1fr 6px var(--chat-w,340px);
+  grid-template-rows:48px 1fr 32px;
+  grid-template-areas:
+    "header header header"
+    "canvas h2  chat"
+    "status status status";
+  height:100vh;width:100vw;background:#f4f4f6}
+
+/* Variant quand chat replié : canvas plein */
+.desk.no-chat{grid-template-columns:1fr 0 0}
+
+/* ── Header : 2 cols (centre + chat) ──────────────────────────── */
+.desk-header{grid-area:header;background:#fff;border-bottom:1px solid var(--border-default-grey);
+  display:grid;grid-template-columns:1fr var(--chat-w,340px);
+  position:relative;overflow:visible;transition:grid-template-columns .12s ease;
+  min-width:0}
+.desk.no-chat .desk-header{grid-template-columns:1fr 0}
+.desk-header > *{min-width:0}
+
+.hdr-center{grid-column:1}
+.hdr-right{grid-column:2}
+.desk.no-chat .hdr-right{display:none}
+
+/* hdr-left = en-tête du panel Publications fusionné dans la navbar.
+   hdr-right = onglets Chat/Mémoire fusionnés dans la navbar.
+   Fond transparent pour s'unifier visuellement avec la navbar.
+   Quand un panel est replié, son en-tête disparaît (col grid à 0). */
+.hdr-left{min-width:0;display:flex;align-items:center;justify-content:space-between;
+  padding:0 56px 0 16px;height:100%}
+.hdr-left .publi-label{font-size:11px;color:var(--text-mention-grey);
+  text-transform:uppercase;letter-spacing:.5px;font-weight:700;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.hdr-left .publi-count{font-size:10px;color:var(--text-mention-grey);
+  background:#fff;padding:1px 7px;border-radius:10px;
+  border:1px solid var(--border-default-grey);font-weight:600;flex-shrink:0}
+
+.hdr-right{min-width:0;display:flex;align-items:stretch;height:100%}
+.hdr-right .right-tab{flex:1;padding:0 6px;font-size:11.5px;font-weight:600;
+  cursor:pointer;text-align:center;background:transparent;border:none;
+  color:var(--text-mention-grey);font-family:inherit;
+  border-bottom:2px solid transparent;display:flex;align-items:center;
+  justify-content:center;gap:6px;height:100%;white-space:nowrap;
+  transition:background .12s ease,color .12s ease,border-color .12s ease}
+.hdr-right .right-tab.active{color:var(--text-action-high-blue-france);
+  background:#fff;border-bottom-color:var(--border-action-high-blue-france)}
+.hdr-right .right-tab:hover:not(.active){background:rgba(0,0,145,.05);
+  color:var(--text-default-grey)}
+
+/* Col canvas : brand à gauche, contenu central (étude + Mon espace) à droite,
+   space-between étale les éléments → pas de gros vide entre eux et les
+   onglets Chat/Mémoire. */
+/* Padding gauche/droite réservé aux toggles 📚 (publi, 14px+36px=50px) et
+   💬 (chat, 14px+36px=50px). 60px de réserve laisse 10px d'aération entre
+   le toggle et le bord du contenu navbar. */
+/* PAS de overflow:hidden ici : sinon le dropdown du sélecteur d'études
+   (position:absolute, top:calc(100% + 6px)) est clippé sous la navbar et
+   le menu ne s'ouvre pas. Le truncate est géré au niveau de .study-name
+   qui a son propre overflow:hidden;text-overflow:ellipsis. */
+.hdr-center{display:flex;align-items:center;padding:0 60px;
+  min-width:0;gap:12px;justify-content:space-between}
+.hdr-center .brand{display:flex;align-items:baseline;gap:8px;white-space:nowrap}
+.hdr-center .brand .op{font-weight:700;color:#000091;font-size:15px;line-height:1;
+  letter-spacing:.4px}
+.hdr-center .brand .sub{font-size:11.5px;color:var(--text-mention-grey);font-weight:500;
+  letter-spacing:.3px}
+.hdr-center .center-content{display:flex;align-items:center;gap:22px;
+  white-space:nowrap;min-width:0}
+.hdr-center .right-spacer{display:none}
+
+/* Toggles : décalés du bord du panel (pas à cheval sur la séparation),
+   carrés arrondis, emoji + barre d'état colorée en bas pour signaler
+   visuellement ouvert/fermé. */
+.toggle-btn{position:absolute;top:50%;transform:translateY(-50%);
+  background:#fff;border:1px solid var(--border-default-grey);
+  border-radius:6px;width:36px;height:32px;font-size:17px;cursor:pointer;
+  font-family:inherit;display:flex;align-items:center;justify-content:center;
+  line-height:1;padding:0 0 3px 0;z-index:10;box-shadow:0 1px 4px rgba(0,0,0,.08);
+  user-select:none;overflow:hidden;
+  transition:left .15s ease,right .15s ease,
+  background .12s ease,box-shadow .12s ease,border-color .12s ease}
+.toggle-btn::after{content:"";position:absolute;left:6px;right:6px;bottom:3px;
+  height:2px;border-radius:1px;background:var(--background-alt-grey);
+  transition:background .12s ease,box-shadow .12s ease}
+.toggle-btn.active::after{background:var(--background-action-high-blue-france);
+  box-shadow:0 0 6px rgba(0,0,145,.35)}
+.toggle-btn:hover{background:var(--background-alt-blue-france);
+  border-color:var(--border-action-high-blue-france);
+  box-shadow:0 2px 8px rgba(0,0,145,.15)}
+.toggle-btn.active{border-color:var(--border-action-low-blue-france)}
+.toggle-btn:not(.active){background:#fafafa}
+.toggle-btn:not(.active):hover{background:var(--background-alt-blue-france)}
+
+/* Publi est un drawer overlay : le toggle reste au bord gauche fixe.
+   Chat est une sidebar grid : le toggle se positionne au bord du chat,
+   ou au bord droit du viewport si chat collapsed. */
+.toggle-publi{left:14px}
+.toggle-chat{right:calc(var(--chat-w,340px) + 14px)}
+.desk.no-chat .toggle-chat{right:14px}
+
+.toggle-publi::before{content:"📚"}
+.toggle-chat::before{content:"💬"}
+
+.hdr-center a.back-link{color:var(--text-action-high-blue-france);font-size:12px;
+  text-decoration:none;white-space:nowrap;font-weight:500;display:flex;align-items:center;gap:4px}
+.hdr-center a.back-link:hover{text-decoration:underline}
+
+/* Menu dropdown études */
+.study-menu{position:relative}
+.study-trigger{background:var(--background-alt-blue-france);
+  color:var(--text-title-blue-france);padding:6px 12px;border-radius:3px;
+  font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;
+  border:1px solid var(--border-action-low-blue-france);cursor:pointer;
+  font-family:inherit;line-height:1.2;max-width:380px;overflow:hidden}
+/* Truncate progressive : titre étude prend priorité, profile peut disparaître
+   en viewport étroit, puis l'étude elle-même tronque en ellipsis. min-width:0
+   sur le flex parent pour activer le shrink. */
+.study-trigger .study-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  min-width:0;flex:1 1 auto}
+.study-trigger:hover{border-color:var(--border-action-high-blue-france)}
+.study-trigger .profile{font-size:10.5px;color:var(--text-mention-grey);font-weight:500;
+  flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* En dessous de ~900px viewport, on cache le profil et garde juste le titre. */
+@media (max-width:900px){
+  .study-trigger .profile{display:none}
+}
+.study-trigger .caret{font-size:10px;opacity:.6}
+.study-dropdown{position:absolute;top:calc(100% + 6px);left:0;background:#fff;
+  border:1px solid var(--border-default-grey);border-radius:4px;
+  box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:300px;max-width:360px;
+  z-index:100;display:none;max-height:70vh;overflow-y:auto}
+.study-dropdown.open{display:block}
+.study-dropdown .item{display:flex;align-items:center;gap:8px;padding:8px 12px;
+  font-size:12.5px;cursor:pointer;color:var(--text-default-grey);
+  border-bottom:1px solid var(--background-alt-grey)}
+.study-dropdown .item:hover{background:var(--background-alt-grey)}
+.study-dropdown .item.active{background:var(--background-alt-blue-france);
+  color:var(--text-action-high-blue-france);font-weight:600}
+.study-dropdown .item.active::after{content:"✓";margin-left:auto;font-weight:700}
+.study-dropdown .item .ic{font-size:13px;opacity:.7}
+.study-dropdown .item .prof{margin-left:auto;font-size:10px;color:var(--text-mention-grey);
+  background:var(--background-alt-grey);padding:1px 6px;border-radius:2px}
+.study-dropdown .item.active .prof{background:rgba(0,0,145,.1)}
+.study-dropdown .new-form{padding:10px 12px;background:var(--background-alt-grey);
+  border-top:1px solid var(--border-default-grey)}
+.study-dropdown .new-form input,.study-dropdown .new-form select{width:100%;
+  padding:5px 8px;font-size:11.5px;border:1px solid var(--border-default-grey);
+  border-radius:3px;margin-bottom:4px;font-family:inherit;background:#fff}
+.study-dropdown .new-form button{width:100%;padding:5px;font-size:11.5px;
+  background:var(--background-action-high-blue-france);color:#fff;border:none;
+  border-radius:3px;cursor:pointer;font-family:inherit;font-weight:500}
+
+.desk-header .spacer{flex:1}
+.desk-header .user-chip{font-size:11.5px;color:var(--text-mention-grey);
+  padding:4px 10px;background:var(--background-alt-grey);border-radius:2px}
+.desk-header a{color:var(--text-action-high-blue-france);font-size:12px;text-decoration:none}
+
+/* ── Drawer Publications (overlay) ─────────────────────────────
+   Publi est TOUJOURS un drawer overlay qui glisse depuis la gauche.
+   Ne réduit pas la zone canvas (z-index:30 par-dessus). */
+.desk-publi{position:fixed;top:48px;bottom:32px;left:0;
+  width:var(--publi-w,260px);max-width:85vw;z-index:30;
+  background:#fff;border-right:1px solid var(--border-default-grey);
+  box-shadow:0 0 28px rgba(0,0,0,.18);
+  transform:translateX(-110%);transition:transform .2s ease;
+  display:flex;flex-direction:column;overflow:hidden}
+.desk.show-publi .desk-publi{transform:translateX(0)}
+
+/* Header du drawer (anciennement hdr-left dans la navbar) */
+.publi-drawer-header{display:flex;align-items:center;justify-content:space-between;
+  padding:10px 16px 10px 58px;border-bottom:1px solid var(--border-default-grey);
+  background:var(--background-alt-grey);min-height:38px}
+.publi-drawer-header .publi-label{font-size:11px;color:var(--text-mention-grey);
+  text-transform:uppercase;letter-spacing:.5px;font-weight:700;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.publi-drawer-header .publi-count{font-size:10px;color:var(--text-mention-grey);
+  background:#fff;padding:1px 7px;border-radius:10px;
+  border:1px solid var(--border-default-grey);font-weight:600;flex-shrink:0}
+.publi-list{flex:1;overflow-y:auto;padding:6px 0}
+.publi-item{padding:8px 12px;font-size:12px;cursor:pointer;
+  display:flex;gap:8px;align-items:center;color:var(--text-default-grey);
+  border-bottom:1px solid var(--background-alt-grey);text-decoration:none}
+.publi-item:hover{background:var(--background-alt-grey)}
+.publi-item.is-active-study{background:#fff8f0;border-left:3px solid #d64d00}
+.publi-item .ic{font-size:14px;flex-shrink:0}
+.publi-item .info{flex:1;min-width:0;overflow:hidden}
+.publi-item .study-badge{display:inline-block;font-size:9.5px;
+  background:var(--background-alt-grey);color:var(--text-mention-grey);
+  padding:1px 5px;border-radius:2px;margin-top:3px;
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.publi-item.is-active-study .study-badge{background:#ffe7d6;color:#d64d00}
+.publi-item .name{font-weight:600;color:var(--text-title-grey);
+  white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font-size:12px}
+.publi-item .meta{font-size:10px;color:var(--text-mention-grey);margin-top:2px}
+.publi-empty{padding:20px 14px;font-size:11.5px;color:var(--text-mention-grey);text-align:center}
+
+/* ── Resize handles ───────────────────────────────────────────── */
+.handle{background:transparent;cursor:col-resize;position:relative;z-index:5}
+.handle:hover,.handle.active{background:var(--border-action-high-blue-france)}
+.handle::after{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:2px;height:24px;background:var(--border-default-grey);border-radius:1px}
+.handle:hover::after,.handle.active::after{background:#fff}
+/* Seul le handle h2 (entre canvas et chat) existe en sidebar ; h1 disparaît
+   puisque publi est un drawer overlay (pas redimensionnable via handle). */
+.handle.h2{grid-area:h2}
+.no-chat .handle.h2{display:none}
+.handle.h1{display:none}
+
+/* ── Canvas (QGIS noVNC iframe) ──────────────────────────────── */
+/* Ancrage QGIS = haut-gauche. Le JS updateLayout() ajuste --chat-w au resize
+   pour que la zone canvas soit exactement en 16:9 ; l'iframe-fit fill alors
+   100% × 100% sans aucune bande vide. En-dessous du breakpoint (canvas trop
+   étroite pour ratio), classe `qgis-scroll` est ajoutée : canvas overflow-y,
+   iframe-fit garde le 16:9 strict via aspect-ratio → l'user scroll en bas
+   pour voir le reste. */
+.desk-canvas{grid-area:canvas;background:#fff;overflow:hidden;position:relative}
+.desk-canvas .iframe-fit{
+  width:100%;height:100%;
+  position:relative;overflow:hidden;background:#fff}
+.desk-canvas .iframe-fit iframe{
+  /* L'iframe est étendue de 8% width et 8% height (conserve ratio 16:9 du
+     Xvfb), positionnée asymétriquement pour masquer :
+       - top:-6% → 6% crop haut (WM titlebar "QgisRemoteMCP Project — QGIS")
+       - reste 2% crop bas (Fluxbox taskbar "Workspace 1 / horloge")
+       - left:-2% → 2% crop gauche (préserve Layers panel) + 6% crop droite
+     Valeurs trouvées par itération DevTools — masque les barres parasites
+     Xvfb sans toucher au menubar QGIS ni à la status bar. */
+  position:absolute;left:-2%;top:-6%;width:108%;height:108%;
+  border:none;display:block;background:#fff}
+
+/* Mode "scroll" : viewport trop étroit pour que QGIS pleine hauteur 16:9 +
+   chat nominal 340 rentrent. QGIS garde sa pleine hauteur en 16:9 (donc
+   width = height × 16/9 > canvas zone width) et déborde à droite ; la zone
+   canvas scrolle horizontalement. Ancrage haut-gauche. */
+.desk.qgis-scroll .desk-canvas{overflow-x:auto;overflow-y:hidden}
+.desk.qgis-scroll .desk-canvas .iframe-fit{
+  height:100%;width:auto;aspect-ratio:16/9}
+.canvas-empty{height:100%;display:flex;align-items:center;justify-content:center;
+  flex-direction:column;gap:12px;color:var(--text-mention-grey);text-align:center;padding:30px;background:#fff}
+.canvas-empty .ic{font-size:3rem;opacity:.4}
+.canvas-empty h3{color:var(--text-title-blue-france);font-weight:600;margin:0}
+.canvas-empty p{margin:0;font-size:13px;max-width:340px;color:var(--text-mention-grey)}
+
+/* ── Right panel (Chat + Mémoire) ────────────────────────────── */
+.desk-right{grid-area:chat;background:#fff;border-left:1px solid var(--border-default-grey);
+  display:flex;flex-direction:column;overflow:hidden}
+.right-pane{flex:1;overflow:hidden;display:none;flex-direction:column}
+.right-pane.active{display:flex}
+.right-pane iframe{flex:1;border:none;width:100%}
+
+/* Mémoire éditeur */
+.mem-pane{flex:1;overflow-y:auto;padding:10px 12px}
+.mem-section{margin-bottom:18px}
+.mem-label{font-size:10px;color:var(--text-mention-grey);text-transform:uppercase;
+  letter-spacing:.5px;font-weight:700;margin-bottom:8px;display:flex;justify-content:space-between;
+  align-items:center}
+.mem-add-btn{background:transparent;border:1px solid var(--border-action-low-blue-france);
+  color:var(--text-action-high-blue-france);padding:2px 8px;border-radius:2px;
+  font-size:10px;cursor:pointer;font-family:inherit;font-weight:600}
+.mem-add-btn:hover{background:var(--background-alt-blue-france)}
+.mem-item{display:flex;gap:6px;padding:6px 8px;background:var(--background-alt-grey);
+  border-radius:3px;margin-bottom:4px;align-items:flex-start;font-size:12px;
+  border-left:2px solid var(--border-action-low-blue-france)}
+.mem-item.explicit{border-left-color:#1f6f3f}
+.mem-item .ic{flex-shrink:0;font-size:11px;line-height:1.4}
+.mem-item .body{flex:1;min-width:0}
+.mem-item .key{font-weight:700;color:var(--text-title-grey);font-size:11px;
+  text-transform:uppercase;letter-spacing:.3px}
+.mem-item .val{color:var(--text-default-grey);font-size:12px;line-height:1.4;
+  margin-top:2px;word-break:break-word}
+.mem-item .val[contenteditable=true]{background:#fff;outline:1px solid var(--border-action-high-blue-france);
+  border-radius:2px;padding:2px 4px}
+.mem-item .actions{display:flex;flex-direction:column;gap:2px;flex-shrink:0}
+.mem-item .actions button{background:transparent;border:none;cursor:pointer;
+  font-size:11px;padding:1px 4px;color:var(--text-mention-grey);font-family:inherit}
+.mem-item .actions button:hover{color:var(--text-action-high-blue-france)}
+.mem-item .actions .del:hover{color:#ce0500}
+.mem-add-form{display:none;background:var(--background-alt-grey);border-radius:3px;
+  padding:8px;margin-bottom:8px;border-left:2px solid var(--border-action-high-blue-france)}
+.mem-add-form.open{display:block}
+.mem-add-form input{width:100%;padding:4px 6px;font-size:11.5px;
+  border:1px solid var(--border-default-grey);border-radius:2px;margin-bottom:4px;
+  font-family:inherit}
+.mem-add-form .row{display:flex;gap:4px}
+.mem-add-form button{flex:1;padding:4px;font-size:11px;background:var(--background-action-high-blue-france);
+  color:#fff;border:none;border-radius:2px;cursor:pointer;font-family:inherit}
+.mem-add-form button.cancel{background:transparent;color:var(--text-mention-grey);
+  border:1px solid var(--border-default-grey)}
+.mem-empty{padding:14px 8px;font-size:11px;color:var(--text-mention-grey);text-align:center}
+.mem-help{font-size:10.5px;color:var(--text-mention-grey);line-height:1.5;
+  padding:8px 10px;background:var(--background-alt-blue-france);border-radius:3px;margin-bottom:12px}
+
+/* Sections structurées markdown */
+.mem-md-section{background:#fff;border:1px solid var(--border-default-grey);
+  border-radius:4px;margin-bottom:10px;overflow:hidden}
+.mem-md-section.empty{background:var(--background-alt-grey)}
+.mem-md-head{padding:7px 10px;background:var(--background-alt-blue-france);
+  display:flex;justify-content:space-between;align-items:center;
+  border-bottom:1px solid var(--border-default-grey);cursor:pointer}
+.mem-md-title{font-size:12px;font-weight:700;color:var(--text-title-blue-france);
+  display:flex;gap:6px;align-items:center}
+.mem-md-toggle{font-size:10px;color:var(--text-mention-grey);background:transparent;
+  border:none;cursor:pointer;font-family:inherit}
+.mem-md-body{padding:0}
+.mem-md-body.collapsed{display:none}
+.mem-md-hint{font-size:10.5px;color:var(--text-mention-grey);padding:6px 10px;
+  font-style:italic;background:#fafafe;border-bottom:1px solid var(--background-alt-grey)}
+.mem-md-textarea{width:100%;border:none;padding:8px 10px;font-size:12px;
+  font-family:inherit;line-height:1.5;resize:vertical;min-height:44px;max-height:300px;
+  color:var(--text-default-grey);background:#fff;box-sizing:border-box}
+.mem-md-textarea:focus{outline:none;background:#fffce8}
+.mem-md-actions{padding:5px 10px;background:var(--background-alt-grey);
+  border-top:1px solid var(--border-default-grey);display:none;align-items:center;
+  justify-content:space-between;font-size:10.5px}
+.mem-md-actions.dirty{display:flex}
+.mem-md-actions .save-btn{background:var(--background-action-high-blue-france);
+  color:#fff;border:none;padding:3px 10px;border-radius:2px;cursor:pointer;
+  font-size:10.5px;font-family:inherit;font-weight:600}
+.mem-md-actions .saved-msg{color:#1f6f3f;font-weight:600;display:none}
+.mem-md-actions.saved .saved-msg{display:inline}
+.mem-md-actions.saved .save-btn{display:none}
+
+/* ── Status bar ──────────────────────────────────────────────── */
+.desk-status{grid-area:status;background:#fff;border-top:1px solid var(--border-default-grey);
+  padding:0 14px;display:flex;align-items:center;gap:12px;font-size:11px;
+  color:var(--text-mention-grey);overflow-x:auto;white-space:nowrap}
+.desk-status .user-chip{font-size:11px;color:var(--text-mention-grey);
+  padding:2px 8px;background:var(--background-alt-grey);border-radius:2px;
+  font-weight:500}
+.desk-status .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;
+  background:var(--background-alt-grey);border-radius:2px}
+.desk-status .badge.ok{color:#1f6f3f}
+.desk-status .badge.warn{color:#b04400}
+.desk-status .sep{color:var(--border-default-grey)}
+.desk-status .recent-tool{color:var(--text-action-high-blue-france);font-weight:500}
+
+/* Backdrop : actif quand publi drawer est ouvert (overlay) */
+.desk-backdrop{display:block;position:fixed;top:48px;right:0;bottom:32px;left:0;
+  background:rgba(0,0,0,.25);z-index:25;opacity:0;pointer-events:none;
+  transition:opacity .15s ease}
+.desk.show-publi .desk-backdrop{opacity:1;pointer-events:auto}
+
+/* ── Mode narrow (<1100px) : chat reste sidebar, juste plus étroite par défaut.
+   Si le canvas devient trop petit, clampLayoutToViewport() réduit chat. */
+@media(max-width:1100px){
+  .handle{display:none}
+}
+
+/* Très petit : la navbar centrale se compresse (brand + étude reste lisible) */
+@media(max-width:560px){
+  .hdr-center{padding:0 56px;gap:10px}
+  .hdr-center .brand .sub{display:none}
+  .study-trigger{max-width:200px}
+}
+</style>
+</head>
+<body>
+
+<div class="desk" id="desk">
+
+  <!-- ── HEADER : 2 colonnes (centre + chat tabs) ─────────────── -->
+  <header class="desk-header">
+
+    <!-- Toggle publi au bord gauche : ouvre/ferme le drawer overlay -->
+    <button class="toggle-btn toggle-publi" id="toggle-publi"
+            title="Ouvrir/fermer publications"></button>
+
+    <!-- Colonne centrale (canvas) : brand à gauche · centre · spacer droit -->
+    <div class="hdr-center">
+      <div class="brand">
+        <span class="op">CEREMA</span>
+        <span class="sub">· QGIS</span>
+      </div>
+      <div class="center-content">
+        <div class="study-menu">
+          <button class="study-trigger" id="study-trigger" onclick="toggleStudyMenu(event)"
+                  title="{% if active_study %}Étude active : {{ active_study.name }}
+Profil agent : {{ active_study.profile_label or active_study.profile }}
+Clique pour changer{% else %}Aucune étude active{% endif %}">
+            <span>📂</span>
+            {% if active_study %}
+              <span class="study-name">{{ active_study.name }}</span>
+              <span class="profile" title="Profil agent">· {{ active_study.profile_label or active_study.profile }}</span>
+            {% else %}
+              <span>Choisir une étude…</span>
+            {% endif %}
+            <span class="caret">▾</span>
+          </button>
+          <div class="study-dropdown" id="study-dropdown">
+            {% if studies %}
+              {% for s in studies %}
+              <form method="POST" action="/workspace/study/{{ s.id }}/activate?return_to=desk" style="margin:0">
+                <button type="submit" class="item {% if s.id == active_study_id %}active{% endif %}"
+                        style="width:100%;text-align:left;background:transparent;border:none;font-family:inherit"
+                        title="Profil: {{ s.profile }} · {{ s.id }}">
+                  <span class="ic">📂</span>
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.name }}</span>
+                  <span class="prof">{{ s.profile }}</span>
+                </button>
+              </form>
+              {% endfor %}
+            {% endif %}
+            <form class="new-form" method="POST" action="/workspace/study/new?return_to=desk">
+              <input name="name" required placeholder="Nom de la nouvelle étude…">
+              <select name="profile">
+                <option value="standard">Standard</option>
+                <option value="risk_analyst">Risques naturels</option>
+                <option value="storymap_creator">Storymap</option>
+                <option value="map_composer">Cartographe</option>
+                <option value="geoai_analyst">IA Vision</option>
+                <option value="db_analyst">DB</option>
+                <option value="recipe_creator">Recettes</option>
+              </select>
+              <button type="submit">+ Nouvelle étude</button>
+            </form>
+          </div>
+        </div>
+        <a href="/workspace" class="back-link" title="Retour à mon espace" aria-label="Retour à mon espace">↩</a>
+      </div>
+    </div>
+
+    <!-- Colonne droite (alignée avec chat panel) : onglets Chat/Mémoire -->
+    <div class="hdr-right">
+      <button class="right-tab active" data-tab="chat">💬 Chat</button>
+      <button class="right-tab" data-tab="memory">🧠 Mémoire</button>
+    </div>
+
+    <!-- Toggle chat au bord droit : position absolute en dehors du grid -->
+    <button class="toggle-btn toggle-chat" id="toggle-chat"
+            title="Masquer/afficher chat"></button>
+
+  </header>
+
+  <!-- Backdrop overlay : actif uniquement en mode narrow quand un panel est ouvert -->
+  <div class="desk-backdrop" id="desk-backdrop"></div>
+
+  <!-- ── PUBLICATIONS (drawer overlay gauche) ────────────────── -->
+  <aside class="desk-publi">
+    <div class="publi-drawer-header">
+      <span class="publi-label">Publications</span>
+      <span class="publi-count">{{ catalog_count }}</span>
+    </div>
+    <div class="publi-list">
+      {% if catalog_items %}
+        {% for item in catalog_items[:30] %}
+        <a href="{{ item.hub_url }}" target="_blank" class="publi-item" title="{{ item.url }}">
+          <span class="ic">
+            {% if item.kind == 'storymap' %}📖
+            {% elif item.kind == 'flux' %}🌐
+            {% elif item.kind == 'recipe' %}📋
+            {% elif item.kind == 'pdf' %}📄
+            {% elif item.kind == 'dataset' %}📊
+            {% else %}📦{% endif %}
+          </span>
+          <div class="info">
+            <div class="name">{{ item.slug }}</div>
+            <div class="meta">{{ item.kind }} · {{ item.size_kb }} ko</div>
+          </div>
+        </a>
+        {% endfor %}
+      {% else %}
+        <div class="publi-empty">
+          Aucune publication pour cette étude.<br>
+          <span style="font-size:10px">
+            Demande à l'agent : « publie cette storymap ».
+            {% if catalog_total and catalog_total > 0 %}
+              <br><a href="/workspace" style="color:var(--text-action-high-blue-france)">
+                Voir les {{ catalog_total }} publications du compte
+              </a>
+            {% endif %}
+          </span>
+        </div>
+      {% endif %}
+    </div>
+  </aside>
+
+  <div class="handle h1" data-target="publi"></div>
+
+  <!-- ── CANVAS QGIS ────────────────────────────────────────────── -->
+  <section class="desk-canvas">
+    {% if novnc_url and session_ready %}
+    <!-- wrapper iframe-fit : forcé en 16:9 via container queries (cf. CSS)
+         pour matcher exactement le ratio du Xvfb 1920x1080. scale=true active
+         le scaleViewport de vnc_lite.html (qui lit `scale`, pas `resize`) → fit
+         complet sans zone vide ni scrollbar. -->
+    <div class="iframe-fit">
+      <iframe src="{{ novnc_url }}/vnc_lite.html?autoconnect=1&reconnect=1&scale=true&quality=6&show_dot=false&logging=warn"
+              allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>
+    </div>
+    {% else %}
+    <div class="canvas-empty">
+      <div class="ic">🖥</div>
+      <h3>Bureau QGIS endormi</h3>
+      <p>Le workspace est en mode économie d'énergie (scale 0). Une commande au chat le réveillera, ou clique ci-dessous (~35s).</p>
+      <form method="POST" action="/workspace/wake?return_to=desk" style="margin:0">
+        <button type="submit" class="fr-btn fr-btn--secondary">Réveiller le bureau</button>
+      </form>
+    </div>
+    {% endif %}
+  </section>
+
+  <div class="handle h2" data-target="chat"></div>
+
+  <!-- ── PANEL DROIT : Chat | Mémoire (onglets dans la navbar hdr-right) ── -->
+  <section class="desk-right">
+    <!-- Pane Chat -->
+    <div class="right-pane active" data-pane="chat">
+      <iframe src="{{ agent_url }}/?embed=1" allow="microphone; clipboard-write"></iframe>
+    </div>
+
+    <!-- Pane Mémoire -->
+    <div class="right-pane" data-pane="memory">
+      <div class="mem-pane">
+        <div class="mem-help">
+          Voici ce que l'agent sait de toi de façon stable. <strong>Tu écris, l'agent lit</strong> —
+          ces sections sont incluses dans son contexte à chaque conversation.
+        </div>
+
+        <!-- Sections structurées éditables -->
+        <div id="mem-sections-container">
+          <div class="mem-empty">Chargement…</div>
+        </div>
+
+        <!-- Facts auto-détectés (apprentissage automatique) -->
+        <div class="mem-section">
+          <div class="mem-label">
+            <span>🧠 Faits auto-détectés ({{ insights|length }})</span>
+          </div>
+          <div style="font-size:10.5px;color:var(--text-mention-grey);margin-bottom:6px;line-height:1.4">
+            L'agent capture des faits pendant tes conversations. Confirme ceux qui
+            comptent en les recopiant dans tes sections ci-dessus, ou oublie les autres.
+          </div>
+          <div id="ins-list">
+            {% if insights %}
+              {% for ins in insights %}
+              <div class="mem-item {% if ins.source == 'explicit' %}explicit{% endif %}" data-id="{{ ins.id }}">
+                <span class="ic">{% if ins.source == 'explicit' %}📌{% else %}🧠{% endif %}</span>
+                <div class="body">
+                  <div class="key">{{ ins.key }}</div>
+                  <div class="val">{{ ins.value }}</div>
+                </div>
+                <div class="actions">
+                  <button class="del" onclick="delIns({{ ins.id }})" title="Oublier">×</button>
+                </div>
+              </div>
+              {% endfor %}
+            {% else %}
+              <div class="mem-empty">Rien d'appris pour l'instant. Discute avec l'agent — il propose des faits durables via &lt;remember&gt;.</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── STATUS BAR ──────────────────────────────────────────── -->
+  <footer class="desk-status">
+    {% if session_ready %}
+    <span class="badge ok">● Workspace actif</span>
+    {% else %}
+    <span class="badge warn">○ Endormi</span>
+    {% endif %}
+    <span>{{ studies|length }} études</span>
+    <span class="sep">|</span>
+    <span>
+      {{ catalog_count }} publication{{ '' if catalog_count == 1 else 's' }}
+      {% if catalog_total and catalog_total != catalog_count %}
+        <small style="opacity:.6">(sur {{ catalog_total }} compte)</small>
+      {% endif %}
+    </span>
+    <span class="sep">|</span>
+    <span>🧠 {{ insights|length }} insights</span>
+    <span class="sep">|</span>
+    {% if recent_treatments %}
+    <span>Récents :</span>
+    {% for t in recent_treatments[:4] %}
+    <span class="recent-tool">{{ t }}</span>
+    {% endfor %}
+    {% else %}
+    <span style="opacity:.6">Aucun traitement récent</span>
+    {% endif %}
+    <span style="margin-left:auto" class="user-chip">{{ username }}</span>
+  </footer>
+
+</div>
+
+<script>
+const desk = document.getElementById('desk');
+
+// Détecte le mode (overlay vs colonnes). Déclaré ici pour éviter
+// la temporal dead zone lors du syncToggles() initial.
+const isNarrow = () => window.matchMedia('(max-width: 1100px)').matches;
+
+// ── Etat persisté layout ─────────────────────────────────────
+const stored = JSON.parse(localStorage.getItem('desk-layout') || '{}');
+if (stored.publi) desk.style.setProperty('--publi-w', stored.publi + 'px');
+if (stored.chat) desk.style.setProperty('--chat-w', stored.chat + 'px');
+// Publi est un drawer overlay : fermé par défaut, pas de persistence ouverte
+// (l'utilisateur l'ouvre à la demande via 📚). Chat est une sidebar persistante.
+if (stored.collapseChat) desk.classList.add('no-chat');
+syncToggles();
+
+// Ajuste --chat-w au resize pour garder QGIS toujours en 16:9 ancré haut-gauche.
+// Iframe = 100% canvas zone, donc pas de débordement à compenser.
+//   A (large) : QGIS pleine hauteur, chat s'étend pour combler.
+//   B (étroit): chat figé 340 ; QGIS scroll horizontal sous canvas zone.
+const CHAT_NOMINAL = 340;
+const HANDLE = 6;
+const HEADER_H = 48, STATUS_H = 32;
+function updateLayout() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight - HEADER_H - STATUS_H;
+  const qgisWAtFullH = vh * 16 / 9;
+
+  if (qgisWAtFullH + CHAT_NOMINAL + HANDLE <= vw) {
+    const chatW = vw - qgisWAtFullH - HANDLE;
+    desk.style.setProperty('--chat-w', chatW + 'px');
+    desk.classList.remove('qgis-scroll');
+  } else {
+    desk.style.setProperty('--chat-w', CHAT_NOMINAL + 'px');
+    desk.classList.add('qgis-scroll');
+  }
+}
+updateLayout();
+window.addEventListener('resize', updateLayout);
+
+// Save du projet QGIS de l'étude active lors de la fermeture / navigation.
+// sendBeacon survit à la fermeture du tab et garantit que le .qgz est écrit
+// même si l'utilisateur ferme brutalement. Fallback fetch keepalive pour
+// les rares navigateurs qui mishandle sendBeacon.
+const _activeStudyId = {{ active_study_id|tojson if active_study_id else 'null' }};
+function _saveActiveStudyBeacon() {
+  if (!_activeStudyId) return;
+  const url = `/desk/study/${_activeStudyId}/save`;
+  try {
+    if (navigator.sendBeacon) {
+      // Blob vide : on n'a pas de payload, juste un trigger côté serveur
+      navigator.sendBeacon(url, new Blob([''], { type: 'application/json' }));
+    } else {
+      fetch(url, { method: 'POST', keepalive: true });
+    }
+  } catch (e) { /* silencieux : on est en plein unload */ }
+}
+window.addEventListener('beforeunload', _saveActiveStudyBeacon);
+// visibilitychange capte aussi les mobiles qui n'envoient pas beforeunload
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') _saveActiveStudyBeacon();
+});
+
+function saveLayout() {
+  const s = {
+    publi: parseInt(getComputedStyle(desk).getPropertyValue('--publi-w') || '260'),
+    chat: parseInt(getComputedStyle(desk).getPropertyValue('--chat-w') || '340'),
+    collapseChat: desk.classList.contains('no-chat'),
+  };
+  localStorage.setItem('desk-layout', JSON.stringify(s));
+}
+
+// Au-dessus de 1100px : panels en colonnes, .no-X cache. En dessous :
+// panels en drawer overlay, .show-X révèle. `isNarrow` déclaré plus haut.
+// Publi = drawer overlay (show-publi) ; Chat = sidebar grid (no-chat collapse).
+// Comportement identique dans tous les viewports.
+function syncToggles() {
+  const tP = document.getElementById('toggle-publi');
+  const tC = document.getElementById('toggle-chat');
+  tP?.classList.toggle('active', desk.classList.contains('show-publi'));
+  tC?.classList.toggle('active', !desk.classList.contains('no-chat'));
+}
+
+function togglePanel(side) {
+  if (side === 'publi') {
+    desk.classList.toggle('show-publi');
+  } else {
+    desk.classList.toggle('no-chat');
+  }
+  syncToggles(); saveLayout();
+}
+
+document.getElementById('toggle-publi').addEventListener('click', () => togglePanel('publi'));
+document.getElementById('toggle-chat').addEventListener('click', () => togglePanel('chat'));
+
+// Backdrop : un click ferme le drawer publi
+document.getElementById('desk-backdrop').addEventListener('click', () => {
+  desk.classList.remove('show-publi');
+  syncToggles();
+});
+
+// ── Resize handles ───────────────────────────────────────────
+document.querySelectorAll('.handle').forEach(h => {
+  h.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    h.classList.add('active');
+    const target = h.dataset.target;
+    const cssVar = '--' + (target === 'publi' ? 'publi-w' : 'chat-w');
+    const startX = e.clientX;
+    const startW = parseInt(getComputedStyle(desk).getPropertyValue(cssVar) ||
+                            (target === 'publi' ? '240' : '380'));
+    const onMove = (ev) => {
+      const delta = ev.clientX - startX;
+      const newW = target === 'publi'
+        ? Math.max(160, Math.min(420, startW + delta))
+        : Math.max(280, Math.min(600, startW - delta));
+      desk.style.setProperty(cssVar, newW + 'px');
+    };
+    const onUp = () => {
+      h.classList.remove('active');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      saveLayout();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+});
+
+// ── Dropdown études ────────────────────────────────────────
+function toggleStudyMenu(e) {
+  e.stopPropagation();
+  document.getElementById('study-dropdown').classList.toggle('open');
+}
+document.addEventListener('click', (e) => {
+  const dd = document.getElementById('study-dropdown');
+  if (!e.target.closest('.study-menu')) dd.classList.remove('open');
+});
+
+// ── Onglets panel droit ───────────────────────────────────
+document.querySelectorAll('.right-tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.right-tab').forEach(x => x.classList.toggle('active', x === t));
+    const target = t.dataset.tab;
+    document.querySelectorAll('.right-pane').forEach(p =>
+      p.classList.toggle('active', p.dataset.pane === target)
+    );
+  });
+});
+
+// ── Mémoire markdown structurée : éditeur par section ─────────
+async function loadMemorySections() {
+  const r = await fetch('/desk/memory');
+  if (!r.ok) return;
+  const data = await r.json();
+  const container = document.getElementById('mem-sections-container');
+  const schema = data.schema || [];
+  const sections = data.sections || {};
+
+  const collapsedState = JSON.parse(localStorage.getItem('mem-collapsed') || '{}');
+
+  container.innerHTML = schema.map(s => {
+    const content = sections[s.key] || '';
+    const isEmpty = !content.trim();
+    const isCollapsed = isEmpty || collapsedState[s.key];
+    return `
+      <div class="mem-md-section ${isEmpty ? 'empty' : ''}" data-key="${s.key}">
+        <div class="mem-md-head" onclick="toggleSection('${s.key}')">
+          <div class="mem-md-title">
+            <span>${isEmpty ? '○' : '●'}</span>
+            <span>${s.title}</span>
+          </div>
+          <button class="mem-md-toggle">${isCollapsed ? '▾' : '▴'}</button>
+        </div>
+        <div class="mem-md-body ${isCollapsed ? 'collapsed' : ''}">
+          <div class="mem-md-hint">${s.hint}</div>
+          <textarea class="mem-md-textarea" data-key="${s.key}"
+            placeholder="${s.placeholder.replace(/"/g, '&quot;')}"
+            oninput="markDirty(this)">${escapeHtml(content)}</textarea>
+          <div class="mem-md-actions" data-key="${s.key}">
+            <span class="saved-msg">✓ Enregistré</span>
+            <span style="color:var(--text-mention-grey)">Modifications non sauvegardées</span>
+            <button class="save-btn" onclick="saveSection('${s.key}')">Enregistrer</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
+}
+
+function toggleSection(key) {
+  const body = document.querySelector(`.mem-md-section[data-key="${key}"] .mem-md-body`);
+  const tog = document.querySelector(`.mem-md-section[data-key="${key}"] .mem-md-toggle`);
+  body.classList.toggle('collapsed');
+  tog.textContent = body.classList.contains('collapsed') ? '▾' : '▴';
+  const state = JSON.parse(localStorage.getItem('mem-collapsed') || '{}');
+  state[key] = body.classList.contains('collapsed');
+  localStorage.setItem('mem-collapsed', JSON.stringify(state));
+}
+
+function markDirty(textarea) {
+  const actions = textarea.closest('.mem-md-section').querySelector('.mem-md-actions');
+  actions.classList.add('dirty');
+  actions.classList.remove('saved');
+}
+
+async function saveSection(key) {
+  const textarea = document.querySelector(`.mem-md-textarea[data-key="${key}"]`);
+  const actions = document.querySelector(`.mem-md-actions[data-key="${key}"]`);
+  const content = textarea.value;
+  const r = await fetch('/desk/memory', {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({key, content}),
+  });
+  if (r.ok) {
+    actions.classList.remove('dirty');
+    actions.classList.add('saved');
+    // Mettre à jour le bullet ●/○ sans recharger
+    const section = textarea.closest('.mem-md-section');
+    const isEmpty = !content.trim();
+    section.classList.toggle('empty', isEmpty);
+    const bullet = section.querySelector('.mem-md-title span:first-child');
+    if (bullet) bullet.textContent = isEmpty ? '○' : '●';
+    // Reset "saved" badge après 2s
+    setTimeout(() => actions.classList.remove('saved'), 2000);
+  }
+}
+
+async function delIns(id) {
+  if (!confirm('Oublier cet insight ?')) return;
+  const r = await fetch('/desk/memory/insights/' + id, { method: 'DELETE' });
+  if (!r.ok && r.status !== 204) return;
+  // DOM update direct — pas de reload (qui reset l'iframe noVNC et la session chat)
+  const el = document.querySelector('.mem-item[data-id="' + id + '"]');
+  if (el) {
+    el.style.transition = 'opacity .2s';
+    el.style.opacity = '0';
+    setTimeout(() => {
+      el.remove();
+      // Mettre à jour le compteur dans le label
+      const cards = document.querySelectorAll('.mem-item[data-id]');
+      const lbl = document.querySelector('#ins-list')?.previousElementSibling?.previousElementSibling;
+      if (lbl) {
+        const m = lbl.innerHTML.match(/\((\d+)\)/);
+        if (m) lbl.innerHTML = lbl.innerHTML.replace(/\(\d+\)/, '(' + cards.length + ')');
+      }
+      // Mettre à jour le compteur de la status bar
+      const statusInsights = document.querySelector('.desk-status');
+      if (statusInsights) {
+        statusInsights.innerHTML = statusInsights.innerHTML.replace(
+          /🧠 \d+ insights/, '🧠 ' + cards.length + ' insights'
+        );
+      }
+      if (!cards.length) {
+        document.getElementById('ins-list').innerHTML =
+          '<div class="mem-empty">Plus aucun fait auto-détecté.</div>';
+      }
+    }, 200);
+  }
+}
+
+// Charger les sections au premier clic sur l'onglet Mémoire (lazy)
+let memoryLoaded = false;
+document.querySelector('.right-tab[data-tab="memory"]').addEventListener('click', () => {
+  if (!memoryLoaded) {
+    loadMemorySections();
+    memoryLoaded = true;
+  }
+});
+</script>
+</body>
+</html>

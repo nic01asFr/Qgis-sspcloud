@@ -1,0 +1,61 @@
+name: Build & Push Docker images
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: nic01asfr
+
+jobs:
+  build-agent:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push qgis-agent
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.agent
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER }}/qgis-agent:latest
+            ghcr.io/${{ env.OWNER }}/qgis-agent:${{ github.sha }}
+
+  build-hub:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push qgis-hub
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.hub
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER }}/qgis-hub:latest
+            ghcr.io/${{ env.OWNER }}/qgis-hub:${{ github.sha }}

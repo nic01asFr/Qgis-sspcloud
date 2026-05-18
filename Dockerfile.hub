@@ -1,0 +1,9 @@
+FROM inseefrlab/onyxia-jupyter-python:py3.13.13
+
+USER root
+WORKDIR /opt/qgis-hub
+
+COPY hub/ .
+RUN pip install -e . --quiet --no-cache-dir
+
+USER 1000

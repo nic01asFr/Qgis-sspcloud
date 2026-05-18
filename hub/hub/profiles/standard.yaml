@@ -1,0 +1,46 @@
+---
+# Profil : Standard (base)
+# Image requise : ghcr.io/nic01asfr/qgisremotemcp:standard
+# Tous les outils, usage générique
+
+profile_version: "1.0"
+id: standard
+name: "Standard"
+description: "Profil de base — tous les outils disponibles"
+image_variant: standard
+requires_geoai: false
+
+plugins:
+  enabled:
+    - qgis2web
+    - quick_map_services
+    - qneat3
+  disabled:
+    - plugin_manager
+
+connections:
+  postgis: []
+  wfs:
+    - name: "IGN BD TOPO"
+      url: "https://data.geopf.fr/wfs/ows"
+    - name: "Géorisques"
+      url: "https://georisques.gouv.fr/services/wfs"
+
+data_structure:
+  - projects/
+  - exports/
+  - cache/
+  - agent/
+
+mcp_tools:
+  allowed: all   # tous les outils activés
+  disabled: []
+
+geoai_watcher:
+  enabled: false
+
+agent_system_prompt: |
+  Tu es un expert QGIS pour le CEREMA, spécialisé en analyse géospatiale.
+  Tu as accès à plus de 60 sources de données françaises (IGN, Géorisques, OSM, DVF).
+  Utilise set_study_zone() pour définir la zone, smart_load() pour charger les données,
+  run_processing() pour les traitements, et export_pdf()/export_web_map() pour les livrables.

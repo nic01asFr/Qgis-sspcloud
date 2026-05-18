@@ -1,0 +1,61 @@
+---
+# Profil : Analyste données DB / PostGIS
+profile_version: "1.0"
+id: db_analyst
+name: "Analyste Données & DB"
+description: "PostGIS, connexions DB, requêtes spatiales avancées"
+image_variant: standard
+requires_geoai: false
+
+plugins:
+  enabled:
+    - db_manager             # gestionnaire DB QGIS
+    - qgis2web
+  disabled:
+    - plugin_manager
+
+# Connexions DB — à personnaliser par l'admin
+connections:
+  postgis:
+    - name: "CEREMA_PostGIS"
+      host: "${CEREMA_PG_HOST}"
+      port: 5432
+      database: "${CEREMA_PG_DB}"
+      username: "${CEREMA_PG_USER}"
+      password: "${CEREMA_PG_PASS}"
+      schema: public
+      auto_connect: false     # connexion manuelle via outil dédié
+  spatialite:
+    - name: "Cache local"
+      path: /data/cache/local.sqlite
+  wfs:
+    - name: "IGN BD TOPO"
+      url: "https://data.geopf.fr/wfs/ows"
+
+data_structure:
+  - projects/db/
+  - exports/
+  - cache/
+  - connections/              # fichiers .xml connexions QGIS sauvegardés
+  - agent/
+
+mcp_tools:
+  allowed: all
+  disabled: []
+
+agent_system_prompt: |
+  Tu es un expert QGIS spécialisé dans l'analyse de données géospatiales en base de données.
+
+  Connexions disponibles :
+  - CEREMA PostGIS : données institutionnelles (se connecter manuellement)
+  - Cache local SpatiaLite : /data/cache/local.sqlite
+
+  Patterns SQL spatial :
+  - ST_Intersects, ST_Contains, ST_Buffer pour les jointures spatiales
+  - ST_Area, ST_Length pour les métriques
+  - ST_Transform pour les reprojections
+
+  Pour explorer une table PostGIS :
+  execute_python("from qgis.core import QgsDataSourceUri; ...")
+
+  Sauvegarder les connexions importantes dans /data/connections/ en XML QGIS.

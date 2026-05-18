@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
+<meta name="theme-color" content="#000091">
+<title>QGIS Agent — CEREMA</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/utility/utility.min.css">
+<script src="https://unpkg.com/marked@9/marked.min.js"></script>
+<style>
+html,body{height:100%;margin:0}
+body{display:flex;flex-direction:column;background:#f6f6f6}
+.chat-app{flex:1;display:grid;grid-template-columns:240px 1fr;min-height:0}
+.chat-sidebar{background:#fff;border-right:1px solid var(--border-default-grey);
+  display:flex;flex-direction:column;overflow:hidden}
+.sidebar-section{padding:10px 14px;border-bottom:1px solid var(--border-default-grey)}
+.sidebar-label{font-size:10px;color:var(--text-mention-grey);text-transform:uppercase;
+  letter-spacing:.5px;font-weight:700;margin-bottom:6px}
+.sidebar-item{padding:5px 8px;border-radius:3px;font-size:12px;cursor:pointer;
+  display:flex;gap:6px;align-items:center;color:var(--text-default-grey)}
+.sidebar-item:hover{background:var(--background-alt-grey)}
+.sidebar-item .ic{flex-shrink:0;font-size:13px;opacity:.7}
+.suggestion-btn{display:block;width:100%;text-align:left;padding:6px 8px;border-radius:3px;
+  background:transparent;border:1px solid transparent;font-size:11.5px;color:var(--text-default-grey);
+  cursor:pointer;font-family:inherit;line-height:1.3;margin-bottom:2px}
+.suggestion-btn:hover{background:var(--background-alt-blue-france);color:var(--text-action-high-blue-france);
+  border-color:var(--border-action-low-blue-france)}
+.chat-main{display:flex;flex-direction:column;min-height:0;background:#f6f6f6;position:relative}
+.chat-toolbar{padding:8px 14px;background:#fff;border-bottom:1px solid var(--border-default-grey);
+  display:flex;gap:10px;align-items:center;flex-shrink:0}
+.chat-toolbar select{font-size:12px;padding:3px 6px;border-radius:3px;
+  border:1px solid var(--border-default-grey);background:#fff;font-family:inherit}
+.chat-toolbar .spacer{flex:1}
+.chat-toolbar a{font-size:12px;color:var(--text-action-high-blue-france);text-decoration:none}
+.chat-toolbar a:hover{text-decoration:underline}
+.chat-toolbar button.tool-btn{background:transparent;border:1px solid var(--border-default-grey);
+  border-radius:3px;padding:3px 8px;font-size:12px;cursor:pointer;font-family:inherit;
+  color:var(--text-default-grey)}
+.chat-toolbar button.tool-btn:hover{background:var(--background-alt-blue-france);
+  border-color:var(--border-action-low-blue-france);color:var(--text-action-high-blue-france)}
+
+/* Mémoire drawer : pan latéral droit par-dessus la zone messages, sans casser le layout */
+.memory-drawer{position:absolute;top:0;right:0;bottom:0;width:340px;background:#fff;
+  border-left:1px solid var(--border-default-grey);box-shadow:-4px 0 12px rgba(0,0,0,.06);
+  transform:translateX(100%);transition:transform .2s ease;z-index:20;
+  display:flex;flex-direction:column}
+.memory-drawer.open{transform:translateX(0)}
+.memory-drawer header{padding:10px 14px;border-bottom:1px solid var(--border-default-grey);
+  display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500}
+.memory-drawer header .close{margin-left:auto;background:transparent;border:0;
+  font-size:18px;cursor:pointer;color:var(--text-mention-grey);line-height:1}
+.memory-drawer .body{flex:1;overflow-y:auto;padding:10px 14px}
+.memory-drawer footer{padding:10px 14px;border-top:1px solid var(--border-default-grey);
+  font-size:11.5px;color:var(--text-mention-grey)}
+.memory-drawer footer a{font-size:11.5px}
+.insight-card{background:var(--background-alt-grey);border:1px solid var(--border-default-grey);
+  border-radius:4px;padding:8px 10px;margin-bottom:6px;font-size:12px;position:relative}
+.insight-card .key{font-weight:600;color:var(--text-action-high-blue-france);font-family:Menlo,Monaco,Consolas,monospace;
+  font-size:11px}
+.insight-card .val{margin-top:3px;color:var(--text-default-grey)}
+.insight-card .meta{margin-top:4px;font-size:10px;color:var(--text-mention-grey);
+  display:flex;gap:8px;align-items:center}
+.insight-card button.del{position:absolute;top:6px;right:8px;background:transparent;border:0;
+  font-size:14px;cursor:pointer;opacity:.4;color:var(--text-default-grey);line-height:1}
+.insight-card button.del:hover{opacity:1;color:#c00}
+.memory-empty{font-size:12px;color:var(--text-mention-grey);text-align:center;padding:20px 10px}
+.chat-messages{flex:1;overflow-y:auto;padding:18px 22px;display:flex;flex-direction:column;gap:14px}
+.msg{display:flex;gap:10px;max-width:100%}
+.msg.user{justify-content:flex-end}
+.msg .avatar{width:28px;height:28px;border-radius:50%;background:var(--background-alt-blue-france);
+  display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.msg .bubble{padding:10px 14px;border-radius:6px;font-size:13.5px;line-height:1.5;
+  max-width:680px;background:#fff;border:1px solid var(--border-default-grey);
+  color:var(--text-default-grey)}
+.msg.user .bubble{background:var(--background-action-high-blue-france);color:#fff;border-color:transparent;
+  max-width:560px}
+.msg .bubble :last-child{margin-bottom:0}
+.msg .bubble p{margin:0 0 6px}
+.msg .bubble ul,.msg .bubble ol{margin:6px 0;padding-left:20px}
+.msg .bubble code{background:var(--background-alt-grey);padding:1px 4px;border-radius:2px;
+  font-size:.9em;font-family:Menlo,Monaco,Consolas,monospace}
+/* Résultats tool (code blocks après blockquote) : compacts, max-height,
+   scroll auto. L'user CEREMA n'a pas besoin de lire le JSON brut en grand. */
+.msg .bubble pre{background:var(--background-alt-grey);padding:6px 10px;border-radius:3px;
+  overflow:auto;max-height:200px;font-size:11px;line-height:1.45;
+  margin:2px 0 10px;border-left:2px solid var(--border-default-grey);
+  font-size:11.5px;line-height:1.4}
+/* Tool calls = badges feedback visibles. Format utilisé par l'agent :
+   "> **`tool_name`** — `arg=val`". On garde un feedback visuel CLAIR
+   (l'user doit voir l'agent travailler) tout en restant ordonné. Accent
+   bleu DSFR sur la border + icône ⚙️ ajoutée via CSS pour identifier
+   immédiatement les actions. */
+.msg .bubble blockquote{
+  position:relative;
+  border-left:3px solid var(--border-action-low-blue-france);
+  background:var(--background-alt-blue-france);
+  padding:5px 10px 5px 30px;margin:10px 0 2px;
+  font-size:12px;line-height:1.5;
+  color:var(--text-default-grey);
+  border-radius:3px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+.msg .bubble blockquote::before{
+  content:"⚙️";position:absolute;left:8px;top:50%;transform:translateY(-50%);
+  font-size:13px;
+}
+.msg .bubble blockquote strong{color:var(--text-action-high-blue-france);font-weight:700}
+.msg .bubble blockquote code{background:transparent;color:var(--text-mention-grey);padding:0;font-size:0.95em}
+.msg .bubble blockquote p{margin:0}
+
+/* Dernier tool en cours d'exécution : pulse pour signaler "j'attends le retour" */
+.msg .bubble blockquote:last-of-type{
+  animation:tool-pulse 1.6s ease-in-out infinite;
+}
+@keyframes tool-pulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(0,0,145,.15)}
+  50%{box-shadow:0 0 0 4px rgba(0,0,145,.05)}
+}
+/* Quand un <pre> suit (= résultat arrivé), on désactive le pulse en le
+   ciblant via :has() (supporté Chrome 105+ / Safari 15.4+ / Firefox 121+). */
+.msg .bubble blockquote:has(+ pre){animation:none}
+/* Images de tools (ex: get_screenshot) rendues inline dans la bulle. */
+.msg .bubble img{max-width:100%;height:auto;border-radius:4px;margin:8px 0;
+  border:1px solid var(--border-default-grey);display:block}
+.chat-input{padding:10px 16px 0;background:#fff;border-top:1px solid var(--border-default-grey);
+  flex-shrink:0}
+.status-bar{font-size:11.5px;color:var(--text-action-high-blue-france);margin-bottom:6px;
+  display:none;align-items:center;gap:6px}
+.status-bar.visible{display:flex}
+.spinner{width:10px;height:10px;border:2px solid var(--border-action-low-blue-france);
+  border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.chat-form{display:flex;gap:8px;align-items:flex-end}
+.input-wrap{flex:1;position:relative;display:flex}
+.chat-form textarea{flex:1;border:1px solid var(--border-default-grey);border-radius:4px;
+  padding:8px 40px 8px 12px;font-size:13.5px;resize:none;font-family:inherit;line-height:1.4;
+  min-height:44px;max-height:160px}
+.chat-form textarea:focus{outline:none;border-color:var(--border-action-high-blue-france);
+  box-shadow:0 0 0 1px var(--border-action-high-blue-france)}
+.chat-form .send-btn{background:var(--background-action-high-blue-france);color:#fff;border:none;
+  padding:0 6px;border-radius:4px;cursor:pointer;font-size:13.5px;font-weight:500;
+  height:44px}
+.chat-form .send-btn:disabled{opacity:.5;cursor:wait}
+.chat-form .send-btn:hover:not(:disabled){background:var(--background-action-high-blue-france-hover)}
+
+/* Bouton dictée intégré au coin haut-droit du textarea, aligné avec la
+   première ligne (= ligne du placeholder) : discret au repos, rouge pulsant
+   en enregistrement. Ne s'affiche que si MediaRecorder dispo.
+   top:8px = padding-top du textarea pour s'aligner pile sur la baseline. */
+.mic-btn{position:absolute;right:6px;top:8px;width:28px;height:28px;
+  border:none;background:transparent;border-radius:50%;cursor:pointer;padding:0;
+  display:none;align-items:center;justify-content:center;color:var(--text-mention-grey);
+  transition:background .12s ease,color .12s ease}
+.mic-btn.available{display:flex}
+.mic-btn:hover{background:var(--background-alt-grey);color:var(--text-action-high-blue-france)}
+.mic-btn svg{width:16px;height:16px;display:block}
+.mic-btn.recording{background:#e1000f;color:#fff;animation:micPulse 1.4s ease-in-out infinite}
+.mic-btn.recording:hover{background:#b3000c;color:#fff}
+.mic-btn.loading{opacity:.55;cursor:wait;animation:none}
+@keyframes micPulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(225,0,15,.55)}
+  50%{box-shadow:0 0 0 6px rgba(225,0,15,0)}
+}
+.hint{font-size:10.5px;color:var(--text-mention-grey);margin:2px 0 0;text-align:center}
+.welcome{background:#fff;border:1px solid var(--border-default-grey);border-radius:6px;
+  padding:14px 18px;color:var(--text-default-grey);font-size:13.5px}
+.welcome h3{font-size:14px;color:var(--text-title-blue-france);margin:0 0 6px;font-weight:700}
+.welcome ul{margin:6px 0 0;padding-left:18px;font-size:12.5px;color:var(--text-mention-grey)}
+.welcome li{padding:2px 0}
+
+/* Mode embed (?embed=1) : enlève header/sidebar pour iframe */
+body.embed .fr-header,
+body.embed .fr-footer,
+body.embed .chat-sidebar,
+body.embed .chat-toolbar a[href*="/"],
+/* En mode embed dans desk, le bouton Mémoire du toolbar agent est
+   redondant avec l'onglet 🧠 Mémoire de la navbar portail (déjà visible
+   au-dessus). On le masque pour éviter la duplication d'affordance. */
+body.embed #btn-memory{display:none !important}
+body.embed .chat-app{grid-template-columns:1fr}
+body.embed .chat-toolbar{padding:6px 10px;font-size:11.5px}
+
+@media(max-width:880px){
+  .chat-app{grid-template-columns:1fr}
+  .chat-sidebar{display:none}
+}
+</style>
+</head>
+<body>
+
+<header role="banner" class="fr-header">
+<div class="fr-header__body"><div class="fr-container fr-container--fluid"><div class="fr-header__body-row">
+  <div class="fr-header__brand fr-enlarge-link"><div class="fr-header__brand-top">
+    <div class="fr-header__logo"><p class="fr-logo">République<br>Française</p></div>
+    <div class="fr-header__operator">
+      <p style="font-weight:700;font-size:14px;color:#000091">CEREMA</p>
+      <p style="font-size:10px;color:#666">QGIS Agent</p>
+    </div>
+  </div>
+  <div class="fr-header__service">
+    <a href="/"><p class="fr-header__service-title">Agent QGIS — Chat</p></a>
+    <p class="fr-header__service-tagline">Analyse géospatiale assistée par IA</p>
+  </div></div>
+</div></div></div>
+</header>
+
+<div class="chat-app">
+
+  <!-- Sidebar -->
+  <aside class="chat-sidebar">
+    <div class="sidebar-section">
+      <button onclick="newSession()" class="fr-btn fr-btn--sm" style="width:100%">
+        + Nouvelle analyse
+      </button>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Suggestions</div>
+      <div id="suggestions"></div>
+    </div>
+
+    {% if projects %}
+    <div class="sidebar-section">
+      <div class="sidebar-label">Projets</div>
+      {% for p in projects[:6] %}
+      <div class="sidebar-item" title="{{ p.zone or '' }}">
+        <span class="ic">📁</span><span>{{ p.name[:25] }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if sessions %}
+    <div class="sidebar-section" style="flex:1;overflow-y:auto;border-bottom:none">
+      <div class="sidebar-label">Sessions récentes</div>
+      {% for s in sessions[:8] %}
+      <div class="sidebar-item" onclick="loadSession('{{ s.id }}')"
+           title="{{ s.summary or '' }}">
+        <span class="ic">💬</span>
+        <span>{{ s.summary[:30] if s.summary else 'Session ' + s.id[:8] }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </aside>
+
+  <!-- Main chat -->
+  <main class="chat-main">
+
+    <div class="chat-toolbar">
+      <select id="profile-select" onchange="changeProfile(this.value)" aria-label="Profil agent">
+        <option value="standard" {% if profile_id=='standard' %}selected{% endif %}>Standard</option>
+        <option value="geoai_analyst" {% if profile_id=='geoai_analyst' %}selected{% endif %}>IA Vision</option>
+        <option value="risk_analyst" {% if profile_id=='risk_analyst' %}selected{% endif %}>Risques</option>
+        <option value="db_analyst" {% if profile_id=='db_analyst' %}selected{% endif %}>Données / DB</option>
+        <option value="storymap_creator" {% if profile_id=='storymap_creator' %}selected{% endif %}>Storymap</option>
+        <option value="map_composer" {% if profile_id=='map_composer' %}selected{% endif %}>Cartographe</option>
+        <option value="recipe_creator" {% if profile_id=='recipe_creator' %}selected{% endif %}>Recettes</option>
+        <option value="guided_tour" {% if profile_id=='guided_tour' %}selected{% endif %}>Guide</option>
+      </select>
+      <div class="spacer"></div>
+      <button type="button" class="tool-btn" id="btn-memory"
+              onclick="toggleMemoryDrawer()" title="Voir et éditer la mémoire de l'agent">
+        🧠 Mémoire
+      </button>
+      <a href="{{ hub_url }}/" target="_blank">🖥 Bureau QGIS</a>
+    </div>
+
+    <!-- Mémoire drawer : liste des insights + lien vers édition complète -->
+    <aside id="memory-drawer" class="memory-drawer" aria-hidden="true">
+      <header>
+        <span>🧠 Mémoire agentique</span>
+        <button class="close" onclick="toggleMemoryDrawer(false)" aria-label="Fermer">✕</button>
+      </header>
+      <div class="body" id="memory-body">
+        <div class="memory-empty">Chargement…</div>
+      </div>
+      <footer>
+        Édition complète des sections (identité, zones, préférences…) :
+        ouvre l'onglet <strong>🧠 Mémoire</strong> dans le bureau intégré.
+      </footer>
+    </aside>
+
+    <div id="messages" class="chat-messages">
+      <div class="msg">
+        <div class="avatar">🗺</div>
+        <div class="bubble welcome">
+          <h3>QGIS Agent prêt</h3>
+          <p>Décris ton analyse géospatiale. J'ai accès aux outils QGIS, aux données IGN,
+             Géorisques, OSM et DVF.</p>
+          <ul>
+            <li>« Analyse le risque inondation T100 sur Le Lavandou »</li>
+            <li>« Carte de densité du bâti à Montpellier »</li>
+            <li>« Détecte les arbres sur cette zone avec SAM3 »</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-input">
+      <div id="status-bar" class="status-bar">
+        <span class="spinner"></span>
+        <span id="status-text">Analyse en cours…</span>
+      </div>
+      <form id="chat-form" class="chat-form">
+        <input type="hidden" name="session_id" id="session-id" value="{{ session_id }}">
+        <input type="hidden" name="profile_id" id="profile-id" value="{{ profile_id }}">
+        <div class="input-wrap">
+          <textarea id="message-input" name="message" rows="2"
+            placeholder="écrit ton message ici…"></textarea>
+          <button type="button" id="mic-btn" class="mic-btn" title="Dicter (cliquer pour démarrer/arrêter)">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
+            </svg>
+          </button>
+        </div>
+        <button type="submit" id="send-btn" class="send-btn">Envoyer ↑</button>
+      </form>
+      <p class="hint">Entrée pour envoyer · Maj+Entrée pour nouvelle ligne</p>
+    </div>
+
+  </main>
+</div>
+
+<footer class="fr-footer" role="contentinfo"><div class="fr-container fr-container--fluid">
+  <div class="fr-footer__bottom"><ul class="fr-footer__bottom-list">
+    <li class="fr-footer__bottom-item"><span class="fr-footer__bottom-link">CEREMA · QGIS Service · Licence ouverte 2.0</span></li>
+    <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/workspace">Mon espace</a></li>
+  </ul></div>
+</div></footer>
+
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.module.min.js"></script>
+<script>
+// Mode embed (iframe) — activé par ?embed=1
+if (new URLSearchParams(location.search).get('embed') === '1') {
+  document.body.classList.add('embed');
+}
+
+const SUGGESTIONS = {
+  standard: [
+    "Risque inondation T100 sur Le Lavandou",
+    "Densité bâti à Montpellier",
+    "Évolution DVF côte 2021-2024",
+  ],
+  geoai_analyst: [
+    "Détecter les arbres sur la zone",
+    "Segmenter la végétation avec SAM3",
+    "Cartographier les surfaces en eau",
+  ],
+  risk_analyst: [
+    "Vulnérabilité infrastructure T100",
+    "Bâtiments exposés submersion marine",
+    "Routes coupées post-crue",
+  ],
+  db_analyst: [
+    "Explorer les tables PostGIS",
+    "Requête ST_Intersects sur DVF",
+    "Export GeoPackage depuis DB",
+  ],
+  storymap_creator: [
+    "Storymap DSFR sur l'étude active",
+    "Publie en HTML public",
+    "Génère méthodologie depuis l'audit",
+  ],
+  map_composer: [
+    "Carte choroplèthe DSFR",
+    "Atlas par commune",
+    "Mise en page A3 paysage",
+  ],
+  recipe_creator: [
+    "Capitaliser le workflow en recette",
+    "Lister mes recettes",
+    "Tester recette densite_bati",
+  ],
+  guided_tour: [
+    "Découvrir QGIS Agent",
+    "Premier projet pas à pas",
+    "Que peut faire le service ?",
+  ],
+};
+
+function loadSuggestions(profile) {
+  const sugs = SUGGESTIONS[profile] || SUGGESTIONS.standard;
+  const cont = document.getElementById('suggestions');
+  if (!cont) return;
+  cont.innerHTML = sugs.map(s => `<button class="suggestion-btn" onclick="useSuggestion('${s.replace(/'/g, "\\'")}')">↗ ${s}</button>`).join('');
+}
+
+function useSuggestion(text) {
+  const ta = document.getElementById('message-input');
+  ta.value = text;
+  ta.focus();
+}
+
+function changeProfile(profileId) {
+  document.getElementById('profile-id').value = profileId;
+  loadSuggestions(profileId);
+  document.cookie = `profile_id=${profileId}; path=/`;
+}
+
+// ── Mémoire drawer : liste, supprime, lien éditeur complet ────────────────
+async function toggleMemoryDrawer(forceState) {
+  const drawer = document.getElementById('memory-drawer');
+  const willOpen = forceState !== undefined ? forceState : !drawer.classList.contains('open');
+  drawer.classList.toggle('open', willOpen);
+  drawer.setAttribute('aria-hidden', willOpen ? 'false' : 'true');
+  if (willOpen) await loadInsights();
+}
+
+async function loadInsights() {
+  const body = document.getElementById('memory-body');
+  body.innerHTML = '<div class="memory-empty">Chargement…</div>';
+  try {
+    const r = await fetch('/user/insights');
+    const insights = await r.json();
+    if (!Array.isArray(insights) || insights.length === 0) {
+      body.innerHTML = '<div class="memory-empty">Aucun insight pour l\'instant.<br>' +
+                       'L\'agent en extrait automatiquement tous les 6 messages.</div>';
+      return;
+    }
+    body.innerHTML = insights.map(ins => {
+      const conf = Math.round((ins.confidence || 0.7) * 100);
+      const src = ins.source === 'explicit' ? '✓ user' : '~ LLM';
+      return `<div class="insight-card" data-id="${ins.id}">
+        <button class="del" onclick="deleteInsight(${ins.id})" title="Supprimer">×</button>
+        <div class="key">${escapeHtml(ins.key)}</div>
+        <div class="val">${escapeHtml(ins.value)}</div>
+        <div class="meta"><span>${src}</span><span>conf. ${conf}%</span></div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    body.innerHTML = `<div class="memory-empty">Erreur de chargement : ${e}</div>`;
+  }
+}
+
+async function deleteInsight(id) {
+  if (!confirm('Supprimer cet insight ?')) return;
+  await fetch('/user/insights/' + id, { method: 'DELETE' });
+  await loadInsights();
+}
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function newSession() {
+  const newId = crypto.randomUUID();
+  document.getElementById('session-id').value = newId;
+  document.getElementById('messages').innerHTML = `
+    <div class="msg">
+      <div class="avatar">🗺</div>
+      <div class="bubble">Nouvelle analyse. Décris ce que tu veux faire.</div>
+    </div>`;
+}
+
+function loadSession(sid) {
+  document.getElementById('session-id').value = sid;
+  fetch('/sessions/' + sid + '/messages')
+    .then(r => r.json())
+    .then(msgs => {
+      const c = document.getElementById('messages');
+      c.innerHTML = '';
+      msgs.forEach(m => {
+        const role = m.role === 'user' ? 'user' : 'assistant';
+        const html = role === 'user'
+          ? `<div class="msg user"><div class="bubble">${escapeHtml(m.content)}</div></div>`
+          : `<div class="msg"><div class="avatar">🗺</div><div class="bubble">${marked.parse(m.content || '')}</div></div>`;
+        c.insertAdjacentHTML('beforeend', html);
+      });
+      c.scrollTop = c.scrollHeight;
+    });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
+}
+
+function appendMessage(role, content) {
+  const msgs = document.getElementById('messages');
+  const div = document.createElement('div');
+  if (role === 'user') {
+    div.className = 'msg user';
+    div.innerHTML = `<div class="bubble">${escapeHtml(content)}</div>`;
+  } else {
+    div.className = 'msg';
+    div.innerHTML = `<div class="avatar">🗺</div><div class="bubble" id="current-response"></div>`;
+  }
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return div;
+}
+
+document.getElementById('chat-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input   = document.getElementById('message-input');
+  const message = input.value.trim();
+  if (!message) return;
+
+  input.value = '';
+  document.getElementById('send-btn').disabled = true;
+  document.getElementById('status-bar').classList.add('visible');
+  document.getElementById('status-text').textContent = 'Analyse en cours…';
+
+  appendMessage('user', message);
+  appendMessage('assistant', '');
+  const responseDiv = document.getElementById('current-response');
+  let fullText = '';
+
+  const formData = new FormData();
+  formData.append('message', message);
+  formData.append('session_id', document.getElementById('session-id').value);
+  formData.append('profile_id', document.getElementById('profile-id').value);
+
+  try {
+    const resp = await fetch('/chat', { method: 'POST', body: formData });
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    // Buffer accumulant les chunks jusqu'à un événement SSE complet
+    // (séparateur `\n\n`). Indispensable pour les payloads volumineux (data
+    // URLs d'images >100 KB) qui sont fragmentés par le réseau.
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, {stream: true});
+      const events = buffer.split('\n\n');
+      buffer = events.pop();  // garde la queue potentiellement incomplète
+      for (const evt of events) {
+        for (const line of evt.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.error) { responseDiv.innerHTML = `<span style="color:#ce0500">Erreur : ${data.error}</span>`; break; }
+            if (data.done) break;
+            if (data.text) {
+              fullText += data.text;
+              // Match le NOM du tool (chunk "> **`name`**") et pas les args
+              // ("`key=value`"). Le pattern strong+code en début de ligne
+              // (apres `> **`) marque le nom du tool.
+              const tname = data.text.match(/>\s*\*\*`([^`]+)`\*\*/);
+              if (tname) {
+                document.getElementById('status-text').textContent = `Outil : ${tname[1]}`;
+              }
+              responseDiv.innerHTML = marked.parse(fullText);
+              document.getElementById('messages').scrollTop = 9999;
+            }
+          } catch {}
+        }
+      }
+    }
+  } catch (err) {
+    if (responseDiv) responseDiv.innerHTML = `<span style="color:#ce0500">Erreur réseau : ${err.message}</span>`;
+  } finally {
+    document.getElementById('send-btn').disabled = false;
+    document.getElementById('status-bar').classList.remove('visible');
+    if (responseDiv) responseDiv.removeAttribute('id');
+  }
+});
+
+document.getElementById('message-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    document.getElementById('chat-form').requestSubmit();
+  }
+});
+
+document.getElementById('message-input').addEventListener('input', (e) => {
+  e.target.style.height = 'auto';
+  e.target.style.height = Math.min(160, e.target.scrollHeight) + 'px';
+});
+
+loadSuggestions(document.getElementById('profile-id').value);
+
+// ── Dictée vocale ──────────────────────────────────────────────────
+// Toggle : click pour démarrer, click pour arrêter et transcrire.
+// Pas d'auto-envoi : la transcription tombe dans le textarea, l'utilisateur valide.
+(function setupMic(){
+  const btn = document.getElementById('mic-btn');
+  const ta  = document.getElementById('message-input');
+  if (!btn || !ta) return;
+  const hasMR  = typeof MediaRecorder !== 'undefined';
+  const hasGUM = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  if (!hasMR || !hasGUM) return;       // bouton reste caché
+  btn.classList.add('available');
+
+  let recorder = null;
+  let chunks = [];
+  let stream = null;
+  let mime = '';
+
+  function pickMime(){
+    const candidates = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'];
+    return candidates.find(t => MediaRecorder.isTypeSupported(t)) || '';
+  }
+
+  async function start(){
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    } catch (err) {
+      btn.title = 'Micro refusé : autorise l\'accès dans les réglages du navigateur';
+      btn.classList.remove('available');
+      return;
+    }
+    mime = pickMime();
+    recorder = new MediaRecorder(stream, mime ? {mimeType: mime} : undefined);
+    chunks = [];
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.onstop = onStop;
+    recorder.start();
+    btn.classList.add('recording');
+    btn.title = 'Cliquer pour arrêter et transcrire';
+  }
+
+  function stop(){
+    if (recorder && recorder.state !== 'inactive') recorder.stop();
+    if (stream) stream.getTracks().forEach(t => t.stop());
+  }
+
+  async function onStop(){
+    btn.classList.remove('recording');
+    btn.classList.add('loading');
+    btn.title = 'Transcription en cours…';
+    const blob = new Blob(chunks, {type: mime || 'audio/webm'});
+    const ext  = (mime.includes('mp4') ? 'mp4' : mime.includes('ogg') ? 'ogg' : 'webm');
+    const fd = new FormData();
+    fd.append('file', blob, `voice.${ext}`);
+    fd.append('language', 'fr');
+    try {
+      const r = await fetch('/stt', {method:'POST', body: fd});
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      const text = (data.text || '').trim();
+      if (text) {
+        // Insère à la position du curseur (ou append) avec espace si déjà du contenu
+        const cur = ta.value;
+        const pos = ta.selectionStart ?? cur.length;
+        const sep = (cur && pos > 0 && cur[pos-1] !== ' ' && cur[pos-1] !== '\n') ? ' ' : '';
+        ta.value = cur.slice(0,pos) + sep + text + cur.slice(pos);
+        ta.dispatchEvent(new Event('input',{bubbles:true}));
+        ta.focus();
+        const newPos = pos + sep.length + text.length;
+        ta.setSelectionRange(newPos, newPos);
+      } else {
+        btn.title = 'Aucune parole détectée';
+      }
+    } catch (err) {
+      btn.title = 'Erreur transcription : ' + err.message;
+    } finally {
+      btn.classList.remove('loading');
+      if (!btn.title.startsWith('Aucune') && !btn.title.startsWith('Erreur')){
+        btn.title = 'Dicter (cliquer pour démarrer/arrêter)';
+      }
+    }
+  }
+
+  btn.addEventListener('click', () => {
+    if (btn.classList.contains('loading')) return;
+    if (btn.classList.contains('recording')) stop();
+    else start();
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+---
+# Profil : Analyste Risques
+profile_version: "1.0"
+id: risk_analyst
+name: "Analyste Risques Naturels"
+description: "Inondations, submersion, vulnérabilité infrastructure"
+image_variant: standard
+requires_geoai: false
+
+plugins:
+  enabled:
+    - qgis2web
+    - quick_map_services
+    - qneat3
+  disabled:
+    - plugin_manager
+
+connections:
+  postgis: []
+  wfs:
+    - name: "Géorisques TRI"
+      url: "https://georisques.gouv.fr/services/wfs"
+    - name: "IGN BD TOPO"
+      url: "https://data.geopf.fr/wfs/ows"
+  wms:
+    - name: "IGN MNT"
+      url: "https://data.geopf.fr/wms-r"
+      layers: ["ELEVATION.ELEVATIONGRIDCOVERAGE"]
+
+data_structure:
+  - projects/risques/
+  - exports/cartes_risques/
+  - cache/
+  - agent/
+
+mcp_tools:
+  allowed: all
+  disabled: [qgis_desktop_ui]
+
+project_templates:
+  - id: flood_risk
+    file: templates/flood_risk.qgz
+    description: "Analyse risque inondation TRI"
+  - id: vulnerability
+    file: templates/infrastructure_vulnerability.qgz
+    description: "Vulnérabilité infrastructure réseau"
+
+agent_system_prompt: |
+  Tu es un expert en analyse des risques naturels (inondations, submersion marine, séismes)
+  pour le CEREMA.
+
+  Sources de données prioritaires :
+  - Géorisques TRI : smart_load("tri_inondation_t100") — référence réglementaire
+  - smart_load("tri_hauteurs_eau_t100") — profondeurs de submersion
+  - smart_load("tri_submersion_marine_t100") — zones côtières
+  - smart_load("tri_enjeux_sensibles") — établissements en zone inondée
+  - smart_load("bdtopo_routes") — réseau routier pour vulnérabilité
+
+  Analyses types :
+  - Intersection bâti × zones inondées → bâtiments exposés
+  - Analyse de connectivité réseau post-crue → routes coupées
+  - Hauteurs d'eau par bâtiment → classes de vulnérabilité
+
+  Livrable standard : carte PDF A3 + export web interactif avec slider T10/T100/T1000.
