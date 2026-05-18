@@ -126,8 +126,7 @@ helm upgrade --install "$HELM_RELEASE_WORKSPACE" ide/jupyter-python \
     --set "networking.user.ports[0]=8080" \
     --set "ingress.hostname=user-${USERNAME}-${HELM_RELEASE_WORKSPACE}-0.user.lab.sspcloud.fr" \
     --set "ingress.userHostname=user-${USERNAME}-${HELM_RELEASE_WORKSPACE}-user.user.lab.sspcloud.fr" \
-    --set "persistence.enabled=true" \
-    --set "persistence.size=10Gi" \
+    --set "persistence.enabled=false" \
     --set "global.suspend=false" \
     --set "extraEnvVars[0].name=SERVICE_NAME" \
     --set-string "extraEnvVars[0].value=qgis-workspace" \
