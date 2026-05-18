@@ -115,28 +115,7 @@ helm upgrade --install "$HELM_RELEASE_AGENT" ide/jupyter-python \
     --set-string "extraEnvVars[4].value=$NAMESPACE" \
     2>&1
 
-# 3. Workspace QGIS Desktop (noVNC + MCP server)
-# Pas de personalInit : l'image qgisremotemcp a son propre entrypoint
-echo "▸ Déploiement workspace QGIS Desktop ($HELM_RELEASE_WORKSPACE)..."
-helm upgrade --install "$HELM_RELEASE_WORKSPACE" ide/jupyter-python \
-    --namespace "$NAMESPACE" \
-    --set service.image.custom.enabled=true \
-    --set "service.image.custom.version=$WORKSPACE_IMAGE" \
-    --set "networking.user.enabled=true" \
-    --set "networking.user.ports[0]=8080" \
-    --set "ingress.hostname=user-${USERNAME}-${HELM_RELEASE_WORKSPACE}-0.user.lab.sspcloud.fr" \
-    --set "ingress.userHostname=user-${USERNAME}-${HELM_RELEASE_WORKSPACE}-user.user.lab.sspcloud.fr" \
-    --set "persistence.enabled=false" \
-    --set "global.suspend=false" \
-    --set "extraEnvVars[0].name=SERVICE_NAME" \
-    --set-string "extraEnvVars[0].value=qgis-workspace" \
-    --set "extraEnvVars[1].name=ONYXIA_USER" \
-    --set-string "extraEnvVars[1].value=$USERNAME" \
-    --set "extraEnvVars[2].name=SSPCLOUD_NAMESPACE" \
-    --set-string "extraEnvVars[2].value=$NAMESPACE" \
-    2>&1
-
-# 4. Pod GPU GeoAI (SAM3 + DeepForest) — scale 0 au démarrage, réveillé à la demande
+# 3. Pod GPU GeoAI (SAM3 + DeepForest) — scale 0 au démarrage, réveillé à la demande
 echo "▸ Déploiement pod GPU GeoAI ($HELM_RELEASE_GPU — suspendu, démarré à la demande)..."
 helm repo add inseefrlab https://inseefrlab.github.io/helm-charts-interactive-services --force-update 2>/dev/null
 helm repo update inseefrlab 2>/dev/null
@@ -147,8 +126,7 @@ helm upgrade --install "$HELM_RELEASE_GPU" inseefrlab/jupyter-pytorch-gpu \
     --set "init.personalInit=$REPO/server_init.sh" \
     --set "networking.user.enabled=true" \
     --set "networking.user.ports[0]=8000" \
-    --set "persistence.enabled=true" \
-    --set "persistence.size=20Gi" \
+    --set "persistence.enabled=false" \
     --set "global.suspend=true" \
     --set "nodeSelector.gpu-vram=16GB" \
     --set "extraEnvVars[0].name=SERVICE_NAME" \
