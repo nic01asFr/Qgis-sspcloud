@@ -13,11 +13,23 @@ HUB_IMAGE="ghcr.io/nic01asfr/qgis-hub:latest"
 HELM_RELEASE_AGENT="qgis-agent"
 HELM_RELEASE_HUB="qgis-mcp-bridge"
 
-USERNAME="${ONYXIA_USER:-}"
+# Détection automatique du namespace depuis le serviceaccount K8s monté.
+# C'est la source la plus fiable dans n'importe quel pod Onyxia.
+SA_NS_FILE="/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
 NAMESPACE="${KUBERNETES_NAMESPACE:-}"
+if [ -z "$NAMESPACE" ] && [ -f "$SA_NS_FILE" ]; then
+    NAMESPACE=$(cat "$SA_NS_FILE")
+fi
+
+USERNAME="${ONYXIA_USER:-}"
+if [ -z "$USERNAME" ] && [ -n "$NAMESPACE" ]; then
+    # Convention SSPCloud : namespace = user-<login>
+    USERNAME="${NAMESPACE#user-}"
+fi
 
 if [ -z "$USERNAME" ] || [ -z "$NAMESPACE" ]; then
-    echo "ERREUR : variables ONYXIA_USER et KUBERNETES_NAMESPACE non définies."
+    echo "ERREUR : impossible de détecter l'utilisateur SSPCloud."
     echo "Lance ce script depuis un terminal dans un service Onyxia."
     exit 1
 fi
