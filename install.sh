@@ -140,7 +140,7 @@ helm upgrade --install "$HELM_RELEASE_GPU" inseefrlab/jupyter-pytorch-gpu \
     --set "persistence.enabled=true" \
     --set "persistence.size=20Gi" \
     --set "global.suspend=true" \
-    --set "resources.limits.nvidia\\.com/gpu=1" \
+    --set-string "resources.limits.nvidia\\.com/gpu=1" \
     --set "nodeSelector.gpu-vram=16GB" \
     --set "extraEnvVars[0].name=SERVICE_NAME" \
     --set-string "extraEnvVars[0].value=geoai-gpu" \
