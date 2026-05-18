@@ -52,6 +52,44 @@ if ! kubectl auth can-i create secrets -n "$NAMESPACE" 2>/dev/null | grep -q yes
 fi
 
 # Helm repo
+# Pré-créer les PVCs avant helm pour éviter les FailedScheduling "PVC not found".
+# kubectl apply est idempotent : si les PVCs existent déjà, pas d'erreur.
+echo "▸ Pré-création des volumes persistants..."
+kubectl apply -n "$NAMESPACE" -f - <<PVCS 2>&1
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${HELM_RELEASE_HUB}-jupyter-python
+  namespace: ${NAMESPACE}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${HELM_RELEASE_AGENT}-jupyter-python
+  namespace: ${NAMESPACE}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${HELM_RELEASE_WORKSPACE}-jupyter-python
+  namespace: ${NAMESPACE}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+PVCS
+
 echo "▸ Ajout repo Helm Onyxia..."
 helm repo add ide https://nexus.lab.sspcloud.fr/repository/inseefrlab-helm-charts-interactive-services --force-update 2>/dev/null
 helm repo update ide 2>/dev/null
