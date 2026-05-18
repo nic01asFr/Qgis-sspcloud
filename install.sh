@@ -61,6 +61,11 @@ kind: PersistentVolumeClaim
 metadata:
   name: ${HELM_RELEASE_HUB}-jupyter-python
   namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: ${HELM_RELEASE_HUB}
+    meta.helm.sh/release-namespace: ${NAMESPACE}
 spec:
   accessModes: [ReadWriteOnce]
   resources:
@@ -72,6 +77,11 @@ kind: PersistentVolumeClaim
 metadata:
   name: ${HELM_RELEASE_AGENT}-jupyter-python
   namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: ${HELM_RELEASE_AGENT}
+    meta.helm.sh/release-namespace: ${NAMESPACE}
 spec:
   accessModes: [ReadWriteOnce]
   resources:
@@ -83,6 +93,11 @@ kind: PersistentVolumeClaim
 metadata:
   name: ${HELM_RELEASE_WORKSPACE}-jupyter-python
   namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: ${HELM_RELEASE_WORKSPACE}
+    meta.helm.sh/release-namespace: ${NAMESPACE}
 spec:
   accessModes: [ReadWriteOnce]
   resources:
