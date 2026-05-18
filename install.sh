@@ -52,21 +52,15 @@ if ! kubectl auth can-i create secrets -n "$NAMESPACE" 2>/dev/null | grep -q yes
 fi
 
 # Helm repo
-# Pré-créer les PVCs avec les labels Helm requis.
-# Utilise un fichier tmp pour éviter les problèmes de heredoc dans curl|bash.
-_ensure_pvc() {
-    local pvc_name="$1" size="$2" release="$3"
-    local tmp; tmp=$(mktemp /tmp/pvc-XXXXXX.yaml)
-    printf 'apiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: "%s"\n  namespace: "%s"\n  labels:\n    app.kubernetes.io/managed-by: Helm\n  annotations:\n    meta.helm.sh/release-name: "%s"\n    meta.helm.sh/release-namespace: "%s"\nspec:\n  accessModes:\n  - ReadWriteOnce\n  resources:\n    requests:\n      storage: "%s"\n' \
-        "$pvc_name" "$NAMESPACE" "$release" "$NAMESPACE" "$size" > "$tmp"
-    kubectl apply -f "$tmp" -n "$NAMESPACE" 2>&1
-    rm -f "$tmp"
-}
-
-echo "▸ Pré-création des volumes persistants..."
-_ensure_pvc "${HELM_RELEASE_HUB}-jupyter-python"       "5Gi"  "$HELM_RELEASE_HUB"
-_ensure_pvc "${HELM_RELEASE_AGENT}-jupyter-python"     "5Gi"  "$HELM_RELEASE_AGENT"
-_ensure_pvc "${HELM_RELEASE_WORKSPACE}-jupyter-python" "10Gi" "$HELM_RELEASE_WORKSPACE"
+echo "▸ Suppression PVCs orphelins sans labels Helm..."
+for r in "$HELM_RELEASE_HUB" "$HELM_RELEASE_AGENT" "$HELM_RELEASE_WORKSPACE"; do
+    pvc="${r}-jupyter-python"
+    owned=$(kubectl get pvc "$pvc" -n "$NAMESPACE" \
+        -o jsonpath="{.metadata.annotations['meta\.helm\.sh/release-name']}" 2>/dev/null || true)
+    if [ -n "$owned" ] && [ "$owned" != "$r" ]; then
+        kubectl delete pvc "$pvc" -n "$NAMESPACE" 2>/dev/null || true
+    fi
+done
 
 echo "▸ Ajout repo Helm Onyxia..."
 helm repo add ide https://nexus.lab.sspcloud.fr/repository/inseefrlab-helm-charts-interactive-services --force-update 2>/dev/null
@@ -86,8 +80,7 @@ helm upgrade --install "$HELM_RELEASE_HUB" ide/jupyter-python \
     --set service.image.custom.enabled=true \
     --set "service.image.custom.version=$HUB_IMAGE" \
     --set "init.personalInit=$REPO/server_init.sh" \
-    --set "persistence.enabled=true" \
-    --set "persistence.size=5Gi" \
+    --set "persistence.enabled=false" \
     --set "global.suspend=false" \
     --set "extraEnvVars[0].name=SERVICE_NAME" \
     --set-string "extraEnvVars[0].value=qgis-mcp" \
@@ -108,8 +101,7 @@ helm upgrade --install "$HELM_RELEASE_AGENT" ide/jupyter-python \
     --set service.image.custom.enabled=true \
     --set "service.image.custom.version=$AGENT_IMAGE" \
     --set "init.personalInit=$REPO/server_init.sh" \
-    --set "persistence.enabled=true" \
-    --set "persistence.size=5Gi" \
+    --set "persistence.enabled=false" \
     --set "global.suspend=false" \
     --set "extraEnvVars[0].name=SERVICE_NAME" \
     --set-string "extraEnvVars[0].value=qgis-agent" \
