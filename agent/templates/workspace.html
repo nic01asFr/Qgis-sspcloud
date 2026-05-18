@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
+<meta name="theme-color" content="#000091">
+<title>Mon espace QGIS — CEREMA</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/utility/utility.min.css">
+<style>
+.chapter-title{font-size:18px;font-weight:700;color:var(--text-title-blue-france);
+  border-bottom:3px solid var(--border-action-high-blue-france);
+  padding-bottom:8px;margin-bottom:16px}
+.study-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+  gap:14px;margin:14px 0}
+.study-card{background:#fff;border-radius:4px;padding:16px 18px;
+  border-left:4px solid var(--border-action-high-blue-france);
+  box-shadow:0 1px 3px rgba(0,0,0,.06);transition:box-shadow .15s}
+.study-card:hover{box-shadow:0 3px 10px rgba(0,0,0,.1)}
+.study-name{font-size:1.05rem;font-weight:700;color:var(--text-title-blue-france);
+  margin:0 0 6px;line-height:1.2}
+.study-meta{font-size:.78rem;color:#666;margin-bottom:8px}
+.study-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.study-actions .fr-btn{font-size:.75rem;padding:.3rem .6rem}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+  gap:12px;margin:16px 0}
+.kpi{background:#fff;border-radius:4px;padding:14px 18px;
+  border-top:4px solid var(--border-action-high-blue-france);
+  box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.kpi-value{font-size:1.6rem;font-weight:700;color:var(--text-title-grey);line-height:1}
+.kpi-label{font-size:.78rem;color:#666;margin-top:.3rem}
+.tile-action{background:#fff;border-radius:4px;padding:16px;
+  border:1px solid var(--border-default-grey);text-decoration:none;color:inherit;
+  display:flex;flex-direction:column;gap:8px;transition:all .15s;height:100%}
+.tile-action:hover{border-color:var(--border-action-high-blue-france);
+  box-shadow:0 3px 10px rgba(0,0,0,.08)}
+.tile-icon{font-size:1.8rem}
+.tile-title{font-size:.95rem;font-weight:700;color:var(--text-title-blue-france);margin:0}
+.tile-desc{font-size:.8rem;color:#666;margin:0;line-height:1.4}
+.active-badge{display:inline-block;background:var(--background-action-high-blue-france);
+  color:#fff;padding:2px 8px;border-radius:2px;font-size:.7rem;font-weight:700;
+  letter-spacing:.5px;margin-left:6px}
+.empty-state{text-align:center;padding:30px 20px;color:#888}
+.empty-state .icon{font-size:2rem;margin-bottom:8px;display:block}
+.fr-card__title{font-size:1rem}
+</style>
+</head>
+<body>
+<header role="banner" class="fr-header">
+<div class="fr-header__body"><div class="fr-container"><div class="fr-header__body-row">
+  <div class="fr-header__brand fr-enlarge-link"><div class="fr-header__brand-top">
+    <div class="fr-header__logo"><p class="fr-logo">République<br>Française</p></div>
+    <div class="fr-header__operator">
+      <p style="font-weight:700;font-size:15px;color:#000091">CEREMA</p>
+      <p style="font-size:11px;color:#666">QGIS Service</p>
+    </div>
+  </div>
+  <div class="fr-header__service"><a href="/workspace"><p class="fr-header__service-title">Mon espace de travail</p></a>
+    <p class="fr-header__service-tagline">{{ username }}@sspcloud</p>
+  </div></div>
+</div></div></div>
+</header>
+
+<main role="main">
+<section class="fr-py-6w">
+<div class="fr-container">
+
+  <!-- KPI -->
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="kpi-value">{{ studies|length }}</div>
+      <div class="kpi-label">Études actives</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-value">{{ catalog_count }}</div>
+      <div class="kpi-label">Publications</div>
+    </div>
+    <div class="kpi" style="border-top-color:#1f6f3f">
+      <div class="kpi-value">{{ insights_count }}</div>
+      <div class="kpi-label">Insights mémoire</div>
+    </div>
+    <div class="kpi" style="border-top-color:#d64d00">
+      <div class="kpi-value">{{ session_status }}</div>
+      <div class="kpi-label">Workspace</div>
+    </div>
+  </div>
+
+  <!-- Triptyque d'usage -->
+  <p class="chapter-title">Accéder à mes outils</p>
+  <div class="fr-grid-row fr-grid-row--gutters">
+    <div class="fr-col-12 fr-col-md-3">
+      <a href="/desk" class="tile-action" style="border-color:var(--border-action-high-blue-france)">
+        <span class="tile-icon">🪟</span>
+        <p class="tile-title">Bureau intégré <span class="active-badge">RECO</span></p>
+        <p class="tile-desc">Vue unifiée : agent + canvas QGIS + ressources dans un seul écran ergonomique.</p>
+      </a>
+    </div>
+    <div class="fr-col-12 fr-col-md-3">
+      <a href="{{ agent_url }}" class="tile-action" target="_blank">
+        <span class="tile-icon">💬</span>
+        <p class="tile-title">Agent QGIS — Chat</p>
+        <p class="tile-desc">Pour piloter sans le canvas. Conversation pleine page.</p>
+      </a>
+    </div>
+    <div class="fr-col-12 fr-col-md-3">
+      <a href="{{ novnc_url }}" class="tile-action" target="_blank">
+        <span class="tile-icon">🖥</span>
+        <p class="tile-title">Bureau QGIS Desktop</p>
+        <p class="tile-desc">QGIS natif plein écran dans le navigateur.</p>
+      </a>
+    </div>
+    <div class="fr-col-12 fr-col-md-3">
+      <a href="#catalogue" class="tile-action">
+        <span class="tile-icon">📚</span>
+        <p class="tile-title">Mes publications</p>
+        <p class="tile-desc">Storymaps, flux, recettes publiées.</p>
+      </a>
+    </div>
+  </div>
+
+  <!-- Études -->
+  <p class="chapter-title fr-mt-5w">Mes études</p>
+  <p class="fr-text--sm fr-mb-3w">
+    Une étude = un projet QGIS + une conversation + un profil + un audit trail. Tu peux jongler entre dossiers sans tout perdre.
+  </p>
+
+  {% if studies %}
+  <div class="study-grid">
+    {% for s in studies %}
+    <div class="study-card{% if s.id == active_study_id %} fr-card--no-icon{% endif %}"
+         {% if s.id == active_study_id %}style="border-left-color:#d64d00;background:#fff8f7"{% endif %}>
+      <h3 class="study-name">
+        {{ s.name }}
+        {% if s.id == active_study_id %}<span class="active-badge">ACTIVE</span>{% endif %}
+      </h3>
+      <div class="study-meta">
+        <span class="fr-badge fr-badge--sm fr-badge--info fr-badge--no-icon">{{ s.profile }}</span>
+      </div>
+      <div class="study-actions">
+        {% if s.id != active_study_id %}
+        <form method="POST" action="/workspace/study/{{ s.id }}/activate" style="margin:0">
+          <button type="submit" class="fr-btn fr-btn--secondary fr-btn--sm">Activer</button>
+        </form>
+        {% endif %}
+        <form method="POST" action="/workspace/study/{{ s.id }}/archive" style="margin:0">
+          <button type="submit" class="fr-btn fr-btn--tertiary fr-btn--sm">Archiver</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <span class="icon">📂</span>
+    <p>Aucune étude — démarre-en une pour organiser ton travail.</p>
+  </div>
+  {% endif %}
+
+  <form method="POST" action="/workspace/study/new" class="fr-mt-3w" style="display:flex;gap:8px;flex-wrap:wrap">
+    <input name="name" type="text" required placeholder="Nom de la nouvelle étude (ex: Inondation Lavandou)"
+           class="fr-input" style="flex:1;min-width:240px">
+    <select name="profile" class="fr-select" style="max-width:200px">
+      <option value="standard">Standard</option>
+      <option value="risk_analyst">Risques naturels</option>
+      <option value="storymap_creator">Storymap</option>
+      <option value="map_composer">Compositeur cartes</option>
+      <option value="geoai_analyst">IA Vision</option>
+      <option value="db_analyst">Analyse DB</option>
+      <option value="recipe_creator">Recettes</option>
+      <option value="guided_tour">Guide</option>
+    </select>
+    <button type="submit" class="fr-btn">+ Nouvelle étude</button>
+  </form>
+
+  <!-- Catalogue -->
+  <p class="chapter-title fr-mt-5w" id="catalogue">Mes publications</p>
+  {% if catalog_items %}
+  <p class="fr-text--sm fr-mb-3w">Livrables publics, accessibles indépendamment de ton workspace.</p>
+  <table class="fr-table">
+    <thead>
+      <tr><th>Type</th><th>Slug</th><th>Taille</th><th>Date</th><th>Lien</th></tr>
+    </thead>
+    <tbody>
+      {% for item in catalog_items %}
+      <tr>
+        <td><span class="fr-badge fr-badge--sm fr-badge--info fr-badge--no-icon">{{ item.kind }}</span></td>
+        <td>{{ item.slug }}</td>
+        <td>{{ item.size_kb }} ko</td>
+        <td>{{ item.date }}</td>
+        <td><a href="{{ item.hub_url }}" target="_blank" class="fr-link">Ouvrir →</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">
+    <span class="icon">📦</span>
+    <p>Aucune publication. Crée une storymap ou un flux pour qu'elle apparaisse ici.</p>
+  </div>
+  {% endif %}
+
+  <!-- Mémoire (couche 3) -->
+  {% if insights or preferences %}
+  <p class="chapter-title fr-mt-5w">Ce que je sais de toi</p>
+  <p class="fr-text--sm fr-mb-3w">
+    L'agent retient des préférences durables pour t'aider mieux dans le temps. Tu peux les modifier ou les effacer à tout moment.
+  </p>
+  <div class="fr-grid-row fr-grid-row--gutters">
+    {% if preferences %}
+    <div class="fr-col-12 fr-col-md-6">
+      <div class="fr-card fr-card--no-icon">
+        <div class="fr-card__body"><div class="fr-card__content">
+          <h3 class="fr-card__title">📌 Préférences explicites</h3>
+          <ul class="fr-text--sm">
+            {% for k, v in preferences.items() %}
+            <li><strong>{{ k }}</strong> : {{ v }}</li>
+            {% endfor %}
+          </ul>
+        </div></div>
+      </div>
+    </div>
+    {% endif %}
+    {% if insights %}
+    <div class="fr-col-12 fr-col-md-6">
+      <div class="fr-card fr-card--no-icon">
+        <div class="fr-card__body"><div class="fr-card__content">
+          <h3 class="fr-card__title">🧠 Insights agentiques</h3>
+          <ul class="fr-text--sm">
+            {% for ins in insights[:10] %}
+            <li><strong>{{ ins.key }}</strong> : {{ ins.value }}</li>
+            {% endfor %}
+          </ul>
+        </div></div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+</div>
+</section>
+</main>
+
+<footer class="fr-footer" role="contentinfo"><div class="fr-container">
+<div class="fr-footer__body">
+  <div class="fr-footer__brand fr-enlarge-link"><p class="fr-logo">République<br>Française</p></div>
+  <div class="fr-footer__content">
+    <p class="fr-footer__content-desc">CEREMA — Service QGIS Cloud sur SSPCloud</p>
+    <ul class="fr-footer__content-list">
+      <li class="fr-footer__content-item"><a class="fr-footer__content-link" href="https://cerema.fr">cerema.fr</a></li>
+      <li class="fr-footer__content-item"><a class="fr-footer__content-link" href="https://datalab.sspcloud.fr">SSPCloud</a></li>
+    </ul>
+  </div>
+</div>
+<div class="fr-footer__bottom"><ul class="fr-footer__bottom-list">
+  <li class="fr-footer__bottom-item"><span class="fr-footer__bottom-link">Licence ouverte 2.0</span></li>
+</ul></div>
+</div></footer>
+
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.module.min.js"></script>
+</body>
+</html>

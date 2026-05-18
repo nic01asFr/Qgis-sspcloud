@@ -40,6 +40,8 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.templating import Jinja2Templates
+from pathlib import Path
 
 from hub import auth, sessions
 try:
@@ -129,6 +131,67 @@ _HUB_URL = (
     or (f"https://user-{_ONYXIA_USER}-qgis-mcp-bridge.user.lab.sspcloud.fr"
         if _ONYXIA_USER else "")
 )
+# AGENT_URL : URL publique du pod agent IA (pour proxifier les routes mémoire)
+_AGENT_URL = (
+    os.getenv("AGENT_URL")
+    or (f"https://user-{_ONYXIA_USER}-qgis-agent-bridge.user.lab.sspcloud.fr"
+        if _ONYXIA_USER else "")
+)
+
+# Jinja2 templates pour les pages HTML (desk, workspace)
+_TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
+_jinja = Jinja2Templates(directory=str(_TEMPLATES_DIR)) if _TEMPLATES_DIR.is_dir() else None
+
+PROFILE_LABELS = {
+    "standard": "Standard", "geoai_analyst": "IA Vision",
+    "risk_analyst": "Risques", "db_analyst": "Données / DB",
+    "storymap_creator": "Storymap", "map_composer": "Cartographe",
+    "recipe_creator": "Recettes", "guided_tour": "Guide",
+}
+
+
+async def _desk_context() -> dict:
+    """Agrège le contexte workspace depuis les modules internes du hub."""
+    ctx: dict = {
+        "username": _ONYXIA_USER, "hub_url": _HUB_URL, "agent_url": _AGENT_URL,
+        "studies": [], "active_study_id": None, "active_study": None,
+        "catalog_items": [], "catalog_count": 0, "profile_labels": PROFILE_LABELS,
+        "session_status": "—", "session_ready": False, "novnc_url": "#",
+        "insights": [], "insights_count": 0, "preferences": {},
+        "recent_treatments": [],
+    }
+    try:
+        api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+        headers = {"Authorization": f"Bearer {api_key}"}
+        async with httpx.AsyncClient(timeout=8, base_url="http://127.0.0.1:8100") as c:
+            for path, cb in [
+                ("/studies", lambda d: ctx.update(studies=d)),
+                ("/studies/active", lambda d: ctx.update(
+                    active_study_id=d.get("id"), active_study=d) if d else None),
+                ("/sessions", lambda d: ctx.update(
+                    session_status={"ready":"✓","sleeping":"💤","starting":"…","error":"⚠"}.get(
+                        d[0].get("status","—"), d[0].get("status","—")),
+                    session_ready=(d[0].get("status") == "ready"),
+                    novnc_url=d[0].get("novnc_url","#")) if d else None),
+            ]:
+                try:
+                    r = await c.get(path, headers=headers)
+                    if r.status_code == 200:
+                        cb(r.json())
+                except Exception:
+                    pass
+            if ctx.get("active_study_id"):
+                try:
+                    r = await c.get(f"/catalog/{_ONYXIA_USER}", headers=headers)
+                    if r.status_code == 200:
+                        items = [i for i in r.json().get("items", [])
+                                 if i.get("study_id") == ctx["active_study_id"]][:30]
+                        ctx.update(catalog_items=items, catalog_count=len(items))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return ctx
 
 
 # ── OAuth 2.0 — Client Credentials (pour Claude Desktop connector) ─────────────
@@ -1641,3 +1704,146 @@ async def _proxy_request(request: Request, target_url: str, session_id: str) -> 
         media_type=content_type,
         headers=resp_headers,
     )
+
+
+# ── Bureau de travail (desk) + workspace ──────────────────────────────────────
+
+@app.get("/desk", response_class=HTMLResponse)
+async def desk_page(request: Request):
+    """Bureau de travail unifié : sidebar études | canvas QGIS noVNC | chat agent."""
+    if not _jinja:
+        raise HTTPException(503, "Templates non disponibles")
+    ctx = await _desk_context()
+    return _jinja.TemplateResponse(request, "desk.html", ctx)
+
+
+@app.get("/workspace", response_class=HTMLResponse)
+async def workspace_page(request: Request):
+    """Vue études + catalogue + accès outils."""
+    if not _jinja:
+        raise HTTPException(503, "Templates non disponibles")
+    ctx = await _desk_context()
+    return _jinja.TemplateResponse(request, "workspace.html", ctx)
+
+
+@app.post("/workspace/wake")
+async def workspace_wake():
+    """Réveille le workspace QGIS endormi (scale 0→1)."""
+    try:
+        api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+        async with httpx.AsyncClient(timeout=30, base_url="http://127.0.0.1:8100") as c:
+            await c.post("/sessions", headers={"Authorization": f"Bearer {api_key}"}, json={})
+        return {"ok": True}
+    except Exception:
+        return {"ok": False}
+
+
+@app.post("/workspace/study/new")
+async def workspace_create_study(request: Request):
+    form = await request.form()
+    name = form.get("name", "").strip()
+    profile = form.get("profile", "standard")
+    if not name:
+        return RedirectResponse("/workspace?error=name_required", status_code=302)
+    try:
+        api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+        async with httpx.AsyncClient(timeout=15, base_url="http://127.0.0.1:8100") as c:
+            r = await c.post("/studies",
+                             headers={"Authorization": f"Bearer {api_key}"},
+                             json={"name": name, "profile": profile})
+            new_id = r.json().get("id") if r.status_code == 200 else None
+            if new_id:
+                await c.post(f"/studies/{new_id}/activate",
+                             headers={"Authorization": f"Bearer {api_key}"})
+    except Exception:
+        pass
+    return RedirectResponse("/workspace", status_code=302)
+
+
+@app.post("/workspace/study/{sid}/activate")
+async def workspace_activate_study(sid: str):
+    try:
+        api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+        async with httpx.AsyncClient(timeout=15, base_url="http://127.0.0.1:8100") as c:
+            await c.post(f"/studies/{sid}/activate",
+                         headers={"Authorization": f"Bearer {api_key}"})
+    except Exception:
+        pass
+    return RedirectResponse("/workspace", status_code=302)
+
+
+@app.post("/workspace/study/{sid}/archive")
+async def workspace_archive_study(sid: str):
+    try:
+        api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+        async with httpx.AsyncClient(timeout=15, base_url="http://127.0.0.1:8100") as c:
+            await c.delete(f"/studies/{sid}",
+                           headers={"Authorization": f"Bearer {api_key}"})
+    except Exception:
+        pass
+    return RedirectResponse("/workspace", status_code=302)
+
+
+# ── Proxy mémoire vers l'agent IA ─────────────────────────────────────────────
+
+async def _agent_call(method: str, path: str, **kwargs):
+    """Proxifie un appel vers le pod agent IA."""
+    async with httpx.AsyncClient(timeout=10, base_url=_AGENT_URL or "http://127.0.0.1:8100") as c:
+        return await c.request(method, path, **kwargs)
+
+
+@app.get("/desk/memory")
+async def desk_get_memory():
+    r = await _agent_call("GET", "/user/memory")
+    return r.json()
+
+
+@app.patch("/desk/memory")
+async def desk_patch_memory(request: Request):
+    body = await request.json()
+    r = await _agent_call("PATCH", "/user/memory", json=body)
+    return r.json()
+
+
+@app.patch("/desk/memory/preferences")
+async def desk_set_pref(request: Request):
+    body = await request.json()
+    r = await _agent_call("PATCH", "/user/preferences", json=body)
+    return r.json()
+
+
+@app.delete("/desk/memory/preferences/{key}", status_code=204)
+async def desk_del_pref(key: str):
+    await _agent_call("PATCH", "/user/preferences", json={key: ""})
+
+
+@app.post("/desk/memory/insights")
+async def desk_add_insight(request: Request):
+    body = await request.json()
+    r = await _agent_call("POST", "/user/insights", json=body)
+    return r.json()
+
+
+@app.delete("/desk/memory/insights/{insight_id}", status_code=204)
+async def desk_del_insight(insight_id: int):
+    await _agent_call("DELETE", f"/user/insights/{insight_id}")
+
+
+@app.get("/desk/layers")
+async def desk_layers():
+    """Liste les couches QGIS du projet courant via le MCP."""
+    try:
+        api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+        async with httpx.AsyncClient(timeout=10, base_url="http://127.0.0.1:8100") as c:
+            r = await c.post("/mcp",
+                             headers={"Authorization": f"Bearer {api_key}"},
+                             json={"jsonrpc": "2.0", "id": 1,
+                                   "method": "tools/call",
+                                   "params": {"name": "get_project_info", "arguments": {}}})
+        import json as _json
+        content = r.json().get("result", {}).get("content", [{}])
+        text = content[0].get("text", "") if content else ""
+        info = _json.loads(text) if text else {}
+        return {"layers": info.get("layers", [])}
+    except Exception:
+        return {"layers": []}
