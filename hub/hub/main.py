@@ -364,6 +364,12 @@ async def oauth_token(
 
 # ── Healthcheck ────────────────────────────────────────────────────────────────
 
+@app.get("/")
+async def root():
+    """Readiness probe Kubernetes — 200 sans auth."""
+    return {"status": "ok", "service": "qgis-mcp-hub"}
+
+
 @app.get("/health")
 async def health():
     return {

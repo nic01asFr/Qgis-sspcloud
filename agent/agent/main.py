@@ -114,6 +114,12 @@ async def shutdown():
 
 # ── Healthcheck ────────────────────────────────────────────────────────────────
 
+@app.get("/")
+async def root():
+    """Readiness probe Kubernetes — 200 sans auth."""
+    return {"status": "ok", "service": "qgis-agent"}
+
+
 @app.get("/health")
 async def health():
     return {
