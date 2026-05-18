@@ -5,5 +5,7 @@ WORKDIR /opt/qgis-hub
 
 COPY hub/ .
 RUN pip install -e . --quiet --no-cache-dir
+# Templates HTML pour /desk et /workspace
+COPY hub/templates/ templates/
 
 USER 1000
