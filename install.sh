@@ -52,58 +52,21 @@ if ! kubectl auth can-i create secrets -n "$NAMESPACE" 2>/dev/null | grep -q yes
 fi
 
 # Helm repo
-# Pré-créer les PVCs avant helm pour éviter les FailedScheduling "PVC not found".
-# kubectl apply est idempotent : si les PVCs existent déjà, pas d'erreur.
+# Pré-créer les PVCs avec les labels Helm requis.
+# Utilise un fichier tmp pour éviter les problèmes de heredoc dans curl|bash.
+_ensure_pvc() {
+    local pvc_name="$1" size="$2" release="$3"
+    local tmp; tmp=$(mktemp /tmp/pvc-XXXXXX.yaml)
+    printf 'apiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: "%s"\n  namespace: "%s"\n  labels:\n    app.kubernetes.io/managed-by: Helm\n  annotations:\n    meta.helm.sh/release-name: "%s"\n    meta.helm.sh/release-namespace: "%s"\nspec:\n  accessModes:\n  - ReadWriteOnce\n  resources:\n    requests:\n      storage: "%s"\n' \
+        "$pvc_name" "$NAMESPACE" "$release" "$NAMESPACE" "$size" > "$tmp"
+    kubectl apply -f "$tmp" -n "$NAMESPACE" 2>&1
+    rm -f "$tmp"
+}
+
 echo "▸ Pré-création des volumes persistants..."
-kubectl apply -n "$NAMESPACE" -f - <<PVCS 2>&1
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: ${HELM_RELEASE_HUB}-jupyter-python
-  namespace: ${NAMESPACE}
-  labels:
-    app.kubernetes.io/managed-by: Helm
-  annotations:
-    meta.helm.sh/release-name: ${HELM_RELEASE_HUB}
-    meta.helm.sh/release-namespace: ${NAMESPACE}
-spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests:
-      storage: 5Gi
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: ${HELM_RELEASE_AGENT}-jupyter-python
-  namespace: ${NAMESPACE}
-  labels:
-    app.kubernetes.io/managed-by: Helm
-  annotations:
-    meta.helm.sh/release-name: ${HELM_RELEASE_AGENT}
-    meta.helm.sh/release-namespace: ${NAMESPACE}
-spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests:
-      storage: 5Gi
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: ${HELM_RELEASE_WORKSPACE}-jupyter-python
-  namespace: ${NAMESPACE}
-  labels:
-    app.kubernetes.io/managed-by: Helm
-  annotations:
-    meta.helm.sh/release-name: ${HELM_RELEASE_WORKSPACE}
-    meta.helm.sh/release-namespace: ${NAMESPACE}
-spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests:
-      storage: 10Gi
-PVCS
+_ensure_pvc "${HELM_RELEASE_HUB}-jupyter-python"       "5Gi"  "$HELM_RELEASE_HUB"
+_ensure_pvc "${HELM_RELEASE_AGENT}-jupyter-python"     "5Gi"  "$HELM_RELEASE_AGENT"
+_ensure_pvc "${HELM_RELEASE_WORKSPACE}-jupyter-python" "10Gi" "$HELM_RELEASE_WORKSPACE"
 
 echo "▸ Ajout repo Helm Onyxia..."
 helm repo add ide https://nexus.lab.sspcloud.fr/repository/inseefrlab-helm-charts-interactive-services --force-update 2>/dev/null
