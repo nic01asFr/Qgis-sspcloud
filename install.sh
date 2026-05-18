@@ -79,6 +79,7 @@ helm upgrade --install "$HELM_RELEASE_HUB" ide/jupyter-python \
     --namespace "$NAMESPACE" \
     --set service.image.custom.enabled=true \
     --set "service.image.custom.version=$HUB_IMAGE" \
+    --set "service.image.pullPolicy=Always" \
     --set "init.personalInit=$REPO/server_init.sh" \
     --set "persistence.enabled=false" \
     --set "global.suspend=false" \
@@ -100,6 +101,7 @@ helm upgrade --install "$HELM_RELEASE_AGENT" ide/jupyter-python \
     --namespace "$NAMESPACE" \
     --set service.image.custom.enabled=true \
     --set "service.image.custom.version=$AGENT_IMAGE" \
+    --set "service.image.pullPolicy=Always" \
     --set "init.personalInit=$REPO/server_init.sh" \
     --set "persistence.enabled=false" \
     --set "global.suspend=false" \
