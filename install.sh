@@ -56,7 +56,14 @@ echo "▸ Ajout repo Helm Onyxia..."
 helm repo add ide https://nexus.lab.sspcloud.fr/repository/inseefrlab-helm-charts-interactive-services --force-update 2>/dev/null
 helm repo update ide 2>/dev/null
 
-# 1. Hub QGIS/MCP (tools, études, publications)
+# Convention Onyxia : ingress hostname = user-{USERNAME}-{RELEASE}-0.user.lab.sspcloud.fr
+# userHostname (port user) = user-{USERNAME}-{RELEASE}-user.user.lab.sspcloud.fr
+HUB_HOST="user-${USERNAME}-${HELM_RELEASE_HUB}-0.user.lab.sspcloud.fr"
+HUB_USER_HOST="user-${USERNAME}-${HELM_RELEASE_HUB}-user.user.lab.sspcloud.fr"
+AGENT_HOST="user-${USERNAME}-${HELM_RELEASE_AGENT}-0.user.lab.sspcloud.fr"
+AGENT_USER_HOST="user-${USERNAME}-${HELM_RELEASE_AGENT}-user.user.lab.sspcloud.fr"
+
+# 1. Hub QGIS/MCP (tools, études, publications, /desk)
 echo "▸ Déploiement hub QGIS ($HELM_RELEASE_HUB)..."
 helm upgrade --install "$HELM_RELEASE_HUB" ide/jupyter-python \
     --namespace "$NAMESPACE" \
@@ -65,6 +72,8 @@ helm upgrade --install "$HELM_RELEASE_HUB" ide/jupyter-python \
     --set "init.personalInit=$REPO/server_init.sh" \
     --set "networking.user.enabled=true" \
     --set "networking.user.ports[0]=8100" \
+    --set "ingress.hostname=$HUB_HOST" \
+    --set "ingress.userHostname=$HUB_USER_HOST" \
     --set "persistence.enabled=true" \
     --set "persistence.size=5Gi" \
     --set "global.suspend=false" \
@@ -89,6 +98,8 @@ helm upgrade --install "$HELM_RELEASE_AGENT" ide/jupyter-python \
     --set "init.personalInit=$REPO/server_init.sh" \
     --set "networking.user.enabled=true" \
     --set "networking.user.ports[0]=8100" \
+    --set "ingress.hostname=$AGENT_HOST" \
+    --set "ingress.userHostname=$AGENT_USER_HOST" \
     --set "persistence.enabled=true" \
     --set "persistence.size=5Gi" \
     --set "global.suspend=false" \
@@ -105,16 +116,16 @@ helm upgrade --install "$HELM_RELEASE_AGENT" ide/jupyter-python \
     2>&1
 
 # 3. Workspace QGIS Desktop (noVNC + MCP server)
+# Pas de personalInit : l'image qgisremotemcp a son propre entrypoint
 echo "▸ Déploiement workspace QGIS Desktop ($HELM_RELEASE_WORKSPACE)..."
 helm upgrade --install "$HELM_RELEASE_WORKSPACE" ide/jupyter-python \
     --namespace "$NAMESPACE" \
     --set service.image.custom.enabled=true \
     --set "service.image.custom.version=$WORKSPACE_IMAGE" \
-    --set "init.personalInit=$REPO/server_init.sh" \
     --set "networking.user.enabled=true" \
     --set "networking.user.ports[0]=8080" \
-    --set "networking.user.ports[1]=8100" \
-    --set "networking.user.ports[2]=6080" \
+    --set "ingress.hostname=user-${USERNAME}-${HELM_RELEASE_WORKSPACE}-0.user.lab.sspcloud.fr" \
+    --set "ingress.userHostname=user-${USERNAME}-${HELM_RELEASE_WORKSPACE}-user.user.lab.sspcloud.fr" \
     --set "persistence.enabled=true" \
     --set "persistence.size=10Gi" \
     --set "global.suspend=false" \
@@ -154,26 +165,14 @@ helm upgrade --install "$HELM_RELEASE_GPU" inseefrlab/jupyter-pytorch-gpu \
     2>&1
 
 echo ""
-echo "⏳ Attente démarrage agent + hub + workspace (~90s)..."
+echo "⏳ Attente démarrage hub + agent (~90s)..."
 kubectl rollout status statefulset/${HELM_RELEASE_HUB}-jupyter-python \
     -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
 kubectl rollout status statefulset/${HELM_RELEASE_AGENT}-jupyter-python \
     -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-kubectl rollout status statefulset/${HELM_RELEASE_WORKSPACE}-jupyter-python \
-    -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
 
-# Récupérer l'URL réelle depuis l'ingress créé par le chart
-AGENT_USER_HOST=$(kubectl get ingress -n "$NAMESPACE" \
-    -l "app.kubernetes.io/instance=${HELM_RELEASE_AGENT}" \
-    -o jsonpath='{.items[*].spec.rules[*].host}' 2>/dev/null | tr ' ' '\n' \
-    | grep -v "^$" | tail -1)
-
-if [ -n "$AGENT_USER_HOST" ]; then
-    DESK_URL="https://${AGENT_USER_HOST}/desk"
-else
-    # Fallback : convention Onyxia userHostname
-    DESK_URL="https://user-${USERNAME}-${HELM_RELEASE_AGENT}-user.user.lab.sspcloud.fr/desk"
-fi
+# Le desk est servi par le hub — URL sur le port user du hub
+DESK_URL="https://${HUB_USER_HOST}/desk"
 
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
