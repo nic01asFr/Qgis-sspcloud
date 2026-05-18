@@ -31,6 +31,12 @@ if [ "$SERVICE_NAME" = "qgis-agent" ]; then
 fi
 
 # Démarrer le serveur
+# Si SERVER_MODULE est vide, l'image a son propre entrypoint (ex: qgis-workspace)
+if [ -z "$SERVER_MODULE" ]; then
+    echo "[init] SERVER_MODULE vide — l'image gère son propre démarrage."
+    exit 0
+fi
+
 echo "[init] Démarrage uvicorn $SERVER_MODULE sur :$SERVER_PORT"
 exec uvicorn "$SERVER_MODULE" \
     --host 0.0.0.0 \

@@ -8,10 +8,10 @@
 set -e
 
 REPO="https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main"
-AGENT_IMAGE="ghcr.io/nic01asfr/qgis-agent:latest"
-HUB_IMAGE="ghcr.io/nic01asfr/qgis-hub:latest"
-WORKSPACE_IMAGE="ghcr.io/nic01asfr/qgisremotemcp:latest"
-GPU_IMAGE="ghcr.io/nic01asfr/geoai-gpu:latest"
+AGENT_IMAGE="ghcr.io/nic01asfr/qgis-agent:latest"       # built: Qgis-sspcloud CI
+HUB_IMAGE="ghcr.io/nic01asfr/qgis-hub:latest"          # built: Qgis-sspcloud CI
+WORKSPACE_IMAGE="ghcr.io/nic01asfr/qgisremotemcp:latest" # built: BigQgisMCP (manuel)
+GPU_IMAGE="ghcr.io/nic01asfr/geoai-gpu:latest"           # built: Passerelle CI
 HELM_RELEASE_AGENT="qgis-agent"
 HELM_RELEASE_HUB="qgis-mcp-bridge"
 HELM_RELEASE_WORKSPACE="qgis-workspace"

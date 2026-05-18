@@ -2,6 +2,16 @@
 # BigQgisMCP — QGIS Desktop as an MCP Server
 # ═══════════════════════════════════════════════════════════════════
 #
+# ATTENTION : Ce Dockerfile est conservé pour référence uniquement.
+# Les sources (main_mcp.py, src/, recipes/, etc.) se trouvent dans
+# le repo séparé : https://github.com/nic01asFr/BigQgisMCP
+#
+# L'image produite est publiée manuellement sur :
+#   ghcr.io/nic01asfr/qgisremotemcp:latest
+#
+# Pour rebuilder : cloner BigQgisMCP et faire `docker build -t ...`
+# ═══════════════════════════════════════════════════════════════════
+#
 # Single container with:
 #   - QGIS Desktop 3.34 LTR (full GUI)
 #   - Xvfb + fluxbox + x11vnc + noVNC (browser access)
