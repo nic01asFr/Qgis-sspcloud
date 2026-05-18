@@ -9,7 +9,6 @@ setup(
         "httpx",
         "aiosqlite",
         "sqlite-vec",
-        "agno",
         "jinja2",
         "python-multipart",
         "pyyaml",
