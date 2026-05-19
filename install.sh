@@ -8,33 +8,18 @@
 set -e
 
 REPO="https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main"
-AGENT_IMAGE="ghcr.io/nic01asfr/qgis-agent:latest"       # built: Qgis-sspcloud CI
-HUB_IMAGE="ghcr.io/nic01asfr/qgis-hub:latest"          # built: Qgis-sspcloud CI
-WORKSPACE_IMAGE="ghcr.io/nic01asfr/qgisremotemcp:latest" # built: BigQgisMCP (manuel)
-GPU_IMAGE="ghcr.io/nic01asfr/geoai-gpu:latest"           # built: Passerelle CI
-HELM_RELEASE_AGENT="qgis-agent"
-HELM_RELEASE_HUB="qgis-mcp-bridge"
-HELM_RELEASE_WORKSPACE="qgis-workspace"
-HELM_RELEASE_GPU="geoai-gpu"
+HUB_IMAGE="ghcr.io/nic01asfr/qgis-hub:latest"
+AGENT_IMAGE="ghcr.io/nic01asfr/qgis-agent:latest"
 
-# Détection automatique du namespace depuis le serviceaccount K8s monté.
-# C'est la source la plus fiable dans n'importe quel pod Onyxia.
 SA_NS_FILE="/var/run/secrets/kubernetes.io/serviceaccount/namespace"
-
 NAMESPACE="${KUBERNETES_NAMESPACE:-}"
 if [ -z "$NAMESPACE" ] && [ -f "$SA_NS_FILE" ]; then
     NAMESPACE=$(cat "$SA_NS_FILE")
 fi
-
-USERNAME="${ONYXIA_USER:-}"
-if [ -z "$USERNAME" ] && [ -n "$NAMESPACE" ]; then
-    # Convention SSPCloud : namespace = user-<login>
-    USERNAME="${NAMESPACE#user-}"
-fi
+USERNAME="${ONYXIA_USER:-${NAMESPACE#user-}}"
 
 if [ -z "$USERNAME" ] || [ -z "$NAMESPACE" ]; then
-    echo "ERREUR : impossible de détecter l'utilisateur SSPCloud."
-    echo "Lance ce script depuis un terminal dans un service Onyxia."
+    echo "ERREUR : impossible de détecter le namespace."
     exit 1
 fi
 
@@ -44,118 +29,272 @@ echo "║   Installation QGIS Agent — $USERNAME"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 
-# Vérifier les droits
-if ! kubectl auth can-i create secrets -n "$NAMESPACE" 2>/dev/null | grep -q yes; then
-    echo "ERREUR : droits insuffisants (create:secrets refusé)."
-    echo "Relance le service avec kubernetes.role = edit ou admin."
-    exit 1
-fi
+_apply() {
+    # Écrit un manifest YAML dans un fichier tmp et l'applique
+    local name="$1"; shift
+    local tmp; tmp=$(mktemp /tmp/manifest-XXXXXX.yaml)
+    python3 - "$tmp" "$@" <<'PYEOF'
+import sys, os
+dest = sys.argv[1]
+data = os.environ.get('MANIFEST_YAML', '')
+open(dest, 'w').write(data)
+PYEOF
+    MANIFEST_YAML="$1" python3 -c "
+import sys, os
+open(sys.argv[1], 'w').write(os.environ['MANIFEST_YAML'])
+" "$tmp"
+    kubectl apply -f "$tmp" -n "$NAMESPACE" 2>&1
+    rm -f "$tmp"
+}
 
-# Helm repo
-echo "▸ Suppression PVCs orphelins sans labels Helm..."
-for r in "$HELM_RELEASE_HUB" "$HELM_RELEASE_AGENT" "$HELM_RELEASE_WORKSPACE"; do
-    pvc="${r}-jupyter-python"
-    owned=$(kubectl get pvc "$pvc" -n "$NAMESPACE" \
-        -o jsonpath="{.metadata.annotations['meta\.helm\.sh/release-name']}" 2>/dev/null || true)
-    if [ -n "$owned" ] && [ "$owned" != "$r" ]; then
-        kubectl delete pvc "$pvc" -n "$NAMESPACE" 2>/dev/null || true
-    fi
-done
+# Fonction pour appliquer un manifest YAML passé via stdin (heredoc dans un pipe)
+_kubectl_apply() {
+    python3 -c "
+import sys, subprocess
+data = sys.stdin.read()
+r = subprocess.run(['kubectl', 'apply', '-f', '-', '-n', '$NAMESPACE'],
+    input=data, capture_output=False, text=True)
+"
+}
 
-echo "▸ Ajout repo Helm Onyxia..."
-helm repo add ide https://nexus.lab.sspcloud.fr/repository/inseefrlab-helm-charts-interactive-services --force-update 2>/dev/null
-helm repo update ide 2>/dev/null
+echo "▸ Déploiement hub QGIS (qgis-mcp-bridge)..."
+python3 - <<PYEOF
+import subprocess, os
 
-# Convention Onyxia : ingress hostname = user-{USERNAME}-{RELEASE}-0.user.lab.sspcloud.fr
-# userHostname (port user) = user-{USERNAME}-{RELEASE}-user.user.lab.sspcloud.fr
-HUB_HOST="user-${USERNAME}-${HELM_RELEASE_HUB}-0.user.lab.sspcloud.fr"
-HUB_USER_HOST="user-${USERNAME}-${HELM_RELEASE_HUB}-user.user.lab.sspcloud.fr"
-AGENT_HOST="user-${USERNAME}-${HELM_RELEASE_AGENT}-0.user.lab.sspcloud.fr"
-AGENT_USER_HOST="user-${USERNAME}-${HELM_RELEASE_AGENT}-user.user.lab.sspcloud.fr"
+ns = '$NAMESPACE'
+username = '$USERNAME'
+hub_image = '$HUB_IMAGE'
+repo = '$REPO'
+name = 'qgis-mcp-bridge'
+host = f'user-{username}-{name}-0.user.lab.sspcloud.fr'
 
-# 1. Hub QGIS/MCP (tools, études, publications, /desk)
-echo "▸ Déploiement hub QGIS ($HELM_RELEASE_HUB)..."
-helm upgrade --install "$HELM_RELEASE_HUB" ide/jupyter-python \
-    --namespace "$NAMESPACE" \
-    --set service.image.custom.enabled=true \
-    --set "service.image.custom.version=$HUB_IMAGE" \
-    --set "service.image.pullPolicy=Always" \
-    --set "init.personalInit=$REPO/server_init.sh" \
-    --set "persistence.enabled=false" \
-    --set "global.suspend=false" \
-    --set "ingress.hostname=$HUB_HOST" \
-    --set "ingress.ingressClassName=onyxia" \
-    --set "extraEnvVars[0].name=SERVICE_NAME" \
-    --set-string "extraEnvVars[0].value=qgis-mcp" \
-    --set "extraEnvVars[1].name=SERVER_MODULE" \
-    --set-string "extraEnvVars[1].value=hub.main:app" \
-    --set "extraEnvVars[2].name=SERVER_PORT" \
-    --set-string "extraEnvVars[2].value=8888" \
-    --set "extraEnvVars[3].name=ONYXIA_USER" \
-    --set-string "extraEnvVars[3].value=$USERNAME" \
-    --set "extraEnvVars[4].name=SSPCLOUD_NAMESPACE" \
-    --set-string "extraEnvVars[4].value=$NAMESPACE" \
-    2>&1
+manifest = f"""apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {name}
+  namespace: {ns}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {name}
+  namespace: {ns}
+  labels:
+    app: {name}
+spec:
+  serviceName: {name}
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {name}
+  template:
+    metadata:
+      labels:
+        app: {name}
+    spec:
+      serviceAccountName: {name}
+      containers:
+      - name: hub
+        image: {hub_image}
+        imagePullPolicy: Always
+        command: ["/bin/bash", "-c"]
+        args: ["curl -fsSL {repo}/server_init.sh | bash"]
+        ports:
+        - containerPort: 8888
+        env:
+        - name: SERVICE_NAME
+          value: qgis-mcp
+        - name: SERVER_MODULE
+          value: hub.main:app
+        - name: SERVER_PORT
+          value: "8888"
+        - name: ONYXIA_USER
+          value: "{username}"
+        - name: SSPCLOUD_NAMESPACE
+          value: "{ns}"
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8888
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {name}
+  namespace: {ns}
+  labels:
+    app: {name}
+spec:
+  selector:
+    app: {name}
+  ports:
+  - port: 8888
+    targetPort: 8888
+    name: http
+  clusterIP: None
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {name}-svc
+  namespace: {ns}
+spec:
+  selector:
+    app: {name}
+  ports:
+  - port: 8888
+    targetPort: 8888
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {name}
+  namespace: {ns}
+  annotations:
+    kubernetes.io/ingress.class: onyxia
+spec:
+  ingressClassName: onyxia
+  rules:
+  - host: {host}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {name}-svc
+            port:
+              number: 8888
+"""
 
-# 2. Agent IA (chat, mémoire, LLM)
-echo "▸ Déploiement agent IA ($HELM_RELEASE_AGENT)..."
-helm upgrade --install "$HELM_RELEASE_AGENT" ide/jupyter-python \
-    --namespace "$NAMESPACE" \
-    --set service.image.custom.enabled=true \
-    --set "service.image.custom.version=$AGENT_IMAGE" \
-    --set "service.image.pullPolicy=Always" \
-    --set "init.personalInit=$REPO/server_init.sh" \
-    --set "persistence.enabled=false" \
-    --set "global.suspend=false" \
-    --set "ingress.hostname=$AGENT_HOST" \
-    --set "ingress.ingressClassName=onyxia" \
-    --set "extraEnvVars[0].name=SERVICE_NAME" \
-    --set-string "extraEnvVars[0].value=qgis-agent" \
-    --set "extraEnvVars[1].name=SERVER_MODULE" \
-    --set-string "extraEnvVars[1].value=agent.main:app" \
-    --set "extraEnvVars[2].name=SERVER_PORT" \
-    --set-string "extraEnvVars[2].value=8888" \
-    --set "extraEnvVars[3].name=ONYXIA_USER" \
-    --set-string "extraEnvVars[3].value=$USERNAME" \
-    --set "extraEnvVars[4].name=SSPCLOUD_NAMESPACE" \
-    --set-string "extraEnvVars[4].value=$NAMESPACE" \
-    2>&1
+r = subprocess.run(['kubectl', 'apply', '-f', '-', '-n', ns],
+    input=manifest, capture_output=True, text=True)
+print(r.stdout or r.stderr)
+PYEOF
 
-# 3. Pod GPU GeoAI (SAM3 + DeepForest) — scale 0 au démarrage, réveillé à la demande
-echo "▸ Déploiement pod GPU GeoAI ($HELM_RELEASE_GPU — suspendu, démarré à la demande)..."
-helm repo add inseefrlab https://inseefrlab.github.io/helm-charts-interactive-services --force-update 2>/dev/null
-helm repo update inseefrlab 2>/dev/null
-helm upgrade --install "$HELM_RELEASE_GPU" inseefrlab/jupyter-pytorch-gpu \
-    --namespace "$NAMESPACE" \
-    --set service.image.custom.enabled=true \
-    --set "service.image.custom.version=$GPU_IMAGE" \
-    --set "init.personalInit=$REPO/server_init.sh" \
-    --set "networking.user.enabled=true" \
-    --set "networking.user.ports[0]=8000" \
-    --set "persistence.enabled=false" \
-    --set "global.suspend=true" \
-    --set "nodeSelector.gpu-vram=16GB" \
-    --set "extraEnvVars[0].name=SERVICE_NAME" \
-    --set-string "extraEnvVars[0].value=geoai-gpu" \
-    --set "extraEnvVars[1].name=SERVER_PORT" \
-    --set-string "extraEnvVars[1].value=8000" \
-    --set "extraEnvVars[2].name=ONYXIA_USER" \
-    --set-string "extraEnvVars[2].value=$USERNAME" \
-    --set "extraEnvVars[3].name=SSPCLOUD_NAMESPACE" \
-    --set-string "extraEnvVars[3].value=$NAMESPACE" \
-    --set "extraEnvVars[4].name=GEOAI_GPU_SERVICE_NAME" \
-    --set-string "extraEnvVars[4].value=$HELM_RELEASE_GPU" \
-    2>&1
+echo "▸ Déploiement agent IA (qgis-agent)..."
+python3 - <<PYEOF
+import subprocess, os
+
+ns = '$NAMESPACE'
+username = '$USERNAME'
+agent_image = '$AGENT_IMAGE'
+repo = '$REPO'
+name = 'qgis-agent'
+host = f'user-{username}-{name}-0.user.lab.sspcloud.fr'
+
+manifest = f"""apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {name}
+  namespace: {ns}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {name}
+  namespace: {ns}
+  labels:
+    app: {name}
+spec:
+  serviceName: {name}
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {name}
+  template:
+    metadata:
+      labels:
+        app: {name}
+    spec:
+      serviceAccountName: {name}
+      containers:
+      - name: agent
+        image: {agent_image}
+        imagePullPolicy: Always
+        command: ["/bin/bash", "-c"]
+        args: ["curl -fsSL {repo}/server_init.sh | bash"]
+        ports:
+        - containerPort: 8888
+        env:
+        - name: SERVICE_NAME
+          value: qgis-agent
+        - name: SERVER_MODULE
+          value: agent.main:app
+        - name: SERVER_PORT
+          value: "8888"
+        - name: ONYXIA_USER
+          value: "{username}"
+        - name: SSPCLOUD_NAMESPACE
+          value: "{ns}"
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8888
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {name}
+  namespace: {ns}
+spec:
+  selector:
+    app: {name}
+  ports:
+  - port: 8888
+    targetPort: 8888
+    name: http
+  clusterIP: None
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {name}-svc
+  namespace: {ns}
+spec:
+  selector:
+    app: {name}
+  ports:
+  - port: 8888
+    targetPort: 8888
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {name}
+  namespace: {ns}
+spec:
+  ingressClassName: onyxia
+  rules:
+  - host: {host}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {name}-svc
+            port:
+              number: 8888
+"""
+
+r = subprocess.run(['kubectl', 'apply', '-f', '-', '-n', ns],
+    input=manifest, capture_output=True, text=True)
+print(r.stdout or r.stderr)
+PYEOF
 
 echo ""
 echo "⏳ Attente démarrage hub + agent (~90s)..."
-kubectl rollout status statefulset/${HELM_RELEASE_HUB}-jupyter-python \
-    -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-kubectl rollout status statefulset/${HELM_RELEASE_AGENT}-jupyter-python \
-    -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
+kubectl rollout status statefulset/qgis-mcp-bridge -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
+kubectl rollout status statefulset/qgis-agent -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
 
-# Le desk est servi par le hub sur l'ingress standard (port 8888 remplacé par uvicorn)
-DESK_URL="https://${HUB_HOST}/desk"
+DESK_URL="https://user-${USERNAME}-qgis-mcp-bridge-0.user.lab.sspcloud.fr/desk"
 
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
@@ -165,8 +304,5 @@ echo "║   Ton bureau de travail QGIS :"
 echo "║   $DESK_URL"
 echo "║"
 echo "║   Bookmarke ce lien — c'est ton espace personnel."
-echo "║"
-echo "║   Note : le bureau QGIS Desktop (noVNC) se lancera"
-echo "║   automatiquement à la demande depuis le bureau."
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
