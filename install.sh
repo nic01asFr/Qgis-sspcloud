@@ -83,6 +83,8 @@ helm upgrade --install "$HELM_RELEASE_HUB" ide/jupyter-python \
     --set "init.personalInit=$REPO/server_init.sh" \
     --set "persistence.enabled=false" \
     --set "global.suspend=false" \
+    --set "ingress.hostname=$HUB_HOST" \
+    --set "ingress.ingressClassName=onyxia" \
     --set "extraEnvVars[0].name=SERVICE_NAME" \
     --set-string "extraEnvVars[0].value=qgis-mcp" \
     --set "extraEnvVars[1].name=SERVER_MODULE" \
@@ -105,6 +107,8 @@ helm upgrade --install "$HELM_RELEASE_AGENT" ide/jupyter-python \
     --set "init.personalInit=$REPO/server_init.sh" \
     --set "persistence.enabled=false" \
     --set "global.suspend=false" \
+    --set "ingress.hostname=$AGENT_HOST" \
+    --set "ingress.ingressClassName=onyxia" \
     --set "extraEnvVars[0].name=SERVICE_NAME" \
     --set-string "extraEnvVars[0].value=qgis-agent" \
     --set "extraEnvVars[1].name=SERVER_MODULE" \
