@@ -607,8 +607,9 @@ async def hub_login(key: str = "", request: Request = None):
 # ── Interface web hub ─────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
-async def hub_home(request: Request, user: dict = Depends(auth.get_current_user)):
-    """Page d'accueil du hub : bureau QGIS + liens utiles."""
+async def hub_home(request: Request):
+    """Page d'accueil — readiness probe K8s (200 sans auth) + redirect vers /desk."""
+    return RedirectResponse("/desk", status_code=302)
     username = user["username"]
     all_sessions = await sessions.list_sessions(username)
     active = [s for s in all_sessions if s["status"] == sessions.SESSION_READY]
