@@ -94,6 +94,113 @@ _active_sessions: dict[str, str] = {}
 _session_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
+# ── Bootstrap agent K8s ────────────────────────────────────────────────────────
+
+_AGENT_IMAGE = "ghcr.io/nic01asfr/qgis-agent:latest"
+_K8S_HOST    = "https://kubernetes.default.svc"
+
+
+async def _bootstrap_agent() -> None:
+    """
+    Crée le StatefulSet qgis-agent dans le namespace du hub si absent.
+    Utilise le ServiceAccount du pod (kubernetes.role: edit requis).
+    Lance en tâche de fond au démarrage du hub — non bloquant.
+    """
+    token_file = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
+    ns_file    = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+    if not token_file.exists():
+        log.debug("Bootstrap agent: pas en K8s (dev mode), ignoré")
+        return
+
+    await asyncio.sleep(5)  # Laisser le hub démarrer entièrement
+
+    token    = token_file.read_text().strip()
+    ns       = ns_file.read_text().strip()
+    username = os.getenv("ONYXIA_USER", ns.removeprefix("user-"))
+    headers  = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    host     = f"user-{username}-qgis-agent-0.user.lab.sspcloud.fr"
+
+    async with httpx.AsyncClient(verify=False, timeout=15) as client:
+        # Vérifier si qgis-agent existe déjà
+        r = await client.get(
+            f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/qgis-agent",
+            headers=headers,
+        )
+        if r.status_code == 200:
+            log.info("bootstrap: qgis-agent déjà présent dans %s", ns)
+            return
+
+        log.info("bootstrap: création qgis-agent pour %s dans %s", username, ns)
+
+        # StatefulSet
+        sts = {
+            "apiVersion": "apps/v1", "kind": "StatefulSet",
+            "metadata": {"name": "qgis-agent", "namespace": ns,
+                         "labels": {"app": "qgis-agent"}},
+            "spec": {
+                "serviceName": "qgis-agent", "replicas": 1,
+                "selector": {"matchLabels": {"app": "qgis-agent"}},
+                "template": {
+                    "metadata": {"labels": {"app": "qgis-agent"}},
+                    "spec": {"containers": [{
+                        "name": "agent",
+                        "image": _AGENT_IMAGE,
+                        "imagePullPolicy": "Always",
+                        "command": ["uvicorn", "agent.main:app",
+                                    "--host", "0.0.0.0", "--port", "8888"],
+                        "ports": [{"containerPort": 8888}],
+                        "env": [{"name": "ONYXIA_USER", "value": username}],
+                        "readinessProbe": {
+                            "httpGet": {"path": "/", "port": 8888},
+                            "initialDelaySeconds": 30, "periodSeconds": 10,
+                            "failureThreshold": 30,
+                        },
+                    }]},
+                },
+            },
+        }
+        r = await client.post(
+            f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets",
+            headers=headers, json=sts,
+        )
+        if r.status_code not in (200, 201):
+            log.error("bootstrap StatefulSet qgis-agent: %s %s", r.status_code, r.text[:300])
+            return
+
+        # Headless Service (pour le StatefulSet DNS)
+        await client.post(f"{_K8S_HOST}/api/v1/namespaces/{ns}/services",
+            headers=headers,
+            json={"apiVersion": "v1", "kind": "Service",
+                  "metadata": {"name": "qgis-agent", "namespace": ns},
+                  "spec": {"selector": {"app": "qgis-agent"}, "clusterIP": "None",
+                            "ports": [{"port": 8888, "targetPort": 8888}]}})
+
+        # ClusterIP Service (pour l'Ingress)
+        await client.post(f"{_K8S_HOST}/api/v1/namespaces/{ns}/services",
+            headers=headers,
+            json={"apiVersion": "v1", "kind": "Service",
+                  "metadata": {"name": "qgis-agent-svc", "namespace": ns},
+                  "spec": {"selector": {"app": "qgis-agent"},
+                            "ports": [{"port": 8888, "targetPort": 8888}]}})
+
+        # Ingress
+        await client.post(
+            f"{_K8S_HOST}/apis/networking.k8s.io/v1/namespaces/{ns}/ingresses",
+            headers=headers,
+            json={"apiVersion": "networking.k8s.io/v1", "kind": "Ingress",
+                  "metadata": {"name": "qgis-agent", "namespace": ns,
+                               "annotations": {"kubernetes.io/ingress.class": "onyxia"}},
+                  "spec": {"ingressClassName": "onyxia", "rules": [{
+                      "host": host,
+                      "http": {"paths": [{"path": "/", "pathType": "Prefix",
+                                          "backend": {"service": {
+                                              "name": "qgis-agent-svc",
+                                              "port": {"number": 8888}}}}]},
+                  }]}})
+
+        log.info("bootstrap: qgis-agent créé — %s", host)
+
+
 # ── Lifespan ───────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -110,6 +217,7 @@ async def lifespan(app: FastAPI):
     if _active_sessions:
         log.info("Cache restauré : %d session(s) actives", len(_active_sessions))
     task = asyncio.create_task(sessions.cleanup_loop())
+    asyncio.create_task(_bootstrap_agent())
     yield
     task.cancel()
 
@@ -128,13 +236,13 @@ _ONYXIA_USER = os.getenv("ONYXIA_USER", "")
 # HUB_URL : explicite ou dérivé depuis ONYXIA_USER (toujours injecté par SSPCloud)
 _HUB_URL = (
     os.getenv("HUB_URL")
-    or (f"https://user-{_ONYXIA_USER}-qgis-mcp-bridge.user.lab.sspcloud.fr"
+    or (f"https://user-{_ONYXIA_USER}-qgis-mcp-bridge-0.user.lab.sspcloud.fr"
         if _ONYXIA_USER else "")
 )
 # AGENT_URL : URL publique du pod agent IA (pour proxifier les routes mémoire)
 _AGENT_URL = (
     os.getenv("AGENT_URL")
-    or (f"https://user-{_ONYXIA_USER}-qgis-agent-bridge.user.lab.sspcloud.fr"
+    or (f"https://user-{_ONYXIA_USER}-qgis-agent-0.user.lab.sspcloud.fr"
         if _ONYXIA_USER else "")
 )
 

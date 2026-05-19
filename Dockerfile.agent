@@ -6,4 +6,8 @@ WORKDIR /opt/qgis-agent
 COPY agent/ .
 RUN pip install -e . --quiet --no-cache-dir
 
+ENV SERVICE_NAME=qgis-agent \
+    SERVER_MODULE=agent.main:app \
+    SERVER_PORT=8888
+
 USER 1000
