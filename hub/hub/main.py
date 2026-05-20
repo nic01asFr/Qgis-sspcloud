@@ -262,7 +262,19 @@ app = FastAPI(
 )
 
 
-_ONYXIA_USER = os.getenv("ONYXIA_USER", "")
+def _resolve_onyxia_user() -> str:
+    """Résout le username depuis ONYXIA_USER env ou namespace K8s (fallback).
+    Onyxia n'injecte pas toujours ONYXIA_USER selon la version du chart."""
+    user = os.getenv("ONYXIA_USER", "")
+    if not user:
+        try:
+            ns = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read_text().strip()
+            user = ns.removeprefix("user-")
+        except Exception:
+            pass
+    return user
+
+_ONYXIA_USER = _resolve_onyxia_user()
 # HUB_URL : explicite ou dérivé depuis ONYXIA_USER (toujours injecté par SSPCloud)
 _HUB_URL = (
     os.getenv("HUB_URL")
