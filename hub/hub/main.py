@@ -151,7 +151,30 @@ async def _bootstrap_agent() -> None:
             headers=headers,
         )
         if r.status_code == 200:
-            log.info("bootstrap: qgis-agent déjà présent dans %s", ns)
+            # Agent existant : patcher les env vars critiques (HUB_API_KEY, LLM_API_KEY)
+            # pour s'assurer qu'ils sont à jour (en cas de bootstrap depuis ancienne image)
+            try:
+                patch_env = [
+                    {"name": "HUB_API_KEY",  "value": hub_api_key},
+                    {"name": "LLM_API_KEY",  "value": llm_api_key},
+                    {"name": "HUB_URL",      "value": _HUB_URL},
+                    {"name": "DATA_DIR",     "value": "/home/onyxia/work/qgis-agent-data"},
+                    {"name": "ONYXIA_USER",  "value": username},
+                ]
+                existing_env = (r.json().get("spec", {}).get("template", {})
+                                .get("spec", {}).get("containers", [{}])[0]
+                                .get("env", []))
+                existing_names = {e["name"] for e in existing_env}
+                new_env = [e for e in existing_env if e["name"] not in {p["name"] for p in patch_env}]
+                new_env.extend(patch_env)
+                await client.patch(
+                    f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/qgis-agent",
+                    headers={**headers, "Content-Type": "application/strategic-merge-patch+json"},
+                    json={"spec": {"template": {"spec": {"containers": [{"name": "agent", "env": new_env}]}}}},
+                )
+                log.info("bootstrap: qgis-agent env patché pour %s", username)
+            except Exception as exc:
+                log.warning("bootstrap: patch agent échoué: %s", exc)
             return
 
         log.info("bootstrap: création qgis-agent pour %s dans %s", username, ns)
@@ -1885,15 +1908,19 @@ async def workspace_page(request: Request):
 
 
 @app.post("/workspace/wake")
-async def workspace_wake():
+@app.get("/workspace/wake")
+async def workspace_wake(request: Request):
     """Réveille le workspace QGIS endormi (scale 0→1)."""
+    return_to = request.query_params.get("return_to", "")
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
         async with httpx.AsyncClient(timeout=30, base_url=_SELF_URL) as c:
             await c.post("/sessions", headers={"Authorization": f"Bearer {api_key}"}, json={})
-        return {"ok": True}
     except Exception:
-        return {"ok": False}
+        pass
+    if return_to == "desk":
+        return RedirectResponse("/desk", status_code=302)
+    return {"ok": True}
 
 
 @app.post("/workspace/study/new")
