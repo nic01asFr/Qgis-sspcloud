@@ -83,9 +83,11 @@ def _read_passerelle_s3_creds() -> dict[str, str]:
     return decoded
 
 
+import boto3  # noqa: E402 — top-level pour que _S3_AVAILABLE détecte l'absence
+
+
 def _get_s3_client():
     """Renvoie (client, bucket, endpoint)."""
-    import boto3
     creds = _read_passerelle_s3_creds()
     endpoint = creds.get("AWS_S3_ENDPOINT", "https://minio.lab.sspcloud.fr").rstrip("/")
     if not endpoint.startswith("http"):
