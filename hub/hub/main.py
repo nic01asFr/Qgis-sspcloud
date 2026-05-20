@@ -121,6 +121,8 @@ async def _bootstrap_agent() -> None:
     headers  = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     host     = f"user-{username}-qgis-agent.user.lab.sspcloud.fr"
 
+    hub_api_key = await auth.create_or_get_api_key(username)
+
     async with httpx.AsyncClient(verify=False, timeout=15) as client:
         # Vérifier si qgis-agent existe déjà
         r = await client.get(
@@ -150,7 +152,12 @@ async def _bootstrap_agent() -> None:
                         "command": ["uvicorn", "agent.main:app",
                                     "--host", "0.0.0.0", "--port", "8888"],
                         "ports": [{"containerPort": 8888}],
-                        "env": [{"name": "ONYXIA_USER", "value": username}],
+                        "env": [
+                            {"name": "ONYXIA_USER",  "value": username},
+                            {"name": "DATA_DIR",     "value": "/home/onyxia/work/qgis-agent-data"},
+                            {"name": "HUB_URL",      "value": _HUB_URL},
+                            {"name": "HUB_API_KEY",  "value": hub_api_key},
+                        ],
                         "readinessProbe": {
                             "httpGet": {"path": "/", "port": 8888},
                             "initialDelaySeconds": 30, "periodSeconds": 10,
