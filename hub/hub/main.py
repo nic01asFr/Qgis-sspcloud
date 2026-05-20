@@ -69,6 +69,7 @@ log = logging.getLogger("hub.main")
 
 _MCP_PORT = 8100
 _API_PORT = 8080
+_SELF_URL  = f"http://127.0.0.1:{os.getenv('SERVER_PORT', '8888')}"
 
 # ── Config GeoAI GPU pod ──────────────────────────────────────────────────────
 # Injecté par qgis-mcp.service.yml → serve.env
@@ -271,7 +272,7 @@ async def _desk_context() -> dict:
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
         headers = {"Authorization": f"Bearer {api_key}"}
-        async with httpx.AsyncClient(timeout=8, base_url="http://127.0.0.1:8100") as c:
+        async with httpx.AsyncClient(timeout=8, base_url=_SELF_URL) as c:
             for path, cb in [
                 ("/studies", lambda d: ctx.update(studies=d)),
                 ("/studies/active", lambda d: ctx.update(
@@ -1846,7 +1847,7 @@ async def workspace_wake():
     """Réveille le workspace QGIS endormi (scale 0→1)."""
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
-        async with httpx.AsyncClient(timeout=30, base_url="http://127.0.0.1:8100") as c:
+        async with httpx.AsyncClient(timeout=30, base_url=_SELF_URL) as c:
             await c.post("/sessions", headers={"Authorization": f"Bearer {api_key}"}, json={})
         return {"ok": True}
     except Exception:
@@ -1862,7 +1863,7 @@ async def workspace_create_study(request: Request):
         return RedirectResponse("/workspace?error=name_required", status_code=302)
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
-        async with httpx.AsyncClient(timeout=15, base_url="http://127.0.0.1:8100") as c:
+        async with httpx.AsyncClient(timeout=15, base_url=_SELF_URL) as c:
             r = await c.post("/studies",
                              headers={"Authorization": f"Bearer {api_key}"},
                              json={"name": name, "profile": profile})
@@ -1879,7 +1880,7 @@ async def workspace_create_study(request: Request):
 async def workspace_activate_study(sid: str):
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
-        async with httpx.AsyncClient(timeout=15, base_url="http://127.0.0.1:8100") as c:
+        async with httpx.AsyncClient(timeout=15, base_url=_SELF_URL) as c:
             await c.post(f"/studies/{sid}/activate",
                          headers={"Authorization": f"Bearer {api_key}"})
     except Exception:
@@ -1891,7 +1892,7 @@ async def workspace_activate_study(sid: str):
 async def workspace_archive_study(sid: str):
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
-        async with httpx.AsyncClient(timeout=15, base_url="http://127.0.0.1:8100") as c:
+        async with httpx.AsyncClient(timeout=15, base_url=_SELF_URL) as c:
             await c.delete(f"/studies/{sid}",
                            headers={"Authorization": f"Bearer {api_key}"})
     except Exception:
@@ -1949,7 +1950,7 @@ async def desk_layers():
     """Liste les couches QGIS du projet courant via le MCP."""
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
-        async with httpx.AsyncClient(timeout=10, base_url="http://127.0.0.1:8100") as c:
+        async with httpx.AsyncClient(timeout=10, base_url=_SELF_URL) as c:
             r = await c.post("/mcp",
                              headers={"Authorization": f"Bearer {api_key}"},
                              json={"jsonrpc": "2.0", "id": 1,
