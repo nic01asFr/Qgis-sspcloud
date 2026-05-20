@@ -23,7 +23,7 @@ jobs:
         run: |
           mkdir -p helm-repo
           helm package charts/qgis-hub -d helm-repo/
-          helm repo index helm-repo/ --url "https://nic01asFr.github.io/Qgis-sspcloud/helm-repo"
+          helm repo index helm-repo/ --url "https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/helm-repo"
 
       - name: Commit and push helm-repo
         run: |
