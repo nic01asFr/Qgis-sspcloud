@@ -10,6 +10,7 @@ COPY hub/templates/ templates/
 
 ENV SERVICE_NAME=qgis-mcp \
     SERVER_MODULE=hub.main:app \
-    SERVER_PORT=8888
+    SERVER_PORT=8888 \
+    HUB_INTERNAL_PORT=8888
 
 USER 1000

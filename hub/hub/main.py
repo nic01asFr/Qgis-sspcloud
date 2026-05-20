@@ -69,7 +69,7 @@ log = logging.getLogger("hub.main")
 
 _MCP_PORT = 8100
 _API_PORT = 8080
-_SELF_URL  = f"http://127.0.0.1:{os.getenv('SERVER_PORT', '8888')}"
+_SELF_URL  = f"http://127.0.0.1:{os.getenv('HUB_INTERNAL_PORT', '8888')}"
 
 # ── Config GeoAI GPU pod ──────────────────────────────────────────────────────
 # Injecté par qgis-mcp.service.yml → serve.env
