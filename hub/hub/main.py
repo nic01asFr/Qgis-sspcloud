@@ -123,7 +123,28 @@ async def _bootstrap_agent() -> None:
 
     hub_api_key = await auth.create_or_get_api_key(username)
 
+    # Chercher le token LLM SSPCloud dans les secrets du namespace
+    # Onyxia injecte SSPCloud_API_KEY dans le secret *-secretextraenv de chaque service
+    llm_api_key = os.getenv("SSPCloud_API_KEY", "")
+
     async with httpx.AsyncClient(verify=False, timeout=15) as client:
+        if not llm_api_key:
+            try:
+                sr = await client.get(
+                    f"{_K8S_HOST}/api/v1/namespaces/{ns}/secrets",
+                    headers=headers, params={"fieldSelector": "type=Opaque"},
+                )
+                import base64 as _b64
+                for secret in (sr.json().get("items") or []):
+                    name = secret.get("metadata", {}).get("name", "")
+                    if "secretextraenv" in name:
+                        raw = secret.get("data", {}).get("SSPCloud_API_KEY")
+                        if raw:
+                            llm_api_key = _b64.b64decode(raw).decode()
+                            log.info("bootstrap: LLM_API_KEY trouvé dans %s", name)
+                            break
+            except Exception as exc:
+                log.warning("bootstrap: impossible de lire LLM_API_KEY depuis secrets: %s", exc)
         # Vérifier si qgis-agent existe déjà
         r = await client.get(
             f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/qgis-agent",
@@ -157,6 +178,7 @@ async def _bootstrap_agent() -> None:
                             {"name": "DATA_DIR",     "value": "/home/onyxia/work/qgis-agent-data"},
                             {"name": "HUB_URL",      "value": _HUB_URL},
                             {"name": "HUB_API_KEY",  "value": hub_api_key},
+                            {"name": "LLM_API_KEY",  "value": llm_api_key},
                         ],
                         "readinessProbe": {
                             "httpGet": {"path": "/", "port": 8888},
