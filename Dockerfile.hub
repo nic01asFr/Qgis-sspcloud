@@ -13,4 +13,9 @@ ENV SERVICE_NAME=qgis-mcp \
     SERVER_PORT=8888 \
     HUB_INTERNAL_PORT=8888
 
+# Remplacer onyxia-init.sh pour respecter SERVER_MODULE (le chart passe toujours
+# "jupyter lab" en args mais on veut démarrer le hub uvicorn à la place).
+RUN printf '#!/bin/bash\nif [ -n "$SERVER_MODULE" ]; then\n  exec /opt/python/bin/uvicorn "$SERVER_MODULE" --host 0.0.0.0 --port "${HUB_INTERNAL_PORT:-8888}" --log-level info\nfi\nexec "$@"\n' \
+    > /opt/onyxia-init.sh && chmod +x /opt/onyxia-init.sh
+
 USER 1000
