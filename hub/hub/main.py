@@ -118,7 +118,7 @@ async def _bootstrap_agent() -> None:
     ns       = ns_file.read_text().strip()
     username = os.getenv("ONYXIA_USER", ns.removeprefix("user-"))
     headers  = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    host     = f"user-{username}-qgis-agent-0.user.lab.sspcloud.fr"
+    host     = f"user-{username}-qgis-agent.user.lab.sspcloud.fr"
 
     async with httpx.AsyncClient(verify=False, timeout=15) as client:
         # Vérifier si qgis-agent existe déjà
@@ -236,13 +236,13 @@ _ONYXIA_USER = os.getenv("ONYXIA_USER", "")
 # HUB_URL : explicite ou dérivé depuis ONYXIA_USER (toujours injecté par SSPCloud)
 _HUB_URL = (
     os.getenv("HUB_URL")
-    or (f"https://user-{_ONYXIA_USER}-qgis-mcp-bridge-0.user.lab.sspcloud.fr"
+    or (f"https://user-{_ONYXIA_USER}-qgis.user.lab.sspcloud.fr"
         if _ONYXIA_USER else "")
 )
-# AGENT_URL : URL publique du pod agent IA (pour proxifier les routes mémoire)
+# AGENT_URL : URL publique du pod agent IA (bootstrappé par le hub au démarrage)
 _AGENT_URL = (
     os.getenv("AGENT_URL")
-    or (f"https://user-{_ONYXIA_USER}-qgis-agent-0.user.lab.sspcloud.fr"
+    or (f"https://user-{_ONYXIA_USER}-qgis-agent.user.lab.sspcloud.fr"
         if _ONYXIA_USER else "")
 )
 
