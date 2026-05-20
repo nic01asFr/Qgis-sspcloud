@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "QGIS Hub",
+  "type": "object",
+  "properties": {
+    "image": {
+      "type": "object",
+      "title": "Image",
+      "properties": {
+        "repository": {
+          "type": "string",
+          "title": "Image repository",
+          "default": "ghcr.io/nic01asfr/qgis-hub"
+        },
+        "tag": {
+          "type": "string",
+          "title": "Image tag",
+          "default": "latest"
+        }
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "title": "Persistence",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable persistence",
+          "default": true
+        },
+        "size": {
+          "type": "string",
+          "title": "Storage size",
+          "default": "10Gi"
+        }
+      }
+    },
+    "kubernetes": {
+      "type": "object",
+      "title": "Kubernetes",
+      "properties": {
+        "role": {
+          "type": "string",
+          "title": "Service account role",
+          "default": "edit",
+          "enum": ["view", "edit", "admin"]
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "title": "Ingress",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "hostname": {
+          "type": "string",
+          "title": "Hostname",
+          "default": ""
+        }
+      }
+    },
+    "global": {
+      "type": "object",
+      "properties": {
+        "suspend": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    }
+  }
+}

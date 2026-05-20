@@ -1,0 +1,34 @@
+name: Publish Helm Chart
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'charts/**'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install helm
+        uses: azure/setup-helm@v3
+
+      - name: Package chart
+        run: |
+          mkdir -p helm-repo
+          helm package charts/qgis-hub -d helm-repo/
+          helm repo index helm-repo/ --url "https://nic01asFr.github.io/Qgis-sspcloud/helm-repo"
+
+      - name: Commit and push helm-repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add helm-repo/
+          git diff --staged --quiet || git commit -m "chore: publish helm chart qgis-hub"
+          git push

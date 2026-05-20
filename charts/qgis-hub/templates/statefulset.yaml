@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "qgis-hub.fullname" . }}
+  labels:
+    {{- include "qgis-hub.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "qgis-hub.fullname" . }}
+  selector:
+    matchLabels:
+      {{- include "qgis-hub.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "qgis-hub.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "qgis-hub.fullname" . }}
+      securityContext:
+        fsGroup: 100
+      {{- if .Values.persistence.enabled }}
+      volumes:
+        - name: home
+          persistentVolumeClaim:
+            claimName: {{ include "qgis-hub.fullname" . }}
+      {{- end }}
+      containers:
+        - name: hub
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/opt/python/bin/uvicorn"]
+          args:
+            - "hub.main:app"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8888"
+            - "--log-level"
+            - "info"
+          ports:
+            - name: http
+              containerPort: 8888
+              protocol: TCP
+          env:
+            - name: KUBERNETES_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HUB_INTERNAL_PORT
+              value: "8888"
+            - name: DATA_DIR
+              value: /home/onyxia/work/qgis-hub-data
+            - name: ONYXIA_USER
+              value: {{ .Values.oidc.username | quote }}
+            {{- if .Values.s3.enabled }}
+            - name: AWS_ACCESS_KEY_ID
+              value: {{ .Values.s3.accessKeyId | quote }}
+            - name: AWS_SECRET_ACCESS_KEY
+              value: {{ .Values.s3.secretAccessKey | quote }}
+            - name: AWS_SESSION_TOKEN
+              value: {{ .Values.s3.sessionToken | quote }}
+            - name: AWS_ENDPOINT_URL
+              value: "https://{{ .Values.s3.endpoint }}/"
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.s3.defaultRegion | quote }}
+            - name: AWS_WORKING_DIRECTORY_PATH
+              value: {{ .Values.s3.workingDirectoryPath | quote }}
+            {{- end }}
+            {{- if .Values.vault.enabled }}
+            - name: VAULT_ADDR
+              value: {{ .Values.vault.url | quote }}
+            - name: VAULT_TOKEN
+              value: {{ .Values.vault.token | quote }}
+            - name: VAULT_TOP_DIR
+              value: {{ .Values.vault.directory | quote }}
+            - name: VAULT_MOUNT
+              value: {{ .Values.vault.mount | quote }}
+            {{- end }}
+          {{- if .Values.persistence.enabled }}
+          volumeMounts:
+            - name: home
+              mountPath: /home/onyxia/work
+          {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8888
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8888
+            failureThreshold: 60
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

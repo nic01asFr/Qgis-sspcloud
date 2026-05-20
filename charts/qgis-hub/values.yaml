@@ -1,0 +1,75 @@
+image:
+  repository: ghcr.io/nic01asfr/qgis-hub
+  tag: latest
+  pullPolicy: Always
+
+service:
+  port: 8888
+
+ingress:
+  enabled: true
+  # Onyxia injecte le hostname automatiquement
+  hostname: ""
+  ingressClassName: onyxia
+
+persistence:
+  enabled: true
+  size: 10Gi
+
+kubernetes:
+  role: edit
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 2Gi
+  limits:
+    cpu: 4000m
+    memory: 8Gi
+
+# Onyxia injecte ces valeurs automatiquement depuis Vault/S3
+oidc:
+  username: ""
+
+s3:
+  enabled: true
+  endpoint: minio.lab.sspcloud.fr
+  defaultRegion: us-east-1
+  accessKeyId: ""
+  secretAccessKey: ""
+  sessionToken: ""
+  workingDirectoryPath: ""
+
+vault:
+  enabled: true
+  url: https://vault.lab.sspcloud.fr
+  mount: onyxia-kv
+  token: ""
+  directory: ""
+
+git:
+  enabled: true
+  name: ""
+  email: ""
+  token: ""
+
+security:
+  password: ""
+  networkPolicy:
+    enabled: true
+    from:
+      - ipBlock:
+          cidr: 10.233.103.0/32
+      - ipBlock:
+          cidr: 10.233.111.0/32
+      - ipBlock:
+          cidr: 10.233.116.0/32
+      - ipBlock:
+          cidr: 10.233.108.0/32
+
+global:
+  suspend: false
+
+message:
+  fr: "**NB:** ce service pourrait être supprimé après 7 jours d'utilisation."
+  en: "**Warning:** this service may be deleted after 7 days."
