@@ -1776,6 +1776,7 @@ def _session_view(s: dict) -> dict:
         "status":      s["status"],
         "created_at":  s["created_at"],
         "last_active": s["last_active"],
+        "novnc_url":   sessions.novnc_url(s["id"]),
     }
 
 
