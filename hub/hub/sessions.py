@@ -38,7 +38,17 @@ import aiosqlite
 _DATA_DIR = Path(os.getenv("DATA_DIR", "/tmp/qgis-mcp/server-data"))
 _DB_PATH  = _DATA_DIR / "sessions.db"
 
-_NAMESPACE = os.getenv("SSPCLOUD_NAMESPACE", os.getenv("NAMESPACE", "default"))
+def _resolve_namespace() -> str:
+    """Résout le namespace K8s: env var ou lecture du SA token (fallback)."""
+    ns = os.getenv("SSPCLOUD_NAMESPACE") or os.getenv("NAMESPACE", "")
+    if not ns:
+        try:
+            ns = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read_text().strip()
+        except Exception:
+            ns = "default"
+    return ns
+
+_NAMESPACE = _resolve_namespace()
 _QGIS_IMAGE = os.getenv("QGIS_IMAGE", "registry.gitlab.cerema.fr/mcp/qgisremotemcp:latest")
 _PULL_SECRET = os.getenv("QGIS_IMAGE_PULL_SECRET", "")
 
