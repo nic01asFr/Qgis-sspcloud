@@ -521,7 +521,12 @@ Clique pour changer{% else %}Aucune étude active{% endif %}">
   <section class="desk-right">
     <!-- Pane Chat -->
     <div class="right-pane active" data-pane="chat">
-      <iframe src="{{ agent_url }}/?embed=1" allow="microphone; clipboard-write"></iframe>
+      <div id="agent-loader" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;gap:12px">
+        <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+        <div style="width:28px;height:28px;border:3px solid #e3e3fd;border-top-color:#000091;border-radius:50%;animation:spin 1s linear infinite"></div>
+        <p style="font-size:.85rem;color:#666;margin:0">Agent IA en démarrage…</p>
+      </div>
+      <iframe src="{{ agent_url }}/?embed=1" allow="microphone; clipboard-write" style="display:none"></iframe>
     </div>
 
     <!-- Pane Mémoire -->
@@ -873,6 +878,57 @@ document.querySelector('.right-tab[data-tab="memory"]').addEventListener('click'
     memoryLoaded = true;
   }
 });
+
+// ── Loader agent IA : spinner + auto-retry toutes les 5s ─────────────────────
+(function() {
+  const agentUrl = '{{ agent_url }}';
+  if (!agentUrl) return;
+  const loader = document.getElementById('agent-loader');
+  const iframe = document.querySelector('.right-pane[data-pane="chat"] iframe');
+  if (!iframe || !loader) return;
+
+  function showAgent() {
+    loader.style.display = 'none';
+    iframe.style.display = '';
+    // Forcer rechargement propre (src déjà positionné au rendu Jinja, on le réaffecte)
+    const src = iframe.src;
+    iframe.src = '';
+    iframe.src = src;
+  }
+
+  function checkAgent() {
+    // no-cors : on ne lit pas la réponse, on détecte juste si le serveur répond
+    fetch(agentUrl + '/health', { mode: 'no-cors' })
+      .then(() => showAgent())
+      .catch(() => setTimeout(checkAgent, 5000));
+  }
+
+  // Si l'iframe charge et que son contenu indique une erreur, remettre le loader
+  iframe.addEventListener('load', function() {
+    try {
+      const body = iframe.contentDocument && iframe.contentDocument.body;
+      if (body && (
+        body.innerText.includes('no available') ||
+        body.innerText.includes('502') ||
+        body.innerText.includes('503') ||
+        body.innerText.includes('ERR_')
+      )) {
+        loader.style.display = 'flex';
+        iframe.style.display = 'none';
+        setTimeout(checkAgent, 5000);
+      } else if (iframe.style.display === 'none') {
+        // iframe chargée correctement mais encore cachée : révéler
+        showAgent();
+      }
+    } catch(e) {
+      // Cross-origin attendu : l'agent répond — révéler l'iframe
+      if (iframe.style.display === 'none') showAgent();
+    }
+  });
+
+  // Lancer la vérification initiale après 2s (laisser le hub démarrer)
+  setTimeout(checkAgent, 2000);
+})();
 </script>
 </body>
 </html>

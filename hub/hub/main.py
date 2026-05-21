@@ -173,6 +173,16 @@ async def _bootstrap_agent() -> None:
                     json={"spec": {"template": {"spec": {"containers": [{"name": "agent", "env": new_env}]}}}},
                 )
                 log.info("bootstrap: qgis-agent env patché pour %s", username)
+                # Supprimer le pod pour forcer redémarrage avec les nouvelles vars
+                try:
+                    del_headers = {k: v for k, v in headers.items() if k != "Content-Type"}
+                    await client.delete(
+                        f"{_K8S_HOST}/api/v1/namespaces/{ns}/pods/qgis-agent-0",
+                        headers=del_headers,
+                    )
+                    log.info("bootstrap: pod qgis-agent-0 supprimé pour redémarrage")
+                except Exception as exc:
+                    log.warning("bootstrap: suppression pod agent échouée: %s", exc)
             except Exception as exc:
                 log.warning("bootstrap: patch agent échoué: %s", exc)
             return
@@ -1745,6 +1755,65 @@ async def admin_delete_session(session_id: str, _: dict = Depends(auth.require_a
         if sid == session_id:
             _active_sessions.pop(user, None)
     await sessions.delete_session(session_id)
+
+
+@app.post("/admin/agent-config")
+async def update_agent_config(request: Request):
+    """Met à jour HUB_API_KEY et LLM_API_KEY dans le pod agent et redémarre."""
+    admin_token = os.getenv("ADMIN_TOKEN", "")
+    auth_header = request.headers.get("Authorization", "")
+    if admin_token and auth_header != f"Bearer {admin_token}":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin token requis")
+
+    body = await request.json()
+    hub_api_key = body.get("hub_api_key", "")
+    llm_api_key = body.get("llm_api_key", "")
+
+    token_file = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
+    ns_file = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+    if not token_file.exists():
+        return JSONResponse({"ok": False, "error": "not in K8s"})
+
+    token = token_file.read_text().strip()
+    ns = ns_file.read_text().strip()
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    async with httpx.AsyncClient(verify=False, timeout=15) as client:
+        # Lire env actuelles du StatefulSet agent
+        r = await client.get(
+            f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/qgis-agent",
+            headers=headers,
+        )
+        if r.status_code != 200:
+            return JSONResponse({"ok": False, "error": "agent not found"})
+
+        existing_env = (r.json().get("spec", {}).get("template", {})
+                        .get("spec", {}).get("containers", [{}])[0].get("env", []))
+        patch_vars = {"HUB_API_KEY": hub_api_key, "LLM_API_KEY": llm_api_key}
+        new_env = [e for e in existing_env if e["name"] not in patch_vars]
+        new_env.extend([{"name": k, "value": v} for k, v in patch_vars.items() if v])
+
+        patch_headers = {**headers,
+                         "Content-Type": "application/strategic-merge-patch+json"}
+        await client.patch(
+            f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/qgis-agent",
+            headers=patch_headers,
+            json={"spec": {"template": {"spec": {
+                "containers": [{"name": "agent", "env": new_env}],
+            }}}},
+        )
+        # Redémarrer le pod
+        try:
+            del_headers = {k: v for k, v in headers.items() if k != "Content-Type"}
+            await client.delete(
+                f"{_K8S_HOST}/api/v1/namespaces/{ns}/pods/qgis-agent-0",
+                headers=del_headers,
+            )
+            log.info("admin/agent-config: pod qgis-agent-0 supprimé pour redémarrage")
+        except Exception as exc:
+            log.warning("admin/agent-config: suppression pod échouée: %s", exc)
+
+    return JSONResponse({"ok": True})
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
