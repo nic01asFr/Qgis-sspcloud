@@ -1082,8 +1082,14 @@ async def hub_login(key: str = "", request: Request = None):
 
 @app.get("/", response_class=HTMLResponse)
 async def hub_home(request: Request):
-    """Page d'accueil — readiness probe K8s (200 sans auth) + redirect vers /desk."""
-    return RedirectResponse("/desk", status_code=302)
+    """Page d'accueil — readiness probe K8s (302 sans auth = OK) + redirect.
+
+    Cible /workspace plutôt que /desk : la vue workspace (études +
+    catalogue + outils) est plus pertinente comme "home" — l'user choisit
+    son étude, puis ouvre /desk pour bosser dessus. /desk reste accessible
+    via le portail au 1er déploiement (lien direct) et depuis /workspace.
+    """
+    return RedirectResponse("/workspace", status_code=302)
     username = user["username"]
     all_sessions = await sessions.list_sessions(username)
     active = [s for s in all_sessions if s["status"] == sessions.SESSION_READY]
