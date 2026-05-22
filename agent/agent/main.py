@@ -124,6 +124,20 @@ async def health():
     }
 
 
+@app.get("/api/status")
+async def api_status():
+    """État de l'agent côté UI (polling) — sert au bandeau d'avertissement
+    « clé LLM manquante » dans le chat. Pas de secret renvoyé."""
+    has_llm = bool(os.getenv("LLM_API_KEY"))
+    has_hub = bool(os.getenv("HUB_API_KEY"))
+    return {
+        "has_llm_key": has_llm,
+        "has_hub_key": has_hub,
+        "llm_base_url": os.getenv("LLM_BASE_URL", "https://llm.lab.sspcloud.fr/api"),
+        "profile": _DEFAULT_PROFILE,
+    }
+
+
 @app.get("/memory/embed/stats")
 async def embed_stats():
     """Compteurs du worker d'indexation : indexed vs pending par source."""
@@ -233,6 +247,7 @@ async def index(request: Request):
     return templates.TemplateResponse(request, "chat.html", {
         "profile_id":   profile_id,
         "hub_url":      _HUB_URL,
+        "portal_url":   os.getenv("PORTAL_URL", ""),
         "sessions":     sessions,
         "projects":     projects[:5],
         "session_id":   str(uuid.uuid4()),

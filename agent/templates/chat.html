@@ -169,6 +169,32 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
 .welcome ul{margin:6px 0 0;padding-left:18px;font-size:12.5px;color:var(--text-mention-grey)}
 .welcome li{padding:2px 0}
 
+/* Bandeau "clé LLM manquante" — affiché tant que l'agent n'a pas reçu
+   sa LLM_API_KEY via /admin/agent-config (Vault). Disparaît dès que le
+   polling /api/status renvoie has_llm_key=true. */
+.llm-banner{display:none;background:#fff5e6;border:1px solid #fcc63a;
+  border-left:4px solid #b34000;border-radius:4px;padding:12px 14px;
+  margin:0 16px 8px;font-size:12.5px;color:#3a3a3a;line-height:1.5}
+.llm-banner.visible{display:block}
+.llm-banner h4{font-size:13px;margin:0 0 6px;color:#b34000;font-weight:700}
+.llm-banner ol{margin:6px 0 8px;padding-left:20px}
+.llm-banner ol li{margin:2px 0}
+.llm-banner a{color:var(--text-action-high-blue-france);text-decoration:underline;
+  font-weight:500}
+.llm-banner a:hover{color:var(--text-action-high-blue-france-hover)}
+.llm-banner code{background:#fff;border:1px solid #fcc63a;border-radius:3px;
+  padding:1px 4px;font-size:11.5px;color:#3a3a3a}
+.llm-banner .verify-row{display:flex;align-items:center;gap:10px;margin-top:8px;
+  flex-wrap:wrap}
+.llm-banner .verify-btn{background:var(--background-action-high-blue-france);
+  color:#fff;border:none;border-radius:4px;padding:6px 14px;font-size:12px;
+  font-weight:500;cursor:pointer}
+.llm-banner .verify-btn:hover{background:var(--background-action-high-blue-france-hover)}
+.llm-banner .verify-btn:disabled{opacity:.55;cursor:wait}
+.llm-banner .verify-status{font-size:11.5px;color:var(--text-mention-grey)}
+.llm-banner .verify-status.ok{color:#18753c}
+.llm-banner .verify-status.err{color:#b34000}
+
 /* Mode embed (?embed=1) : enlève header/sidebar pour iframe */
 body.embed .fr-header,
 body.embed .fr-footer,
@@ -298,6 +324,32 @@ body.embed .chat-toolbar{padding:6px 10px;font-size:11.5px}
       </div>
     </div>
 
+    <!-- Bandeau "clé LLM SSPCloud manquante" — visible si le pod agent n'a
+         pas reçu LLM_API_KEY. Le polling (/api/status) le réaffiche/masque
+         sans rechargement. -->
+    <div id="llm-banner" class="llm-banner" role="status" aria-live="polite">
+      <h4>Agent IA en attente — clé LLM SSPCloud manquante</h4>
+      <p>L'agent peut piloter QGIS mais ne peut pas répondre au chat tant
+        que ta clé LLM SSPCloud n'est pas configurée. Procédure (2 min) :</p>
+      <ol>
+        <li>Ouvre <a href="https://llm.lab.sspcloud.fr/" target="_blank" rel="noopener">
+          llm.lab.sspcloud.fr</a> → menu profil →
+          <strong>Réglages</strong> → <strong>Compte</strong> →
+          section <strong>Clés API</strong> → copie ta clé.</li>
+        <li>Ouvre <a href="https://datalab.sspcloud.fr/account" target="_blank" rel="noopener">
+          datalab.sspcloud.fr/account</a> → onglet <strong>Profil</strong> →
+          section <strong>AI Assistant</strong> → champ <code>API key</code> →
+          colle la clé → <strong>Enregistrer</strong>.</li>
+        <li>Reviens ici et clique sur le bouton ci-dessous.</li>
+      </ol>
+      <div class="verify-row">
+        <button type="button" id="llm-verify-btn" class="verify-btn">
+          Vérifier ma config
+        </button>
+        <span id="llm-verify-status" class="verify-status"></span>
+      </div>
+    </div>
+
     <div class="chat-input">
       <div id="status-bar" class="status-bar">
         <span class="spinner"></span>
@@ -336,6 +388,103 @@ body.embed .chat-toolbar{padding:6px 10px;font-size:11.5px}
 if (new URLSearchParams(location.search).get('embed') === '1') {
   document.body.classList.add('embed');
 }
+
+/* ─ Bandeau "clé LLM manquante" ────────────────────────────────────────
+   Polling sur /api/status toutes les 10s :
+   - has_llm_key=false → on affiche le bandeau, on désactive le bouton Envoyer
+   - has_llm_key=true → on cache le bandeau, on réactive Envoyer
+   Le bouton "Vérifier ma config" déclenche un refresh côté portail (lui
+   seul a le cookie OIDC permettant le lookup Vault). Comme l'agent est en
+   iframe cross-origin, on lance la requête dans une popup courte qui
+   appelle /api/refresh-llm-config sur le portail, puis on re-poll
+   immédiatement /api/status. */
+(function() {
+  const banner = document.getElementById('llm-banner');
+  const verifyBtn = document.getElementById('llm-verify-btn');
+  const verifyStatus = document.getElementById('llm-verify-status');
+  const sendBtn = document.getElementById('send-btn');
+  const msgInput = document.getElementById('message-input');
+  if (!banner || !verifyBtn) return;
+
+  const PORTAL_URL = "{{ portal_url or '' }}";
+  let pollTimer = null;
+  let lastHasLlm = null;
+
+  function setBannerVisible(visible) {
+    banner.classList.toggle('visible', visible);
+    if (sendBtn) {
+      sendBtn.disabled = visible;
+      sendBtn.title = visible
+        ? "Configure ta clé LLM (voir bandeau ci-dessus)"
+        : "";
+    }
+    if (msgInput) {
+      msgInput.placeholder = visible
+        ? "Configure d'abord ta clé LLM SSPCloud (bandeau ci-dessus)"
+        : "écrit ton message ici…";
+    }
+  }
+
+  async function pollStatus() {
+    try {
+      const r = await fetch('/api/status', {cache: 'no-store'});
+      if (!r.ok) return;
+      const data = await r.json();
+      const hasLlm = !!data.has_llm_key;
+      // Ne touche au DOM qu'en cas de changement, pour éviter le flicker
+      if (hasLlm !== lastHasLlm) {
+        setBannerVisible(!hasLlm);
+        lastHasLlm = hasLlm;
+      }
+    } catch (e) {
+      /* silencieux : on retentera */
+    }
+  }
+
+  verifyBtn.addEventListener('click', async () => {
+    verifyBtn.disabled = true;
+    verifyStatus.className = 'verify-status';
+    verifyStatus.textContent = 'Vérification en cours…';
+
+    let popup = null;
+    try {
+      if (PORTAL_URL) {
+        // Ouverture d'une popup vers le portail : il a le cookie OIDC et
+        // peut lookup Vault + repush l'agent. Si réussi il renvoie ok=true.
+        const refreshUrl = PORTAL_URL.replace(/\/$/, '') + '/api/refresh-llm-config';
+        popup = window.open(refreshUrl, '_llm_refresh',
+                           'width=520,height=320,noopener=0');
+      }
+
+      // Quelle que soit l'issue popup (bloquée ou pas), on re-poll
+      // l'agent dans 4s pour récupérer le nouvel état.
+      await new Promise(r => setTimeout(r, 4000));
+      lastHasLlm = null; // force refresh visuel
+      await pollStatus();
+      if (popup) { try { popup.close(); } catch(e) {} }
+
+      const r = await fetch('/api/status', {cache: 'no-store'});
+      const data = await r.json();
+      if (data.has_llm_key) {
+        verifyStatus.className = 'verify-status ok';
+        verifyStatus.textContent = 'Clé LLM détectée. Tu peux maintenant chatter !';
+      } else {
+        verifyStatus.className = 'verify-status err';
+        verifyStatus.textContent =
+          'Pas de clé trouvée. Vérifie les étapes ci-dessus puis réessaie.';
+      }
+    } catch (e) {
+      verifyStatus.className = 'verify-status err';
+      verifyStatus.textContent = 'Erreur de vérification : ' + (e.message || e);
+    } finally {
+      verifyBtn.disabled = false;
+    }
+  });
+
+  // Premier poll immédiat puis toutes les 10s tant que la page est ouverte
+  pollStatus();
+  pollTimer = setInterval(pollStatus, 10000);
+})();
 
 const SUGGESTIONS = {
   standard: [

@@ -1768,6 +1768,7 @@ async def update_agent_config(request: Request):
     body = await request.json()
     hub_api_key = body.get("hub_api_key", "")
     llm_api_key = body.get("llm_api_key", "")
+    portal_url  = body.get("portal_url", "")
 
     token_file = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
     ns_file = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
@@ -1789,7 +1790,14 @@ async def update_agent_config(request: Request):
 
         existing_env = (r.json().get("spec", {}).get("template", {})
                         .get("spec", {}).get("containers", [{}])[0].get("env", []))
-        patch_vars = {"HUB_API_KEY": hub_api_key, "LLM_API_KEY": llm_api_key}
+        # PORTAL_URL est patché à la volée pour que le bandeau "clé LLM
+        # manquante" côté UI agent puisse appeler la popup refresh sur
+        # le bon portail (cross-origin maîtrisé).
+        patch_vars = {
+            "HUB_API_KEY": hub_api_key,
+            "LLM_API_KEY": llm_api_key,
+            "PORTAL_URL":  portal_url,
+        }
         new_env = [e for e in existing_env if e["name"] not in patch_vars]
         new_env.extend([{"name": k, "value": v} for k, v in patch_vars.items() if v])
 
