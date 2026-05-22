@@ -264,6 +264,214 @@ async def _bootstrap_agent() -> None:
         log.info("bootstrap: qgis-agent créé — %s", host)
 
 
+# ── Bootstrap GeoAI GPU pod ───────────────────────────────────────────────────
+
+_GEOAI_IMAGE       = "ghcr.io/nic01asfr/geoai-gpu:latest"
+_GEOAI_SS_NAME     = "geoai-gpu-jupyter-pytorch-gpu"
+_GEOAI_SVC_NAME    = "geoai-gpu"
+_GEOAI_BOOT_ANNOT  = "geoai.qgis-sspcloud.io/bootstrap-done"
+_GEOAI_BOOT_TIMEOUT = 1800  # 30 min max (pull image gros + queue GPU SSPCloud)
+
+
+def _geoai_manifests(ns: str) -> dict:
+    """Manifests K8s pour le pod GPU GeoAI — modèles bundlés dans l'image,
+    PVC réduit à 5Gi (seulement cache HF inférence + sorties)."""
+    sts = {
+        "apiVersion": "apps/v1", "kind": "StatefulSet",
+        "metadata": {
+            "name": _GEOAI_SS_NAME, "namespace": ns,
+            "labels": {"app": _GEOAI_SVC_NAME},
+        },
+        "spec": {
+            "serviceName": _GEOAI_SS_NAME,
+            "replicas": 1,
+            "selector": {"matchLabels": {"app": _GEOAI_SVC_NAME}},
+            "template": {
+                "metadata": {"labels": {"app": _GEOAI_SVC_NAME}},
+                "spec": {"containers": [{
+                    "name": "geoai",
+                    "image": _GEOAI_IMAGE,
+                    "imagePullPolicy": "Always",
+                    "command": ["sh", "-c",
+                                "uvicorn geoai_server.main:app --host 0.0.0.0 "
+                                "--port 8000 --log-level warning"],
+                    "ports": [{"containerPort": 8000}],
+                    "env": [
+                        {"name": "GEOAI_MODELS", "value": "sam3,deepforest,omniwater"},
+                        {"name": "SAMGEO3_BACKEND", "value": "transformers"},
+                        {"name": "GEOAI_MODELS_DIR", "value": "/opt/geoai/models"},
+                        {"name": "HF_HOME", "value": "/opt/geoai/models/huggingface"},
+                        {"name": "GPU_AUTO_ALLOC_ENABLED", "value": "0"},
+                    ],
+                    "resources": {
+                        "limits": {"nvidia.com/gpu": 1},
+                        "requests": {"cpu": "1", "memory": "4Gi"},
+                    },
+                    "readinessProbe": {
+                        "httpGet": {"path": "/health", "port": 8000},
+                        "initialDelaySeconds": 120,
+                        "periodSeconds": 15,
+                        "failureThreshold": 80,
+                    },
+                    "volumeMounts": [
+                        {"name": "home", "mountPath": "/home/onyxia/work"}
+                    ],
+                }]},
+            },
+            "volumeClaimTemplates": [{
+                "metadata": {"name": "home"},
+                "spec": {
+                    "accessModes": ["ReadWriteOnce"],
+                    "resources": {"requests": {"storage": "5Gi"}},
+                },
+            }],
+        },
+    }
+    svc_headless = {
+        "apiVersion": "v1", "kind": "Service",
+        "metadata": {"name": _GEOAI_SS_NAME, "namespace": ns},
+        "spec": {
+            "clusterIP": "None",
+            "selector": {"app": _GEOAI_SVC_NAME},
+            "ports": [{"port": 8000, "targetPort": 8000}],
+        },
+    }
+    svc_cluster = {
+        "apiVersion": "v1", "kind": "Service",
+        "metadata": {"name": _GEOAI_SVC_NAME, "namespace": ns},
+        "spec": {
+            "selector": {"app": _GEOAI_SVC_NAME},
+            "ports": [{"port": 8000, "targetPort": 8000}],
+        },
+    }
+    return {"sts": sts, "svc_headless": svc_headless, "svc_cluster": svc_cluster}
+
+
+async def _bootstrap_geoai_gpu() -> None:
+    """
+    Crée / vérifie le pod GPU GeoAI au démarrage du hub.
+
+    Modèles (SAM2, DeepForest, optionnellement SAM3) sont bundlés dans
+    l'image — on a juste besoin de pull l'image + initialiser CUDA pour
+    valider que tout est opérationnel.
+
+    Workflow :
+      1. SS absent → créer SS + Services (replicas=1, force image pull)
+      2. SS présent + annotation bootstrap-done=true → skip, set
+         _GEOAI_GPU_SERVICE et exit
+      3. SS présent + annotation absente → scale 1 pour re-warmup
+      4. Poll /health max ~30 min (pull image gros, queue GPU SSPCloud)
+      5. Au 200 → patch annotation bootstrap-done=true + scale 0
+      6. Set _GEOAI_GPU_SERVICE = "geoai-gpu" (active le proxy /geoai/*)
+
+    Failure modes gracieux :
+      - SS create échoue (RBAC, quota) → log warn, hub continue sans GPU
+      - Pod stays Pending >30min → log warn, annotation pas écrite, retry
+        au prochain hub restart
+    """
+    global _GEOAI_GPU_SERVICE
+
+    token_file = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
+    ns_file    = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+    if not token_file.exists():
+        log.debug("bootstrap geoai-gpu: pas en K8s, ignoré")
+        return
+
+    # Laisser le hub + agent démarrer d'abord
+    await asyncio.sleep(8)
+
+    token = token_file.read_text().strip()
+    ns    = ns_file.read_text().strip()
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    patch_headers = {**headers,
+                     "Content-Type": "application/strategic-merge-patch+json"}
+    manifests = _geoai_manifests(ns)
+    base_url = f"http://{_GEOAI_SVC_NAME}.{ns}.svc.cluster.local:8000"
+
+    async with httpx.AsyncClient(verify=False, timeout=30) as client:
+        # Étape 1/2 — État SS existant
+        r = await client.get(
+            f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/{_GEOAI_SS_NAME}",
+            headers=headers,
+        )
+        if r.status_code == 200:
+            ann = r.json().get("metadata", {}).get("annotations", {}) or {}
+            if ann.get(_GEOAI_BOOT_ANNOT) == "true":
+                log.info("bootstrap geoai-gpu: déjà bootstrapé, skip")
+                _GEOAI_GPU_SERVICE = _GEOAI_SVC_NAME
+                return
+            # Re-warmup : scale 1
+            log.info("bootstrap geoai-gpu: SS existant sans annotation, scale 1 pour re-warmup")
+            try:
+                await client.patch(
+                    f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/{_GEOAI_SS_NAME}",
+                    headers=patch_headers,
+                    json={"spec": {"replicas": 1}},
+                )
+            except Exception as exc:
+                log.warning("bootstrap geoai-gpu: scale 1 échoué: %s", exc)
+        elif r.status_code == 404:
+            # Création complète
+            log.info("bootstrap geoai-gpu: création initiale SS + Services dans %s", ns)
+            r1 = await client.post(
+                f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets",
+                headers=headers, json=manifests["sts"],
+            )
+            if r1.status_code not in (200, 201):
+                log.warning("bootstrap geoai-gpu: création SS échouée %s: %s",
+                            r1.status_code, r1.text[:300])
+                return
+            # Services (idempotents : 409 si existe déjà = ok)
+            for svc in (manifests["svc_headless"], manifests["svc_cluster"]):
+                rs = await client.post(
+                    f"{_K8S_HOST}/api/v1/namespaces/{ns}/services",
+                    headers=headers, json=svc,
+                )
+                if rs.status_code not in (200, 201, 409):
+                    log.warning("bootstrap geoai-gpu: création Service %s : %s",
+                                svc["metadata"]["name"], rs.status_code)
+        else:
+            log.warning("bootstrap geoai-gpu: lecture SS http=%s, abandon", r.status_code)
+            return
+
+        # Étape 3 — Attente /health 200 (max ~30 min)
+        log.info("bootstrap geoai-gpu: attente /health (pull image + GPU init, jusqu'à 30min)")
+        deadline = asyncio.get_event_loop().time() + _GEOAI_BOOT_TIMEOUT
+        health_ok = False
+        while asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(15)
+            try:
+                hr = await client.get(f"{base_url}/health", timeout=5)
+                if hr.status_code == 200:
+                    health_ok = True
+                    log.info("bootstrap geoai-gpu: /health 200 — pod opérationnel")
+                    break
+            except Exception:
+                pass
+
+        if not health_ok:
+            log.warning(
+                "bootstrap geoai-gpu: timeout après %ds (GPU SSPCloud indisponible ou "
+                "pull image en cours). Retry au prochain redémarrage hub.",
+                _GEOAI_BOOT_TIMEOUT,
+            )
+            return
+
+        # Étape 4 — Annoter bootstrap-done puis scale 0 (libère GPU)
+        await client.patch(
+            f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/{_GEOAI_SS_NAME}",
+            headers=patch_headers,
+            json={"metadata": {"annotations": {_GEOAI_BOOT_ANNOT: "true"}}},
+        )
+        await client.patch(
+            f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/{_GEOAI_SS_NAME}",
+            headers=patch_headers,
+            json={"spec": {"replicas": 0}},
+        )
+        _GEOAI_GPU_SERVICE = _GEOAI_SVC_NAME
+        log.info("bootstrap geoai-gpu: terminé (scale 0, GPU libéré, prêt à servir)")
+
+
 # ── Lifespan ───────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -281,6 +489,7 @@ async def lifespan(app: FastAPI):
         log.info("Cache restauré : %d session(s) actives", len(_active_sessions))
     task = asyncio.create_task(sessions.cleanup_loop())
     asyncio.create_task(_bootstrap_agent())
+    asyncio.create_task(_bootstrap_geoai_gpu())
     yield
     task.cancel()
 
@@ -631,6 +840,88 @@ async def get_template(name: str, user: dict = Depends(auth.get_current_user)):
 # ── GeoAI — proxy vers pod GPU (SAM3, DeepForest, OmniWater) ─────────────────
 # Le hub centralise l'accès au GPU pod via GPURelay (scale 0→1→0 transparent).
 # Les session pods appellent le hub /geoai/* — ils n'ont pas accès direct au GPU.
+
+
+@app.get("/geoai/status")
+async def geoai_status(request: Request):
+    """État du pod GPU GeoAI pour l'UI agent (chip footer, polling court).
+
+    Pas d'auth (info publique côté user pour son propre namespace).
+    """
+    out: dict = {
+        "ss_exists":       False,
+        "bootstrap_done":  False,
+        "replicas":        None,
+        "pod_phase":       None,
+        "health":          None,
+        "state":           "not_installed",
+    }
+
+    token_file = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
+    ns_file    = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+    if not token_file.exists():
+        out["state"] = "not_in_k8s"
+        return JSONResponse(out)
+
+    token = token_file.read_text().strip()
+    ns    = ns_file.read_text().strip()
+    headers = {"Authorization": f"Bearer {token}"}
+    base_url = f"http://{_GEOAI_SVC_NAME}.{ns}.svc.cluster.local:8000"
+
+    async with httpx.AsyncClient(verify=False, timeout=8) as client:
+        r = await client.get(
+            f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/{_GEOAI_SS_NAME}",
+            headers=headers,
+        )
+        if r.status_code != 200:
+            return JSONResponse(out)
+        out["ss_exists"] = True
+        ss = r.json()
+        out["replicas"] = ss.get("spec", {}).get("replicas")
+        ann = ss.get("metadata", {}).get("annotations", {}) or {}
+        out["bootstrap_done"] = ann.get(_GEOAI_BOOT_ANNOT) == "true"
+
+        # Pod state
+        pr = await client.get(
+            f"{_K8S_HOST}/api/v1/namespaces/{ns}/pods/{_GEOAI_SS_NAME}-0",
+            headers=headers,
+        )
+        if pr.status_code == 200:
+            pod = pr.json()
+            out["pod_phase"] = pod.get("status", {}).get("phase")
+            cs = pod.get("status", {}).get("containerStatuses", []) or []
+            if cs:
+                state = cs[0].get("state", {})
+                waiting = state.get("waiting") or {}
+                if waiting:
+                    out["waiting_reason"] = waiting.get("reason")
+        else:
+            out["pod_phase"] = "absent"
+
+        # Health probe (si pod possiblement up)
+        if out["replicas"] and out["pod_phase"] == "Running":
+            try:
+                hr = await client.get(f"{base_url}/health", timeout=5)
+                if hr.status_code == 200:
+                    out["health"] = hr.json()
+            except Exception:
+                pass
+
+    # Dérivation de l'état UI-friendly
+    replicas = out["replicas"] or 0
+    if out["bootstrap_done"] and replicas == 0:
+        out["state"] = "ready"
+    elif replicas >= 1 and out.get("health"):
+        out["state"] = "active"
+    elif replicas >= 1 and out["pod_phase"] == "Pending":
+        out["state"] = "queued"
+    elif replicas >= 1:
+        out["state"] = "preparing"
+    else:
+        out["state"] = "installed"
+
+    return JSONResponse(out)
+
 
 @app.api_route("/geoai/{path:path}", methods=["GET", "POST"])
 async def geoai_proxy(
