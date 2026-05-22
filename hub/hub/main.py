@@ -461,16 +461,24 @@ async def _bootstrap_geoai_gpu() -> None:
             return
 
         # Étape 4 — POST /warmup pour télécharger les modèles SAM/DeepForest
-        # sur le PVC pendant que le GPU est encore alloué. Sans cette étape,
-        # le 1er user qui appelle /geoai/segment paierait le download (~5min
-        # SAM2 + init CUDA). Avec /warmup à l'install, les modèles sont sur
-        # PVC dès que l'user en a besoin → cold start ~30s entre scale 0→1.
-        log.info("bootstrap geoai-gpu: téléchargement modèles via /warmup (5-10 min)")
+        # sur le PVC pendant que le GPU est encore alloué.
+        # Si l'endpoint n'existe pas (image GPU ancienne sans /warmup), on
+        # skip immédiatement : pas la peine de retry 15 min, et le hub reste
+        # compatible avec d'anciennes images.
+        log.info("bootstrap geoai-gpu: téléchargement modèles via /warmup")
         warmup_deadline = asyncio.get_event_loop().time() + 900  # 15 min
         warmup_ok = False
+        warmup_not_supported = False
         while asyncio.get_event_loop().time() < warmup_deadline:
             try:
                 wr = await client.post(f"{base_url}/warmup", timeout=900)
+                if wr.status_code == 404:
+                    log.info(
+                        "bootstrap geoai-gpu: /warmup absent dans cette image "
+                        "(404) — skip warmup, modèles seront chargés au 1er usage"
+                    )
+                    warmup_not_supported = True
+                    break
                 if wr.status_code == 200:
                     data = wr.json()
                     if data.get("all_loaded"):
@@ -493,7 +501,7 @@ async def _bootstrap_geoai_gpu() -> None:
                 log.debug("bootstrap geoai-gpu: warmup attente: %s", exc)
             await asyncio.sleep(20)
 
-        if not warmup_ok:
+        if not warmup_ok and not warmup_not_supported:
             log.warning(
                 "bootstrap geoai-gpu: warmup non confirmé après timeout. "
                 "L'install continue, le 1er usage user pourrait être lent."
