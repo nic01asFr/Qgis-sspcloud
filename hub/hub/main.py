@@ -297,10 +297,13 @@ def _geoai_manifests(ns: str) -> dict:
                                 "--port 8000 --log-level warning"],
                     "ports": [{"containerPort": 8000}],
                     "env": [
-                        {"name": "GEOAI_MODELS", "value": "sam3,deepforest,omniwater"},
+                        {"name": "GEOAI_MODELS", "value": "sam3,deepforest"},
                         {"name": "SAMGEO3_BACKEND", "value": "transformers"},
-                        {"name": "GEOAI_MODELS_DIR", "value": "/opt/geoai/models"},
-                        {"name": "HF_HOME", "value": "/opt/geoai/models/huggingface"},
+                        # IMPORTANT : modèles sur PVC pour persister entre
+                        # scale 0→1 (sinon perdus à chaque cycle). HF_HOME
+                        # de l'image pointe sur /home/onyxia/work/... aussi.
+                        {"name": "GEOAI_MODELS_DIR", "value": "/home/onyxia/work/geoai/models"},
+                        {"name": "HF_HOME", "value": "/home/onyxia/work/geoai/models/huggingface"},
                         {"name": "GPU_AUTO_ALLOC_ENABLED", "value": "0"},
                     ],
                     "resources": {
@@ -457,7 +460,46 @@ async def _bootstrap_geoai_gpu() -> None:
             )
             return
 
-        # Étape 4 — Annoter bootstrap-done puis scale 0 (libère GPU)
+        # Étape 4 — POST /warmup pour télécharger les modèles SAM/DeepForest
+        # sur le PVC pendant que le GPU est encore alloué. Sans cette étape,
+        # le 1er user qui appelle /geoai/segment paierait le download (~5min
+        # SAM2 + init CUDA). Avec /warmup à l'install, les modèles sont sur
+        # PVC dès que l'user en a besoin → cold start ~30s entre scale 0→1.
+        log.info("bootstrap geoai-gpu: téléchargement modèles via /warmup (5-10 min)")
+        warmup_deadline = asyncio.get_event_loop().time() + 900  # 15 min
+        warmup_ok = False
+        while asyncio.get_event_loop().time() < warmup_deadline:
+            try:
+                wr = await client.post(f"{base_url}/warmup", timeout=900)
+                if wr.status_code == 200:
+                    data = wr.json()
+                    if data.get("all_loaded"):
+                        warmup_ok = True
+                        log.info(
+                            "bootstrap geoai-gpu: warmup terminé, modèles=%s",
+                            data.get("loaded"),
+                        )
+                        break
+                    log.warning(
+                        "bootstrap geoai-gpu: warmup partiel %s — retry",
+                        data.get("results"),
+                    )
+                else:
+                    log.warning(
+                        "bootstrap geoai-gpu: warmup http=%s — retry",
+                        wr.status_code,
+                    )
+            except Exception as exc:
+                log.debug("bootstrap geoai-gpu: warmup attente: %s", exc)
+            await asyncio.sleep(20)
+
+        if not warmup_ok:
+            log.warning(
+                "bootstrap geoai-gpu: warmup non confirmé après timeout. "
+                "L'install continue, le 1er usage user pourrait être lent."
+            )
+
+        # Étape 5 — Annoter bootstrap-done puis scale 0 (libère GPU)
         await client.patch(
             f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/{_GEOAI_SS_NAME}",
             headers=patch_headers,
