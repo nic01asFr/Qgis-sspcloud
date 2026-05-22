@@ -120,6 +120,44 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
 /* Quand un <pre> suit (= résultat arrivé), on désactive le pulse en le
    ciblant via :has() (supporté Chrome 105+ / Safari 15.4+ / Firefox 121+). */
 .msg .bubble blockquote:has(+ pre){animation:none}
+.msg .bubble blockquote:has(+ details){animation:none}
+
+/* Tool result blocks (pre) collapsibles par défaut.
+   Le blockquote au-dessus (⚙️ tool_name + args) reste visible, le payload
+   JSON brut est replié dans un <details> que l'user peut ouvrir au besoin.
+   Permet de lire la conversation et le DERNIER message sans scroller
+   à travers 200 lignes de JSON. */
+.msg .bubble details.tool-result{
+  margin:2px 0 10px;
+}
+.msg .bubble details.tool-result > summary{
+  font-size:10.5px;color:var(--text-mention-grey);
+  cursor:pointer;padding:3px 8px;border-radius:3px;
+  background:var(--background-alt-grey);
+  border-left:2px solid var(--border-default-grey);
+  list-style:none;user-select:none;
+  display:inline-block;font-family:ui-monospace,Menlo,monospace;
+}
+.msg .bubble details.tool-result > summary::-webkit-details-marker{display:none}
+.msg .bubble details.tool-result > summary::before{
+  content:"▸ ";display:inline-block;font-size:10px;
+  transition:transform .15s ease;
+}
+.msg .bubble details.tool-result[open] > summary::before{
+  content:"▾ ";
+}
+.msg .bubble details.tool-result > summary:hover{
+  background:var(--background-alt-blue-france);
+  color:var(--text-action-high-blue-france);
+}
+.msg .bubble details.tool-result > pre{
+  margin:4px 0 0;
+}
+.msg .bubble details.tool-result.tool-error > summary{
+  color:#b34000;
+  border-left-color:#b34000;
+}
+
 /* Images de tools (ex: get_screenshot) rendues inline dans la bulle. */
 .msg .bubble img{max-width:100%;height:auto;border-radius:4px;margin:8px 0;
   border:1px solid var(--border-default-grey);display:block}
@@ -620,12 +658,57 @@ function loadSession(sid) {
           : `<div class="msg"><div class="avatar">🗺</div><div class="bubble">${marked.parse(m.content || '')}</div></div>`;
         c.insertAdjacentHTML('beforeend', html);
       });
+      // Replie tous les blocs résultat-tool dans les messages history
+      c.querySelectorAll('.msg .bubble').forEach(foldToolResults);
       c.scrollTop = c.scrollHeight;
     });
 }
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
+}
+
+// Replie les <pre> (payloads JSON des tools) dans <details> fermés.
+// L'user voit ainsi le blockquote tool_name + args + un toggle compact,
+// mais pas le JSON brut qui bouffe l'écran et masque le dernier message.
+function foldToolResults(container) {
+  if (!container) return;
+  container.querySelectorAll('pre').forEach(pre => {
+    if (pre.closest('details.tool-result')) return;          // déjà wrapped
+    const txt = (pre.textContent || '').trim();
+    if (txt.length < 30) return;                              // probable inline / petit retour
+    let label = 'Résultat outil';
+    let isError = false;
+    if (txt.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(txt);
+        if (parsed.success === false) {
+          isError = true;
+          const err = (parsed.error || 'erreur').toString();
+          label = '✗ ' + err.slice(0, 70) + (err.length > 70 ? '…' : '');
+        } else if (parsed.success === true) {
+          // Extraire un libellé utile selon le contenu
+          if (parsed.result && parsed.result.name) {
+            label = '✓ ' + parsed.result.name;
+          } else if (parsed.stdout) {
+            const firstLine = parsed.stdout.split('\n')[0].slice(0, 70);
+            label = '✓ ' + (firstLine || 'résultat');
+          } else {
+            label = '✓ résultat tool';
+          }
+        } else if (parsed.results && Array.isArray(parsed.results)) {
+          label = `Liste (${parsed.results.length} entrées)`;
+        }
+      } catch { /* pas du JSON ou mal formé : libellé générique */ }
+    }
+    const details = document.createElement('details');
+    details.className = 'tool-result' + (isError ? ' tool-error' : '');
+    const summary = document.createElement('summary');
+    summary.textContent = label;
+    pre.parentNode.insertBefore(details, pre);
+    details.appendChild(summary);
+    details.appendChild(pre);
+  });
 }
 
 function appendMessage(role, content) {
@@ -696,7 +779,12 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
                 document.getElementById('status-text').textContent = `Outil : ${tname[1]}`;
               }
               responseDiv.innerHTML = marked.parse(fullText);
-              document.getElementById('messages').scrollTop = 9999;
+              // Replie chaque <pre> de résultat-tool dans un <details> fermé
+              // pour que le user voie le dernier blockquote (tool en cours)
+              // et le texte final sans devoir scroller à travers les JSON bruts.
+              foldToolResults(responseDiv);
+              const msgs = document.getElementById('messages');
+              msgs.scrollTop = msgs.scrollHeight;
             }
           } catch {}
         }
