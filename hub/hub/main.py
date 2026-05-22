@@ -1816,6 +1816,161 @@ async def update_agent_config(request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.get("/admin/workspace-info")
+async def admin_workspace_info(request: Request):
+    """Diagnostic : retourne l'image et l'état du pod workspace pour debug.
+
+    Pas d'auth (ADMIN_TOKEN optionnel) : lecture seule, namespace local uniquement.
+    """
+    admin_token = os.getenv("ADMIN_TOKEN", "")
+    auth_header = request.headers.get("Authorization", "")
+    if admin_token and auth_header != f"Bearer {admin_token}":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin token requis")
+
+    token_file = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
+    ns_file = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+    if not token_file.exists():
+        return JSONResponse({"ok": False, "error": "not in K8s"})
+
+    token = token_file.read_text().strip()
+    ns = ns_file.read_text().strip()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    out: dict = {"namespace": ns, "default_image": sessions._QGIS_IMAGE}
+
+    async with httpx.AsyncClient(verify=False, timeout=15) as client:
+        # Liste StatefulSets workspace
+        r = await client.get(
+            f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets",
+            headers=headers,
+            params={"labelSelector": "app=qgis-workspace"},
+        )
+        if r.status_code != 200:
+            out["error"] = f"list SS http={r.status_code}"
+            return JSONResponse(out)
+        items = r.json().get("items", [])
+        out["statefulsets"] = []
+        for ss in items:
+            name = ss.get("metadata", {}).get("name")
+            spec = ss.get("spec", {})
+            template = spec.get("template", {}).get("spec", {})
+            containers = template.get("containers", [{}])
+            img = containers[0].get("image") if containers else None
+            replicas = spec.get("replicas")
+            status_obj = ss.get("status", {})
+            out["statefulsets"].append({
+                "name": name,
+                "image": img,
+                "replicas": replicas,
+                "readyReplicas": status_obj.get("readyReplicas"),
+                "currentReplicas": status_obj.get("currentReplicas"),
+            })
+
+            # État du pod {name}-0
+            pr = await client.get(
+                f"{_K8S_HOST}/api/v1/namespaces/{ns}/pods/{name}-0",
+                headers=headers,
+            )
+            if pr.status_code == 200:
+                pod = pr.json()
+                phase = pod.get("status", {}).get("phase")
+                cs = pod.get("status", {}).get("containerStatuses", []) or []
+                cs_summary = []
+                for c in cs:
+                    state = c.get("state", {})
+                    waiting = state.get("waiting") or {}
+                    terminated = state.get("terminated") or {}
+                    cs_summary.append({
+                        "ready": c.get("ready"),
+                        "restartCount": c.get("restartCount"),
+                        "waiting_reason": waiting.get("reason"),
+                        "waiting_message": waiting.get("message"),
+                        "terminated_reason": terminated.get("reason"),
+                    })
+                out["statefulsets"][-1]["pod_phase"] = phase
+                out["statefulsets"][-1]["pod_containers"] = cs_summary
+            elif pr.status_code == 404:
+                out["statefulsets"][-1]["pod_phase"] = "absent"
+            else:
+                out["statefulsets"][-1]["pod_error"] = pr.status_code
+
+    return JSONResponse(out)
+
+
+@app.post("/admin/workspace-fix-image")
+async def admin_workspace_fix_image(request: Request):
+    """Patche l'image des StatefulSets workspace existants vers _QGIS_IMAGE
+    (la valeur actuelle dans sessions.py) et supprime le pod pour forcer un re-pull.
+
+    Utile quand un workspace a été créé avec une image privée inaccessible.
+    """
+    admin_token = os.getenv("ADMIN_TOKEN", "")
+    auth_header = request.headers.get("Authorization", "")
+    if admin_token and auth_header != f"Bearer {admin_token}":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin token requis")
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    target_image = body.get("image") or sessions._QGIS_IMAGE
+
+    token_file = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
+    ns_file = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+    if not token_file.exists():
+        return JSONResponse({"ok": False, "error": "not in K8s"})
+
+    token = token_file.read_text().strip()
+    ns = ns_file.read_text().strip()
+    headers = {"Authorization": f"Bearer {token}"}
+    patch_headers = {**headers,
+                     "Content-Type": "application/strategic-merge-patch+json"}
+
+    patched: list = []
+    async with httpx.AsyncClient(verify=False, timeout=20) as client:
+        r = await client.get(
+            f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets",
+            headers=headers,
+            params={"labelSelector": "app=qgis-workspace"},
+        )
+        if r.status_code != 200:
+            return JSONResponse({"ok": False, "error": f"list SS http={r.status_code}"})
+        items = r.json().get("items", [])
+        for ss in items:
+            name = ss.get("metadata", {}).get("name")
+            if not name:
+                continue
+            # Patch container image + s'assurer que replicas=1
+            pr = await client.patch(
+                f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/{name}",
+                headers=patch_headers,
+                json={"spec": {
+                    "replicas": 1,
+                    "template": {"spec": {
+                        "containers": [{
+                            "name": "qgis",
+                            "image": target_image,
+                            "imagePullPolicy": "Always",
+                        }],
+                    }},
+                }},
+            )
+            # Supprimer le pod pour forcer un re-pull immédiat
+            try:
+                del_headers = {k: v for k, v in headers.items() if k != "Content-Type"}
+                await client.delete(
+                    f"{_K8S_HOST}/api/v1/namespaces/{ns}/pods/{name}-0",
+                    headers=del_headers,
+                )
+            except Exception:
+                pass
+            patched.append({"name": name, "patch_http": pr.status_code,
+                            "image": target_image})
+
+    return JSONResponse({"ok": True, "patched": patched})
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 async def _get_or_create_session(username: str) -> dict:

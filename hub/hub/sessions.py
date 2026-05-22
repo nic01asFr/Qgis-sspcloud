@@ -49,7 +49,7 @@ def _resolve_namespace() -> str:
     return ns
 
 _NAMESPACE = _resolve_namespace()
-_QGIS_IMAGE = os.getenv("QGIS_IMAGE", "registry.gitlab.cerema.fr/mcp/qgisremotemcp:latest")
+_QGIS_IMAGE = os.getenv("QGIS_IMAGE", "ghcr.io/nic01asfr/qgisremotemcp:latest")
 _PULL_SECRET = os.getenv("QGIS_IMAGE_PULL_SECRET", "")
 
 _MCP_PORT        = 8100
