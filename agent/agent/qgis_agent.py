@@ -465,12 +465,12 @@ class QGISAgent:
         headers = {"Authorization": f"Bearer {_HUB_KEY}"}
         try:
             async with _httpx.AsyncClient(timeout=5) as c:
-                ra = await c.get(f"{hub_url}/studies/active", headers=headers)
+                ra = await c.get(f"{_HUB_URL}/studies/active", headers=headers)
                 if ra.status_code != 200 or not ra.json():
                     return None, None
                 study = ra.json()
                 rt = await c.get(
-                    f"{hub_url}/studies/{study['id']}/treatments",
+                    f"{_HUB_URL}/studies/{study['id']}/treatments",
                     headers=headers, params={"limit": 30},
                 )
                 treats = rt.json().get("events", []) if rt.status_code == 200 else []
@@ -552,6 +552,35 @@ class QGISAgent:
 2. 📖 **Recipes d'abord** : `list_recipes()` avant de tout coder.
    `densite_bati`, `occupation_sol`, `risque_inondation`, etc. existent
    et sont validées — `run_recipe(id, params)` plutôt que ré-écrire.
+
+2bis. 📚 **CATALOGUE d'abord — JAMAIS d'URL externe inventée** :
+   Pour charger des données : `list_datasources()` puis `smart_load(id)`
+   ou `add_from_catalog(id)`. Le catalogue contient les sources validées
+   pour SSPCloud (IGN Géoplateforme, Géorisques, OSM via WFS officiel,
+   DVF, BD TOPO, Corine Land Cover…).
+
+   Si le catalogue ne contient PAS exactement ta clé (ex: "quartiers") :
+   - ✅ ÉLARGIS la recherche : `list_datasources()` complet, regarde
+     les sources proches (limites administratives, IRIS, OSM places…)
+   - ✅ Si toujours rien : DEMANDE à l'user quelle source il préfère,
+     OU propose 2-3 alternatives **présentes dans le catalogue**
+   - ❌ NE JAMAIS inventer une URL externe (overpass.foo.bar, etc.).
+     Les LLM hallucinent des mirrors qui n'existent pas → boucle d'erreurs.
+
+   Endpoints externes autorisés (en dernier recours, si vraiment nécessaire) :
+   - `https://overpass-api.de/api/interpreter` (Overpass officiel)
+   - `https://overpass.openstreetmap.fr/api/interpreter` (mirror OSM France)
+   - `https://geo.api.gouv.fr/*` (API officielle communes/INSEE)
+   - `https://data.geopf.fr/*` (Géoplateforme IGN)
+   Format Overpass : **GET avec data URL-encoded**, pas POST avec body brut
+   (sinon 406 Apache). Toujours timeout=25 dans le QL.
+
+   Sources connues pour quartiers/sub-communes :
+   - IRIS INSEE via `https://geo.api.gouv.fr/communes/{insee}?fields=contour`
+     ou couche `iris_2024` Géoplateforme (échelle infra-communale officielle)
+   - OSM `place=quarter` ou `boundary=administrative admin_level=10`
+     via Overpass officiel
+   - Open Data municipal (data.marseille.fr, opendata.lyon.fr, etc.)
 
 3. 🪤 **Pièges PyQGIS** — si `execute_python` est inévitable :
    - **JAMAIS** `int(feat["champ"])` direct (QVariant trap) →
