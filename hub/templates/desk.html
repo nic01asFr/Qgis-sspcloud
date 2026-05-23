@@ -62,17 +62,6 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   background:#fff;border-bottom-color:var(--border-action-high-blue-france)}
 .hdr-right .right-tab:hover:not(.active){background:rgba(0,0,145,.05);
   color:var(--text-default-grey)}
-/* Onglet "🖥 Canvas" : utile uniquement en viewport étroit où afficher
-   canvas + chat côte à côte n'a plus de sens. Sur écran large, l'onglet
-   est masqué et le canvas est toujours visible à gauche. */
-.hdr-right .right-tab-narrow{display:none}
-@media(max-width:1100px){.hdr-right .right-tab-narrow{display:flex}}
-/* Quand l'onglet Canvas est actif : le right pane disparait, le canvas
-   prend toute la largeur (1fr). Le grid s'ajuste automatiquement via
-   .desk.canvas-full qui force la colonne chat à 0. */
-.desk.canvas-full{grid-template-columns:1fr 0 0 !important}
-.desk.canvas-full .desk-right,
-.desk.canvas-full .handle.h2{display:none}
 
 /* Col canvas : brand à gauche, contenu central (étude + Mon espace) à droite,
    space-between étale les éléments → pas de gros vide entre eux et les
@@ -269,14 +258,13 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   position:absolute;left:-2%;top:-6%;width:108%;height:108%;
   border:none;display:block;background:#fff}
 
-/* Mode "narrow" : viewport trop étroit pour QGIS pleine hauteur 16:9 + chat
-   nominal côte à côte. On NE crée PAS de scroll horizontal (l'utilisateur a
-   décidé : pas de scroll horizontal sur le desk). Le canvas QGIS prend
-   100% × 100% de sa zone et s'adapte ; l'iframe s'étire légèrement par
-   rapport au ratio Xvfb 16:9 — léger compromis acceptable, l'utilisateur
-   peut basculer en mode onglet Canvas plein écran via le bouton dédié. */
-.desk.qgis-scroll .desk-canvas{overflow:hidden}
-.desk.qgis-scroll .desk-canvas .iframe-fit{width:100%;height:100%}
+/* Mode "scroll" : viewport trop étroit pour que QGIS pleine hauteur 16:9 +
+   chat nominal 340 rentrent. QGIS garde sa pleine hauteur en 16:9 (donc
+   width = height × 16/9 > canvas zone width) et déborde à droite ; la zone
+   canvas scrolle horizontalement. Ancrage haut-gauche. */
+.desk.qgis-scroll .desk-canvas{overflow-x:auto;overflow-y:hidden}
+.desk.qgis-scroll .desk-canvas .iframe-fit{
+  height:100%;width:auto;aspect-ratio:16/9}
 .canvas-empty{height:100%;display:flex;align-items:center;justify-content:center;
   flex-direction:column;gap:12px;color:var(--text-mention-grey);text-align:center;padding:30px;background:#fff}
 .canvas-empty .ic{font-size:3rem;opacity:.4}
@@ -466,12 +454,9 @@ Clique pour changer{% else %}Aucune étude active{% endif %}">
       </div>
     </div>
 
-    <!-- Colonne droite (alignée avec chat panel) : onglets Chat/Mémoire +
-         onglet Canvas plein écran visible uniquement en viewport étroit -->
+    <!-- Colonne droite (alignée avec chat panel) : onglets Chat/Mémoire -->
     <div class="hdr-right">
-      <button class="right-tab right-tab-narrow active" data-tab="canvas"
-              title="QGIS plein écran (masque le chat)">🖥 Canvas</button>
-      <button class="right-tab" data-tab="chat">💬 Chat</button>
+      <button class="right-tab active" data-tab="chat">💬 Chat</button>
       <button class="right-tab" data-tab="memory">🧠 Mémoire</button>
     </div>
 
@@ -814,36 +799,15 @@ document.addEventListener('click', (e) => {
 });
 
 // ── Onglets panel droit ───────────────────────────────────
-// L'onglet "canvas" est spécial : il masque le right pane entier pour
-// donner toute la largeur au canvas QGIS (utile en viewport étroit).
-// Les autres onglets (chat, memory) basculent .right-pane.active comme
-// d'habitude et désactivent canvas-full si actif.
 document.querySelectorAll('.right-tab').forEach(t => {
   t.addEventListener('click', () => {
     document.querySelectorAll('.right-tab').forEach(x => x.classList.toggle('active', x === t));
     const target = t.dataset.tab;
-    if (target === 'canvas') {
-      desk.classList.add('canvas-full');
-    } else {
-      desk.classList.remove('canvas-full');
-      document.querySelectorAll('.right-pane').forEach(p =>
-        p.classList.toggle('active', p.dataset.pane === target)
-      );
-    }
+    document.querySelectorAll('.right-pane').forEach(p =>
+      p.classList.toggle('active', p.dataset.pane === target)
+    );
   });
 });
-// Sur viewport étroit, par défaut on démarre en mode chat (pas canvas-full)
-// pour ne pas surprendre l'utilisateur ; il pourra basculer manuellement.
-(function initRightTab() {
-  // Tab chat par défaut, sauf si l'utilisateur a choisi canvas
-  const initial = isNarrow() ? 'chat' : 'chat';
-  document.querySelectorAll('.right-tab').forEach(x =>
-    x.classList.toggle('active', x.dataset.tab === initial)
-  );
-  document.querySelectorAll('.right-pane').forEach(p =>
-    p.classList.toggle('active', p.dataset.pane === initial)
-  );
-})();
 
 // ── Mémoire markdown structurée : éditeur par section ─────────
 async function loadMemorySections() {

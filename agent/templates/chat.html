@@ -245,12 +245,18 @@ body.embed .fr-header,
 body.embed .fr-footer,
 body.embed .chat-sidebar,
 body.embed .chat-toolbar a[href*="/"],
-/* En mode embed dans desk, le bouton Mémoire du toolbar agent est
-   redondant avec l'onglet 🧠 Mémoire de la navbar portail (déjà visible
-   au-dessus). On le masque pour éviter la duplication d'affordance. */
-body.embed #btn-memory{display:none !important}
-body.embed .chat-app{grid-template-columns:1fr}
+/* En mode embed dans desk, le bouton Mémoire ET le drawer interne sont
+   redondants avec l'onglet 🧠 Mémoire de la navbar portail (déjà visible
+   au-dessus). On les masque pour éviter la duplication d'affordance et
+   le scroll horizontal causé par le drawer ouvert. */
+body.embed #btn-memory,
+body.embed .memory-drawer{display:none !important}
+body.embed .chat-app{grid-template-columns:1fr;overflow-x:hidden}
 body.embed .chat-toolbar{padding:6px 10px;font-size:11.5px}
+/* Cap dur sur la largeur des bulles en embed pour éviter qu'une longue
+   URL/tool result ne pousse l'iframe en horizontal scroll. */
+body.embed .msg .bubble{max-width:100%;overflow-wrap:anywhere}
+body.embed .msg .bubble pre{max-width:100%}
 
 @media(max-width:880px){
   .chat-app{grid-template-columns:1fr}
