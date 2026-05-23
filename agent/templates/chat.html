@@ -432,7 +432,7 @@ body.embed .chat-toolbar{padding:6px 10px;font-size:11.5px}
 <footer class="fr-footer" role="contentinfo"><div class="fr-container fr-container--fluid">
   <div class="fr-footer__bottom"><ul class="fr-footer__bottom-list">
     <li class="fr-footer__bottom-item"><span class="fr-footer__bottom-link">CEREMA · QGIS Service · Licence ouverte 2.0</span></li>
-    <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="{{ portal_url + '/workspace' if portal_url else '/workspace' }}">Mon espace</a></li>
+    <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="{{ (portal_url or hub_url) ~ '/workspace' if (portal_url or hub_url) else '/workspace' }}">Mon espace</a></li>
   </ul></div>
 </div></footer>
 
