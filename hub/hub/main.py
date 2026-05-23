@@ -2555,10 +2555,38 @@ async def workspace_page(request: Request):
     return _jinja.TemplateResponse(request, "workspace.html", ctx)
 
 
+# Anchor des tâches background lancées par /workspace/wake — sinon asyncio
+# peut les GC avant qu'elles se terminent (les références faibles ne suffisent
+# pas dans certaines configs uvicorn). On les garde tant qu'elles tournent.
+_background_anchors: set = set()
+
+
+async def _auto_activate_active_study_after_wake(owner: str):
+    """Au réveil du workspace, recharge le projet QGIS de l'étude active.
+
+    Sans ce hook, le pod redémarre avec un projet vierge alors que l'utilisateur
+    avait une étude active : l'iframe noVNC affiche QGIS vide, l'utilisateur
+    pense que son travail est perdu. Lancé en background pour ne pas bloquer
+    le redirect du wake.
+    """
+    if not _STUDIES_AVAILABLE:
+        return
+    try:
+        active_sid = await studies.get_active_study_id(owner)
+        if not active_sid:
+            return
+        log.info("Auto-activate étude %s après wake (background)", active_sid)
+        await _execute_python_in_workspace(
+            owner, studies.activate_pod_code(active_sid), timeout=60,
+        )
+    except Exception as exc:
+        log.warning("Auto-activate post-wake : %s", exc)
+
+
 @app.post("/workspace/wake")
 @app.get("/workspace/wake")
 async def workspace_wake(request: Request):
-    """Réveille le workspace QGIS endormi (scale 0→1)."""
+    """Réveille le workspace QGIS endormi (scale 0→1) + recharge l'étude active."""
     return_to = request.query_params.get("return_to", "")
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
@@ -2566,6 +2594,11 @@ async def workspace_wake(request: Request):
             await c.post("/sessions", headers={"Authorization": f"Bearer {api_key}"}, json={})
     except Exception:
         pass
+    # Recharge le projet QGIS de l'étude active dès que le pod est prêt
+    # (en background — le wait pod ready peut prendre 30-60s).
+    task = asyncio.create_task(_auto_activate_active_study_after_wake(_ONYXIA_USER))
+    _background_anchors.add(task)
+    task.add_done_callback(_background_anchors.discard)
     if return_to == "desk":
         return RedirectResponse("/desk", status_code=302)
     return {"ok": True}
@@ -2623,6 +2656,80 @@ async def _agent_call(method: str, path: str, **kwargs):
     """Proxifie un appel vers le pod agent IA."""
     async with httpx.AsyncClient(timeout=10, base_url=_AGENT_URL or "http://127.0.0.1:8100") as c:
         return await c.request(method, path, **kwargs)
+
+
+@app.get("/desk/study-files")
+async def desk_study_files():
+    """Liste les fichiers de l'étude active (data/, exports/, notes.md).
+
+    Lecture côté workspace via execute_python. Retourne liste plate avec
+    {name, kind, size_kb, path} — consommé par le panel Ressources du desk.
+    Si workspace endormi, retourne liste vide (UI affiche placeholder).
+    """
+    if not _STUDIES_AVAILABLE:
+        return {"files": []}
+    try:
+        active_sid = await studies.get_active_study_id(_ONYXIA_USER)
+        if not active_sid:
+            return {"files": []}
+        # Best-effort : ne réveille pas le pod, timeout court.
+        all_sessions = await sessions.list_sessions(_ONYXIA_USER)
+        if not all_sessions or all_sessions[0].get("status") != sessions.SESSION_READY:
+            return {"files": []}
+        code = (
+            "import json\n"
+            "from pathlib import Path\n"
+            f"sid = {active_sid!r}\n"
+            "base = Path(f'/data/studies/{sid}')\n"
+            "out = []\n"
+            "if base.exists():\n"
+            "    for sub, kind in [('data','data'),('exports','export')]:\n"
+            "        d = base / sub\n"
+            "        if d.exists():\n"
+            "            for p in sorted(d.rglob('*')):\n"
+            "                if p.is_file():\n"
+            "                    sz = p.stat().st_size\n"
+            "                    out.append({'name': p.name, 'kind': kind,\n"
+            "                                'size_kb': round(sz/1024, 1),\n"
+            "                                'path': str(p.relative_to(base))})\n"
+            "    notes = base / 'notes.md'\n"
+            "    if notes.exists():\n"
+            "        sz = notes.stat().st_size\n"
+            "        out.append({'name': 'notes.md', 'kind': 'note',\n"
+            "                    'size_kb': round(sz/1024, 1),\n"
+            "                    'path': 'notes.md'})\n"
+            "print('<<<FILES>>>' + json.dumps(out[:60]) + '<<<END>>>')\n"
+        )
+        stdout = await _execute_python_in_workspace(_ONYXIA_USER, code, timeout=5)
+        start = stdout.find("<<<FILES>>>")
+        end = stdout.find("<<<END>>>")
+        if start < 0 or end <= start:
+            return {"files": []}
+        import json as _json
+        return {"files": _json.loads(stdout[start + len("<<<FILES>>>"):end])}
+    except Exception:
+        return {"files": []}
+
+
+@app.get("/desk/workspace-status")
+async def desk_workspace_status():
+    """État du workspace QGIS pour le polling JS du desk (réveil).
+
+    Retourne {"status": "ready|starting|sleeping|error", "novnc_url": "..."}.
+    Sert au feedback visuel de la commande 'Réveiller le bureau' : le JS poll
+    cet endpoint toutes les 2s, et bascule en iframe noVNC dès que ready.
+    """
+    try:
+        all_sessions = await sessions.list_sessions(_ONYXIA_USER)
+        if not all_sessions:
+            return {"status": "sleeping", "novnc_url": ""}
+        s = all_sessions[0]
+        return {
+            "status": s.get("status", "—"),
+            "novnc_url": s.get("novnc_url", ""),
+        }
+    except Exception:
+        return {"status": "error", "novnc_url": ""}
 
 
 @app.get("/desk/agent-health")

@@ -335,7 +335,7 @@ body.embed .chat-toolbar{padding:6px 10px;font-size:11.5px}
               onclick="toggleMemoryDrawer()" title="Voir et éditer la mémoire de l'agent">
         🧠 Mémoire
       </button>
-      <a href="{{ hub_url }}/" target="_blank">🖥 Bureau QGIS</a>
+      <a href="{{ (portal_url or hub_url) ~ '/desk' if (portal_url or hub_url) else '/desk' }}" target="_blank">🖥 Bureau QGIS</a>
     </div>
 
     <!-- Mémoire drawer : liste des insights + lien vers édition complète -->

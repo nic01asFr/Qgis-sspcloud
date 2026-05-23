@@ -62,6 +62,17 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   background:#fff;border-bottom-color:var(--border-action-high-blue-france)}
 .hdr-right .right-tab:hover:not(.active){background:rgba(0,0,145,.05);
   color:var(--text-default-grey)}
+/* Onglet "🖥 Canvas" : utile uniquement en viewport étroit où afficher
+   canvas + chat côte à côte n'a plus de sens. Sur écran large, l'onglet
+   est masqué et le canvas est toujours visible à gauche. */
+.hdr-right .right-tab-narrow{display:none}
+@media(max-width:1100px){.hdr-right .right-tab-narrow{display:flex}}
+/* Quand l'onglet Canvas est actif : le right pane disparait, le canvas
+   prend toute la largeur (1fr). Le grid s'ajuste automatiquement via
+   .desk.canvas-full qui force la colonne chat à 0. */
+.desk.canvas-full{grid-template-columns:1fr 0 0 !important}
+.desk.canvas-full .desk-right,
+.desk.canvas-full .handle.h2{display:none}
 
 /* Col canvas : brand à gauche, contenu central (étude + Mon espace) à droite,
    space-between étale les éléments → pas de gros vide entre eux et les
@@ -192,6 +203,20 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .publi-drawer-header .publi-count{font-size:10px;color:var(--text-mention-grey);
   background:#fff;padding:1px 7px;border-radius:10px;
   border:1px solid var(--border-default-grey);font-weight:600;flex-shrink:0}
+/* Onglets internes du panel Ressources (couches / publi / fichiers) */
+.rtabs{display:flex;border-bottom:1px solid var(--border-default-grey);
+  background:#fafafa;flex-shrink:0}
+.rtabs .rtab{flex:1;padding:8px 6px;font-size:11px;font-weight:600;
+  cursor:pointer;text-align:center;background:transparent;border:none;
+  color:var(--text-mention-grey);font-family:inherit;
+  border-bottom:2px solid transparent;
+  transition:background .12s,color .12s,border-color .12s}
+.rtabs .rtab.active{color:var(--text-action-high-blue-france);
+  background:#fff;border-bottom-color:var(--border-action-high-blue-france)}
+.rtabs .rtab:hover:not(.active){background:rgba(0,0,145,.05);
+  color:var(--text-default-grey)}
+.rpane{display:none;flex:1;overflow:hidden;flex-direction:column}
+.rpane.active{display:flex}
 .publi-list{flex:1;overflow-y:auto;padding:6px 0}
 .publi-item{padding:8px 12px;font-size:12px;cursor:pointer;
   display:flex;gap:8px;align-items:center;color:var(--text-default-grey);
@@ -244,13 +269,14 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   position:absolute;left:-2%;top:-6%;width:108%;height:108%;
   border:none;display:block;background:#fff}
 
-/* Mode "scroll" : viewport trop étroit pour que QGIS pleine hauteur 16:9 +
-   chat nominal 340 rentrent. QGIS garde sa pleine hauteur en 16:9 (donc
-   width = height × 16/9 > canvas zone width) et déborde à droite ; la zone
-   canvas scrolle horizontalement. Ancrage haut-gauche. */
-.desk.qgis-scroll .desk-canvas{overflow-x:auto;overflow-y:hidden}
-.desk.qgis-scroll .desk-canvas .iframe-fit{
-  height:100%;width:auto;aspect-ratio:16/9}
+/* Mode "narrow" : viewport trop étroit pour QGIS pleine hauteur 16:9 + chat
+   nominal côte à côte. On NE crée PAS de scroll horizontal (l'utilisateur a
+   décidé : pas de scroll horizontal sur le desk). Le canvas QGIS prend
+   100% × 100% de sa zone et s'adapte ; l'iframe s'étire légèrement par
+   rapport au ratio Xvfb 16:9 — léger compromis acceptable, l'utilisateur
+   peut basculer en mode onglet Canvas plein écran via le bouton dédié. */
+.desk.qgis-scroll .desk-canvas{overflow:hidden}
+.desk.qgis-scroll .desk-canvas .iframe-fit{width:100%;height:100%}
 .canvas-empty{height:100%;display:flex;align-items:center;justify-content:center;
   flex-direction:column;gap:12px;color:var(--text-mention-grey);text-align:center;padding:30px;background:#fff}
 .canvas-empty .ic{font-size:3rem;opacity:.4}
@@ -440,9 +466,12 @@ Clique pour changer{% else %}Aucune étude active{% endif %}">
       </div>
     </div>
 
-    <!-- Colonne droite (alignée avec chat panel) : onglets Chat/Mémoire -->
+    <!-- Colonne droite (alignée avec chat panel) : onglets Chat/Mémoire +
+         onglet Canvas plein écran visible uniquement en viewport étroit -->
     <div class="hdr-right">
-      <button class="right-tab active" data-tab="chat">💬 Chat</button>
+      <button class="right-tab right-tab-narrow active" data-tab="canvas"
+              title="QGIS plein écran (masque le chat)">🖥 Canvas</button>
+      <button class="right-tab" data-tab="chat">💬 Chat</button>
       <button class="right-tab" data-tab="memory">🧠 Mémoire</button>
     </div>
 
@@ -455,43 +484,69 @@ Clique pour changer{% else %}Aucune étude active{% endif %}">
   <!-- Backdrop overlay : actif uniquement en mode narrow quand un panel est ouvert -->
   <div class="desk-backdrop" id="desk-backdrop"></div>
 
-  <!-- ── PUBLICATIONS (drawer overlay gauche) ────────────────── -->
+  <!-- ── RESSOURCES DE L'ÉTUDE (drawer overlay gauche) ────────────
+       Panel central pour TOUT ce qui appartient à l'étude active :
+       couches QGIS du projet, publications/livrables, fichiers de
+       l'étude. Bascule entre les 3 vues via onglets internes. -->
   <aside class="desk-publi">
     <div class="publi-drawer-header">
-      <span class="publi-label">Publications</span>
-      <span class="publi-count">{{ catalog_count }}</span>
+      <span class="publi-label">Ressources</span>
+      <span class="publi-count" id="publi-count-badge">{{ catalog_count }}</span>
     </div>
-    <div class="publi-list">
-      {% if catalog_items %}
-        {% for item in catalog_items[:30] %}
-        <a href="{{ item.hub_url }}" target="_blank" class="publi-item" title="{{ item.url }}">
-          <span class="ic">
-            {% if item.kind == 'storymap' %}📖
-            {% elif item.kind == 'flux' %}🌐
-            {% elif item.kind == 'recipe' %}📋
-            {% elif item.kind == 'pdf' %}📄
-            {% elif item.kind == 'dataset' %}📊
-            {% else %}📦{% endif %}
-          </span>
-          <div class="info">
-            <div class="name">{{ item.slug }}</div>
-            <div class="meta">{{ item.kind }} · {{ item.size_kb }} ko</div>
+    <div class="rtabs">
+      <button class="rtab active" data-rtab="layers" title="Couches du projet QGIS courant">🗺 Couches</button>
+      <button class="rtab" data-rtab="publi" title="Publications et livrables">📚 Publi</button>
+      <button class="rtab" data-rtab="files" title="Fichiers de l'étude">📁 Fichiers</button>
+    </div>
+
+    <!-- Onglet Couches QGIS (chargé via /desk/layers) -->
+    <div class="rpane active" data-rpane="layers">
+      <div class="publi-list" id="resources-layers-list">
+        <div class="publi-empty">Chargement…</div>
+      </div>
+    </div>
+
+    <!-- Onglet Publications (existant) -->
+    <div class="rpane" data-rpane="publi">
+      <div class="publi-list">
+        {% if catalog_items %}
+          {% for item in catalog_items[:30] %}
+          <a href="{{ item.hub_url }}" target="_blank" class="publi-item" title="{{ item.url }}">
+            <span class="ic">
+              {% if item.kind == 'storymap' %}📖
+              {% elif item.kind == 'flux' %}🌐
+              {% elif item.kind == 'recipe' %}📋
+              {% elif item.kind == 'pdf' %}📄
+              {% elif item.kind == 'dataset' %}📊
+              {% else %}📦{% endif %}
+            </span>
+            <div class="info">
+              <div class="name">{{ item.slug }}</div>
+              <div class="meta">{{ item.kind }} · {{ item.size_kb }} ko</div>
+            </div>
+          </a>
+          {% endfor %}
+        {% else %}
+          <div class="publi-empty">
+            Aucune publication pour cette étude.<br>
+            <span style="font-size:10px">
+              Demande à l'agent : « publie cette storymap ».
+              {% if catalog_total and catalog_total > 0 %}
+                <br><a href="/workspace" style="color:var(--text-action-high-blue-france)">
+                  Voir les {{ catalog_total }} publications du compte
+                </a>
+              {% endif %}
+            </span>
           </div>
-        </a>
-        {% endfor %}
-      {% else %}
-        <div class="publi-empty">
-          Aucune publication pour cette étude.<br>
-          <span style="font-size:10px">
-            Demande à l'agent : « publie cette storymap ».
-            {% if catalog_total and catalog_total > 0 %}
-              <br><a href="/workspace" style="color:var(--text-action-high-blue-france)">
-                Voir les {{ catalog_total }} publications du compte
-              </a>
-            {% endif %}
-          </span>
-        </div>
-      {% endif %}
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Onglet Fichiers (placeholder, alimenté par /desk/study-files) -->
+    <div class="rpane" data-rpane="files">
+      <div class="publi-list" id="resources-files-list">
+        <div class="publi-empty">Chargement…</div>
+      </div>
     </div>
   </aside>
 
@@ -509,13 +564,21 @@ Clique pour changer{% else %}Aucune étude active{% endif %}">
               allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>
     </div>
     {% else %}
-    <div class="canvas-empty">
+    <div class="canvas-empty" id="canvas-empty-wake">
       <div class="ic">🖥</div>
       <h3>Bureau QGIS endormi</h3>
       <p>Le workspace est en mode économie d'énergie (scale 0). Une commande au chat le réveillera, ou clique ci-dessous (~35s).</p>
-      <form method="POST" action="/workspace/wake?return_to=desk" style="margin:0">
-        <button type="submit" class="fr-btn fr-btn--secondary">Réveiller le bureau</button>
-      </form>
+      <button type="button" id="wake-btn" class="fr-btn fr-btn--secondary"
+              onclick="wakeWorkspace()">Réveiller le bureau</button>
+    </div>
+    <div class="canvas-empty" id="canvas-empty-waking" style="display:none">
+      <style>@keyframes spin-w{to{transform:rotate(360deg)}}</style>
+      <div style="width:42px;height:42px;border:4px solid #e3e3fd;
+                  border-top-color:#000091;border-radius:50%;
+                  animation:spin-w 1s linear infinite"></div>
+      <h3>Démarrage du bureau QGIS…</h3>
+      <p id="wake-progress">Provisionnement du pod K8s + Xvfb + QGIS (~35s).</p>
+      <p style="font-size:11px;opacity:.7" id="wake-elapsed">0s écoulées</p>
     </div>
     {% endif %}
   </section>
@@ -576,23 +639,6 @@ Clique pour changer{% else %}Aucune étude active{% endif %}">
           </div>
         </div>
 
-        <!-- Couches du projet QGIS courant (lecture seule, depuis MCP) -->
-        <div class="mem-section">
-          <div class="mem-label">
-            <span>🗺 Couches du projet</span>
-            <button class="mem-refresh" onclick="loadLayers()"
-                    title="Rafraîchir la liste des couches"
-                    style="margin-left:auto;background:none;border:none;cursor:pointer;
-                           color:var(--text-mention-grey);font-size:11px">↻</button>
-          </div>
-          <div style="font-size:10.5px;color:var(--text-mention-grey);margin-bottom:6px;line-height:1.4">
-            Vue du projet QGIS courant — lecture seule, l'agent y a accès.
-            Pour modifier, demande à l'agent ou édite dans le canevas.
-          </div>
-          <div id="layers-list">
-            <div class="mem-empty">Chargement…</div>
-          </div>
-        </div>
       </div>
     </div>
   </section>
@@ -768,15 +814,36 @@ document.addEventListener('click', (e) => {
 });
 
 // ── Onglets panel droit ───────────────────────────────────
+// L'onglet "canvas" est spécial : il masque le right pane entier pour
+// donner toute la largeur au canvas QGIS (utile en viewport étroit).
+// Les autres onglets (chat, memory) basculent .right-pane.active comme
+// d'habitude et désactivent canvas-full si actif.
 document.querySelectorAll('.right-tab').forEach(t => {
   t.addEventListener('click', () => {
     document.querySelectorAll('.right-tab').forEach(x => x.classList.toggle('active', x === t));
     const target = t.dataset.tab;
-    document.querySelectorAll('.right-pane').forEach(p =>
-      p.classList.toggle('active', p.dataset.pane === target)
-    );
+    if (target === 'canvas') {
+      desk.classList.add('canvas-full');
+    } else {
+      desk.classList.remove('canvas-full');
+      document.querySelectorAll('.right-pane').forEach(p =>
+        p.classList.toggle('active', p.dataset.pane === target)
+      );
+    }
   });
 });
+// Sur viewport étroit, par défaut on démarre en mode chat (pas canvas-full)
+// pour ne pas surprendre l'utilisateur ; il pourra basculer manuellement.
+(function initRightTab() {
+  // Tab chat par défaut, sauf si l'utilisateur a choisi canvas
+  const initial = isNarrow() ? 'chat' : 'chat';
+  document.querySelectorAll('.right-tab').forEach(x =>
+    x.classList.toggle('active', x.dataset.tab === initial)
+  );
+  document.querySelectorAll('.right-pane').forEach(p =>
+    p.classList.toggle('active', p.dataset.pane === initial)
+  );
+})();
 
 // ── Mémoire markdown structurée : éditeur par section ─────────
 async function loadMemorySections() {
@@ -898,41 +965,148 @@ let memoryLoaded = false;
 document.querySelector('.right-tab[data-tab="memory"]').addEventListener('click', () => {
   if (!memoryLoaded) {
     loadMemorySections();
-    loadLayers();
     memoryLoaded = true;
   }
 });
 
-// Liste les couches du projet QGIS courant — consomme /desk/layers (hub),
-// qui interroge le MCP via get_project_info. Rafraîchissable manuellement.
-async function loadLayers() {
-  const c = document.getElementById('layers-list');
+// ── Panel Ressources : onglets internes (Couches / Publi / Fichiers) ────
+// Bascule entre les 3 vues du drawer. Lazy-load des couches et fichiers
+// au premier affichage.
+let _resLayersLoaded = false;
+let _resFilesLoaded = false;
+document.querySelectorAll('.rtab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.rtab').forEach(x => x.classList.toggle('active', x === t));
+    const target = t.dataset.rtab;
+    document.querySelectorAll('.rpane').forEach(p =>
+      p.classList.toggle('active', p.dataset.rpane === target)
+    );
+    if (target === 'layers' && !_resLayersLoaded) {
+      loadResourceLayers();
+      _resLayersLoaded = true;
+    } else if (target === 'files' && !_resFilesLoaded) {
+      loadResourceFiles();
+      _resFilesLoaded = true;
+    }
+  });
+});
+
+// Couches QGIS — consomme /desk/layers (hub), qui interroge MCP get_project_info.
+async function loadResourceLayers() {
+  const c = document.getElementById('resources-layers-list');
   if (!c) return;
-  c.innerHTML = '<div class="mem-empty">Chargement…</div>';
+  c.innerHTML = '<div class="publi-empty">Chargement…</div>';
   try {
     const r = await fetch('/desk/layers', {cache: 'no-store'});
     if (!r.ok) throw new Error('http');
     const d = await r.json();
     const layers = (d && d.layers) || [];
     if (!layers.length) {
-      c.innerHTML = '<div class="mem-empty">Projet vide — aucune couche.</div>';
+      c.innerHTML = '<div class="publi-empty">Projet vide — aucune couche. ' +
+                    'Demande à l\'agent : « ajoute la couche X ».</div>';
       return;
     }
     c.innerHTML = layers.map(l => {
       const name = (l.name || l.id || '?').toString();
       const typ = (l.type || l.geom_type || '').toString();
       const n = (l.feature_count != null) ? ` · ${l.feature_count}` : '';
-      return `<div class="mem-item">
+      return `<div class="publi-item">
         <span class="ic">📍</span>
-        <div class="body">
-          <div class="key">${name.replace(/</g, '&lt;')}</div>
-          <div class="val">${typ}${n}</div>
+        <div class="info">
+          <div class="name">${name.replace(/</g, '&lt;')}</div>
+          <div class="meta">${typ}${n}</div>
         </div>
       </div>`;
     }).join('');
   } catch (e) {
-    c.innerHTML = '<div class="mem-empty">Workspace endormi ou inaccessible.</div>';
+    c.innerHTML = '<div class="publi-empty">Workspace endormi ou inaccessible.</div>';
   }
+}
+
+// Fichiers de l'étude — consomme /desk/study-files (à ajouter côté hub).
+async function loadResourceFiles() {
+  const c = document.getElementById('resources-files-list');
+  if (!c) return;
+  c.innerHTML = '<div class="publi-empty">Chargement…</div>';
+  try {
+    const r = await fetch('/desk/study-files', {cache: 'no-store'});
+    if (!r.ok) throw new Error('http');
+    const d = await r.json();
+    const files = (d && d.files) || [];
+    if (!files.length) {
+      c.innerHTML = '<div class="publi-empty">Aucun fichier (data/, exports/, notes.md vides).</div>';
+      return;
+    }
+    c.innerHTML = files.map(f => {
+      const name = (f.name || '?').toString();
+      const kind = (f.kind || 'file').toString();
+      const size = f.size_kb != null ? ` · ${f.size_kb} ko` : '';
+      const ic = kind === 'dir' ? '📁' : (kind === 'data' ? '💾'
+              : kind === 'export' ? '📤' : kind === 'note' ? '📝' : '📄');
+      return `<div class="publi-item" title="${(f.path||'').replace(/"/g, '&quot;')}">
+        <span class="ic">${ic}</span>
+        <div class="info">
+          <div class="name">${name.replace(/</g, '&lt;')}</div>
+          <div class="meta">${kind}${size}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    c.innerHTML = '<div class="publi-empty">Workspace endormi ou liste indisponible.</div>';
+  }
+}
+
+// Au premier affichage du drawer Ressources, charge l'onglet Couches actif.
+// (loadResourceLayers est aussi déclenché par le toggle drawer dans toggle-publi.)
+document.getElementById('toggle-publi')?.addEventListener('click', () => {
+  if (!_resLayersLoaded && desk.classList.contains('show-publi')) {
+    loadResourceLayers();
+    _resLayersLoaded = true;
+  }
+});
+
+// ── Réveil du bureau QGIS : feedback visuel + polling ─────────────────────
+// Sans ce hook, le clic 'Réveiller le bureau' POST puis redirige sur /desk
+// qui rerender 'Bureau endormi' tant que le pod n'est pas ready (~35s) ;
+// l'utilisateur ne voit AUCUN signe que sa commande est passée. On force
+// donc l'affichage d'un spinner immédiat + polling toutes les 2s.
+async function wakeWorkspace() {
+  const empty = document.getElementById('canvas-empty-wake');
+  const waking = document.getElementById('canvas-empty-waking');
+  const elapsed = document.getElementById('wake-elapsed');
+  const progress = document.getElementById('wake-progress');
+  if (!empty || !waking) return;
+  empty.style.display = 'none';
+  waking.style.display = 'flex';
+  // Lance le réveil
+  try {
+    await fetch('/workspace/wake', {method: 'POST'});
+  } catch (e) {
+    progress.textContent = 'Erreur réseau — réessaie dans quelques secondes.';
+    return;
+  }
+  // Polling de l'état toutes les 2s
+  const start = Date.now();
+  const tick = setInterval(async () => {
+    const sec = Math.floor((Date.now() - start) / 1000);
+    elapsed.textContent = `${sec}s écoulées`;
+    if (sec > 30) progress.textContent =
+      'Toujours en cours — Xvfb + QGIS prennent parfois plus de 30s sur node froid.';
+    if (sec > 90) {
+      clearInterval(tick);
+      progress.textContent = 'Démarrage anormalement long, ouvre la console K8s.';
+      return;
+    }
+    try {
+      const r = await fetch('/desk/workspace-status', {cache: 'no-store'});
+      const d = await r.json();
+      if (d.status === 'ready') {
+        clearInterval(tick);
+        // Recharger la page : le SSR rerender l'iframe noVNC.
+        location.reload();
+      }
+    } catch {}
+  }, 2000);
 }
 
 // ── Loader agent IA : spinner + auto-retry toutes les 5s ─────────────────────
