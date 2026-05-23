@@ -626,13 +626,82 @@ async def _desk_context() -> dict:
                 try:
                     r = await c.get(f"/catalog/{_ONYXIA_USER}", headers=headers)
                     if r.status_code == 200:
-                        items = [i for i in r.json().get("items", [])
+                        all_items = r.json().get("items", [])
+                        items = [i for i in all_items
                                  if i.get("study_id") == ctx["active_study_id"]][:30]
-                        ctx.update(catalog_items=items, catalog_count=len(items))
+                        ctx.update(catalog_items=items,
+                                   catalog_count=len(items),
+                                   catalog_total=len(all_items))
+                except Exception:
+                    pass
+            else:
+                # Pas d'étude active : on remonte le catalogue global pour que
+                # le footer du desk affiche au moins le total et que le drawer
+                # propose les publications non rattachées à une étude.
+                try:
+                    r = await c.get(f"/catalog/{_ONYXIA_USER}", headers=headers)
+                    if r.status_code == 200:
+                        all_items = r.json().get("items", [])
+                        ctx.update(catalog_total=len(all_items))
                 except Exception:
                     pass
     except Exception:
         pass
+
+    # Derniers traitements significatifs (footer du desk) : best-effort, ne
+    # crée pas de session, n'éveille pas le workspace. Si le pod est endormi
+    # ou indisponible, on garde la liste vide (template affiche "Aucun
+    # traitement récent"). On lit l'étude active si dispo, sinon le log global.
+    if ctx.get("session_ready") and _AUDIT_AVAILABLE:
+        try:
+            sid = ctx.get("active_study_id")
+            log_path = (f"/data/studies/{sid}/treatments.jsonl"
+                        if sid else "/data/agent/treatments.jsonl")
+            code = (
+                "import json, os\n"
+                "from pathlib import Path\n"
+                f"p = Path({log_path!r})\n"
+                "events = []\n"
+                "if p.exists():\n"
+                "    with open(p, 'r', encoding='utf-8') as f:\n"
+                "        for line in f:\n"
+                "            line = line.strip()\n"
+                "            if not line: continue\n"
+                "            try: events.append(json.loads(line))\n"
+                "            except Exception: pass\n"
+                "events = [e for e in events if e.get('ok') is not False "
+                "and e.get('kind') in ('processing','export','python')]\n"
+                "events = events[-8:]\n"
+                "print('<<<TREATMENTS>>>' + json.dumps(events) + '<<<END>>>')\n"
+            )
+            stdout = await _execute_python_in_workspace(
+                _ONYXIA_USER, code, timeout=3,
+            )
+            start = stdout.find("<<<TREATMENTS>>>")
+            end = stdout.find("<<<END>>>")
+            if start >= 0 and end > start:
+                import json as _json
+                events = _json.loads(stdout[start + len("<<<TREATMENTS>>>"):end])
+                labels: list[str] = []
+                for e in events:
+                    label = (e.get("summary") or e.get("tool")
+                             or e.get("kind") or "").strip()
+                    if not label:
+                        continue
+                    if len(label) > 40:
+                        label = label[:37] + "…"
+                    labels.append(label)
+                # Dédupliquer en conservant l'ordre (les plus récents en dernier)
+                seen: set[str] = set()
+                dedup: list[str] = []
+                for lbl in reversed(labels):
+                    if lbl in seen:
+                        continue
+                    seen.add(lbl)
+                    dedup.append(lbl)
+                ctx["recent_treatments"] = dedup[:6]
+        except Exception:
+            pass
     return ctx
 
 
@@ -2554,6 +2623,21 @@ async def _agent_call(method: str, path: str, **kwargs):
     """Proxifie un appel vers le pod agent IA."""
     async with httpx.AsyncClient(timeout=10, base_url=_AGENT_URL or "http://127.0.0.1:8100") as c:
         return await c.request(method, path, **kwargs)
+
+
+@app.get("/desk/agent-health")
+async def desk_agent_health():
+    """Sonde same-origin de l'état de l'agent IA pour le loader du desk.
+
+    Le client JS du desk ne peut pas interroger l'agent cross-origin (no-cors
+    masque toutes les erreurs HTTP, cf. loader cassé identifié dans l'audit
+    UX 2026-05-17). On proxifie via le hub pour avoir un signal fiable.
+    """
+    try:
+        r = await _agent_call("GET", "/health")
+        return {"ready": r.status_code < 300}
+    except Exception:
+        return {"ready": False}
 
 
 @app.get("/desk/memory")

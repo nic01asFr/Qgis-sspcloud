@@ -360,6 +360,21 @@ async def close_session(session_id: str, summary: str = "", zone: str = "") -> N
         await db.commit()
 
 
+async def set_session_summary(session_id: str, summary: str) -> None:
+    """Met à jour uniquement le résumé d'une session sans la clore.
+
+    Utilisé pour étiqueter automatiquement les sessions actives avec le
+    premier message utilisateur — sinon get_recent_sessions() renvoie des
+    titres `Session abcd1234` illisibles dans la sidebar du chat.
+    """
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "UPDATE sessions SET summary=? WHERE id=? AND (summary IS NULL OR summary='')",
+            (summary, session_id),
+        )
+        await db.commit()
+
+
 async def add_message(session_id: str, role: str, content: str,
                       tool_calls: list | None = None) -> None:
     async with aiosqlite.connect(_DB_PATH) as db:

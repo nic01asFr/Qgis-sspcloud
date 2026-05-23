@@ -206,6 +206,13 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
 .welcome h3{font-size:14px;color:var(--text-title-blue-france);margin:0 0 6px;font-weight:700}
 .welcome ul{margin:6px 0 0;padding-left:18px;font-size:12.5px;color:var(--text-mention-grey)}
 .welcome li{padding:2px 0}
+.welcome-examples{list-style:none;padding-left:0}
+.welcome-example{background:none;border:1px dashed var(--border-default-grey);border-radius:4px;
+  padding:4px 8px;width:100%;text-align:left;cursor:pointer;font-family:inherit;
+  font-size:12.5px;color:var(--text-mention-grey);margin:2px 0;transition:all .15s}
+.welcome-example:hover{background:var(--background-alt-blue-france);
+  border-color:var(--text-action-high-blue-france);
+  color:var(--text-action-high-blue-france)}
 
 /* Bandeau "clé LLM manquante" — affiché tant que l'agent n'a pas reçu
    sa LLM_API_KEY via /admin/agent-config (Vault). Disparaît dès que le
@@ -353,10 +360,19 @@ body.embed .chat-toolbar{padding:6px 10px;font-size:11.5px}
           <h3>QGIS Agent prêt</h3>
           <p>Décris ton analyse géospatiale. J'ai accès aux outils QGIS, aux données IGN,
              Géorisques, OSM et DVF.</p>
-          <ul>
-            <li>« Analyse le risque inondation T100 sur Le Lavandou »</li>
-            <li>« Carte de densité du bâti à Montpellier »</li>
-            <li>« Détecte les arbres sur cette zone avec SAM3 »</li>
+          <ul class="welcome-examples">
+            <li><button type="button" class="welcome-example"
+                onclick="useSuggestion('Analyse le risque inondation T100 sur Le Lavandou')">
+                « Analyse le risque inondation T100 sur Le Lavandou »
+            </button></li>
+            <li><button type="button" class="welcome-example"
+                onclick="useSuggestion('Carte de densité du bâti à Montpellier')">
+                « Carte de densité du bâti à Montpellier »
+            </button></li>
+            <li><button type="button" class="welcome-example"
+                onclick="useSuggestion('Détecte les arbres sur cette zone avec SAM3')">
+                « Détecte les arbres sur cette zone avec SAM3 »
+            </button></li>
           </ul>
         </div>
       </div>
@@ -416,7 +432,7 @@ body.embed .chat-toolbar{padding:6px 10px;font-size:11.5px}
 <footer class="fr-footer" role="contentinfo"><div class="fr-container fr-container--fluid">
   <div class="fr-footer__bottom"><ul class="fr-footer__bottom-list">
     <li class="fr-footer__bottom-item"><span class="fr-footer__bottom-link">CEREMA · QGIS Service · Licence ouverte 2.0</span></li>
-    <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/workspace">Mon espace</a></li>
+    <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="{{ portal_url + '/workspace' if portal_url else '/workspace' }}">Mon espace</a></li>
   </ul></div>
 </div></footer>
 

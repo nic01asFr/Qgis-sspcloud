@@ -142,6 +142,10 @@
           <button type="submit" class="fr-btn fr-btn--secondary fr-btn--sm">Activer</button>
         </form>
         {% endif %}
+        <a href="/studies/{{ s.id }}/export" class="fr-btn fr-btn--tertiary fr-btn--sm"
+           title="Télécharger l'étude au format ZIP (projet QGIS + data + treatments + exports)">
+          Exporter (ZIP)
+        </a>
         <form method="POST" action="/workspace/study/{{ s.id }}/archive" style="margin:0">
           <button type="submit" class="fr-btn fr-btn--tertiary fr-btn--sm">Archiver</button>
         </form>
@@ -176,15 +180,30 @@
   <p class="chapter-title fr-mt-5w" id="catalogue">Mes publications</p>
   {% if catalog_items %}
   <p class="fr-text--sm fr-mb-3w">Livrables publics, accessibles indépendamment de ton workspace.</p>
+  {% set study_names = {} %}
+  {% for s in studies %}{% set _ = study_names.update({s.id: s.name}) %}{% endfor %}
   <table class="fr-table">
     <thead>
-      <tr><th>Type</th><th>Slug</th><th>Taille</th><th>Date</th><th>Lien</th></tr>
+      <tr><th>Type</th><th>Slug</th><th>Étude</th><th>Taille</th><th>Date</th><th>Lien</th></tr>
     </thead>
     <tbody>
       {% for item in catalog_items %}
       <tr>
         <td><span class="fr-badge fr-badge--sm fr-badge--info fr-badge--no-icon">{{ item.kind }}</span></td>
         <td>{{ item.slug }}</td>
+        <td>
+          {% if item.study_id and item.study_id in study_names %}
+            <span class="fr-badge fr-badge--sm fr-badge--no-icon"
+                  style="background:#ffe7d6;color:#d64d00"
+                  title="Étude : {{ study_names[item.study_id] }}">
+              {{ study_names[item.study_id] }}
+            </span>
+          {% elif item.study_id %}
+            <span class="fr-text--sm" style="opacity:.55">{{ item.study_id }}</span>
+          {% else %}
+            <span class="fr-text--sm" style="opacity:.55">—</span>
+          {% endif %}
+        </td>
         <td>{{ item.size_kb }} ko</td>
         <td>{{ item.date }}</td>
         <td><a href="{{ item.hub_url }}" target="_blank" class="fr-link">Ouvrir →</a></td>

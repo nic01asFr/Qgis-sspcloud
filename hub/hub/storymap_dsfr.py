@@ -305,7 +305,24 @@ class StorymapBuilder:
         Chaque step : {"n": 1, "title": "...", "desc": "...",
                        "data_in": "📥 ...", "algo": "⚙️ ...", "result": "📊 ...",
                        "svg_explain": "<svg>...</svg>"}  # SVG optionnel
+
+        ATTENTION — règle d'explicabilité CEREMA : les chain-badges affichés
+        dans la storymap DOIVENT correspondre à des traitements réellement
+        exécutés. N'appelle jamais cette méthode avec des steps fabriqués par
+        l'agent — utilise `add_methodology_from_treatments(events)` qui lit le
+        log d'audit (treatments.jsonl). Cette méthode reste pour des storymaps
+        rédigées manuellement par un humain qui certifie les steps.
         """
+        import logging
+        logging.getLogger("hub.storymap").warning(
+            "add_methodology() appelée directement (steps=%d) — vérifie que "
+            "ces steps reflètent des traitements RÉELS ; préférer "
+            "add_methodology_from_treatments() pour l'audit automatique.",
+            len(steps or []),
+        )
+        # Marque les steps comme non-audités pour permettre un contrôle aval
+        for s in steps or []:
+            s.setdefault("source", "manual")
         self._methodology = {"intro": intro, "steps": steps}
         return self
 
@@ -367,6 +384,8 @@ class StorymapBuilder:
                     "data_in": data_in,
                     "algo":    tool,
                     "result":  result_str,
+                    "source":  "audit",
+                    "ts":      evt.get("ts"),
                 })
             else:  # export
                 params = evt.get("params") or {}
@@ -377,6 +396,8 @@ class StorymapBuilder:
                     "data_in": "couche projet",
                     "algo":    params.get("ext", "fichier"),
                     "result":  (evt.get("outputs") or ["fichier"])[0],
+                    "source":  "audit",
+                    "ts":      evt.get("ts"),
                 })
 
         self._methodology = {"intro": intro, "steps": steps}

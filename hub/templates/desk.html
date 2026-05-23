@@ -431,6 +431,11 @@ Clique pour changer{% else %}Aucune étude active{% endif %}">
             </form>
           </div>
         </div>
+        {% if active_study %}
+        <a href="/studies/{{ active_study_id }}/export" class="back-link"
+           title="Exporter l'étude au format ZIP (projet + data + treatments + exports)"
+           aria-label="Exporter l'étude au format ZIP">↓ ZIP</a>
+        {% endif %}
         <a href="/workspace" class="back-link" title="Retour à mon espace" aria-label="Retour à mon espace">↩</a>
       </div>
     </div>
@@ -568,6 +573,24 @@ Clique pour changer{% else %}Aucune étude active{% endif %}">
             {% else %}
               <div class="mem-empty">Rien d'appris pour l'instant. Discute avec l'agent — il propose des faits durables via &lt;remember&gt;.</div>
             {% endif %}
+          </div>
+        </div>
+
+        <!-- Couches du projet QGIS courant (lecture seule, depuis MCP) -->
+        <div class="mem-section">
+          <div class="mem-label">
+            <span>🗺 Couches du projet</span>
+            <button class="mem-refresh" onclick="loadLayers()"
+                    title="Rafraîchir la liste des couches"
+                    style="margin-left:auto;background:none;border:none;cursor:pointer;
+                           color:var(--text-mention-grey);font-size:11px">↻</button>
+          </div>
+          <div style="font-size:10.5px;color:var(--text-mention-grey);margin-bottom:6px;line-height:1.4">
+            Vue du projet QGIS courant — lecture seule, l'agent y a accès.
+            Pour modifier, demande à l'agent ou édite dans le canevas.
+          </div>
+          <div id="layers-list">
+            <div class="mem-empty">Chargement…</div>
           </div>
         </div>
       </div>
@@ -875,9 +898,42 @@ let memoryLoaded = false;
 document.querySelector('.right-tab[data-tab="memory"]').addEventListener('click', () => {
   if (!memoryLoaded) {
     loadMemorySections();
+    loadLayers();
     memoryLoaded = true;
   }
 });
+
+// Liste les couches du projet QGIS courant — consomme /desk/layers (hub),
+// qui interroge le MCP via get_project_info. Rafraîchissable manuellement.
+async function loadLayers() {
+  const c = document.getElementById('layers-list');
+  if (!c) return;
+  c.innerHTML = '<div class="mem-empty">Chargement…</div>';
+  try {
+    const r = await fetch('/desk/layers', {cache: 'no-store'});
+    if (!r.ok) throw new Error('http');
+    const d = await r.json();
+    const layers = (d && d.layers) || [];
+    if (!layers.length) {
+      c.innerHTML = '<div class="mem-empty">Projet vide — aucune couche.</div>';
+      return;
+    }
+    c.innerHTML = layers.map(l => {
+      const name = (l.name || l.id || '?').toString();
+      const typ = (l.type || l.geom_type || '').toString();
+      const n = (l.feature_count != null) ? ` · ${l.feature_count}` : '';
+      return `<div class="mem-item">
+        <span class="ic">📍</span>
+        <div class="body">
+          <div class="key">${name.replace(/</g, '&lt;')}</div>
+          <div class="val">${typ}${n}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    c.innerHTML = '<div class="mem-empty">Workspace endormi ou inaccessible.</div>';
+  }
+}
 
 // ── Loader agent IA : spinner + auto-retry toutes les 5s ─────────────────────
 (function() {
@@ -897,9 +953,14 @@ document.querySelector('.right-tab[data-tab="memory"]').addEventListener('click'
   }
 
   function checkAgent() {
-    // no-cors : on ne lit pas la réponse, on détecte juste si le serveur répond
-    fetch(agentUrl + '/health', { mode: 'no-cors' })
-      .then(() => showAgent())
+    // Sonde same-origin via le hub. no-cors masquait les 502/503 et
+    // déclenchait showAgent() avant que l'agent soit prêt → boucle d'erreur.
+    fetch('/desk/agent-health', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => {
+        if (d && d.ready) showAgent();
+        else setTimeout(checkAgent, 5000);
+      })
       .catch(() => setTimeout(checkAgent, 5000));
   }
 

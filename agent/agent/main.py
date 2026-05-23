@@ -25,7 +25,7 @@ from typing import AsyncGenerator
 
 import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
@@ -301,6 +301,14 @@ async def chat(
 
     # Historique des messages pour le contexte
     history = await memory.get_session_messages(session_id, limit=20)
+
+    # Premier message utilisateur de la session → étiquette de session
+    # (sinon la sidebar affiche `Session abcd1234` illisible — cf. audit UX).
+    # On tronque à 80 caractères pour rester lisible dans la sidebar.
+    if not history:
+        title = (message or "").strip().replace("\n", " ")[:80]
+        if title:
+            await memory.set_session_summary(session_id, title)
     history_formatted = [
         {"role": m["role"], "content": m["content"]}
         for m in history
@@ -620,18 +628,30 @@ async def desk_layers():
 
 
 @app.post("/workspace/wake")
-async def workspace_wake():
-    """Réveille le workspace QGIS endormi (scale 0→1)."""
-    if not _HUB_URL or not _HUB_API_KEY:
-        return {"ok": False}
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(f"{_HUB_URL}/sessions",
-                                   headers={"Authorization": f"Bearer {_HUB_API_KEY}"},
-                                   json={})
-            return {"ok": r.status_code < 300}
-    except Exception:
-        return {"ok": False}
+async def workspace_wake(request: Request):
+    """Réveille le workspace QGIS endormi (scale 0→1).
+
+    Si return_to=desk est fourni (formulaire HTML), on redirige vers /desk
+    plutôt que de renvoyer du JSON brut — sinon le navigateur affiche
+    `{"ok": true}` à la place du bureau (cf. loader cassé identifié dans
+    l'audit UX 2026-05-17).
+    """
+    return_to = request.query_params.get("return_to", "")
+    ok = False
+    if _HUB_URL and _HUB_API_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.post(
+                    f"{_HUB_URL}/sessions",
+                    headers={"Authorization": f"Bearer {_HUB_API_KEY}"},
+                    json={},
+                )
+                ok = r.status_code < 300
+        except Exception:
+            ok = False
+    if return_to == "desk":
+        return RedirectResponse("/desk", status_code=302)
+    return {"ok": ok}
 
 
 @app.post("/desk/study/{sid}/save")
