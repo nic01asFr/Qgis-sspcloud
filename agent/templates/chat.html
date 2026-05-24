@@ -702,6 +702,9 @@ function loadSession(sid) {
       // Replie tous les blocs résultat-tool dans les messages history
       c.querySelectorAll('.msg .bubble').forEach(foldToolResults);
       c.scrollTop = c.scrollHeight;
+      // Re-attache les boutons "↶ Revenir avant" depuis la DB
+      // (les marqueurs SSE n'existent pas dans l'historique re-rendu).
+      reattachRollbackButtonsFromHistory();
     });
 }
 
@@ -716,9 +719,38 @@ function escapeHtml(s) {
 // tool mutating, et attache un bouton "↶ Revenir avant" au blockquote suivant.
 // L'user peut cliquer pour POST /sessions/{sid}/rollback/{ckpt_id} et
 // rebobiner la conversation + restaurer le projet QGIS au snapshot pré-tool.
+// Crée un bouton "↶ Revenir avant" lié à un checkpoint donné. Utilisé soit
+// depuis attachRollbackButtons (streaming SSE, marqueurs <!--ckpt:ID-->),
+// soit depuis reattachRollbackButtonsFromHistory (au load, matching ordinal).
+function _createRollbackBtn(ckptId) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'rollback-btn';
+  btn.dataset.ckpt = ckptId;
+  btn.title = 'Restaurer le projet QGIS à l\'état d\'avant ce tool et tronquer la conversation après ce point';
+  btn.textContent = '↶ Revenir avant';
+  btn.addEventListener('click', async () => {
+    if (!confirm('Restaurer le projet QGIS à l\'état d\'avant ce tool ?\n\nLa conversation après ce point sera supprimée.')) return;
+    btn.disabled = true;
+    btn.textContent = '↶ Restauration…';
+    const sid = document.getElementById('session-id').value;
+    try {
+      const r = await fetch(`/sessions/${encodeURIComponent(sid)}/rollback/${encodeURIComponent(ckptId)}`, {method: 'POST'});
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      await r.json();
+      location.reload();
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = '↶ Revenir avant';
+      alert('Rollback échoué : ' + e.message);
+    }
+  });
+  return btn;
+}
+
 function attachRollbackButtons(container) {
   if (!container) return;
-  // Walk le DOM pour trouver les commentaires HTML
+  // Walk le DOM pour trouver les commentaires HTML <!--ckpt:ID-->
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_COMMENT);
   const ckptComments = [];
   let n;
@@ -727,7 +759,6 @@ function attachRollbackButtons(container) {
     if (m) ckptComments.push({node: n, ckptId: m[1]});
   }
   ckptComments.forEach(({node, ckptId}) => {
-    // Trouve le prochain blockquote frère ou cousin (qui suit dans le flux)
     let next = node.nextSibling;
     let attempts = 0;
     while (next && attempts < 10) {
@@ -740,32 +771,58 @@ function attachRollbackButtons(container) {
       attempts++;
     }
     if (!next || next.tagName !== 'BLOCKQUOTE') return;
-    if (next.querySelector('.rollback-btn')) return;  // déjà attaché
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'rollback-btn';
-    btn.dataset.ckpt = ckptId;
-    btn.title = 'Restaurer le projet QGIS à l\'état d\'avant ce tool et tronquer la conversation après ce point';
-    btn.textContent = '↶ Revenir avant';
-    btn.addEventListener('click', async () => {
-      if (!confirm('Restaurer le projet QGIS à l\'état d\'avant ce tool ?\n\nLa conversation après ce point sera supprimée.')) return;
-      btn.disabled = true;
-      btn.textContent = '↶ Restauration…';
-      const sid = document.getElementById('session-id').value;
-      try {
-        const r = await fetch(`/sessions/${encodeURIComponent(sid)}/rollback/${encodeURIComponent(ckptId)}`, {method: 'POST'});
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
-        // Reload la page pour que conversation + projet soient cohérents
-        location.reload();
-      } catch (e) {
-        btn.disabled = false;
-        btn.textContent = '↶ Revenir avant';
-        alert('Rollback échoué : ' + e.message);
-      }
-    });
-    next.appendChild(btn);
+    if (next.querySelector('.rollback-btn')) return;
+    next.appendChild(_createRollbackBtn(ckptId));
   });
+}
+
+// Au load de la page (et au switch de session), les marqueurs <!--ckpt:ID-->
+// n'existent pas dans l'historique re-rendu depuis /sessions/{sid}/messages
+// — ils sont yield uniquement en streaming SSE. On reconstitue les boutons
+// "↶ Revenir avant" en fetchant /sessions/{sid}/checkpoints puis en
+// matchant chaque checkpoint au N-ième blockquote dont tool_name correspond.
+// Matching ordinal : 1er ckpt smart_load ↔ 1er blockquote smart_load, etc.
+async function reattachRollbackButtonsFromHistory() {
+  const sidEl = document.getElementById('session-id');
+  if (!sidEl) return;
+  const sid = sidEl.value;
+  let ckpts;
+  try {
+    const r = await fetch(`/sessions/${encodeURIComponent(sid)}/checkpoints`, {cache: 'no-store'});
+    if (!r.ok) return;
+    ckpts = await r.json();
+  } catch { return; }
+  if (!Array.isArray(ckpts) || !ckpts.length) return;
+  // Index ordonné des blockquotes mutating dans le DOM, avec leur tool_name
+  // détecté depuis le premier <code> à l'intérieur (format "> **`tool`**").
+  const msgs = document.getElementById('messages');
+  if (!msgs) return;
+  const bqs = Array.from(msgs.querySelectorAll('.bubble blockquote'));
+  const toolBqs = bqs.map(bq => {
+    const codeEl = bq.querySelector('strong > code, code');
+    const tool = codeEl ? codeEl.textContent.trim() : '';
+    return tool ? {bq, tool} : null;
+  }).filter(Boolean);
+  // Matching ordinal par tool_name
+  const counters = {};
+  ckpts.forEach(ckpt => {
+    const tool = ckpt.tool_name;
+    const idx = counters[tool] || 0;
+    const candidates = toolBqs.filter(t => t.tool === tool);
+    const target = candidates[idx];
+    if (target && !target.bq.querySelector('.rollback-btn')) {
+      target.bq.appendChild(_createRollbackBtn(ckpt.id));
+    }
+    counters[tool] = idx + 1;
+  });
+}
+
+// Trigger reattach au DOMContentLoaded + à chaque clic sur une session
+// dans la sidebar (qui re-render l'historique via /sessions/{id}/messages).
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => reattachRollbackButtonsFromHistory());
+} else {
+  reattachRollbackButtonsFromHistory();
 }
 
 function foldToolResults(container) {
