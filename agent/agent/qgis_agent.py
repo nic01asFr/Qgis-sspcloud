@@ -1119,6 +1119,52 @@ ne vient pas d'un outil cette session, la supprimer.
                     yield f" — {args_preview}"
                 yield "\n"
 
+                # ── Hook checkpoint pré-mutating ───────────────────────────
+                # Avant chaque tool modifiant l'état projet, on demande au hub
+                # de prendre un snapshot du .qgz courant. L'agent enregistre
+                # la métadonnée dans memory.checkpoints. En cas d'échec du
+                # snapshot, on continue quand même (best-effort) — l'absence
+                # de checkpoint empêche juste le rollback ultérieur sur ce point.
+                if fn_name in _MUTATING_TOOLS and _HUB_URL and _HUB_KEY:
+                    try:
+                        ckpt_id = uuid.uuid4().hex[:12]
+                        # Index du dernier message persisté (assistant courant).
+                        # On compte les messages déjà dans le contexte LLM, c'est
+                        # l'index où l'utilisateur voudra retourner avant ce tool.
+                        msg_idx = len([m for m in messages
+                                       if m.get("role") in ("user", "assistant")])
+                        async with httpx.AsyncClient(timeout=15) as ck_client:
+                            ck_resp = await ck_client.post(
+                                f"{_HUB_URL}/sessions/{self.session_id}/checkpoint",
+                                headers={"Authorization": f"Bearer {_HUB_KEY}"},
+                                json={
+                                    "checkpoint_id": ckpt_id,
+                                    "tool_name":     fn_name,
+                                },
+                            )
+                            if ck_resp.status_code < 300:
+                                ck_data = ck_resp.json()
+                                await memory.create_checkpoint(
+                                    checkpoint_id=ckpt_id,
+                                    session_id=self.session_id,
+                                    message_idx=msg_idx,
+                                    qgz_path=ck_data.get("qgz_path", ""),
+                                    tool_name=fn_name,
+                                    study_id=ck_data.get("study_id"),
+                                    audit_ts=ck_data.get("audit_ts"),
+                                )
+                                # Marqueur HTML pour que l'UI puisse afficher
+                                # un bouton "↶ Revenir avant" sur ce blockquote.
+                                # Format : commentaire HTML invisible mais parseable.
+                                yield f"<!--ckpt:{ckpt_id}-->\n"
+                                log.info("Checkpoint %s pris avant %s",
+                                         ckpt_id, fn_name)
+                            else:
+                                log.warning("Checkpoint refusé par hub (%d)",
+                                            ck_resp.status_code)
+                    except Exception as exc:
+                        log.warning("Checkpoint pré-%s échoué : %s", fn_name, exc)
+
                 result = await _call_mcp_tool(fn_name, fn_args, username=self.username)
                 tool_calls_made.append({"tool": fn_name, "args": fn_args, "result": result[:200]})
 

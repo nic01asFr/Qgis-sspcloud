@@ -108,6 +108,18 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
 .msg .bubble blockquote strong{color:var(--text-action-high-blue-france);font-weight:700}
 .msg .bubble blockquote code{background:transparent;color:var(--text-mention-grey);padding:0;font-size:0.95em}
 .msg .bubble blockquote p{margin:0}
+/* Bouton "↶ Revenir avant" attaché au blockquote des tools mutating
+   (smart_load, processing, etc.) — visible discret en bas-droite. */
+.msg .bubble blockquote .rollback-btn{
+  display:inline-block;margin-top:6px;background:#fff;
+  color:var(--text-action-high-blue-france);
+  border:1px solid var(--border-action-low-blue-france);
+  border-radius:3px;padding:2px 8px;font-size:10.5px;
+  font-family:inherit;cursor:pointer;line-height:1.4}
+.msg .bubble blockquote .rollback-btn:hover{
+  background:var(--background-alt-blue-france);
+  border-color:var(--border-action-high-blue-france)}
+.msg .bubble blockquote .rollback-btn:disabled{opacity:.6;cursor:wait}
 
 /* Dernier tool en cours d'exécution : pulse pour signaler "j'attends le retour" */
 .msg .bubble blockquote:last-of-type{
@@ -700,8 +712,66 @@ function escapeHtml(s) {
 // Replie les <pre> (payloads JSON des tools) dans <details> fermés.
 // L'user voit ainsi le blockquote tool_name + args + un toggle compact,
 // mais pas le JSON brut qui bouffe l'écran et masque le dernier message.
+// Détecte les marqueurs <!--ckpt:ID--> insérés par chat_stream avant chaque
+// tool mutating, et attache un bouton "↶ Revenir avant" au blockquote suivant.
+// L'user peut cliquer pour POST /sessions/{sid}/rollback/{ckpt_id} et
+// rebobiner la conversation + restaurer le projet QGIS au snapshot pré-tool.
+function attachRollbackButtons(container) {
+  if (!container) return;
+  // Walk le DOM pour trouver les commentaires HTML
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_COMMENT);
+  const ckptComments = [];
+  let n;
+  while ((n = walker.nextNode())) {
+    const m = (n.textContent || '').match(/^ckpt:([a-f0-9]+)$/);
+    if (m) ckptComments.push({node: n, ckptId: m[1]});
+  }
+  ckptComments.forEach(({node, ckptId}) => {
+    // Trouve le prochain blockquote frère ou cousin (qui suit dans le flux)
+    let next = node.nextSibling;
+    let attempts = 0;
+    while (next && attempts < 10) {
+      if (next.nodeType === 1 && next.tagName === 'BLOCKQUOTE') break;
+      if (next.nodeType === 1) {
+        const innerBq = next.querySelector && next.querySelector('blockquote');
+        if (innerBq) { next = innerBq; break; }
+      }
+      next = next.nextSibling;
+      attempts++;
+    }
+    if (!next || next.tagName !== 'BLOCKQUOTE') return;
+    if (next.querySelector('.rollback-btn')) return;  // déjà attaché
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'rollback-btn';
+    btn.dataset.ckpt = ckptId;
+    btn.title = 'Restaurer le projet QGIS à l\'état d\'avant ce tool et tronquer la conversation après ce point';
+    btn.textContent = '↶ Revenir avant';
+    btn.addEventListener('click', async () => {
+      if (!confirm('Restaurer le projet QGIS à l\'état d\'avant ce tool ?\n\nLa conversation après ce point sera supprimée.')) return;
+      btn.disabled = true;
+      btn.textContent = '↶ Restauration…';
+      const sid = document.getElementById('session-id').value;
+      try {
+        const r = await fetch(`/sessions/${encodeURIComponent(sid)}/rollback/${encodeURIComponent(ckptId)}`, {method: 'POST'});
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        // Reload la page pour que conversation + projet soient cohérents
+        location.reload();
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = '↶ Revenir avant';
+        alert('Rollback échoué : ' + e.message);
+      }
+    });
+    next.appendChild(btn);
+  });
+}
+
 function foldToolResults(container) {
   if (!container) return;
+  // Attache d'abord les boutons rollback (commentaires ckpt:ID → blockquotes)
+  attachRollbackButtons(container);
   container.querySelectorAll('pre').forEach(pre => {
     if (pre.closest('details.tool-result')) return;          // déjà wrapped
     const txt = (pre.textContent || '').trim();

@@ -113,6 +113,26 @@ async def init() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_insights_username ON agent_insights(username);
             CREATE INDEX IF NOT EXISTS idx_insights_key ON agent_insights(key);
+
+            -- Phase 5 : Checkpoints / Rollback agent (Commit B)
+            -- Snapshot du projet QGIS pris avant chaque tool mutating
+            -- (cf. _MUTATING_TOOLS dans qgis_agent.py). Permet à l'utilisateur
+            -- de revenir en arrière à un état antérieur : restaure le .qgz +
+            -- tronque les messages de la conversation après ce point.
+            -- qgz_path est relatif au PVC user : /data/studies/{sid}/.checkpoints/
+            CREATE TABLE IF NOT EXISTS checkpoints (
+                id          TEXT PRIMARY KEY,
+                session_id  TEXT NOT NULL,
+                message_idx INTEGER NOT NULL,        -- index dans messages au moment du snapshot
+                study_id    TEXT,                    -- étude active au snapshot (peut être NULL)
+                qgz_path    TEXT NOT NULL,           -- relatif au PVC user
+                tool_name   TEXT NOT NULL,           -- tool qui s'apprêtait à muter l'état
+                audit_ts    REAL,                    -- cross-ref treatments.jsonl
+                created_at  INTEGER NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_ckpt_session ON checkpoints(session_id, message_idx);
+            CREATE INDEX IF NOT EXISTS idx_ckpt_created ON checkpoints(created_at);
         """)
         await db.commit()
     log.info("Mémoire initialisée : %s", _DB_PATH)
@@ -407,6 +427,155 @@ async def get_recent_sessions(username: str, limit: int = 10) -> list[dict]:
             ORDER BY started_at DESC LIMIT ?
         """, (username, limit))).fetchall()
     return [dict(r) for r in rows]
+
+
+async def truncate_messages_after(session_id: str, message_idx: int) -> int:
+    """Supprime tous les messages de la session après l'index donné.
+
+    Utilisé par le rollback : restaure le projet QGIS au snapshot + tronque
+    la conversation à ce point pour que l'historique reflète l'état réel.
+    Retourne le nombre de messages supprimés.
+
+    message_idx = position 0-based dans la liste ordonnée par created_at.
+    Tronque > message_idx (garde les message_idx + 1 premiers).
+    """
+    async with aiosqlite.connect(_DB_PATH) as db:
+        # Récupérer les IDs au-delà de l'index
+        rows = await (await db.execute(
+            "SELECT id FROM messages WHERE session_id = ? ORDER BY created_at LIMIT -1 OFFSET ?",
+            (session_id, message_idx + 1),
+        )).fetchall()
+        ids = [r[0] for r in rows]
+        if not ids:
+            return 0
+        placeholders = ",".join("?" * len(ids))
+        await db.execute(
+            f"DELETE FROM messages WHERE id IN ({placeholders})", ids,
+        )
+        await db.commit()
+    return len(ids)
+
+
+# ── Checkpoints (Commit B — Rollback agent) ───────────────────────────────────
+
+async def create_checkpoint(
+    checkpoint_id: str,
+    session_id: str,
+    message_idx: int,
+    qgz_path: str,
+    tool_name: str,
+    study_id: str | None = None,
+    audit_ts: float | None = None,
+) -> None:
+    """Enregistre un checkpoint pris avant un tool mutating.
+
+    Le snapshot .qgz est déjà écrit sur le PVC par le hub (cf.
+    studies.snapshot_active_pod_code). Cette fonction enregistre seulement
+    la métadonnée dans SQLite côté agent.
+    """
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO checkpoints
+              (id, session_id, message_idx, study_id, qgz_path, tool_name,
+               audit_ts, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (checkpoint_id, session_id, message_idx, study_id, qgz_path,
+             tool_name, audit_ts, int(time.time())),
+        )
+        await db.commit()
+
+
+async def list_checkpoints(session_id: str, limit: int = 100) -> list[dict]:
+    """Liste les checkpoints d'une session, du plus ancien au plus récent."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(
+            """
+            SELECT id, session_id, message_idx, study_id, qgz_path, tool_name,
+                   audit_ts, created_at
+            FROM checkpoints WHERE session_id = ?
+            ORDER BY message_idx ASC, created_at ASC LIMIT ?
+            """,
+            (session_id, limit),
+        )).fetchall()
+    return [dict(r) for r in rows]
+
+
+async def get_checkpoint(checkpoint_id: str) -> dict | None:
+    """Retourne un checkpoint par id, ou None."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        row = await (await db.execute(
+            "SELECT * FROM checkpoints WHERE id = ?", (checkpoint_id,),
+        )).fetchone()
+    return dict(row) if row else None
+
+
+async def delete_checkpoint(checkpoint_id: str) -> None:
+    """Supprime la métadonnée du checkpoint (le .qgz est nettoyé par la purge)."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM checkpoints WHERE id = ?", (checkpoint_id,),
+        )
+        await db.commit()
+
+
+async def purge_old_checkpoints(
+    session_id: str | None = None,
+    max_per_session: int = 20,
+    max_age_days: int = 7,
+) -> list[dict]:
+    """Purge les checkpoints au-delà de max_per_session OU plus vieux que
+    max_age_days. Renvoie la liste des checkpoints purgés (utile pour que
+    l'appelant supprime aussi les .qgz sur le PVC).
+
+    Si session_id est None, applique à toutes les sessions.
+    """
+    now = int(time.time())
+    age_cutoff = now - (max_age_days * 86400)
+    purged: list[dict] = []
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if session_id:
+            sessions_to_check = [session_id]
+        else:
+            sids = await (await db.execute(
+                "SELECT DISTINCT session_id FROM checkpoints"
+            )).fetchall()
+            sessions_to_check = [r[0] for r in sids]
+        for sid in sessions_to_check:
+            # Trop anciens
+            old_rows = await (await db.execute(
+                "SELECT * FROM checkpoints WHERE session_id = ? AND created_at < ?",
+                (sid, age_cutoff),
+            )).fetchall()
+            # Au-delà de max_per_session (garde les plus récents).
+            # Tie-breaker sur message_idx DESC puis id DESC : si plusieurs
+            # checkpoints partagent le même created_at (création rapide),
+            # on conserve ceux avec le plus grand message_idx (= plus tard
+            # dans la conversation) — ordre déterministe.
+            extras_rows = await (await db.execute(
+                """
+                SELECT * FROM checkpoints WHERE session_id = ?
+                ORDER BY created_at DESC, message_idx DESC, id DESC
+                LIMIT -1 OFFSET ?
+                """,
+                (sid, max_per_session),
+            )).fetchall()
+            to_purge_ids: set[str] = set()
+            for r in list(old_rows) + list(extras_rows):
+                purged.append(dict(r))
+                to_purge_ids.add(r["id"])
+            if to_purge_ids:
+                placeholders = ",".join("?" * len(to_purge_ids))
+                await db.execute(
+                    f"DELETE FROM checkpoints WHERE id IN ({placeholders})",
+                    list(to_purge_ids),
+                )
+        await db.commit()
+    return purged
 
 
 # ── Projets ────────────────────────────────────────────────────────────────────

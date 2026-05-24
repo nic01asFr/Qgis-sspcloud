@@ -501,6 +501,108 @@ except Exception as exc:
 """
 
 
+def snapshot_active_pod_code(sid: str, checkpoint_id: str, tool_name: str) -> str:
+    """Code Python pour snapshot le projet QGIS courant AVANT un tool mutating.
+
+    Stratégie : write du .qgz dans `/data/studies/{sid}/.checkpoints/{ckpt}.qgz`,
+    plus léger que save_active_pod_code car PAS d'adoption des sources cache —
+    le but est de figer rapidement l'état pour permettre un rollback, pas de
+    produire un bundle autoportant. Si rollback est demandé, on relit ce .qgz
+    sur le pod via le pattern proj.read() existant (cf. activate_pod_code).
+    """
+    return f"""
+from pathlib import Path
+sid = {sid!r}
+ckpt_id = {checkpoint_id!r}
+tool_name = {tool_name!r}
+ckpt_dir = Path(f"/data/studies/{{sid}}/.checkpoints")
+ckpt_dir.mkdir(parents=True, exist_ok=True)
+target = ckpt_dir / f"{{ckpt_id}}.qgz"
+try:
+    from qgis.core import QgsProject
+    proj = QgsProject.instance()
+    n_layers = len(proj.mapLayers())
+    if n_layers == 0 and not target.exists():
+        # Pas de couches → snapshot vide quand même (placeholder), permet
+        # un rollback "tout enlever" cohérent. proj.write crée un .qgz minimal.
+        proj.setFileName(str(target))
+        try:
+            proj.writeEntry("Paths", "Absolute", False)
+        except Exception:
+            pass
+        ok = proj.write(str(target))
+        print(f"CKPT_SAVE_OK id={{ckpt_id}} tool={{tool_name}} n_layers=0 ok={{ok}}")
+    else:
+        # Snapshot l'état courant. On ne modifie PAS le fileName du proj
+        # (pour ne pas perturber save_active_pod_code suivant), donc on
+        # passe via writeAsBinaryProject ou write avec un path explicite.
+        prev_fname = proj.fileName() or ""
+        proj.setFileName(str(target))
+        try:
+            proj.writeEntry("Paths", "Absolute", False)
+        except Exception:
+            pass
+        ok = proj.write(str(target))
+        # Restaurer le fileName d'origine pour ne pas perturber les saves
+        # suivants qui s'attendent à pointer sur project.qgz, pas le snapshot.
+        if prev_fname:
+            proj.setFileName(prev_fname)
+        print(f"CKPT_SAVE_OK id={{ckpt_id}} tool={{tool_name}} n_layers={{n_layers}} ok={{ok}}")
+except Exception as exc:
+    print(f"CKPT_SAVE_ERR {{exc}}")
+"""
+
+
+def restore_checkpoint_pod_code(sid: str, checkpoint_id: str) -> str:
+    """Code Python pour restaurer un .qgz snapshot dans QGIS courant.
+
+    Réutilise le pattern de activate_pod_code (BadLayerHandler silencieux +
+    proj.read + auto-zoom). Le .qgz restauré écrase l'état courant.
+    """
+    return f"""
+from pathlib import Path
+sid = {sid!r}
+ckpt_id = {checkpoint_id!r}
+src = Path(f"/data/studies/{{sid}}/.checkpoints/{{ckpt_id}}.qgz")
+if not src.exists():
+    print(f"CKPT_RESTORE_ERR not_found {{src}}")
+else:
+    try:
+        from qgis.core import QgsProject, QgsProjectBadLayerHandler
+
+        class _SilentBadLayerHandler(QgsProjectBadLayerHandler):
+            def __init__(self):
+                super().__init__()
+                self.dropped = []
+            def handleBadLayers(self, layers):
+                for el in layers:
+                    try:
+                        n = el.namedItem("layername").toElement().text()
+                        self.dropped.append(n)
+                    except Exception:
+                        pass
+
+        proj = QgsProject.instance()
+        proj.setBadLayerHandler(_SilentBadLayerHandler())
+        ok = proj.read(str(src))
+        # On restaure le fileName canonique de l'étude (pas le snapshot path)
+        # pour que les saves ultérieurs continuent d'écrire dans project.qgz.
+        canonical = Path(f"/data/studies/{{sid}}/project.qgz")
+        proj.setFileName(str(canonical))
+        try:
+            from qgis.utils import iface
+            if iface is not None:
+                canvas = iface.mapCanvas()
+                if canvas is not None:
+                    canvas.zoomToFullExtent()
+        except Exception:
+            pass
+        print(f"CKPT_RESTORE_OK id={{ckpt_id}} ok={{ok}}")
+    except Exception as exc:
+        print(f"CKPT_RESTORE_ERR {{exc}}")
+"""
+
+
 def purge_pod_layout_code(sid: str) -> str:
     """Code Python pour supprimer le dossier de l'étude sur le pod."""
     return f"""

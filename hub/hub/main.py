@@ -1697,6 +1697,140 @@ else:
     )
 
 
+# ── Checkpoints / Rollback agent (Commit B) ───────────────────────────────────
+# Pattern : l'agent appelle ces endpoints juste avant d'exécuter un tool
+# mutating. Le hub fait le snapshot Python côté workspace pod + log dans
+# audit_trail. L'agent enregistre la métadonnée dans SQLite (/data/agent/).
+
+@app.post("/sessions/{session_id}/checkpoint")
+async def session_checkpoint(
+    session_id: str,
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Snapshot le projet QGIS courant avant un tool mutating.
+
+    Reçoit {checkpoint_id, tool_name}. Exécute snapshot_active_pod_code sur
+    le workspace via execute_python. Log dans audit_trail kind=checkpoint.
+    Retourne {qgz_path, study_id, audit_ts} pour que l'agent stocke la
+    métadonnée dans SQLite.
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    body = await request.json()
+    ckpt_id = body.get("checkpoint_id", "").strip()
+    tool_name = body.get("tool_name", "").strip()
+    if not ckpt_id or not tool_name:
+        raise HTTPException(400, "checkpoint_id et tool_name requis")
+
+    active_sid = await studies.get_active_study_id(user["username"])
+    if not active_sid:
+        # Sans étude active, pas de dossier .checkpoints/ → on skip silencieusement
+        return {"ok": False, "reason": "no_active_study"}
+
+    try:
+        await _execute_python_in_workspace(
+            user["username"],
+            studies.snapshot_active_pod_code(active_sid, ckpt_id, tool_name),
+            timeout=15,
+        )
+    except Exception as exc:
+        log.warning("Snapshot pré-%s pour ckpt %s : %s", tool_name, ckpt_id, exc)
+        raise HTTPException(500, f"Snapshot échec: {exc}")
+
+    audit_ts = time.time()
+    qgz_path = f"/data/studies/{active_sid}/.checkpoints/{ckpt_id}.qgz"
+
+    # Trace dans le journal d'audit (treatments.jsonl) — observabilité unifiée
+    if _AUDIT_AVAILABLE:
+        try:
+            log_path = Path(f"/data/studies/{active_sid}/treatments.jsonl")
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            evt = {
+                "ts": audit_ts, "kind": "checkpoint",
+                "tool": tool_name, "ok": True,
+                "summary": f"Snapshot avant {tool_name}",
+                "params": {"checkpoint_id": ckpt_id, "session_id": session_id},
+                "outputs": [qgz_path],
+            }
+            # On écrit via le pod aussi (le hub n'a pas accès direct au PVC)
+            await _execute_python_in_workspace(
+                user["username"],
+                (
+                    "import json\n"
+                    f"with open({str(log_path)!r}, 'a', encoding='utf-8') as f:\n"
+                    f"    f.write(json.dumps({evt!r}, ensure_ascii=False) + '\\n')\n"
+                    "print('CKPT_AUDIT_LOG_OK')\n"
+                ),
+                timeout=5,
+            )
+        except Exception:
+            pass  # audit best-effort
+
+    return {
+        "ok": True,
+        "checkpoint_id": ckpt_id,
+        "study_id": active_sid,
+        "qgz_path": qgz_path,
+        "audit_ts": audit_ts,
+    }
+
+
+@app.post("/sessions/{session_id}/restore-checkpoint")
+async def session_restore_checkpoint(
+    session_id: str,
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Restaure le projet QGIS à un checkpoint donné.
+
+    Reçoit {checkpoint_id, study_id}. Exécute restore_checkpoint_pod_code.
+    Log audit kind=rollback. L'agent appelle cet endpoint depuis son
+    rollback workflow ; il s'occupe ensuite de truncate_messages_after.
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    body = await request.json()
+    ckpt_id = body.get("checkpoint_id", "").strip()
+    sid = body.get("study_id", "").strip()
+    if not ckpt_id or not sid:
+        raise HTTPException(400, "checkpoint_id et study_id requis")
+
+    try:
+        await _execute_python_in_workspace(
+            user["username"],
+            studies.restore_checkpoint_pod_code(sid, ckpt_id),
+            timeout=30,
+        )
+    except Exception as exc:
+        log.warning("Restore ckpt %s : %s", ckpt_id, exc)
+        raise HTTPException(500, f"Restore échec: {exc}")
+
+    if _AUDIT_AVAILABLE:
+        try:
+            log_path = Path(f"/data/studies/{sid}/treatments.jsonl")
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            evt = {
+                "ts": time.time(), "kind": "rollback", "ok": True,
+                "summary": f"Restauré au checkpoint {ckpt_id}",
+                "params": {"checkpoint_id": ckpt_id, "session_id": session_id},
+            }
+            await _execute_python_in_workspace(
+                user["username"],
+                (
+                    "import json\n"
+                    f"with open({str(log_path)!r}, 'a', encoding='utf-8') as f:\n"
+                    f"    f.write(json.dumps({evt!r}, ensure_ascii=False) + '\\n')\n"
+                    "print('RB_AUDIT_LOG_OK')\n"
+                ),
+                timeout=5,
+            )
+        except Exception:
+            pass
+
+    return {"ok": True, "checkpoint_id": ckpt_id, "study_id": sid}
+
+
 @app.delete("/studies/{sid}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_study_endpoint(
     sid: str,

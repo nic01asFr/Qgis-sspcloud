@@ -111,7 +111,32 @@ async def startup():
         _embed_task = asyncio.create_task(embed_worker.run_forever(_embed_stop))
     except Exception as e:
         log.warning("vector_store / embed_worker indisponible : %s", e)
+    # Task de purge des vieux checkpoints — toutes les 6h, applique les
+    # limites par défaut (20 max/session, 7j max). Permet de garder le PVC
+    # propre sans intervention manuelle.
+    asyncio.create_task(_checkpoint_purge_loop())
     log.info("QGIS Agent démarré | Hub: %s | Profil: %s", _HUB_URL, _DEFAULT_PROFILE)
+
+
+async def _checkpoint_purge_loop() -> None:
+    """Boucle background : purge les vieux checkpoints toutes les 6 heures."""
+    while True:
+        try:
+            await asyncio.sleep(6 * 3600)
+            purged = await memory.purge_old_checkpoints(
+                max_per_session=20, max_age_days=7,
+            )
+            if purged:
+                log.info("Purge auto checkpoints : %d entrées DB supprimées",
+                         len(purged))
+                # NB : les .qgz sur le PVC ne sont PAS supprimés par cette
+                # fonction (pas d'accès direct depuis l'agent). Un nettoyage
+                # PVC est fait au prochain save_active_pod_code ou via une
+                # tâche hub dédiée (TODO si pression PVC observée).
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            log.warning("Purge checkpoints en erreur : %s", exc)
 
 
 @app.on_event("shutdown")
@@ -386,6 +411,76 @@ async def list_sessions():
 @app.get("/sessions/{session_id}/messages")
 async def get_messages(session_id: str):
     return await memory.get_session_messages(session_id)
+
+
+# ── Checkpoints / Rollback (Commit B) ──────────────────────────────────────────
+
+@app.get("/sessions/{session_id}/checkpoints")
+async def session_list_checkpoints(session_id: str):
+    """Liste les checkpoints d'une session (du plus ancien au plus récent)."""
+    return await memory.list_checkpoints(session_id, limit=100)
+
+
+@app.post("/sessions/{session_id}/rollback/{checkpoint_id}")
+async def session_rollback(session_id: str, checkpoint_id: str):
+    """Rollback complet : restaure le projet QGIS au checkpoint + tronque
+    la conversation après le point de retour.
+
+    Orchestre : récupère métadonnée → appelle hub /restore-checkpoint pour
+    le pod → truncate_messages_after côté agent → retourne les compteurs.
+    """
+    ckpt = await memory.get_checkpoint(checkpoint_id)
+    if not ckpt:
+        raise HTTPException(404, "Checkpoint introuvable")
+    if ckpt["session_id"] != session_id:
+        raise HTTPException(400, "Checkpoint ne correspond pas à cette session")
+
+    if not _HUB_URL or not _HUB_API_KEY:
+        raise HTTPException(503, "Hub non configuré")
+
+    # 1. Restaurer le .qgz sur le pod via hub
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            r = await client.post(
+                f"{_HUB_URL}/sessions/{session_id}/restore-checkpoint",
+                headers={"Authorization": f"Bearer {_HUB_API_KEY}"},
+                json={
+                    "checkpoint_id": checkpoint_id,
+                    "study_id":      ckpt.get("study_id") or "",
+                },
+            )
+            if r.status_code >= 300:
+                raise HTTPException(
+                    502, f"Hub restore-checkpoint a renvoyé {r.status_code}",
+                )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Restore pod échec : {exc}")
+
+    # 2. Tronquer la conversation après le message_idx
+    n_truncated = await memory.truncate_messages_after(
+        session_id, ckpt["message_idx"],
+    )
+
+    return {
+        "ok": True,
+        "checkpoint_id": checkpoint_id,
+        "message_idx": ckpt["message_idx"],
+        "messages_truncated": n_truncated,
+        "tool_name": ckpt["tool_name"],
+    }
+
+
+@app.post("/sessions/{session_id}/checkpoints/purge")
+async def session_purge_checkpoints(session_id: str):
+    """Purge manuelle des vieux checkpoints d'une session.
+
+    Applique les limites par défaut (20 max, 7j). La purge auto se fait aussi
+    en background à intervalle régulier (cf. _start_checkpoint_purge_task).
+    """
+    purged = await memory.purge_old_checkpoints(session_id=session_id)
+    return {"purged": len(purged), "ids": [p["id"] for p in purged]}
 
 
 @app.get("/projects")
