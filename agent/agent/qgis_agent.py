@@ -1164,7 +1164,13 @@ ne vient pas d'un outil cette session, la supprimer.
                         log.warning("Checkpoint pré-%s échoué : %s", fn_name, exc)
 
                 log.info("Tool call: %s(%s)", fn_name, str(fn_args)[:100])
-                yield f"\n\n> **`{fn_name}`**"
+                # Le blockquote markdown est À LA FOIS yield (rendu streaming
+                # côté UI) ET accumulé dans full_response (persisté en DB pour
+                # que le rendu au reload soit cohérent + matching des
+                # checkpoints aux tools possible côté reattachRollbackButtons).
+                _bq_header = f"\n\n> **`{fn_name}`**"
+                full_response += _bq_header
+                yield _bq_header
                 if fn_args:
                     def _short_arg(v):
                         s = str(v).replace("\n", " ").replace("\r", " ").replace("`", "'")
@@ -1173,7 +1179,10 @@ ne vient pas d'un outil cette session, la supprimer.
                     args_preview = ", ".join(
                         f"`{k}={_short_arg(v)}`" for k, v in fn_args.items()
                     )
-                    yield f" — {args_preview}"
+                    _bq_args = f" — {args_preview}"
+                    full_response += _bq_args
+                    yield _bq_args
+                full_response += "\n"
                 yield "\n"
 
                 # ── Exécution du tool avec surveillance stop_signal ────────
