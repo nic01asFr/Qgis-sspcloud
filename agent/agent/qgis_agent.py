@@ -1128,7 +1128,7 @@ ne vient pas d'un outil cette session, la supprimer.
                         # inclut system_prompt + history non persistés).
                         db_count = await memory.count_session_messages(self.session_id)
                         msg_idx = max(db_count - 1, 0)
-                        async with httpx.AsyncClient(timeout=15) as ck_client:
+                        async with httpx.AsyncClient(timeout=30) as ck_client:
                             ck_resp = await ck_client.post(
                                 f"{_HUB_URL}/sessions/{self.session_id}/checkpoint",
                                 headers={"Authorization": f"Bearer {_HUB_KEY}"},
@@ -1161,7 +1161,12 @@ ne vient pas d'un outil cette session, la supprimer.
                                 log.warning("Checkpoint refusé par hub (%d)",
                                             ck_resp.status_code)
                     except Exception as exc:
-                        log.warning("Checkpoint pré-%s échoué : %s", fn_name, exc)
+                        # Log explicite : certaines exceptions httpx ont str("")
+                        # vide → on inclut le type pour diagnostic.
+                        log.warning(
+                            "Checkpoint pré-%s échoué : %s: %s",
+                            fn_name, type(exc).__name__, exc or "(no msg)",
+                        )
 
                 log.info("Tool call: %s(%s)", fn_name, str(fn_args)[:100])
                 # Le blockquote markdown est À LA FOIS yield (rendu streaming
