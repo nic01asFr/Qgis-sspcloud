@@ -956,6 +956,7 @@ document.querySelectorAll('.rtab').forEach(t => {
 });
 
 // Couches QGIS — consomme /desk/layers (hub), qui interroge MCP get_project_info.
+// Distingue 3 états : workspace endormi / projet vide / projet avec couches.
 async function loadResourceLayers() {
   const c = document.getElementById('resources-layers-list');
   if (!c) return;
@@ -965,6 +966,16 @@ async function loadResourceLayers() {
     if (!r.ok) throw new Error('http');
     const d = await r.json();
     const layers = (d && d.layers) || [];
+    const state = d?.state || 'ok';
+    if (state === 'workspace_sleeping') {
+      c.innerHTML = '<div class="publi-empty">Workspace endormi. ' +
+                    'Réveille-le (canvas) pour voir les couches.</div>';
+      return;
+    }
+    if (state === 'error' || state === 'unknown') {
+      c.innerHTML = '<div class="publi-empty">État du workspace indéterminé. Réessaie.</div>';
+      return;
+    }
     if (!layers.length) {
       c.innerHTML = '<div class="publi-empty">Projet vide — aucune couche. ' +
                     'Demande à l\'agent : « ajoute la couche X ».</div>';

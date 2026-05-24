@@ -2951,7 +2951,20 @@ async def desk_del_insight(insight_id: int):
 
 @app.get("/desk/layers")
 async def desk_layers():
-    """Liste les couches QGIS du projet courant via le MCP."""
+    """Liste les couches QGIS du projet courant via le MCP.
+
+    Retourne aussi un champ `state` pour que le panel Ressources sache
+    distinguer "projet vide" (workspace OK, projet sans couches) de
+    "workspace endormi" (impossible de lire pour l'instant) — UX moins
+    trompeuse que `layers=[]` ambigu.
+    """
+    # Check workspace ready en premier (best-effort, ne réveille pas).
+    try:
+        all_sessions = await sessions.list_sessions(_ONYXIA_USER)
+        if not all_sessions or all_sessions[0].get("status") != sessions.SESSION_READY:
+            return {"layers": [], "state": "workspace_sleeping"}
+    except Exception:
+        return {"layers": [], "state": "unknown"}
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
         async with httpx.AsyncClient(timeout=10, base_url=_SELF_URL) as c:
@@ -2960,10 +2973,9 @@ async def desk_layers():
                              json={"jsonrpc": "2.0", "id": 1,
                                    "method": "tools/call",
                                    "params": {"name": "get_project_info", "arguments": {}}})
-        import json as _json
         content = r.json().get("result", {}).get("content", [{}])
         text = content[0].get("text", "") if content else ""
-        info = _json.loads(text) if text else {}
-        return {"layers": info.get("layers", [])}
+        info = json.loads(text) if text else {}
+        return {"layers": info.get("layers", []), "state": "ok"}
     except Exception:
-        return {"layers": []}
+        return {"layers": [], "state": "error"}
