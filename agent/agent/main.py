@@ -119,20 +119,43 @@ async def startup():
 
 
 async def _checkpoint_purge_loop() -> None:
-    """Boucle background : purge les vieux checkpoints toutes les 6 heures."""
+    """Boucle background : purge les vieux checkpoints toutes les 6 heures.
+
+    Étapes :
+    1. memory.purge_old_checkpoints supprime les métadonnées SQLite et
+       retourne la liste des entrées purgées (avec leur qgz_path).
+    2. On appelle le hub /sessions/purge-checkpoint-files avec ces paths
+       pour supprimer effectivement les .qgz sur le PVC user (sinon ils
+       s'accumulent indéfiniment).
+    """
     while True:
         try:
             await asyncio.sleep(6 * 3600)
             purged = await memory.purge_old_checkpoints(
                 max_per_session=20, max_age_days=7,
             )
-            if purged:
-                log.info("Purge auto checkpoints : %d entrées DB supprimées",
-                         len(purged))
-                # NB : les .qgz sur le PVC ne sont PAS supprimés par cette
-                # fonction (pas d'accès direct depuis l'agent). Un nettoyage
-                # PVC est fait au prochain save_active_pod_code ou via une
-                # tâche hub dédiée (TODO si pression PVC observée).
+            if not purged:
+                continue
+            log.info("Purge auto checkpoints : %d entrées DB supprimées",
+                     len(purged))
+            # Demande au hub de supprimer les .qgz correspondants sur le PVC
+            paths = [p["qgz_path"] for p in purged if p.get("qgz_path")]
+            if paths and _HUB_URL and _HUB_API_KEY:
+                try:
+                    async with httpx.AsyncClient(timeout=30) as c:
+                        r = await c.post(
+                            f"{_HUB_URL}/sessions/purge-checkpoint-files",
+                            headers={"Authorization": f"Bearer {_HUB_API_KEY}"},
+                            json={"paths": paths},
+                        )
+                        if r.status_code < 300:
+                            d = r.json()
+                            log.info("Purge .qgz PVC : %d fichiers supprimés",
+                                     d.get("purged", 0))
+                        else:
+                            log.warning("Purge .qgz PVC échec %d", r.status_code)
+                except Exception as exc:
+                    log.warning("Purge .qgz PVC réseau : %s", exc)
         except asyncio.CancelledError:
             break
         except Exception as exc:

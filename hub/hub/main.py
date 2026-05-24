@@ -1796,6 +1796,58 @@ async def session_checkpoint(
     }
 
 
+@app.post("/sessions/purge-checkpoint-files")
+async def purge_checkpoint_files(
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Supprime les .qgz snapshots listés sur le PVC user.
+
+    Appelé par la boucle de purge de l'agent (toutes les 6h), juste après
+    la suppression des métadonnées SQLite. Sans ça, les .qgz s'accumulent
+    indéfiniment sur le PVC (cf. limitation #5 du suivi Stop/Rollback).
+
+    Sécurité : filtre strict des paths pour éviter le path traversal —
+    seuls les fichiers dans /data/studies/{sid}/.checkpoints/ sont
+    acceptés (le user a accès à son propre PVC mais on durcit quand même).
+    """
+    body = await request.json()
+    paths = body.get("paths", [])
+    if not isinstance(paths, list):
+        raise HTTPException(400, "paths doit être une liste")
+    # Filtre strict : path doit ressembler à /data/studies/<sid>/.checkpoints/<ckpt>.qgz
+    safe_paths = [
+        p for p in paths
+        if isinstance(p, str)
+        and p.startswith("/data/studies/")
+        and "/.checkpoints/" in p
+        and p.endswith(".qgz")
+        and ".." not in p
+    ]
+    if not safe_paths:
+        return {"purged": 0, "skipped": len(paths)}
+    code = (
+        "from pathlib import Path\n"
+        f"paths = {safe_paths!r}\n"
+        "n_purged = 0\n"
+        "for p in paths:\n"
+        "    try:\n"
+        "        Path(p).unlink()\n"
+        "        n_purged += 1\n"
+        "    except FileNotFoundError:\n"
+        "        pass\n"
+        "    except Exception as exc:\n"
+        "        print(f'PURGE_ERR {p}: {exc}')\n"
+        "print(f'PURGED_QGZ={n_purged}')\n"
+    )
+    try:
+        await _execute_python_in_workspace(user["username"], code, timeout=10)
+        return {"purged": len(safe_paths), "skipped": len(paths) - len(safe_paths)}
+    except Exception as exc:
+        log.warning("Purge .qgz files : %s", exc)
+        return {"purged": 0, "skipped": len(paths), "error": str(exc)}
+
+
 @app.post("/sessions/{session_id}/restore-checkpoint")
 async def session_restore_checkpoint(
     session_id: str,
