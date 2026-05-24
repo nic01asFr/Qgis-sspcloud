@@ -37,6 +37,26 @@ pattern: |
   layer.updateFields()
 note: dataProvider().addAttributes (pluriel) avec liste de QgsField. Le singulier addAttribute n'existe pas non plus sur layer.
 
+## tip: Marseille / Paris / Lyon — utiliser INSEE direct si sans numéro
+symptom: Marseillette geocoded as wrong commune set_study_zone Marseille resolved as 11220 Aude run_recipe zone Marseille returned wrong commune
+pattern: |
+  # /communes?nom=Marseille retourne Marseillette (11220, Aude) en premier
+  # car ordre alphabétique. Pour les 3 grandes villes à arrondissements,
+  # utiliser le code INSEE PRINCIPAL en direct via /communes/{insee} :
+  #   - Marseille   → 13055
+  #   - Paris       → 75056
+  #   - Lyon        → 69123
+  # Pour un arrondissement spécifique, utiliser INSEE arrondissement :
+  #   - Marseille 1-16 → 13201..13216
+  #   - Paris     1-20 → 75101..75120
+  #   - Lyon      1-9  → 69381..69389
+  import requests
+  insee_principal = {"Marseille": "13055", "Paris": "75056", "Lyon": "69123"}
+  city = "Marseille"  # exemple
+  resp = requests.get(f"https://geo.api.gouv.fr/communes/{insee_principal[city]}")
+  commune = resp.json()
+note: Pour set_study_zone ou search_commune avec "Marseille" / "Paris" / "Lyon" SEUL (sans numéro d'arrondissement), passer par /communes/{insee_principal} direct. Sinon /communes?nom= matche Marseillette (Aude) au lieu de Marseille (Bouches-du-Rhône). Bug critique pour les workflows CEREMA risque/PPRi.
+
 ## tip: QgsFields vs QgsField (collection vs item)
 symptom: QgsFields object has no attribute add QgsFields object has no attribute addAttribute name QgsFields is not defined Did you mean QgsField
 pattern: |
