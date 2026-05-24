@@ -2784,6 +2784,28 @@ async def workspace_archive_study(sid: str):
     return RedirectResponse("/workspace", status_code=302)
 
 
+@app.post("/desk/study/{sid}/save")
+async def desk_save_study(sid: str):
+    """Sauve le projet QGIS de l'étude `sid` (appelé par le beforeunload
+    sendBeacon du desk.html).
+
+    Endpoint same-origin pour que `navigator.sendBeacon` côté browser ne
+    soit pas bloqué CORS. Délègue à studies.save_active_pod_code via
+    execute_python (même path que /studies/{sid}/save, mais sans auth
+    Bearer requise puisqu'on est sur l'origine hub avec cookie/CSRF).
+    """
+    if not _STUDIES_AVAILABLE:
+        return {"ok": False}
+    try:
+        await _execute_python_in_workspace(
+            _ONYXIA_USER, studies.save_active_pod_code(sid), timeout=15,
+        )
+        return {"ok": True, "sid": sid}
+    except Exception as exc:
+        log.warning("Save desk étude %s : %s", sid, exc)
+        return {"ok": False, "error": str(exc)}
+
+
 # ── Proxy mémoire vers l'agent IA ─────────────────────────────────────────────
 
 async def _agent_call(method: str, path: str, **kwargs):
