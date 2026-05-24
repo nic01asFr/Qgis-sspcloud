@@ -181,6 +181,11 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
   height:44px}
 .chat-form .send-btn:disabled{opacity:.5;cursor:wait}
 .chat-form .send-btn:hover:not(:disabled){background:var(--background-action-high-blue-france-hover)}
+.chat-form .stop-btn{background:#fff;color:#b34000;border:1px solid #b34000;
+  padding:8px 14px;font-size:13px;border-radius:4px;cursor:pointer;
+  font-family:inherit;font-weight:500}
+.chat-form .stop-btn:hover{background:#fff5e6}
+.chat-form .stop-btn:disabled{opacity:.5;cursor:wait}
 
 /* Bouton dictée intégré au coin haut-droit du textarea, aligné avec la
    première ligne (= ligne du placeholder) : discret au repos, rouge pulsant
@@ -428,6 +433,8 @@ body.embed .msg .bubble pre{max-width:100%}
           </button>
         </div>
         <button type="submit" id="send-btn" class="send-btn">Envoyer ↑</button>
+        <button type="button" id="stop-btn" class="stop-btn" style="display:none"
+                title="Interrompre l'agent à la fin du tool en cours">⏸ Arrêter</button>
       </form>
       <p class="hint">Entrée pour envoyer · Maj+Entrée pour nouvelle ligne</p>
     </div>
@@ -748,6 +755,30 @@ function appendMessage(role, content) {
   return div;
 }
 
+// AbortController du fetch SSE en cours — partagé avec le bouton ⏸ Arrêter
+// pour permettre une coupure propre côté client (la coupure côté serveur est
+// signalée via POST /chat/{sid}/stop qui pose un asyncio.Event).
+let _currentAbort = null;
+
+document.getElementById('stop-btn').addEventListener('click', async () => {
+  const sid = document.getElementById('session-id').value;
+  const btn = document.getElementById('stop-btn');
+  btn.disabled = true;
+  btn.textContent = '⏸ Arrêt…';
+  try {
+    // Signal côté serveur : la boucle agent break après le tool en cours
+    await fetch(`/chat/${encodeURIComponent(sid)}/stop`, {method: 'POST'});
+  } catch {}
+  // On NE coupe PAS le fetch SSE côté client immédiatement : on laisse le
+  // serveur émettre le dernier chunk "⛔ Arrêté par l'utilisateur" et clore
+  // proprement. Si le serveur ne répond pas dans 5s, on coupe en force.
+  setTimeout(() => {
+    if (_currentAbort) {
+      try { _currentAbort.abort(); } catch {}
+    }
+  }, 5000);
+});
+
 document.getElementById('chat-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const input   = document.getElementById('message-input');
@@ -756,6 +787,10 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
 
   input.value = '';
   document.getElementById('send-btn').disabled = true;
+  document.getElementById('send-btn').style.display = 'none';
+  document.getElementById('stop-btn').style.display = '';
+  document.getElementById('stop-btn').disabled = false;
+  document.getElementById('stop-btn').textContent = '⏸ Arrêter';
   document.getElementById('status-bar').classList.add('visible');
   document.getElementById('status-text').textContent = 'Analyse en cours…';
 
@@ -769,8 +804,9 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
   formData.append('session_id', document.getElementById('session-id').value);
   formData.append('profile_id', document.getElementById('profile-id').value);
 
+  _currentAbort = new AbortController();
   try {
-    const resp = await fetch('/chat', { method: 'POST', body: formData });
+    const resp = await fetch('/chat', { method: 'POST', body: formData, signal: _currentAbort.signal });
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     // Buffer accumulant les chunks jusqu'à un événement SSE complet
@@ -813,11 +849,22 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
       }
     }
   } catch (err) {
-    if (responseDiv) responseDiv.innerHTML = `<span style="color:#ce0500">Erreur réseau : ${err.message}</span>`;
+    if (err && err.name === 'AbortError') {
+      // Coupure user via stop-btn — message déjà affiché par le serveur si
+      // SSE a délivré son dernier chunk. Sinon on l'écrit ici.
+      if (responseDiv && !responseDiv.textContent.includes('Arrêté')) {
+        responseDiv.innerHTML += '<p style="color:#b34000">⛔ Arrêté par l\'utilisateur.</p>';
+      }
+    } else if (responseDiv) {
+      responseDiv.innerHTML = `<span style="color:#ce0500">Erreur réseau : ${err.message}</span>`;
+    }
   } finally {
     document.getElementById('send-btn').disabled = false;
+    document.getElementById('send-btn').style.display = '';
+    document.getElementById('stop-btn').style.display = 'none';
     document.getElementById('status-bar').classList.remove('visible');
     if (responseDiv) responseDiv.removeAttribute('id');
+    _currentAbort = null;
   }
 });
 

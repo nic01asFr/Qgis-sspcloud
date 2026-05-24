@@ -37,6 +37,24 @@ pattern: |
   layer.updateFields()
 note: dataProvider().addAttributes (pluriel) avec liste de QgsField. Le singulier addAttribute n'existe pas non plus sur layer.
 
+## tip: QgsFields vs QgsField (collection vs item)
+symptom: QgsFields object has no attribute add QgsFields object has no attribute addAttribute name QgsFields is not defined Did you mean QgsField
+pattern: |
+  # QgsFields = COLLECTION de champs. QgsField = UN champ. NE PAS confondre.
+  # Ajouter un champ à une collection : .append() (PAS .add ni .addAttribute).
+  from qgis.core import QgsFields, QgsField
+  from PyQt5.QtCore import QVariant
+
+  fields = QgsFields()
+  fields.append(QgsField("code", QVariant.String))
+  fields.append(QgsField("count", QVariant.Int))
+
+  # Pour ajouter à un layer existant, passer par dataProvider().addAttributes :
+  prov = layer.dataProvider()
+  prov.addAttributes([QgsField("code", QVariant.String)])
+  layer.updateFields()
+note: QgsFields() (pluriel = collection) supporte .append(QgsField(...)). PAS de .add ni .addAttribute sur la collection. Pour modifier un layer, dataProvider().addAttributes([liste de QgsField]) + updateFields().
+
 ## tip: Imports PyQGIS explicites
 symptom: NameError name Qgs is not defined name QgsProject is not defined
 pattern: |

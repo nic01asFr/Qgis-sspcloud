@@ -896,10 +896,16 @@ ne vient pas d'un outil cette session, la supprimer.
         self,
         user_message: str,
         history: list[dict] | None = None,
+        stop_signal: "asyncio.Event | None" = None,
     ) -> AsyncGenerator[str, None]:
         """
         Génère une réponse en streaming avec appels d'outils MCP.
         Yield des chunks de texte + events d'outils.
+
+        `stop_signal` : Event asyncio que l'utilisateur peut poser via
+        POST /chat/{sid}/stop pour interrompre la boucle entre tool calls.
+        Le tool en cours d'exécution est laissé finir, on break ensuite.
+        Si None, le stop manuel est désactivé (utile pour les tests).
         """
         # Sauvegarder le message user
         await memory.add_message(self.session_id, "user", user_message)
@@ -922,6 +928,16 @@ ne vient pas d'un outil cette session, la supprimer.
         max_iterations = 20
         final_finish_reason = None
         for iteration in range(max_iterations):
+            # Vérifier le signal d'arrêt user (posé via POST /chat/{sid}/stop).
+            # Check en début d'itération : si l'user a cliqué Stop pendant
+            # qu'un tool s'exécutait, on a laissé finir le tool puis on break ici.
+            if stop_signal is not None and stop_signal.is_set():
+                log.info("Stop signal détecté pour session %s à l'itération %d",
+                         self.session_id, iteration)
+                yield "\n\n⛔ **Arrêté par l'utilisateur.** La conversation est conservée — tu peux poursuivre ou revenir en arrière.\n"
+                full_response += "\n\n⛔ Arrêté par l'utilisateur."
+                break
+
             # Appel LLM
             model = os.getenv("LLM_MODEL", _get_model(self.profile_id))
             payload = {
@@ -1134,7 +1150,25 @@ ne vient pas d'un outil cette session, la supprimer.
                         if c["tool"] == fn_name
                         and _extract_error_signature(c.get("result", "")) == err_sig
                     ]
-                    if len(same_failures) >= 2:
+                    if len(same_failures) >= 3:
+                        # ≥3 mêmes erreurs : l'avertissement précédent (≥2) n'a
+                        # pas changé le comportement → auto-stop dur pour ne
+                        # pas consommer le budget en pure perte. L'user verra
+                        # le message et pourra reformuler ou rollback.
+                        log.warning(
+                            "Auto-stop boucle d'erreur : %s × %d sur %s",
+                            err_sig, len(same_failures), fn_name,
+                        )
+                        if stop_signal is not None:
+                            stop_signal.set()
+                        yield (
+                            f"\n\n⚠️ **Boucle d'erreur détectée** "
+                            f"(`{fn_name}` × {len(same_failures)} : « {err_sig} »). "
+                            "Je m'arrête pour ne pas tourner en rond. Reformule "
+                            "ta demande différemment, ou ↶ reviens à l'étape "
+                            "d'avant si tu as enregistré un point de retour.\n"
+                        )
+                    elif len(same_failures) >= 2:
                         log.warning(
                             "Boucle d'erreur détectée : %s × %d sur %s",
                             err_sig, len(same_failures), fn_name,

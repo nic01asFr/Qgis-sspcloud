@@ -38,6 +38,21 @@ from agent.qgis_agent import QGISAgent
 _embed_task: asyncio.Task | None = None
 _embed_stop: asyncio.Event | None = None
 
+# Signaux d'arrêt par session : permet à l'utilisateur d'interrompre la boucle
+# agent (loop LLM→tool→LLM) entre 2 tool calls. Lu par chat_stream après
+# chaque exécution de tool. Cf. POST /chat/{sid}/stop.
+# Map session_id → asyncio.Event. Event posé = stop demandé.
+_stop_signals: dict[str, asyncio.Event] = {}
+
+
+def _get_or_create_stop_signal(session_id: str) -> asyncio.Event:
+    """Récupère ou crée l'Event de stop pour une session."""
+    ev = _stop_signals.get(session_id)
+    if ev is None:
+        ev = asyncio.Event()
+        _stop_signals[session_id] = ev
+    return ev
+
 log = logging.getLogger("agent.main")
 
 # Aligner le niveau des loggers `agent.*` sur celui d'uvicorn pour que les
@@ -320,9 +335,17 @@ async def chat(
         profile_id = profile_id,
     )
 
+    # Récupère/crée le signal d'arrêt de cette session — sera vérifié par
+    # chat_stream entre chaque tool call. On le reset ici pour permettre une
+    # nouvelle requête après un stop précédent sur la même session.
+    stop_signal = _get_or_create_stop_signal(session_id)
+    stop_signal.clear()
+
     async def event_stream() -> AsyncGenerator[str, None]:
         try:
-            async for chunk in agent.chat_stream(message, history=history_formatted):
+            async for chunk in agent.chat_stream(
+                message, history=history_formatted, stop_signal=stop_signal,
+            ):
                 # SSE format
                 yield f"data: {json.dumps({'text': chunk})}\n\n"
             yield f"data: {json.dumps({'done': True})}\n\n"
@@ -338,6 +361,19 @@ async def chat(
             "X-Accel-Buffering": "no",
         }
     )
+
+
+@app.post("/chat/{session_id}/stop")
+async def chat_stop(session_id: str):
+    """Demande l'arrêt de la boucle agent pour cette session.
+
+    L'agent vérifie ce signal entre chaque tool call. Le tool en cours
+    d'exécution est laissé finir proprement (cohérence des données) ;
+    l'agent break à la prochaine itération de boucle.
+    """
+    ev = _get_or_create_stop_signal(session_id)
+    ev.set()
+    return {"stopped": True, "session_id": session_id}
 
 
 # ── API Mémoire ────────────────────────────────────────────────────────────────
