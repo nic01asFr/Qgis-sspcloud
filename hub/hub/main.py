@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import json
 import logging
 import os
 import secrets
@@ -1702,6 +1703,37 @@ else:
 # mutating. Le hub fait le snapshot Python côté workspace pod + log dans
 # audit_trail. L'agent enregistre la métadonnée dans SQLite (/data/agent/).
 
+async def _log_audit_event_on_pod(username: str, log_path: str, evt: dict) -> None:
+    """Append un évènement audit dans `treatments.jsonl` côté pod workspace.
+
+    Le hub n'a pas d'accès direct au PVC user, donc on délègue l'écriture
+    à un execute_python. Pour éviter les pièges d'injection f-string (repr
+    de dict avec strings contenant quotes/newlines casse le code généré),
+    on sérialise d'abord evt en JSON puis on insère cette string repr-safe
+    dans le code Python.
+
+    Best-effort : si l'écriture échoue, on log un warning mais on ne
+    propage pas l'exception (l'audit n'est pas critique pour la fonction
+    principale du caller).
+    """
+    try:
+        evt_json = json.dumps(evt, ensure_ascii=False)
+        code = (
+            f"from pathlib import Path\n"
+            f"p = Path({log_path!r})\n"
+            f"p.parent.mkdir(parents=True, exist_ok=True)\n"
+            f"line = {evt_json!r} + '\\n'\n"
+            f"with open(p, 'a', encoding='utf-8') as f:\n"
+            f"    f.write(line)\n"
+            f"print('AUDIT_LOG_OK kind=' + {evt.get('kind', '?')!r})\n"
+        )
+        out = await _execute_python_in_workspace(username, code, timeout=5)
+        if "AUDIT_LOG_OK" not in (out or ""):
+            log.warning("Audit log peut avoir échoué silencieusement : %s",
+                        (out or "")[:200])
+    except Exception as exc:
+        log.warning("Audit log kind=%s échec : %s", evt.get("kind", "?"), exc)
+
 @app.post("/sessions/{session_id}/checkpoint")
 async def session_checkpoint(
     session_id: str,
@@ -1743,29 +1775,17 @@ async def session_checkpoint(
 
     # Trace dans le journal d'audit (treatments.jsonl) — observabilité unifiée
     if _AUDIT_AVAILABLE:
-        try:
-            log_path = Path(f"/data/studies/{active_sid}/treatments.jsonl")
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            evt = {
+        await _log_audit_event_on_pod(
+            user["username"],
+            f"/data/studies/{active_sid}/treatments.jsonl",
+            {
                 "ts": audit_ts, "kind": "checkpoint",
                 "tool": tool_name, "ok": True,
                 "summary": f"Snapshot avant {tool_name}",
                 "params": {"checkpoint_id": ckpt_id, "session_id": session_id},
                 "outputs": [qgz_path],
-            }
-            # On écrit via le pod aussi (le hub n'a pas accès direct au PVC)
-            await _execute_python_in_workspace(
-                user["username"],
-                (
-                    "import json\n"
-                    f"with open({str(log_path)!r}, 'a', encoding='utf-8') as f:\n"
-                    f"    f.write(json.dumps({evt!r}, ensure_ascii=False) + '\\n')\n"
-                    "print('CKPT_AUDIT_LOG_OK')\n"
-                ),
-                timeout=5,
-            )
-        except Exception:
-            pass  # audit best-effort
+            },
+        )
 
     return {
         "ok": True,
@@ -1807,26 +1827,15 @@ async def session_restore_checkpoint(
         raise HTTPException(500, f"Restore échec: {exc}")
 
     if _AUDIT_AVAILABLE:
-        try:
-            log_path = Path(f"/data/studies/{sid}/treatments.jsonl")
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            evt = {
+        await _log_audit_event_on_pod(
+            user["username"],
+            f"/data/studies/{sid}/treatments.jsonl",
+            {
                 "ts": time.time(), "kind": "rollback", "ok": True,
                 "summary": f"Restauré au checkpoint {ckpt_id}",
                 "params": {"checkpoint_id": ckpt_id, "session_id": session_id},
-            }
-            await _execute_python_in_workspace(
-                user["username"],
-                (
-                    "import json\n"
-                    f"with open({str(log_path)!r}, 'a', encoding='utf-8') as f:\n"
-                    f"    f.write(json.dumps({evt!r}, ensure_ascii=False) + '\\n')\n"
-                    "print('RB_AUDIT_LOG_OK')\n"
-                ),
-                timeout=5,
-            )
-        except Exception:
-            pass
+            },
+        )
 
     return {"ok": True, "checkpoint_id": ckpt_id, "study_id": sid}
 
