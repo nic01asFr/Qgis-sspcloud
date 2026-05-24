@@ -984,11 +984,18 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
               if (tname) {
                 document.getElementById('status-text').textContent = `Outil : ${tname[1]}`;
               }
-              responseDiv.innerHTML = marked.parse(fullText);
-              // Replie chaque <pre> de résultat-tool dans un <details> fermé
-              // pour que le user voie le dernier blockquote (tool en cours)
-              // et le texte final sans devoir scroller à travers les JSON bruts.
-              foldToolResults(responseDiv);
+              const rendered = marked.parse(fullText);
+              // Ne pas écraser le placeholder "Analyse en cours…" tant que
+              // le rendu est vide (chunks initiaux "\n\n" qui parsent en ""
+              // — sinon la bulle redevient visuellement vide entre les
+              // premiers chunks et le 1er contenu utile).
+              if (rendered.trim()) {
+                responseDiv.innerHTML = rendered;
+                // Replie chaque <pre> de résultat-tool dans un <details> fermé
+                // pour que le user voie le dernier blockquote (tool en cours)
+                // et le texte final sans devoir scroller à travers les JSON bruts.
+                foldToolResults(responseDiv);
+              }
               const msgs = document.getElementById('messages');
               msgs.scrollTop = msgs.scrollHeight;
             }
