@@ -39,6 +39,16 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
   color:var(--text-default-grey)}
 .chat-toolbar button.tool-btn:hover{background:var(--background-alt-blue-france);
   border-color:var(--border-action-low-blue-france);color:var(--text-action-high-blue-france)}
+/* Chip de contexte (routeur contextuel) : affiche le mode courant.
+   Cliquable pour révéler le combobox d'override manuel (rare). */
+.context-chip{background:var(--background-alt-blue-france);
+  border:1px solid var(--border-action-low-blue-france);
+  border-radius:14px;padding:3px 10px 3px 8px;font-size:12px;
+  font-family:inherit;cursor:pointer;color:var(--text-action-high-blue-france);
+  display:flex;align-items:center;gap:6px}
+.context-chip:hover{background:#dde0fe}
+.context-chip .ctx-icon{font-size:13px}
+.context-chip .ctx-caret{font-size:9px;opacity:.6}
 
 /* Mémoire drawer : pan latéral droit par-dessus la zone messages, sans casser le layout */
 .memory-drawer{position:absolute;top:0;right:0;bottom:0;width:340px;background:#fff;
@@ -353,7 +363,18 @@ body.embed .msg .bubble pre{max-width:100%}
   <main class="chat-main">
 
     <div class="chat-toolbar">
-      <select id="profile-select" onchange="changeProfile(this.value)" aria-label="Profil agent">
+      <!-- Chip de contexte (routeur contextuel) : affiche le profil courant
+           dérivé du render actif / étude / form. Cliquable pour override
+           manuel (rare — l'usage normal est automatique). -->
+      <button type="button" id="context-chip" class="context-chip"
+              onclick="toggleProfileMenu()" title="Mode agent courant (cliquer pour modifier)">
+        <span class="ctx-icon" id="ctx-icon">📂</span>
+        <span class="ctx-label" id="ctx-label">{{ profile_id }}</span>
+        <span class="ctx-caret">▾</span>
+      </button>
+      <!-- Override manuel (caché par défaut, déplié au clic chip) -->
+      <select id="profile-select" onchange="changeProfile(this.value)"
+              aria-label="Profil agent" style="display:none">
         <option value="standard" {% if profile_id=='standard' %}selected{% endif %}>Standard</option>
         <option value="geoai_analyst" {% if profile_id=='geoai_analyst' %}selected{% endif %}>IA Vision</option>
         <option value="risk_analyst" {% if profile_id=='risk_analyst' %}selected{% endif %}>Risques</option>
@@ -635,6 +656,81 @@ function changeProfile(profileId) {
   document.getElementById('profile-id').value = profileId;
   loadSuggestions(profileId);
   document.cookie = `profile_id=${profileId}; path=/`;
+  updateContextChip();
+}
+
+// ── Routeur contextuel : chip de bandeau + listener postMessage ─────────
+// Le chip affiche le profil courant dérivé du contexte (render actif /
+// étude / form). Cliquable pour révéler le combobox d'override manuel.
+
+// Mapping profil → libellé court + emoji pour le chip
+const _PROFILE_META = {
+  standard:         {label: 'Standard',     icon: '💬'},
+  geoai_analyst:    {label: 'IA Vision',    icon: '🧠'},
+  risk_analyst:     {label: 'Risques',      icon: '⚠️'},
+  db_analyst:       {label: 'Données',      icon: '📊'},
+  storymap_creator: {label: 'Storymap',     icon: '📖'},
+  map_composer:     {label: 'Cartographe',  icon: '🗺'},
+  recipe_creator:   {label: 'Recettes',     icon: '📋'},
+  guided_tour:      {label: 'Guide',        icon: '🧭'},
+};
+
+function updateContextChip() {
+  const sel = document.getElementById('profile-select');
+  const chip = document.getElementById('ctx-label');
+  const icon = document.getElementById('ctx-icon');
+  if (!chip || !sel) return;
+  const profile = sel.value;
+  const meta = _PROFILE_META[profile] || {label: profile, icon: '📂'};
+  chip.textContent = meta.label;
+  if (icon) icon.textContent = meta.icon;
+}
+
+function toggleProfileMenu() {
+  const sel = document.getElementById('profile-select');
+  if (!sel) return;
+  sel.style.display = sel.style.display === 'none' ? 'inline-block' : 'none';
+  if (sel.style.display !== 'none') sel.focus();
+}
+
+// Réception des messages cross-frame depuis le desk (parent)
+// Quand l'user clique sur un livrable dans le drawer publi du desk,
+// le desk envoie postMessage qgis_set_render au chat iframe.
+// On en informe le backend (state agent) + on met à jour le chip.
+window.addEventListener('message', async (e) => {
+  const data = e.data;
+  if (!data || data.type !== 'qgis_set_render') return;
+  const sid = document.getElementById('session-id').value;
+  if (!sid) return;
+  try {
+    const r = await fetch(`/context/render/${encodeURIComponent(sid)}`, {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({
+        kind:  data.kind,
+        id:    data.id,
+        title: data.title,
+      }),
+    });
+    if (r.ok) {
+      const resp = await r.json();
+      // Si profile_target dispo, on l'aligne sur le combobox + chip
+      if (resp.profile_target) {
+        const sel = document.getElementById('profile-select');
+        if (sel) {
+          sel.value = resp.profile_target;
+          changeProfile(resp.profile_target);
+        }
+      }
+    }
+  } catch {}
+});
+
+// Init chip au load
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', updateContextChip);
+} else {
+  updateContextChip();
 }
 
 // ── Mémoire drawer : liste, supprime, lien éditeur complet ────────────────

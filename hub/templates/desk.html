@@ -496,7 +496,11 @@ Clique pour changer{% else %}Aucune étude active{% endif %}">
       <div class="publi-list">
         {% if catalog_items %}
           {% for item in catalog_items[:30] %}
-          <a href="{{ item.hub_url }}" target="_blank" class="publi-item" title="{{ item.url }}">
+          <a href="{{ item.hub_url }}" target="_blank" class="publi-item"
+             data-render-kind="{{ item.kind }}" data-render-id="{{ item.slug }}"
+             data-render-title="{{ item.slug }}"
+             onclick="setActiveRender('{{ item.kind }}', '{{ item.slug }}', '{{ item.slug }}')"
+             title="{{ item.url }}">
             <span class="ic">
               {% if item.kind == 'storymap' %}📖
               {% elif item.kind == 'flux' %}🌐
@@ -932,6 +936,25 @@ document.querySelector('.right-tab[data-tab="memory"]').addEventListener('click'
     memoryLoaded = true;
   }
 });
+
+// ── Routeur contextuel : clic livrable dans le drawer publi ─────────────
+// Quand l'user clique sur un livrable (storymap, recipe, etc.), on en
+// informe l'agent iframe via postMessage. L'agent bascule alors son
+// profil sur le mapping render_kind → profile (cf. _RENDER_KIND_PROFILE).
+// L'attribut href="{item.hub_url}" target="_blank" ouvre toujours le livrable
+// dans un nouvel onglet, mais en parallèle on tag le contexte agent.
+function setActiveRender(kind, id, title) {
+  const iframe = document.querySelector('.right-pane[data-pane="chat"] iframe');
+  if (!iframe || !iframe.contentWindow) return;
+  try {
+    iframe.contentWindow.postMessage({
+      type:  'qgis_set_render',
+      kind:  kind,
+      id:    id,
+      title: title,
+    }, '*');
+  } catch {}
+}
 
 // ── Panel Ressources : onglets internes (Couches / Publi / Fichiers) ────
 // Bascule entre les 3 vues du drawer. Lazy-load des couches et fichiers

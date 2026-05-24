@@ -426,17 +426,27 @@ class QGISAgent:
         self._tools_cache = None  # forcer rechargement
 
     _SWITCH_INSTRUCTIONS = (
-        "\n\n— PROFIL DYNAMIQUE —\n"
-        "Tu as un profil actuel adapté à un type de tâche. Tu peux changer "
-        "de profil en cours de conversation si la demande du user relève "
-        "d'un autre champ. Profils disponibles : standard, geoai_analyst, "
-        "risk_analyst, db_analyst, recipe_creator, storymap_creator, "
-        "map_composer, guided_tour. Pour switcher, inclus dans ta réponse "
-        "(une seule fois, en début ou fin) :\n"
+        "\n\n— PROFIL DYNAMIQUE (ROUTAGE CONTEXTUEL) —\n"
+        "Ton profil suit le contexte de l'utilisateur (étude active, livrable "
+        "sélectionné). Tu peux ET DOIS changer de profil dès que la demande "
+        "user bascule clairement sur un autre champ — pas besoin que l'user "
+        "le demande explicitement.\n\n"
+        "Triggers d'intent à détecter (réagis dès que l'user formule une de "
+        "ces intentions) :\n"
+        "  • « crée/produis/rédige une storymap »          → storymap_creator\n"
+        "  • « écris/sauve une recette »                    → recipe_creator\n"
+        "  • « détecte/segmente avec SAM/DeepForest »       → geoai_analyst\n"
+        "  • « charge un .gpkg/.csv », « requête SQL »      → db_analyst\n"
+        "  • « croise risque/PPRi/T100/inondation »         → risk_analyst\n"
+        "  • « compose/exporte une carte »                  → map_composer\n"
+        "  • « explique-moi le service / comment faire ? »  → guided_tour\n\n"
+        "Pour switcher, inclus dans ta réponse (une seule fois, en début "
+        "ou fin) :\n"
         "<switch_profile>NOM_PROFIL</switch_profile>\n"
         "Le système l'intercepte, ne montre rien à l'user, et applique le "
-        "switch pour les turns suivants. À utiliser avec parcimonie : seulement "
-        "quand la demande change clairement de nature."
+        "switch pour les turns suivants. Profils dispo : standard, "
+        "geoai_analyst, risk_analyst, db_analyst, recipe_creator, "
+        "storymap_creator, map_composer, guided_tour."
     )
 
     _REMEMBER_INSTRUCTIONS = (

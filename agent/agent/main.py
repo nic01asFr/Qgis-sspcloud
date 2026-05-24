@@ -44,6 +44,27 @@ _embed_stop: asyncio.Event | None = None
 # Map session_id → asyncio.Event. Event posé = stop demandé.
 _stop_signals: dict[str, asyncio.Event] = {}
 
+# Contexte de navigation par session : quel livrable l'user vient de
+# sélectionner dans le desk (storymap draft, recette, publication…).
+# Le routeur _resolve_active_profile l'utilise pour basculer dynamiquement
+# le profil agent (storymap → storymap_creator, recipe → recipe_creator…).
+# Map session_id → {"kind": "storymap|recipe|...", "id": str, "title": str|None}.
+# In-memory : si le pod redémarre, le contexte retombe sur l'étude active
+# (qui est persistée DB hub).
+_active_renders: dict[str, dict] = {}
+
+# Mapping render_kind → profile agent (la "table de routage contextuel").
+# Si un render est actif pour la session, son kind override le profil de
+# l'étude. Sinon, fallback sur profil de l'étude active (qui lui-même peut
+# fallback sur "standard" si pas d'étude).
+_RENDER_KIND_PROFILE: dict[str, str] = {
+    "storymap":   "storymap_creator",
+    "recipe":     "recipe_creator",
+    "flux":       "map_composer",
+    "dataset":    "db_analyst",
+    "pdf":        "storymap_creator",
+}
+
 
 def _get_or_create_stop_signal(session_id: str) -> asyncio.Event:
     """Récupère ou crée l'Event de stop pour une session."""
@@ -319,11 +340,24 @@ async def index(request: Request):
 
 # ── Chat streaming SSE ─────────────────────────────────────────────────────────
 
-async def _resolve_active_profile(form_profile: str) -> str:
+async def _resolve_active_profile(form_profile: str, session_id: str = "") -> str:
+    """Routeur contextuel : choisit le profil agent selon le contexte courant.
+
+    Ordre de priorité (du plus spécifique au plus général) :
+      1. **Render actif pour cette session** (storymap sélectionnée, recette
+         ouverte…) → profil mappé via _RENDER_KIND_PROFILE
+      2. **Étude active** (sentinel hub) → profil métier de l'étude
+      3. **form_profile** transmis (typiquement le cookie profile_id de l'user)
+
+    Permet la "contextualisation native" décrite dans CHARTE_AGENT.md §3
+    Principe 1 : l'agent suit ce que l'utilisateur fait, sans combobox.
     """
-    Si le hub a une étude active, son profil prime sur le form.
-    Permet au profil de "suivre" l'étude active de l'user automatiquement.
-    """
+    # 1. Render actif pour cette session (le plus spécifique)
+    render = _active_renders.get(session_id) if session_id else None
+    if render and render.get("kind") in _RENDER_KIND_PROFILE:
+        return _RENDER_KIND_PROFILE[render["kind"]]
+
+    # 2. Étude active (fallback)
     import os, httpx
     hub_url = os.getenv("HUB_URL", "")
     api_key = os.getenv("HUB_API_KEY", "")
@@ -341,6 +375,8 @@ async def _resolve_active_profile(form_profile: str) -> str:
                     return p
     except Exception:
         pass
+
+    # 3. Form profile (par défaut)
     return form_profile
 
 
@@ -356,8 +392,9 @@ async def chat(
     Si une étude est active côté hub, son profil prime sur le form_profile.
     Le LLM peut switcher de profil en cours via <switch_profile>X</switch_profile>.
     """
-    # L'étude active prime sur le form (permet au profil de suivre l'étude)
-    profile_id = await _resolve_active_profile(profile_id)
+    # Routeur contextuel : le render actif (sélection livrable dans le desk)
+    # ou l'étude active prime sur le form. Cf. CHARTE_AGENT §3 Principe 1.
+    profile_id = await _resolve_active_profile(profile_id, session_id=session_id)
 
     # Créer la session en mémoire si nouvelle
     await memory.create_session(session_id, "user", profile_id)
@@ -409,6 +446,47 @@ async def chat(
             "X-Accel-Buffering": "no",
         }
     )
+
+
+# ── Routeur contextuel : render actif par session ───────────────────────────
+
+@app.post("/context/render/{session_id}")
+async def set_active_render(session_id: str, request: Request):
+    """Déclare qu'un livrable est en cours d'édition/consultation.
+
+    Le routeur _resolve_active_profile utilisera le `kind` pour basculer
+    automatiquement vers le profil approprié (storymap → storymap_creator,
+    recipe → recipe_creator, etc.).
+
+    Body : {"kind": "storymap|recipe|flux|dataset|pdf", "id": "...", "title": "..."}
+    """
+    body = await request.json()
+    kind = (body.get("kind") or "").strip()
+    rid = (body.get("id") or "").strip()
+    if not kind:
+        return {"ok": False, "error": "kind requis"}
+    _active_renders[session_id] = {
+        "kind":  kind,
+        "id":    rid,
+        "title": body.get("title") or "",
+    }
+    log.info("Render actif session=%s kind=%s id=%s",
+             session_id[:12], kind, rid[:12])
+    return {"ok": True, "render": _active_renders[session_id],
+            "profile_target": _RENDER_KIND_PROFILE.get(kind)}
+
+
+@app.delete("/context/render/{session_id}")
+async def clear_active_render(session_id: str):
+    """Retire le render actif → profil retombe sur étude / form."""
+    rendered = _active_renders.pop(session_id, None)
+    return {"ok": True, "cleared": rendered}
+
+
+@app.get("/context/render/{session_id}")
+async def get_active_render(session_id: str):
+    """Retourne le render actif pour cette session, ou null."""
+    return {"render": _active_renders.get(session_id)}
 
 
 @app.post("/chat/{session_id}/stop")

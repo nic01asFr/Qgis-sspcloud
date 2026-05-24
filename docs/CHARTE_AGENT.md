@@ -37,7 +37,7 @@ approfondie.
 L'**étude** est l'unité qui traverse tout le cycle. C'est elle qu'on archive,
 qu'on partage, qu'on industrialise.
 
-## 3. Les 8 principes de fonctionnement de l'agent
+## 3. Les 9 principes de fonctionnement de l'agent
 
 ### Principe 1 — Contextualisation native (multimodale)
 
@@ -182,6 +182,28 @@ Lifecycle :
 en YAML dans `hub/hub/profiles/`. Migration prévue : ces 8 profils deviennent
 des AgentTemplates système livrés par défaut.
 
+### Principe 9 — Typologie fichiers explicite (3 familles)
+
+L'agent traite distinctement trois familles de fichiers, chacune avec son
+lifecycle, ses tools, ses permissions et son rôle dans le cycle d'usage :
+
+| Famille | Direction | Exemples | Tools agent | Stockage | Indexé RAG ? |
+|---|---|---|---|---|---|
+| **A. Données spatiales** | Entrant → QGIS | .tif, .gpkg, .csv | add_layer, run_processing, smart_load | `data/` | ❌ |
+| **B. Connaissance** | Contextuel → agent | .pdf, .docx, .md, notes | search_uploaded_docs, read_uploaded_doc | `docs/` | ✅ (L4) |
+| **C. Livrables** | Sortant → public | storymap, recette, AgentTemplate | publish, embed_agent | `exports/` + S3 | docs intégrés ✅ |
+
+Chaque référence fichier porte un `kind` explicite. Cela garantit :
+- Tools adéquats par famille (pas de `add_layer` sur un PDF)
+- Permissions correctes selon phase du cycle (cf. §11 table permissions)
+- Lifecycle approprié (adoption / indexation / publication)
+- UI claire (un onglet par famille dans panel Ressources)
+- ZIP export propre (seules les bonnes catégories incluses)
+
+État : ⏳ cadré, partiellement implémenté. Famille A : tools ✅, panel UI ✅.
+Famille B : tools ⏳ Phase 13+. Famille C : tools partiels (publish existe),
+embed_agent ⏳ Phase 10. Détail complet : voir §11 Fichiers.
+
 ## 4. Architecture mémoire — 4 couches
 
 | Couche | Stockage | Portée | Persistant après rollback ? |
@@ -283,9 +305,15 @@ mono-repo (#11) prise.
 - **Phase 13+ — Document RAG L4** (4-5j) : SQLite-vec + 3 tools MCP
 
 ### Moyen terme (~1-2 semaines)
+- **Phase Fichiers — Upload natif & classification famille A/B** (1-2j)
+  - POST `/studies/{sid}/upload` (multipart) côté hub
+  - Drag-drop sur zone chat + bouton 📤 panel Ressources
+  - Auto-classification (extension + MIME) → kind + famille
+  - Adoption auto via add_layer (A) ou attach_doc (B placeholder)
 - **Diffusion vivante** : agent embed dans publi HTML (3-4j)
   - URL `/published/{user}/agent/{slug}/`
   - Iframe figée + L4 docs sans L3 user + tools restreints
+  - `embed_agent_in_publication(slug, template_id)`
 - **Collaboration jetons** : session/étude + ACL + expiration (2j)
 - **GeoAI fully bundled** : SAM2+DeepForest bundlés (✅), SAM3 runtime via HF_TOKEN (opt-in user Vault), OmniWater à retravailler upstream
 - **Pod GPU lazy init** (chip bandeau cliquable) : code en place, à durcir UX
@@ -324,6 +352,150 @@ mono-repo (#11) prise.
 | 9 | Agent publié anonymise le lecteur | Anti-fuite données privées du producteur |
 | 10 | Macro learning bâti sur checkpoints existants | Réutilise l'infra Rollback, pas de nouveau journal |
 | 11 | **Consolidation mono-repo `qgis-sspcloud`** (à trancher) | Workspace + portail admin actuellement dans `Passerelle/examples/qgis-mcp-portal`. Critères : maintenabilité, CI/CD unifié, simplification déploiement. À décider AVANT Phase 10 (touche plusieurs sous-systèmes). |
+| 12 | **Typologie 3 familles A/B/C des fichiers** | Données entrantes (QGIS) / Connaissance contextuelle (RAG) / Livrables sortants (publiables). Tools, permissions, lifecycle et UI distincts par famille. Cf. §11 et Principe 9. Évite confusion "tout est juste un fichier", garantit sandboxing cat C. |
+
+## 11. Fichiers — typologie 3 familles + transverses
+
+Cette section consolide le traitement des fichiers, axe transversal aussi
+structurant que la mémoire ou l'audit. Cf. Principe 9.
+
+### 11.1 — Les 3 familles
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ FAMILLE A — DONNÉES                  (Entrant — consommé par QGIS)  │
+│ raster, vector, tabular                                              │
+│ → manipulées comme couches dans le projet QGIS                       │
+│ → adoptées dans studies/{sid}/data/ pour autoporter l'étude          │
+│ → tracées dans treatments.jsonl (chain-badges)                       │
+└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│ FAMILLE B — CONNAISSANCE         (Contextuel — consommé par l'agent)│
+│ document (PDF, DOCX, MD), notes                                      │
+│ → indexées dans vector store L4 (SQLite-vec)                         │
+│ → l'agent y fait référence dans ses réponses ("selon le rapport X")  │
+│ → stockées dans studies/{sid}/docs/                                  │
+└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│ FAMILLE C — LIVRABLES                  (Sortant — publié au monde)  │
+│ storymap, export PDF, dataset filtré, recette, AgentTemplate, …     │
+│ → produits du cycle (Production / Capitalisation)                    │
+│ → URL canonique /published/{user}/{kind}/{slug}/ + stockage S3      │
+│ → lifecycle : draft → publié → archivé → unpublished                 │
+│ → agent C embarqué possible (storymap interactive, agent guichet…)   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 11.2 — Typologie complète
+
+| Famille | Kind | Stockage | Tools MCP | RAG ? | ZIP étude | Publi S3 |
+|---|---|---|---|---|---|---|
+| **A** | raster | `data/` | add_layer, run_processing | ❌ | ✅ | ❌ |
+| **A** | vector | `data/` | add_layer, run_processing | ❌ | ✅ | ❌ |
+| **A** | tabular | `data/` | add_layer, query_resource | ❌ | ✅ | ❌ |
+| **B** | document | `docs/` | search_uploaded_docs, read_uploaded_doc | ✅ | ✅ option | dans publi RAG |
+| **B** | notes | `notes.md` | read_study_notes | ✅ | ✅ | ❌ |
+| **C** | storymap | `exports/` + S3 | publish, embed_agent | ❌ | ✅ `publications/` | ✅ |
+| **C** | pdf | `exports/` + S3 | publish | ❌ | ✅ | ✅ |
+| **C** | flux | `exports/` + S3 | publish | ❌ | ✅ | ✅ |
+| **C** | dataset | `exports/` + S3 | publish | ❌ | ✅ | ✅ |
+| **C** | recipe | `recipes/` + S3 | publish, run_recipe | ❌ | ✅ | ✅ |
+| **C** | agent | `agents/{tpl}/` + S3 | publish_template, embed_agent | docs intégrés ✅ | ✅ | ✅ |
+| **C** | capture | `exports/` | save_capture | ❌ | ✅ | option |
+| **C** | bundle | (généré à la demande) | export_study_zip | ❌ | (c'est lui) | option |
+| trans | upload | `uploads/` | upload_file, move_file | ❌ | ❌ par défaut | ❌ |
+| trans | cache | `/data/cache/` | smart_load | ❌ | ❌ jamais | ❌ |
+
+### 11.3 — Permissions par famille × phase du cycle
+
+| Famille | Exploration | Production | Diffusion (cat C) | Capitalisation |
+|---|---|---|---|---|
+| A. Données | ❌ pas d'étude | ✅ tout | ❌ pas exposé | ✅ |
+| B. Connaissance (docs) | partiel (sys) | ✅ tout | ✅ **lecture** (sources citées) | ✅ |
+| C. Livrables produits | ❌ | ✅ | ✅ download autorisé | ✅ |
+| C. Recettes | partiel | ✅ | ✅ replay si tools_allowed | ✅ |
+| C. AgentTemplates | ❌ | ✅ | ❌ (sauf publi indépendante) | ✅ |
+| transverse Uploads | propres | ✅ tout étude | ❌ jamais exposé | ✅ |
+
+### 11.4 — Tools MCP dédiés par famille
+
+```python
+# Famille A — Données spatiales
+add_layer(uri, layer_type, name)
+add_from_file(path)              # auto-classify A
+run_processing(algo, params)
+smart_load(catalog_id, bbox)
+
+# Famille B — Connaissance  (Phase 13+)
+search_uploaded_docs(query, sid?)
+read_uploaded_doc(path, section?)
+list_uploaded_docs(sid?)
+attach_doc_to_study(path)
+
+# Famille C — Livrables  (partiel, Phase 10)
+publish(slug, kind, source_path)
+unpublish(slug)
+list_publications(user?, kind?, status?)
+republish(slug, source_path)
+embed_agent_in_publication(slug, template_id)
+publish_template(tpl_id)
+
+# Communs (transversaux)
+list_files(directory?, kind?)
+upload_file(name, url?)
+download_file(path)
+delete_file(path)
+move_file(src, dst)               # adoption uploads → data ou docs
+```
+
+### 11.5 — Panel Ressources cible (5 onglets)
+
+```
+Drawer "📁 Ressources de l'étude"
+ ├── 🗺 Couches           ← Famille A (data/)              ✅ existe
+ ├── 📖 Docs              ← Famille B (docs/ + notes)      ⏳ Phase 13+
+ ├── 📚 Livrables          ← Famille C (exports + publi)   partiel
+ │    └── filtres : 📖 Storymap · 📄 PDF · 📊 Dataset · 📋 Recette · 🤖 Agent
+ ├── 📁 Fichiers           ← Transverses (uploads)         ✅ existe
+ └── 🤖 Templates          ← Famille C sous-set (AgentTemplates dispo) ⏳ Phase 10
+```
+
+### 11.6 — Lifecycle distinct par famille
+
+| Famille | Auto-purge | Adoption / Indexation | Inclus ZIP | Publi S3 |
+|---|---|---|---|---|
+| Cache WFS/WMS | > 30j | — | ❌ | ❌ |
+| Uploads transients | > 7j si non adopté | → data/ ou docs/ | ❌ par défaut | ❌ |
+| A. Données (`data/`) | Jamais | adopt via add_layer | ✅ | ❌ |
+| B. Docs (`docs/`) | Jamais | indexé RAG L4 | ✅ option | ✅ accessible RAG |
+| C. Exports/Livrables | Jamais | published → S3 | ✅ | ✅ |
+| C. Recettes | Jamais | publié → S3 | ✅ | ✅ replay |
+| C. AgentTemplates | Jamais | publié indépendamment | ✅ | ✅ |
+
+### 11.7 — Workflows métier types
+
+**Upload PCRS dalle locale** :
+1. User drag-drop `.tif` dans le chat (ou bouton 📤)
+2. Hub `POST /studies/{sid}/upload` → stocke dans `uploads/`
+3. Auto-classification : raster → Famille A
+4. Agent propose : *"Tu as téléversé X.tif (250 Mo, raster). Je l'ajoute au projet ?"*
+5. `add_layer` adopte le fichier dans `data/`
+6. Si plugin pcrs_detect actif : bascule auto sur "Dalles locales"
+
+**Document métier** :
+1. User drag-drop `.pdf` dans le chat
+2. Auto-classification : document → Famille B
+3. Agent propose : *"Ajouter aux documents indexés de l'étude ?"*
+4. `attach_doc_to_study` déplace vers `docs/` + déclenche indexation RAG
+5. L'agent peut désormais citer le document dans ses réponses
+
+**Livrable storymap + agent embarqué** :
+1. Production aboutie, treatments.jsonl rempli
+2. User : *"publie cette storymap"* → agent génère HTML DSFR
+3. `publish(slug="risque-marseille", kind="storymap", source=...)` → S3
+4. Agent propose : *"Embarquer un agent pour répondre aux questions des lecteurs ?"*
+5. `embed_agent_in_publication(slug, template_id=...)` → iframe agent figée
+6. URL `/published/{user}/storymap/risque-marseille/` interactive
 
 ## 10. Pour relire cette charte avant chaque décision
 
@@ -357,9 +529,12 @@ sans place explicit dans la charte (pas de principe / décision à en tirer) :
 - `project_passerelle_client`, `project_compute_v2_validated` — autres repos
   (Passerelle binaire Go, compute distribué)
 
-Dernière mise à jour : 2026-05-24 (v2) — ajouts : multimodal input + chip GPU
-(§3 Principe 1), dépendances infra AgentTemplate (§5), GeoAI bundle éclaté
-(§7 moyen terme), décision #11 mono-repo (§9), annexe items hors charte.
+Dernière mise à jour : 2026-05-24 (v3) — ajouts : §11 Fichiers (typologie 3
+familles A/B/C entrant/contextuel/sortant), Principe 9 typologie fichiers
+explicite, décision #12, roadmap Phase Fichiers Upload natif, panel
+Ressources 5 onglets cible (Couches + Docs + Livrables + Fichiers +
+Templates).
 
-Prochaine étape recommandée : **routeur contextuel** (~2-3j) puis
-**Phase 10 AgentTemplate** (5-7j).
+Prochaine étape recommandée : **routeur contextuel** (~30-45 min restantes)
+puis **Phase Fichiers Upload natif** (1-2j) puis **Phase 10 AgentTemplate**
+(5-7j).
