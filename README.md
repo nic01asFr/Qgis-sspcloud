@@ -3,6 +3,10 @@
 Service QGIS géospatial pour agents CEREMA sur SSPCloud Onyxia.  
 QGIS Desktop + Agent IA + Mémoire long terme.
 
+> **Charte de fonctionnement de l'agent** (vision produit, principes,
+> roadmap, invariants) : voir [docs/CHARTE_AGENT.md](docs/CHARTE_AGENT.md).
+> Document évolutif à relire avant toute décision technique.
+
 ## Installation
 
 1. Connecte-toi sur [datalab.sspcloud.fr](https://datalab.sspcloud.fr)
