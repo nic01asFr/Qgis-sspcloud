@@ -1115,6 +1115,8 @@ ne vient pas d'un outil cette session, la supprimer.
                 # ÉMIS AVANT le blockquote markdown pour que le commentaire HTML
                 # apparaisse comme prev-sibling du blockquote dans le DOM,
                 # ce que `attachRollbackButtons` côté JS attend.
+                current_ckpt_id: str | None = None
+                current_ckpt_study: str | None = None
                 if fn_name in _MUTATING_TOOLS and _HUB_URL and _HUB_KEY:
                     try:
                         ckpt_id = uuid.uuid4().hex[:12]
@@ -1146,6 +1148,9 @@ ne vient pas d'un outil cette session, la supprimer.
                                     study_id=ck_data.get("study_id"),
                                     audit_ts=ck_data.get("audit_ts"),
                                 )
+                                # Mémoriser pour fallback rollback si stop+timeout
+                                current_ckpt_id = ckpt_id
+                                current_ckpt_study = ck_data.get("study_id")
                                 # Marqueur HTML invisible posé AVANT le blockquote
                                 # du tool. attachRollbackButtons cherchera le
                                 # nextSibling BLOCKQUOTE → bouton "↶ Revenir avant".
@@ -1171,7 +1176,89 @@ ne vient pas d'un outil cette session, la supprimer.
                     yield f" — {args_preview}"
                 yield "\n"
 
-                result = await _call_mcp_tool(fn_name, fn_args, username=self.username)
+                # ── Exécution du tool avec surveillance stop_signal ────────
+                # Commit C : si l'user clique Stop pendant un tool MUTATING,
+                # on laisse une grace period (STOP_TOOL_GRACE_SEC, défaut 30s)
+                # pour que le tool finisse proprement. Si timeout, on cancel
+                # le tool ET on déclenche un rollback automatique au snapshot
+                # pré-tool — exactement la sémantique demandée par l'user :
+                # "stoppe le tool et revert sur état juste avant en fallback
+                # si problème, fiable".
+                # Pour les tools NON mutating (lecture seule), pas de rollback
+                # possible/nécessaire — on attend juste la fin du tool.
+                if (fn_name in _MUTATING_TOOLS and stop_signal is not None):
+                    tool_task = asyncio.create_task(
+                        _call_mcp_tool(fn_name, fn_args, username=self.username)
+                    )
+                    stop_wait = asyncio.create_task(stop_signal.wait())
+                    done, pending = await asyncio.wait(
+                        {tool_task, stop_wait},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if stop_wait in done and tool_task not in done:
+                        # Stop demandé pendant l'exécution du tool mutating.
+                        grace = int(os.getenv("STOP_TOOL_GRACE_SEC", "30"))
+                        log.info(
+                            "Stop pendant %s — grace %ds avant rollback fallback",
+                            fn_name, grace,
+                        )
+                        try:
+                            result = await asyncio.wait_for(tool_task, timeout=grace)
+                        except asyncio.TimeoutError:
+                            # Tool n'a pas fini dans le grace → cancel + rollback.
+                            tool_task.cancel()
+                            try:
+                                await tool_task
+                            except (asyncio.CancelledError, Exception):
+                                pass
+                            rollback_msg = (
+                                f"\n\n⛔ **Stop + timeout sur `{fn_name}`** "
+                                f"(> {grace}s) → rollback automatique au point précédent.\n"
+                            )
+                            if current_ckpt_id and current_ckpt_study \
+                               and _HUB_URL and _HUB_KEY:
+                                try:
+                                    async with httpx.AsyncClient(timeout=45) as rb_c:
+                                        rb_resp = await rb_c.post(
+                                            f"{_HUB_URL}/sessions/{self.session_id}/restore-checkpoint",
+                                            headers={"Authorization": f"Bearer {_HUB_KEY}"},
+                                            json={
+                                                "checkpoint_id": current_ckpt_id,
+                                                "study_id":      current_ckpt_study,
+                                            },
+                                        )
+                                        if rb_resp.status_code < 300:
+                                            rollback_msg += (
+                                                "✅ Projet QGIS restauré à l'état d'avant le tool.\n"
+                                            )
+                                        else:
+                                            rollback_msg += (
+                                                f"⚠️ Rollback échec ({rb_resp.status_code}) — "
+                                                "vérifie l'état projet manuellement.\n"
+                                            )
+                                except Exception as exc:
+                                    rollback_msg += f"⚠️ Rollback échec : {exc}\n"
+                            else:
+                                rollback_msg += (
+                                    "(pas de checkpoint disponible — aucune restauration possible)\n"
+                                )
+                            yield rollback_msg
+                            result = json.dumps({
+                                "success": False,
+                                "error":   "tool_cancelled_by_stop",
+                                "tool":    fn_name,
+                            })
+                    else:
+                        # Tool fini avant le stop → résultat normal.
+                        stop_wait.cancel()
+                        try:
+                            await stop_wait
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                        result = tool_task.result()
+                else:
+                    # Tool non mutating OU pas de stop_signal : exécution directe.
+                    result = await _call_mcp_tool(fn_name, fn_args, username=self.username)
                 tool_calls_made.append({"tool": fn_name, "args": fn_args, "result": result[:200]})
 
                 result_clean = result.strip()
