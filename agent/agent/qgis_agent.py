@@ -1106,25 +1106,15 @@ ne vient pas d'un outil cette session, la supprimer.
                 except Exception:
                     fn_args = {}
 
-                log.info("Tool call: %s(%s)", fn_name, str(fn_args)[:100])
-                yield f"\n\n> **`{fn_name}`**"
-                if fn_args:
-                    def _short_arg(v):
-                        s = str(v).replace("\n", " ").replace("\r", " ").replace("`", "'")
-                        s = " ".join(s.split())
-                        return s[:40] + ("…" if len(s) > 40 else "")
-                    args_preview = ", ".join(
-                        f"`{k}={_short_arg(v)}`" for k, v in fn_args.items()
-                    )
-                    yield f" — {args_preview}"
-                yield "\n"
-
                 # ── Hook checkpoint pré-mutating ───────────────────────────
                 # Avant chaque tool modifiant l'état projet, on demande au hub
                 # de prendre un snapshot du .qgz courant. L'agent enregistre
                 # la métadonnée dans memory.checkpoints. En cas d'échec du
                 # snapshot, on continue quand même (best-effort) — l'absence
                 # de checkpoint empêche juste le rollback ultérieur sur ce point.
+                # ÉMIS AVANT le blockquote markdown pour que le commentaire HTML
+                # apparaisse comme prev-sibling du blockquote dans le DOM,
+                # ce que `attachRollbackButtons` côté JS attend.
                 if fn_name in _MUTATING_TOOLS and _HUB_URL and _HUB_KEY:
                     try:
                         ckpt_id = uuid.uuid4().hex[:12]
@@ -1153,10 +1143,10 @@ ne vient pas d'un outil cette session, la supprimer.
                                     study_id=ck_data.get("study_id"),
                                     audit_ts=ck_data.get("audit_ts"),
                                 )
-                                # Marqueur HTML pour que l'UI puisse afficher
-                                # un bouton "↶ Revenir avant" sur ce blockquote.
-                                # Format : commentaire HTML invisible mais parseable.
-                                yield f"<!--ckpt:{ckpt_id}-->\n"
+                                # Marqueur HTML invisible posé AVANT le blockquote
+                                # du tool. attachRollbackButtons cherchera le
+                                # nextSibling BLOCKQUOTE → bouton "↶ Revenir avant".
+                                yield f"\n\n<!--ckpt:{ckpt_id}-->\n"
                                 log.info("Checkpoint %s pris avant %s",
                                          ckpt_id, fn_name)
                             else:
@@ -1164,6 +1154,19 @@ ne vient pas d'un outil cette session, la supprimer.
                                             ck_resp.status_code)
                     except Exception as exc:
                         log.warning("Checkpoint pré-%s échoué : %s", fn_name, exc)
+
+                log.info("Tool call: %s(%s)", fn_name, str(fn_args)[:100])
+                yield f"\n\n> **`{fn_name}`**"
+                if fn_args:
+                    def _short_arg(v):
+                        s = str(v).replace("\n", " ").replace("\r", " ").replace("`", "'")
+                        s = " ".join(s.split())
+                        return s[:40] + ("…" if len(s) > 40 else "")
+                    args_preview = ", ".join(
+                        f"`{k}={_short_arg(v)}`" for k, v in fn_args.items()
+                    )
+                    yield f" — {args_preview}"
+                yield "\n"
 
                 result = await _call_mcp_tool(fn_name, fn_args, username=self.username)
                 tool_calls_made.append({"tool": fn_name, "args": fn_args, "result": result[:200]})
