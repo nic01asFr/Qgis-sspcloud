@@ -840,13 +840,15 @@ document.getElementById('stop-btn').addEventListener('click', async () => {
     await fetch(`/chat/${encodeURIComponent(sid)}/stop`, {method: 'POST'});
   } catch {}
   // On NE coupe PAS le fetch SSE côté client immédiatement : on laisse le
-  // serveur émettre le dernier chunk "⛔ Arrêté par l'utilisateur" et clore
-  // proprement. Si le serveur ne répond pas dans 5s, on coupe en force.
+  // serveur faire sa grace period (STOP_TOOL_GRACE_SEC, défaut 30s) +
+  // rollback fallback si le tool ne finit pas. On donne donc une généreuse
+  // fenêtre de 60s avant d'abort en force — sinon on coupe le SSE au milieu
+  // de la séquence grace + restore-checkpoint côté serveur.
   setTimeout(() => {
     if (_currentAbort) {
       try { _currentAbort.abort(); } catch {}
     }
-  }, 5000);
+  }, 60000);
 });
 
 document.getElementById('chat-form').addEventListener('submit', async (e) => {

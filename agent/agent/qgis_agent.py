@@ -1202,10 +1202,24 @@ ne vient pas d'un outil cette session, la supprimer.
                             "Stop pendant %s — grace %ds avant rollback fallback",
                             fn_name, grace,
                         )
+                        # Triple piège : TimeoutError (grace écoulée),
+                        # CancelledError (générateur SSE cancelled par le
+                        # client qui abort), Exception générique → on traite
+                        # tous comme "tool n'a pas fini proprement" et on
+                        # déclenche le fallback rollback.
+                        timed_out_or_cancelled = False
                         try:
                             result = await asyncio.wait_for(tool_task, timeout=grace)
                         except asyncio.TimeoutError:
-                            # Tool n'a pas fini dans le grace → cancel + rollback.
+                            timed_out_or_cancelled = True
+                            log.info("Tool %s n'a pas fini dans grace %ds", fn_name, grace)
+                        except asyncio.CancelledError:
+                            timed_out_or_cancelled = True
+                            log.info("Tool %s cancelled (SSE coupé)", fn_name)
+                        except Exception as exc:
+                            timed_out_or_cancelled = True
+                            log.warning("Tool %s a échoué : %s", fn_name, exc)
+                        if timed_out_or_cancelled:
                             tool_task.cancel()
                             try:
                                 await tool_task
