@@ -429,6 +429,21 @@ async def get_recent_sessions(username: str, limit: int = 10) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+async def count_session_messages(session_id: str) -> int:
+    """Nombre de messages persistés pour cette session.
+
+    Utilisé par le hook checkpoint pour calculer un message_idx COHÉRENT
+    avec la DB (compter en DB, pas dans le contexte LLM qui inclut
+    system_prompt + history). Le bon point de retour pour rollback est
+    "juste après le dernier message DB au moment du tool".
+    """
+    async with aiosqlite.connect(_DB_PATH) as db:
+        row = await (await db.execute(
+            "SELECT COUNT(*) FROM messages WHERE session_id = ?", (session_id,),
+        )).fetchone()
+    return row[0] if row else 0
+
+
 async def truncate_messages_after(session_id: str, message_idx: int) -> int:
     """Supprime tous les messages de la session après l'index donné.
 

@@ -1118,11 +1118,14 @@ ne vient pas d'un outil cette session, la supprimer.
                 if fn_name in _MUTATING_TOOLS and _HUB_URL and _HUB_KEY:
                     try:
                         ckpt_id = uuid.uuid4().hex[:12]
-                        # Index du dernier message persisté (assistant courant).
-                        # On compte les messages déjà dans le contexte LLM, c'est
-                        # l'index où l'utilisateur voudra retourner avant ce tool.
-                        msg_idx = len([m for m in messages
-                                       if m.get("role") in ("user", "assistant")])
+                        # Index du DERNIER message persisté en DB au moment du
+                        # checkpoint = point de retour pour rollback.
+                        # truncate_messages_after(idx) garde [0..idx] et jette
+                        # tout ce qui suit (= la future réponse assistant de
+                        # ce turn). On compte DB, pas le contexte LLM (qui
+                        # inclut system_prompt + history non persistés).
+                        db_count = await memory.count_session_messages(self.session_id)
+                        msg_idx = max(db_count - 1, 0)
                         async with httpx.AsyncClient(timeout=15) as ck_client:
                             ck_resp = await ck_client.post(
                                 f"{_HUB_URL}/sessions/{self.session_id}/checkpoint",
