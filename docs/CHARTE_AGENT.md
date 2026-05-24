@@ -39,10 +39,10 @@ qu'on partage, qu'on industrialise.
 
 ## 3. Les 8 principes de fonctionnement de l'agent
 
-### Principe 1 — Contextualisation native
+### Principe 1 — Contextualisation native (multimodale)
 
 L'agent se positionne lui-même selon ce que l'utilisateur fait. Pas de combobox
-de profil à remplir.
+de profil à remplir. Input texte OU vocal.
 
 | Contexte de navigation | Mode agent |
 |---|---|
@@ -51,13 +51,20 @@ de profil à remplir.
 | Étude + draft storymap sélectionnée | Édition storymap |
 | Étude + recette ouverte | Auteur recette |
 | Intent "crée storymap" détecté dans chat | Bascule édition storymap |
+| GeoAI pod réveillé | Profil geoai_analyst dispo |
 
-UI : un **chip de contexte** lit le mode actif. Pas de combobox. Override
-manuel ponctuel possible si nécessaire (mais c'est l'exception).
+**Chips de contexte dans le bandeau** (lisible en permanence) :
+- 📂 Étude active + profil agent courant
+- 🧠 Modèle LLM utilisé (qwen/gemma)
+- 🎯 GPU / IA état : prêt / attente / dormant / indisponible (cliquable pour réveiller)
+- 🎤 Input vocal (Whisper STT) — bouton dictée dans la barre
+
+UI : pas de combobox. Override manuel ponctuel possible si nécessaire (mais
+c'est l'exception).
 
 État : ⏳ cadré. Aujourd'hui combobox 8 profils statiques + sentinel
-`.active_study`. À faire : routeur contextuel + détection intent
-+ remplacer combobox par chip.
+`.active_study` + bouton mic existant pour vocal. À faire : routeur contextuel
++ détection intent + remplacer combobox par chip + chip GPU/IA état.
 
 ### Principe 2 — Audit honnête par défaut
 
@@ -89,7 +96,9 @@ L'agent évite trois gaspillages :
 **c. Hallucination géographique**
 - Catalogue obligatoire en tête du prompt (overpass, geo.api.gouv.fr, data.geopf.fr, data.gouv CEREMA)
 - Anti-hallucination : jamais d'URL inventée
-- Résolution INSEE directe pour arrondissements (Paris/Marseille/Lyon)
+- Cas concret durci : **arrondissements Paris/Marseille/Lyon** non indexés par
+  `/communes?nom=` → résolution INSEE directe (Paris 75101-20, Marseille
+  13201-16, Lyon 69381-89) avec regex bidirectionnelle (ville↔numéro)
 
 État : ✅ codé en prod. Catalogue data.gouv CEREMA à enrichir lors de
 l'Étape 4 (data.gouv MCP).
@@ -207,19 +216,48 @@ Format détaillé (voir Principe 8 pour la structure). Trois usages :
 - Pas de mutating tools
 - Pas de chain L2 vers le projet QGIS vivant du producteur
 
-## 6. Audit & rollback — règles dures
+**Dépendances infra possibles d'un AgentTemplate :**
+
+Un template peut déclarer des dépendances d'infrastructure qui doivent être
+satisfaites pour qu'il soit utilisable. Au démarrage, le hub vérifie / réveille
+ces dépendances.
+
+| Dépendance | Quand | Exemple template |
+|---|---|---|
+| Pod GPU GeoAI (SAM2/SAM3/DeepForest/OmniWater) | Tools `detect_*`, `segment_*` | `geoai_analyst` |
+| Pod workspace QGIS Desktop scale > 0 | Tools mutating MCP | tous templates Production |
+| Catalogue data.gouv CEREMA en cache | Tools search_datasets | `risk_analyst`, `db_analyst` |
+| Vector store SQLite-vec initialisé | RAG L4 | tout template avec docs RAG |
+| n8n bridge (si workflow externe) | Tools webhook | template "automation" futur |
+
+État : ⏳ Phase 10 — modèle `meta.json` du template inclut `requires[]` ;
+le hub bootstrap au besoin (cf. `_bootstrap_geoai_gpu`).
+
+## 6. Audit & rollback — règles dures + tests
 
 | Règle | Tests d'invariant | Statut |
 |---|---|---|
-| Chain-badges DSFR depuis tap MCP réel | `test_storymap_audit.py` (5 tests) | ✅ |
-| `read_treatments` filtres cohérents | `test_audit_trail.py` (7 tests) | ✅ |
-| `truncate_messages_after` cohérence | `test_checkpoints.py` (6 tests) | ✅ |
+| Chain-badges DSFR depuis tap MCP réel | `hub/tests/test_storymap_audit.py` (5 tests) | ✅ |
+| `read_treatments` filtres cohérents | `hub/tests/test_audit_trail.py` (7 tests) | ✅ |
+| `truncate_messages_after` cohérence | `agent/tests/test_checkpoints.py` (6 tests) | ✅ |
 | `_log_audit_event_on_pod` non silencieux | (log warning explicit type) | ✅ |
 | `purge-checkpoint-files` filtre path traversal | (whitelist `.checkpoints/`) | ✅ |
 | Anti-hallucination géo en tête du prompt | (audit prompt + KB tips) | ✅ |
 
-Tout PR touchant à `storymap_dsfr.py`, `audit_trail.py`, `qgis_agent.py` doit
-faire passer ces 18 tests.
+**Tests d'invariant : 18 (5+7+6).** Tout PR touchant à `storymap_dsfr.py`,
+`audit_trail.py`, `memory.py`, `qgis_agent.py`, `studies.py` doit les faire
+passer.
+
+Le repo `qgis-mcp-portal` (autre repo) couvre 64 tests `api/` historiques.
+Mention pour info, pas obligatoires pour ce repo. À fusionner si décision
+mono-repo (#11) prise.
+
+**Pipeline CI/CD** :
+- Push sur main → GitHub Actions build & push `ghcr.io/nic01asfr/qgis-{agent,hub}:latest`
+- Workflow `build.yml` build en ~2 min par image
+- `imagePullPolicy: Always` côté K8s → restart pod = re-pull la nouvelle image
+- Patterns CI durs : free-disk-space oui, **pas** cache-from (double l'empreinte),
+  `set -eu` sans pipefail (SIGPIPE head→141)
 
 ## 7. Roadmap d'évolution
 
@@ -232,21 +270,31 @@ faire passer ces 18 tests.
 - 8 profils statiques (à migrer en AgentTemplates système)
 
 ### En cours de cadrage
-- Routeur contextuel + chip lieu de combobox (~2-3j, Phase 9.5)
+- Routeur contextuel + chips de bandeau (~2-3j, Phase 9.5)
 - Étape 4 : data.gouv MCP + spé CEREMA (~2j)
+- Décision mono-repo : `qgis-sspcloud` absorbe workspace + portail admin ? (cf. décision §9 #11)
 
 ### Court terme (~2-3 semaines)
 - **Phase 10 — AgentTemplate** (5-7j) : pivot structurant
-- **Phase 11 — Macro learning** (3j) : fondation prête (checkpoints)
-- **Phase 13+ — Document RAG L4** (4-5j)
+  - Format `meta.json` + `tools_allowed` + `requires[]`
+  - Migration 8 profils statiques → templates système
+  - UI création/édition depuis l'étude
+- **Phase 11 — Macro learning** (3j) : fondation prête (checkpoints + tool_calls_made)
+- **Phase 13+ — Document RAG L4** (4-5j) : SQLite-vec + 3 tools MCP
 
 ### Moyen terme (~1-2 semaines)
-- Diffusion vivante : agent embed dans publi HTML (3-4j)
-- Collaboration jetons : session/étude + ACL (2j)
+- **Diffusion vivante** : agent embed dans publi HTML (3-4j)
+  - URL `/published/{user}/agent/{slug}/`
+  - Iframe figée + L4 docs sans L3 user + tools restreints
+- **Collaboration jetons** : session/étude + ACL + expiration (2j)
+- **GeoAI fully bundled** : SAM2+DeepForest bundlés (✅), SAM3 runtime via HF_TOKEN (opt-in user Vault), OmniWater à retravailler upstream
+- **Pod GPU lazy init** (chip bandeau cliquable) : code en place, à durcir UX
 
 ### Long terme
 - Pont Grist : terrain ↔ gestion (Phase 14, variable)
-- Pod GPU init par défaut (vision)
+- Pod GPU init par défaut au premier déploiement (vision)
+- 3 catégories agents (A/B/C) → reformulés en 4 phases du cycle (cf. §2)
+- Catalogue data.gouv CEREMA en cache permanent (spé organisations/cerema/datasets)
 
 ## 8. Invariants permanents
 
@@ -275,6 +323,7 @@ faire passer ces 18 tests.
 | 8 | Profils → AgentTemplates système (pas combobox) | Routeur contextuel = mode natif, override = exception |
 | 9 | Agent publié anonymise le lecteur | Anti-fuite données privées du producteur |
 | 10 | Macro learning bâti sur checkpoints existants | Réutilise l'infra Rollback, pas de nouveau journal |
+| 11 | **Consolidation mono-repo `qgis-sspcloud`** (à trancher) | Workspace + portail admin actuellement dans `Passerelle/examples/qgis-mcp-portal`. Critères : maintenabilité, CI/CD unifié, simplification déploiement. À décider AVANT Phase 10 (touche plusieurs sous-systèmes). |
 
 ## 10. Pour relire cette charte avant chaque décision
 
@@ -296,6 +345,21 @@ en conscience et documenter pourquoi**.
 jour le statut. Quand une décision architecturale nouvelle est prise, l'ajouter
 à la section 9.
 
-Dernière mise à jour : 2026-05-24 — phase Stop/Rollback livrée et validée en
-réel + bonus UX placeholder. Prochaine étape recommandée : routeur contextuel
-puis Phase 10 AgentTemplate.
+## Annexe — Items connus hors charte directe
+
+Ces notes mémoire sont conservées comme références techniques transversales,
+sans place explicit dans la charte (pas de principe / décision à en tirer) :
+
+- `reference_sse_buffering` — chunks SSE >64 KB côté JS, buffer `\n\n` obligatoire
+- `reference_sspcloud_rbac_namespace` — pas de Role custom dans namespace user OIDC
+- `reference_github_actions_ci_disk_space` — patterns CI Docker volumineux
+- `reference_n8n_rest_api`, `reference_n8n_mcp_ssrf_k8s` — intégrations n8n (projets connexes)
+- `project_passerelle_client`, `project_compute_v2_validated` — autres repos
+  (Passerelle binaire Go, compute distribué)
+
+Dernière mise à jour : 2026-05-24 (v2) — ajouts : multimodal input + chip GPU
+(§3 Principe 1), dépendances infra AgentTemplate (§5), GeoAI bundle éclaté
+(§7 moyen terme), décision #11 mono-repo (§9), annexe items hors charte.
+
+Prochaine étape recommandée : **routeur contextuel** (~2-3j) puis
+**Phase 10 AgentTemplate** (5-7j).
