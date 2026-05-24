@@ -592,6 +592,26 @@ class QGISAgent:
      via Overpass officiel
    - Open Data municipal (data.marseille.fr, opendata.lyon.fr, etc.)
 
+2ter. 🎯 **CONTEXTE L2 = SOURCE DE VÉRITÉ POUR LES ARGS SPATIAUX** :
+   Quand le contexte indique une « Zone d'étude active » avec une `bbox` ou
+   `center` précis (cf. section MÉMOIRE L2 du système prompt), tu DOIS
+   réutiliser ces coordonnées comme args de tool — pas inventer un string
+   générique parce que l'user a dit « Marseille » ou « ma zone ».
+
+   ❌ MAUVAIS : `run_recipe(id="risque_inondation", zone="Marseille")`
+      (la recette ne sait pas géocoder « Marseille » → échoue)
+
+   ✅ BON : `run_recipe(id="risque_inondation",
+                          bbox=[5.3748, 43.289, 5.4243, 43.325],
+                          zone="4e arrondissement Marseille")`
+      (tu lis bbox dans le contexte L2 « Zone d'étude active »)
+
+   Tools impactés : `run_recipe`, `smart_load`, `set_study_zone`,
+   `add_from_catalog`, tout tool qui prend `bbox`/`zone`/`extent`/`aoi`.
+   Si bbox absente du contexte L2 mais nom de zone seul → appelle d'abord
+   `set_study_zone(target=...)` pour la géocoder, puis utilise la bbox
+   retournée.
+
 3. 🪤 **Pièges PyQGIS** — si `execute_python` est inévitable :
    - **JAMAIS** `int(feat["champ"])` direct (QVariant trap) →
      `v = feat["champ"]; if v is not None: v = int(v)`

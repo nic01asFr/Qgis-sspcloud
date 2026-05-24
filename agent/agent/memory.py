@@ -768,8 +768,28 @@ async def build_context_summary(
             layer2.append(f"CRS du projet : {proj_crs}")
         proj_zone = project_state.get("study_zone") or project_state.get("zone")
         if proj_zone:
-            zname = proj_zone if isinstance(proj_zone, str) else proj_zone.get("name", "?")
-            layer2.append(f"Zone d'étude active (var. projet) : {zname}")
+            if isinstance(proj_zone, str):
+                layer2.append(f"Zone d'étude active : {proj_zone}")
+            else:
+                # Dict : exposer nom ET bbox ET center pour que l'agent puisse
+                # les réutiliser comme args de tools (run_recipe, smart_load,
+                # set_study_zone, etc.) sans inventer/géocoder à nouveau.
+                zname = proj_zone.get("name", "?")
+                zbbox = proj_zone.get("bbox") or proj_zone.get("extent")
+                zcenter = proj_zone.get("center") or proj_zone.get("centroid")
+                zcrs = proj_zone.get("crs", "EPSG:4326")
+                zline = f"Zone d'étude active : « {zname} »"
+                if zbbox:
+                    zline += f"\n  bbox ({zcrs}) : {zbbox}"
+                if zcenter:
+                    zline += f"\n  centre : {zcenter}"
+                zline += (
+                    "\n  ⚠️ Quand un tool prend `bbox`, `zone` ou `extent`, "
+                    "RÉUTILISE cette bbox plutôt que d'inventer un string "
+                    "générique (« Marseille » au lieu des coordonnées casse "
+                    "les recettes spatiales)."
+                )
+                layer2.append(zline)
 
     # 2b — Méta-étude (côté hub : nom, profil, audit trail)
     if active_study:
