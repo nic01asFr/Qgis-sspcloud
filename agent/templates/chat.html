@@ -76,6 +76,16 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
 .msg.user .bubble{background:var(--background-action-high-blue-france);color:#fff;border-color:transparent;
   max-width:560px}
 .msg .bubble :last-child{margin-bottom:0}
+/* Placeholder "Analyse en cours…" affiché dans la bulle assistant entre
+   l'envoi du message user et le 1er chunk SSE — évite le rectangle blanc
+   vide qui donnait l'impression que rien ne se passait. */
+.msg .bubble .bubble-thinking{display:flex;align-items:center;gap:10px;
+  color:var(--text-action-high-blue-france);font-size:13px}
+.msg .bubble .bubble-spinner{display:inline-block;width:14px;height:14px;
+  border:2px solid var(--background-alt-blue-france);
+  border-top-color:var(--text-action-high-blue-france);
+  border-radius:50%;animation:bubble-spin 0.9s linear infinite}
+@keyframes bubble-spin{to{transform:rotate(360deg)}}
 .msg .bubble p{margin:0 0 6px}
 .msg .bubble ul,.msg .bubble ol{margin:6px 0;padding-left:20px}
 .msg .bubble code{background:var(--background-alt-grey);padding:1px 4px;border-radius:2px;
@@ -874,8 +884,17 @@ function appendMessage(role, content) {
     div.className = 'msg user';
     div.innerHTML = `<div class="bubble">${escapeHtml(content)}</div>`;
   } else {
+    // Bulle assistant : placeholder "Analyse en cours…" + spinner DANS la
+    // bulle pour ne pas avoir un rectangle blanc vide avant le 1er chunk
+    // SSE. Le placeholder est écrasé par responseDiv.innerHTML = ... dès
+    // que le streaming commence.
     div.className = 'msg';
-    div.innerHTML = `<div class="avatar">🗺</div><div class="bubble" id="current-response"></div>`;
+    div.innerHTML = '<div class="avatar">🗺</div>'
+      + '<div class="bubble" id="current-response">'
+      + '<div class="bubble-thinking">'
+      + '<span class="bubble-spinner"></span>'
+      + '<span>Analyse en cours…</span>'
+      + '</div></div>';
   }
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
