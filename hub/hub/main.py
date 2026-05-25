@@ -2804,8 +2804,10 @@ async def workspace_create_study(request: Request):
     form = await request.form()
     name = form.get("name", "").strip()
     profile = form.get("profile", "standard")
+    return_to = request.query_params.get("return_to", "")
+    target = "/desk" if return_to == "desk" else "/workspace"
     if not name:
-        return RedirectResponse("/workspace?error=name_required", status_code=302)
+        return RedirectResponse(f"{target}?error=name_required", status_code=302)
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
         async with httpx.AsyncClient(timeout=15, base_url=_SELF_URL) as c:
@@ -2818,11 +2820,11 @@ async def workspace_create_study(request: Request):
                              headers={"Authorization": f"Bearer {api_key}"})
     except Exception:
         pass
-    return RedirectResponse("/workspace", status_code=302)
+    return RedirectResponse(target, status_code=302)
 
 
 @app.post("/workspace/study/{sid}/activate")
-async def workspace_activate_study(sid: str):
+async def workspace_activate_study(sid: str, request: Request):
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
         async with httpx.AsyncClient(timeout=15, base_url=_SELF_URL) as c:
@@ -2830,11 +2832,13 @@ async def workspace_activate_study(sid: str):
                          headers={"Authorization": f"Bearer {api_key}"})
     except Exception:
         pass
-    return RedirectResponse("/workspace", status_code=302)
+    return_to = request.query_params.get("return_to", "")
+    target = "/desk" if return_to == "desk" else "/workspace"
+    return RedirectResponse(target, status_code=302)
 
 
 @app.post("/workspace/study/{sid}/archive")
-async def workspace_archive_study(sid: str):
+async def workspace_archive_study(sid: str, request: Request):
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
         async with httpx.AsyncClient(timeout=15, base_url=_SELF_URL) as c:
@@ -2842,7 +2846,9 @@ async def workspace_archive_study(sid: str):
                            headers={"Authorization": f"Bearer {api_key}"})
     except Exception:
         pass
-    return RedirectResponse("/workspace", status_code=302)
+    return_to = request.query_params.get("return_to", "")
+    target = "/desk" if return_to == "desk" else "/workspace"
+    return RedirectResponse(target, status_code=302)
 
 
 @app.post("/desk/study/{sid}/save")
