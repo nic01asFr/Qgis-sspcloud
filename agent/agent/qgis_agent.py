@@ -98,6 +98,14 @@ def _extract_error_signature(tool_result: str) -> str | None:
     chiffres, paths) pour reconnaître "même classe d'erreur" même quand
     l'agent essaie des variantes.
     Ex: « unexpected type 'int' » et « unexpected type 'list' » → même sig.
+
+    Bug historique : `json.loads(tool_result)` échouait quand le résultat
+    contient un JSON pretty-printed multi-ligne suivi de `\\n![img](data:...)`.
+    Le fallback `splitlines()[0]` retournait alors juste « { », fusionnant
+    toutes les erreurs distinctes en une même signature et déclenchant la
+    garde anti-boucle à tort. Fix : extraire le champ "error" via regex
+    (même approche que _maybe_enrich_with_kb_hint), résiliente au mix
+    JSON + markdown.
     """
     if not tool_result:
         return None
@@ -105,22 +113,98 @@ def _extract_error_signature(tool_result: str) -> str | None:
     error_markers = ('"error"', '"success": false', 'traceback', 'exception')
     if not any(m in lower for m in error_markers):
         return None
+
+    raw = ""
+    # 1) Essai parse JSON pur
     try:
         data = json.loads(tool_result)
+        if isinstance(data, dict):
+            err = data.get("error") or ""
+            if isinstance(err, str) and err:
+                raw = err.splitlines()[0]
     except Exception:
-        data = None
-    raw = ""
-    if isinstance(data, dict):
-        err = data.get("error") or ""
-        if isinstance(err, str) and err:
-            raw = err.splitlines()[0]
+        pass
+
+    # 2) Fallback regex sur le champ "error" (résiliente au mix JSON+markdown)
     if not raw:
-        raw = tool_result.splitlines()[0]
+        head = tool_result[:5000]
+        m_err = re.search(r'"error"\s*:\s*"((?:[^"\\]|\\.)*)"', head)
+        if m_err:
+            try:
+                err = m_err.group(1).encode().decode('unicode_escape', errors='ignore')
+            except Exception:
+                err = m_err.group(1)
+            if err:
+                raw = err.splitlines()[0]
+
+    # 3) Fallback regex sur "traceback" (capture la dernière ligne exception)
+    if not raw:
+        head = tool_result[:5000]
+        m_tb = re.search(r'"traceback"\s*:\s*"((?:[^"\\]|\\.)*)"', head)
+        if m_tb:
+            try:
+                tb = m_tb.group(1).encode().decode('unicode_escape', errors='ignore')
+            except Exception:
+                tb = m_tb.group(1)
+            # Dernière ligne non vide d'une traceback = la classe d'exception
+            tb_lines = [ln.strip() for ln in tb.splitlines() if ln.strip()]
+            if tb_lines:
+                raw = tb_lines[-1]
+
+    # 4) Dernier recours : 1re ligne non triviale du payload
+    if not raw:
+        for line in tool_result.splitlines():
+            stripped = line.strip()
+            # On ignore les lignes structurelles JSON ({, }, [, ], "key": {)
+            if stripped and stripped not in ('{', '}', '[', ']') and not re.match(r'^"[^"]+":\s*[{\[]?\s*$', stripped):
+                raw = stripped
+                break
+        if not raw:
+            return None
+
     # Fuzzify : retire valeurs entre guillemets/apostrophes, nombres, paths
     fuzzy = re.sub(r"'[^']*'|\"[^\"]*\"", "X", raw)
     fuzzy = re.sub(r"\b\d+\b", "N", fuzzy)
     fuzzy = re.sub(r"/[^\s\"']+", "PATH", fuzzy)
     return fuzzy[:120]
+
+
+_INFRA_FAILURE_PATTERNS = (
+    "QGIS command timed out after",      # qgis_command timeout côté MCP
+    "Cannot connect to QGIS api_server", # connect refused
+    "Bridge HTTP error:",                # HTTP-level failure (502/503/504)
+    "504 Gateway Timeout",               # smart_load trop lourd
+    "502 Bad Gateway",                   # api_server down
+    "503 Service Unavailable",           # bridge KO
+)
+
+
+def _is_infra_failure(tool_result: str) -> bool:
+    """True si l'erreur tool est un SYMPTÔME D'INFRASTRUCTURE (bridge QGIS
+    dégradé) plutôt qu'une erreur de code utilisateur.
+
+    Critères :
+    - Timeout du bridge (`QGIS command timed out`)
+    - Connect refused (`Cannot connect`)
+    - HTTP layer error (`Bridge HTTP error`, `504/502/503`)
+    - Erreur muette `{"error": ""}` (typique d'un SSE coupé prématurément
+      ou d'une réponse tronquée — observé sur run_recipe)
+
+    Sert à distinguer "le moteur est KO" de "le code de l'agent a un bug"
+    (NoneType, QgsFields slice, etc. = erreurs métier). Sur les premiers
+    cas, l'agent doit ESCALADER à l'user (proposer un redémarrage),
+    pas retenter en boucle.
+    """
+    if not tool_result:
+        return False
+    # Pattern direct sur la string
+    for p in _INFRA_FAILURE_PATTERNS:
+        if p in tool_result:
+            return True
+    # Erreur muette : `"error": ""` (ou `"error":""` sans espace)
+    if re.search(r'"error"\s*:\s*""', tool_result):
+        return True
+    return False
 
 
 async def _maybe_enrich_with_kb_hint(response: str) -> str:
@@ -239,8 +323,24 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
 
     if not _HUB_URL or not _HUB_KEY:
         return json.dumps({"error": "Hub non configuré"})
+
+    # Timeout dynamique par tool — certains tools peuvent légitimement tourner
+    # plusieurs minutes (run_recipe = jusqu'à 20 min côté MCP serveur). Un
+    # timeout client trop court provoquait des `{"error": ""}` muets sur les
+    # recettes lourdes (observé sur risque_inondation Marseille).
+    _LONG_RUNNING_TOOLS = {
+        "run_recipe":          1800,  # 20+ min serveur, on prend large
+        "smart_load":           600,  # WFS download lourds (BD TOPO commune)
+        "execute_python":       900,  # spatial joins sur 100k+ features
+        "set_study_zone":       300,
+        "export_flood_map":     600,
+        "export_web_map":       600,
+        "export_temporal_map":  600,
+        "add_from_catalog":     600,
+    }
+    tool_timeout = _LONG_RUNNING_TOOLS.get(tool_name, 120)
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=tool_timeout) as client:
             resp = await client.post(
                 f"{_HUB_URL}/mcp",
                 json={
@@ -282,8 +382,19 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
                 )
                 return joined
             return json.dumps(result)
+    except httpx.TimeoutException as e:
+        # Erreur de timeout explicite (au lieu de str(e)="" muet sur certaines
+        # exceptions httpx) — l'agent et le détecteur infra peuvent réagir.
+        return json.dumps({
+            "error": f"MCP client timeout après {tool_timeout}s sur tool `{tool_name}` "
+                     f"(httpx.{type(e).__name__})"
+        })
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        # Fallback class name si str(e) est vide (cas observé : SSE coupé,
+        # certaines RemoteProtocolError, etc. → "" empêchait l'agent et le
+        # détecteur infra de classifier l'erreur).
+        msg = str(e) or f"{type(e).__name__} (no message)"
+        return json.dumps({"error": f"MCP call failed: {msg}"})
 
 
 # ── Conversion outils MCP → format OpenAI function calling ────────────────────
@@ -1339,6 +1450,38 @@ ne vient pas d'un outil cette session, la supprimer.
                     "tool_call_id": tc["id"],
                     "content":      llm_result,
                 })
+
+                # Détection bridge dégradé : 2+ tools différents qui échouent
+                # sur des symptômes infra consécutifs → l'agent doit escalader,
+                # pas continuer de spammer le bridge mort.
+                if _is_infra_failure(llm_result):
+                    recent_infra = [
+                        c for c in tool_calls_made[-5:]
+                        if _is_infra_failure(c.get("result", ""))
+                    ]
+                    distinct_tools = {c["tool"] for c in recent_infra}
+                    if len(recent_infra) >= 2 and len(distinct_tools) >= 2:
+                        log.warning(
+                            "Bridge dégradé détecté : %d échecs infra sur %d tools distincts (%s)",
+                            len(recent_infra), len(distinct_tools), distinct_tools,
+                        )
+                        # Inject system msg : forcer l'agent à expliquer + proposer
+                        # le redémarrage. Pas d'auto-stop (l'user peut décider).
+                        messages.append({
+                            "role": "system",
+                            "content": (
+                                f"⚠️ INFRA BRIDGE DÉGRADÉ — {len(recent_infra)} échecs sur "
+                                f"{len(distinct_tools)} tools différents en quelques étapes "
+                                f"(timeouts, erreurs muettes, gateway timeout). Le moteur QGIS "
+                                f"est probablement bloqué ou en surcharge. NE LANCE PLUS de tools "
+                                f"spatiaux maintenant. Choix : (A) propose UNE fois `restart_qgis_engine` "
+                                f"en expliquant à l'user en clair non-technique pourquoi tu redémarres, "
+                                f"puis attends 15s et retente UNE seule fois le tool qui a échoué — OU "
+                                f"(B) termine le tour en disant à l'user que le moteur QGIS semble "
+                                f"bloqué et qu'il peut réessayer dans 30s. NE BOUCLE PAS sur d'autres "
+                                f"tools spatiaux. NE redémarre PAS deux fois de suite."
+                            ),
+                        })
 
                 err_sig = _extract_error_signature(llm_result)
                 if err_sig:

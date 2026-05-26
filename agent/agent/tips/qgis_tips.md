@@ -267,3 +267,59 @@ pattern: |
   # hub_url est une URL stable côté hub (proxy MinIO, masque l'URL S3 brute).
   # À donner directement à l'user en fin de réponse.
 note: Préfère TOUJOURS publish_artifact au lieu d'un urllib brut en execute_python. Le tool gère HUB_URL + HUB_API_KEY + chemins par défaut. Slug = URL-safe (ex: bati_marseille4, pas d'accents ni espaces). Kinds : storymap, flux, recipe, dataset, pdf.
+
+## tip: processing.run — "memory:" n'est PAS un nom de couche
+symptom: Could not load source layer for POLYGONS POINTS INPUT memory not found Unable to execute algorithm
+pattern: |
+  # MAUVAIS : passer "memory:" en arg d'entrée d'un algo processing
+  # ❌ processing.run("native:countpointsinpolygon", {"POLYGONS": "memory:", "POINTS": "memory:", ...})
+  #    → "Could not load source layer for POLYGONS: memory: not found"
+  #
+  # "memory:" est un PROVIDER pour CRÉER une couche en mémoire (output uniquement),
+  # ce n'est pas un nom de couche valide en entrée.
+  #
+  # BON : passer un QgsVectorLayer object, un id de layer du projet, ou un chemin.
+  layer_grid = QgsVectorLayer("Polygon?crs=EPSG:2154", "grid", "memory")
+  prov = layer_grid.dataProvider()
+  prov.addFeatures([...])
+  result = processing.run("native:countpointsinpolygon", {
+      "POLYGONS": layer_grid,        # objet, pas "memory:"
+      "POINTS":   pts_layer,          # objet ou layer_id du projet
+      "FIELD":    "n",
+      "OUTPUT":   "memory:",          # OUTPUT en "memory:" = OK (création)
+  })["OUTPUT"]
+note: "memory:" en OUTPUT = créer une couche temporaire — OK. En INPUT = pas un layer, donc erreur. Toujours passer un objet QgsVectorLayer ou un id de layer chargé dans le projet.
+
+## tip: ternaire qui peut retourner None — guarder l'attribut
+symptom: NoneType object has no attribute combineExtentWith setRenderer triggerRepaint name extent featureCount
+pattern: |
+  # MAUVAIS : ternaire imbriqué qui peut retourner None silencieusement
+  # ❌ layer = project.mapLayer([k for k in layers if 'T10' in layers[k].name()][0]
+  #                              if any('T10' in v.name() for v in layers.values()) else None)
+  # layer.combineExtentWith(...)   → AttributeError: 'NoneType' has no attribute 'combineExtentWith'
+  #
+  # BON : 2 lignes, next() avec default, guard explicite
+  layer = next((l for l in project.mapLayers().values()
+                if 'T10' in l.name() and 'HAUT' not in l.name()), None)
+  if layer is None:
+      print("Couche T10 introuvable")
+  else:
+      layer.combineExtentWith(other.extent())
+      layer.triggerRepaint()
+note: les ternaires imbriqués retournent silencieusement None puis crashent 5 lignes plus loin. TOUJOURS découper en 2 lignes + guard `if x is None`. next(..., None) est l'idiome propre.
+
+## tip: QgsFields ne supporte pas le slicing Python
+symptom: QgsFields __getitem__ arguments did not match any overloaded call argument has unexpected type slice
+pattern: |
+  # MAUVAIS : QgsFields n'est pas une list Python, pas de slicing
+  # ❌ for f in layer.fields()[:5]:
+  #        ...
+  # → QgsFields.__getitem__(): argument 1 has unexpected type 'slice'
+  #
+  # BON : convertir en list, ou itérer + énumérer
+  fields = list(layer.fields())[:5]           # cast explicite
+  # ou
+  for i, f in enumerate(layer.fields()):
+      if i >= 5: break
+      print(f.name())
+note: QgsFields supporte get_item par index entier mais PAS par slice. list(layer.fields()) donne une vraie list slicable. Idem pour QgsFeatureIterator (utiliser itertools.islice).
