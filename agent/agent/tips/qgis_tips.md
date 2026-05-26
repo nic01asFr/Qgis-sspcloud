@@ -254,14 +254,16 @@ pattern: |
   })
 note: Recipes disponibles : densite_bati, occupation_sol, pression_fonciere_cotiere, risque_inondation, urbanisme_general. TOUJOURS chercher d'abord si une recipe couvre le besoin avant de coder.
 
-## tip: Publication HTML public (storymap publi)
-symptom: publish storymap HTML public URL share endpoint /publish slug catalog S3 storymap_bati public
+## tip: Publication livrables (storymap, flux, recipe, dataset, pdf)
+symptom: publish storymap HTML public URL share endpoint slug catalog S3 storymap_bati public livrable
 pattern: |
-  # Le fichier HTML doit être dans /data/exports/storymaps/{slug}.html
-  # Appeler ensuite via mcp_call ou httpx POST sur le hub :
-  POST {hub_url}/publish/storymap/{slug}
-  # Sans body = fallback /data/exports/storymaps/{slug}.html
-  # Réponse JSON :
-  #   {"url": "https://minio.lab.sspcloud.fr/.../storymap/{slug}.html",
-  #    "key": "...", "kind": "storymap", "slug": "...", "size": ..., "published_at": ...}
-note: L'URL retournée est publique (ACL public-read). À donner directement à l'user en fin de réponse. Slug = nom court sans accents ni espaces (ex: bati_marseille4).
+  # 1) Fabriquer le fichier dans /data/studies/{sid}/exports/{kind}/{slug}.{ext}
+  #    (ou /data/exports/{kind}/{slug}.{ext} hors étude active)
+  #    Pour storymap : export_web_map / export_flood_map / storymap builder
+  #
+  # 2) Appeler le tool MCP natif :
+  publish_artifact(kind="storymap", slug="inondation_marseille4")
+  # → Retourne {success, kind, slug, hub_url, key, size, published_at, study_id}
+  # hub_url est une URL stable côté hub (proxy MinIO, masque l'URL S3 brute).
+  # À donner directement à l'user en fin de réponse.
+note: Préfère TOUJOURS publish_artifact au lieu d'un urllib brut en execute_python. Le tool gère HUB_URL + HUB_API_KEY + chemins par défaut. Slug = URL-safe (ex: bati_marseille4, pas d'accents ni espaces). Kinds : storymap, flux, recipe, dataset, pdf.
