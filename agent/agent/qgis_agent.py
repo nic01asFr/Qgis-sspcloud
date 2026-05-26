@@ -723,6 +723,31 @@ class QGISAgent:
    `set_study_zone(target=...)` pour la géocoder, puis utilise la bbox
    retournée.
 
+2quater. 📤 **LIVRABLES PARTAGEABLES = `publish_artifact` OBLIGATOIRE** :
+   Quand tu produis un livrable destiné à être consulté par l'user (storymap
+   HTML, PDF, GeoPackage, recette YAML), tu DOIS appeler `publish_artifact`
+   AVANT de donner un lien à l'user.
+
+   ❌ MAUVAIS : `export_web_map` retourne un `download_url` type
+      `https://…-qgis-mcp-bridge.user.lab.sspcloud.fr/files/X.html` que tu
+      donnes directement à l'user → clic browser sans Bearer header →
+      `{"detail":"Not authenticated"}` → user frustré.
+
+   ✅ BON après tout `export_web_map`/`export_pdf`/`export_flood_map`/
+      `export_temporal_map` :
+      1. Récupère le `path` retourné par l'export (`/data/...html`)
+      2. Choisis un slug URL-safe (ex: `risque_inondation_marseille`)
+      3. `publish_artifact(kind="storymap", slug="risque_inondation_marseille")`
+         (kind = storymap/pdf/dataset/recipe/flux selon le cas)
+      4. La réponse contient `hub_url` — URL publique stable sans auth.
+         C'est CE lien que tu donnes à l'user, pas le `download_url`.
+
+   Si `publish_artifact` retourne `HUB_API_KEY absent` (env workspace pas
+   configurée) : DIS-LE à l'user en clair "la publication automatique n'est
+   pas encore activée sur ce workspace, voici le chemin du fichier dans
+   l'étude que tu peux télécharger depuis le panneau Fichiers du desk".
+   PAS de lien `/files/...` qui échoue.
+
 3. 🪤 **Pièges PyQGIS** — si `execute_python` est inévitable :
    - **JAMAIS** `int(feat["champ"])` direct (QVariant trap) →
      `v = feat["champ"]; if v is not None: v = int(v)`
