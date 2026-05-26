@@ -499,6 +499,20 @@ if (new URLSearchParams(location.search).get('embed') === '1') {
   document.body.classList.add('embed');
 }
 
+// Tous les liens markdown rendus par l'agent doivent ouvrir un nouvel onglet
+// (sinon, en mode embed iframe, le clic navigue l'iframe vers la cible et
+// remplace le chat agent — l'user a signalé ce bug le 2026-05-26).
+if (typeof marked !== 'undefined' && marked.use) {
+  marked.use({
+    renderer: {
+      link({ href, title, text }) {
+        const t = title ? ` title="${title.replace(/"/g, '&quot;')}"` : '';
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer"${t}>${text}</a>`;
+      },
+    },
+  });
+}
+
 /* ─ Bandeau "clé LLM manquante" ────────────────────────────────────────
    Polling sur /api/status toutes les 10s :
    - has_llm_key=false → on affiche le bandeau, on désactive le bouton Envoyer
