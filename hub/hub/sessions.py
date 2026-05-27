@@ -526,7 +526,14 @@ async def create_session(owner: str, extra_env: dict | None = None) -> dict:
     # Avant, l'injection n'était que dans _get_or_create_session → publish
     # échouait quand le pod était créé via le bouton "Réveiller" (POST /sessions).
     extra_env = dict(extra_env or {})
-    _hub_url = os.getenv("HUB_URL", "")
+    # HUB_URL : env explicite (cas nic01asfr via start_hub.sh) sinon dérivé de
+    # l'owner. Un hub lancé par Onyxia (onboarding standard) n'exporte PAS
+    # HUB_URL → os.getenv vide → publish_artifact échouait sur "HUB_URL absent".
+    # Le hub d'un user est toujours à user-{owner}-qgis.user.lab.sspcloud.fr
+    # (ingress.hostname posé par le launcher).
+    _hub_url = os.getenv("HUB_URL", "") or (
+        f"https://user-{owner}-qgis.user.lab.sspcloud.fr" if owner else ""
+    )
     if _hub_url:
         extra_env.setdefault("HUB_URL", _hub_url)
     if "HUB_API_KEY" not in extra_env:

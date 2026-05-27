@@ -65,30 +65,68 @@ _creds_cache: dict[str, Any] = {"ts": 0, "data": None}
 _CREDS_TTL = 3600  # re-lit le secret toutes les heures (token STS rotation)
 
 
-def _read_passerelle_s3_creds() -> dict[str, str]:
+def _s3_creds_from_env(owner: str = "") -> dict[str, str] | None:
+    """Creds S3 depuis l'env du pod (Onyxia injecte AWS_* + bucket lors du
+    lancement du hub via le launcher datalab). Fallback quand le secret
+    passerelle-s3-creds n'existe pas (cas onboarding standard d'un user).
+
+    Bucket SSPCloud = nom d'utilisateur. Onyxia ne pose pas toujours un env
+    dédié → on tente AWS_BUCKET_NAME / SSPCLOUD_BUCKET puis on dérive de
+    ONYXIA_USER / WORKSPACE_OWNER.
+    """
+    akid = os.getenv("AWS_ACCESS_KEY_ID", "")
+    if not akid:
+        return None
+    bucket = (os.getenv("AWS_BUCKET_NAME") or os.getenv("SSPCLOUD_BUCKET")
+              or os.getenv("ONYXIA_USER") or os.getenv("WORKSPACE_OWNER")
+              or owner or "")
+    return {
+        "AWS_ACCESS_KEY_ID":     akid,
+        "AWS_SECRET_ACCESS_KEY": os.getenv("AWS_SECRET_ACCESS_KEY", ""),
+        "AWS_SESSION_TOKEN":     os.getenv("AWS_SESSION_TOKEN", ""),
+        "AWS_S3_ENDPOINT":       os.getenv("AWS_S3_ENDPOINT", "minio.lab.sspcloud.fr"),
+        "AWS_DEFAULT_REGION":    os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
+        "SSPCLOUD_BUCKET":       bucket,
+    }
+
+
+def _read_passerelle_s3_creds(owner: str = "") -> dict[str, str]:
     now = time.time()
     if _creds_cache["data"] and (now - _creds_cache["ts"]) < _CREDS_TTL:
         return _creds_cache["data"]
 
+    # 1) Secret K8s passerelle-s3-creds (déploiement avec creds long-lived).
     r = subprocess.run(
         ["kubectl", "get", "secret", _SECRET_NAME, "-o", "json"],
         capture_output=True, text=True, timeout=10,
     )
-    if r.returncode != 0:
-        raise RuntimeError(f"Secret {_SECRET_NAME} inaccessible: {r.stderr[:200]}")
-    data = json.loads(r.stdout)["data"]
-    decoded = {k: base64.b64decode(v).decode() for k, v in data.items()}
-    _creds_cache["data"] = decoded
-    _creds_cache["ts"] = now
-    return decoded
+    if r.returncode == 0:
+        data = json.loads(r.stdout)["data"]
+        decoded = {k: base64.b64decode(v).decode() for k, v in data.items()}
+        _creds_cache["data"] = decoded
+        _creds_cache["ts"] = now
+        return decoded
+
+    # 2) Fallback env (onboarding Onyxia standard : pas de secret dédié, mais
+    #    AWS_* injectés dans le pod hub par le launcher datalab).
+    env_creds = _s3_creds_from_env(owner)
+    if env_creds and env_creds.get("SSPCLOUD_BUCKET"):
+        _creds_cache["data"] = env_creds
+        _creds_cache["ts"] = now
+        return env_creds
+
+    raise RuntimeError(
+        f"Creds S3 indisponibles : secret {_SECRET_NAME} absent "
+        f"({r.stderr[:120]}) et AWS_* env incomplets (bucket manquant)."
+    )
 
 
 import boto3  # noqa: E402 — top-level pour que _S3_AVAILABLE détecte l'absence
 
 
-def _get_s3_client():
+def _get_s3_client(owner: str = ""):
     """Renvoie (client, bucket, endpoint)."""
-    creds = _read_passerelle_s3_creds()
+    creds = _read_passerelle_s3_creds(owner)
     endpoint = creds.get("AWS_S3_ENDPOINT", "https://minio.lab.sspcloud.fr").rstrip("/")
     if not endpoint.startswith("http"):
         endpoint = "https://" + endpoint
@@ -136,7 +174,7 @@ def publish(owner: str, kind: str, slug: str, content: bytes,
     Sert pour la traçabilité (provenance des données) et l'UI desk
     (grouper les publications par étude).
     """
-    client, bucket, endpoint = _get_s3_client()
+    client, bucket, endpoint = _get_s3_client(owner)
     key = s3_key(owner, kind, slug)
     ct = content_type or _KIND_CONTENT_TYPE.get(kind, "application/octet-stream")
 
@@ -175,7 +213,7 @@ def publish(owner: str, kind: str, slug: str, content: bytes,
 
 def read(owner: str, kind: str, slug: str) -> bytes | None:
     """Récupère le contenu d'une publication. None si absent."""
-    client, bucket, _ = _get_s3_client()
+    client, bucket, _ = _get_s3_client(owner)
     key = s3_key(owner, kind, slug)
     try:
         obj = client.get_object(Bucket=bucket, Key=key)
@@ -189,7 +227,7 @@ def read(owner: str, kind: str, slug: str) -> bytes | None:
 
 def head(owner: str, kind: str, slug: str) -> dict | None:
     """Métadonnées d'une publication sans télécharger le body."""
-    client, bucket, endpoint = _get_s3_client()
+    client, bucket, endpoint = _get_s3_client(owner)
     key = s3_key(owner, kind, slug)
     try:
         h = client.head_object(Bucket=bucket, Key=key)
@@ -207,7 +245,7 @@ def head(owner: str, kind: str, slug: str) -> dict | None:
 
 def delete(owner: str, kind: str, slug: str) -> bool:
     """Dépublie. True si suppression effective."""
-    client, bucket, _ = _get_s3_client()
+    client, bucket, _ = _get_s3_client(owner)
     key = s3_key(owner, kind, slug)
     try:
         client.delete_object(Bucket=bucket, Key=key)
@@ -220,7 +258,7 @@ def delete(owner: str, kind: str, slug: str) -> bool:
 
 def list_published(owner: str, kind: str | None = None) -> list[dict]:
     """Liste les publications d'un owner. Filtrable par kind."""
-    client, bucket, endpoint = _get_s3_client()
+    client, bucket, endpoint = _get_s3_client(owner)
     prefix = f"{_S3_PREFIX}/{owner}/"
     if kind:
         if kind not in _KINDS:
@@ -260,7 +298,7 @@ def _catalog_key(owner: str) -> str:
 
 def get_catalog(owner: str) -> list[dict]:
     """Retourne l'index complet (depuis le JSON catalogue S3)."""
-    client, bucket, _ = _get_s3_client()
+    client, bucket, _ = _get_s3_client(owner)
     try:
         obj = client.get_object(Bucket=bucket, Key=_catalog_key(owner))
         return json.loads(obj["Body"].read())
@@ -271,7 +309,7 @@ def get_catalog(owner: str) -> list[dict]:
 
 
 def _save_catalog(owner: str, items: list[dict]) -> None:
-    client, bucket, _ = _get_s3_client()
+    client, bucket, _ = _get_s3_client(owner)
     body = json.dumps(items, ensure_ascii=False, indent=2).encode("utf-8")
     client.put_object(
         Bucket=bucket,

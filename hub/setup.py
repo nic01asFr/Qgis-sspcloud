@@ -13,5 +13,6 @@ setup(
         "pyyaml",
         "python-multipart",
         "jinja2",
+        "boto3",
     ],
 )
