@@ -74,8 +74,29 @@ _SELF_URL  = f"http://127.0.0.1:{os.getenv('HUB_INTERNAL_PORT', '8888')}"
 
 # ── Config GeoAI GPU pod ──────────────────────────────────────────────────────
 # Injecté par qgis-mcp.service.yml → serve.env
+def _parse_port(raw: str | None, default: int) -> int:
+    """Parse un port robustement, résilient aux env vars auto-injectées par K8s.
+
+    Quand un Service `geoai-gpu` existe dans le namespace, Kubernetes injecte
+    automatiquement GEOAI_GPU_PORT=tcp://10.233.x.y:8000 (service-link, forme
+    URL) qui casse int() → ValueError au démarrage du hub. On extrait le port
+    si la valeur est une URL tcp://host:port, sinon int() direct, sinon default.
+    (nic01asfr ne crashait pas car start_hub.sh exporte GEOAI_GPU_PORT=8000
+    explicitement ; un déploiement Onyxia frais n'a pas cet override.)
+    """
+    if not raw:
+        return default
+    v = str(raw).strip()
+    if "://" in v:                      # forme K8s service-link tcp://IP:PORT
+        v = v.rsplit(":", 1)[-1]
+    try:
+        return int(v)
+    except (ValueError, TypeError):
+        return default
+
+
 _GEOAI_GPU_SERVICE = os.getenv("GEOAI_GPU_SERVICE_NAME", "")
-_GEOAI_GPU_PORT    = int(os.getenv("GEOAI_GPU_PORT", "8000"))
+_GEOAI_GPU_PORT    = _parse_port(os.getenv("GEOAI_GPU_PORT"), 8000)
 
 
 def _geoai_gpu_base_url() -> str | None:
