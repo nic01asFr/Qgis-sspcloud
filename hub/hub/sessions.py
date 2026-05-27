@@ -500,6 +500,22 @@ async def create_session(owner: str, extra_env: dict | None = None) -> dict:
     Note : changer le profil après le 1er démarrage nécessite un restart
     du pod (kubectl rollout restart) — à voir en Phase 5 (profil dynamique).
     """
+    # Injection centralisée des creds hub (HUB_URL + HUB_API_KEY) pour que le
+    # tool publish_artifact fonctionne, QUEL QUE SOIT le chemin de création du
+    # workspace (wake via POST /sessions, profil, _get_or_create_session…).
+    # Avant, l'injection n'était que dans _get_or_create_session → publish
+    # échouait quand le pod était créé via le bouton "Réveiller" (POST /sessions).
+    extra_env = dict(extra_env or {})
+    _hub_url = os.getenv("HUB_URL", "")
+    if _hub_url:
+        extra_env.setdefault("HUB_URL", _hub_url)
+    if "HUB_API_KEY" not in extra_env:
+        try:
+            from hub import auth  # lazy : évite tout cycle d'import au load
+            extra_env["HUB_API_KEY"] = await auth.create_or_get_api_key(owner)
+        except Exception as exc:
+            print(f"[sessions] HUB_API_KEY non injectée pour {owner}: {exc}")
+
     ws = _workspace_name(owner)
     session_id = _session_id_for(owner)
     pod_name = f"{ws}-0"
