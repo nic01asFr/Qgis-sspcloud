@@ -2631,7 +2631,22 @@ async def _get_or_create_session(username: str) -> dict:
             s = active[0]
         else:
             log.info("Création session QGIS pour %s", username)
-            s = await sessions.create_session(username)
+            # Injecter HUB_URL + HUB_API_KEY dans le pod workspace pour que
+            # le tool publish_artifact puisse POST sur {HUB_URL}/publish/...
+            # avec auth Bearer. Sans ça, publish_artifact retourne
+            # "HUB_API_KEY absent" et l'agent ne peut pas produire d'URL
+            # publique partageable. (Le default LOCAL_API_URL=localhost:8080
+            # du tool restart_qgis_engine reste correct, pas besoin de l'injecter.)
+            extra_env: dict[str, str] = {}
+            if _HUB_URL:
+                extra_env["HUB_URL"] = _HUB_URL
+            try:
+                ws_api_key = await auth.create_or_get_api_key(username)
+                if ws_api_key:
+                    extra_env["HUB_API_KEY"] = ws_api_key
+            except Exception as exc:
+                log.warning("HUB_API_KEY non injectée pour %s : %s", username, exc)
+            s = await sessions.create_session(username, extra_env=extra_env or None)
 
         s = await _wait_for_session(s, timeout=120)
         _active_sessions[username] = s["id"]
