@@ -274,7 +274,18 @@ async def _bootstrap_agent() -> None:
             headers=headers,
             json={"apiVersion": "networking.k8s.io/v1", "kind": "Ingress",
                   "metadata": {"name": "qgis-agent", "namespace": ns,
-                               "annotations": {"kubernetes.io/ingress.class": "onyxia"}},
+                               "annotations": {
+                                   "kubernetes.io/ingress.class": "onyxia",
+                                   # Les tools longs (run_recipe, smart_load lourds) et le
+                                   # flux SSE du chat depassent les 60s par defaut de
+                                   # l'ingress -> 504 / flux coupe -> agent "decroche".
+                                   # On aligne sur les bridges dev (proxy-read-timeout 600)
+                                   # et le novnc (3600). proxy-body-size 0 = pas de limite.
+                                   "nginx.ingress.kubernetes.io/proxy-read-timeout": "600",
+                                   "nginx.ingress.kubernetes.io/proxy-send-timeout": "600",
+                                   "nginx.ingress.kubernetes.io/proxy-connect-timeout": "30",
+                                   "nginx.ingress.kubernetes.io/proxy-body-size": "0",
+                               }},
                   "spec": {"ingressClassName": "onyxia", "rules": [{
                       "host": host,
                       "http": {"paths": [{"path": "/", "pathType": "Prefix",
@@ -284,6 +295,72 @@ async def _bootstrap_agent() -> None:
                   }]}})
 
         log.info("bootstrap: qgis-agent créé — %s", host)
+
+
+async def _patch_own_ingress_timeout() -> None:
+    """Pose proxy-read/send-timeout=600 sur l'ingress public DU HUB.
+
+    L'ingress du hub est créé par le launcher Onyxia (chart jupyter-python) qui
+    ne pose AUCUNE annotation de timeout → défaut 60s. Or l'agent appelle
+    `{HUB_URL}/mcp` via cet ingress public ; `run_recipe` (analyse lourde >60s)
+    renvoie alors 504 et le projet reste vide. Les services dev (bridges) ont
+    600 via leur `.service.yml` ; le chemin onboardé ne passe pas par là.
+
+    On retrouve l'ingress par son hostname (user-{owner}-qgis…) et on patche ses
+    annotations. Idempotent (no-op si déjà à jour). Nécessite kubernetes.role=edit
+    (déjà requis pour _bootstrap_agent).
+    """
+    token_file = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
+    ns_file    = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+    if not token_file.exists():
+        log.debug("Patch ingress hub: pas en K8s (dev mode), ignoré")
+        return
+    token    = token_file.read_text().strip()
+    ns       = ns_file.read_text().strip()
+    username = os.getenv("ONYXIA_USER", ns.removeprefix("user-"))
+    hub_host = f"user-{username}-qgis.user.lab.sspcloud.fr"
+    headers  = {"Authorization": f"Bearer {token}"}
+    ann = {
+        "nginx.ingress.kubernetes.io/proxy-read-timeout": "600",
+        "nginx.ingress.kubernetes.io/proxy-send-timeout": "600",
+        "nginx.ingress.kubernetes.io/proxy-connect-timeout": "30",
+        "nginx.ingress.kubernetes.io/proxy-body-size": "0",
+    }
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=15) as client:
+            r = await client.get(
+                f"{_K8S_HOST}/apis/networking.k8s.io/v1/namespaces/{ns}/ingresses",
+                headers=headers,
+            )
+            if r.status_code != 200:
+                log.warning("Patch ingress hub: list KO (%d)", r.status_code)
+                return
+            target = None
+            for ing in (r.json().get("items") or []):
+                hosts = [ru.get("host", "")
+                         for ru in ing.get("spec", {}).get("rules", [])]
+                if hub_host in hosts:
+                    target = ing["metadata"]["name"]
+                    cur = ing["metadata"].get("annotations", {}) or {}
+                    break
+            if not target:
+                log.warning("Patch ingress hub: ingress %s introuvable", hub_host)
+                return
+            if all(cur.get(k) == v for k, v in ann.items()):
+                log.info("Patch ingress hub: %s déjà à jour (no-op)", target)
+                return
+            pr = await client.patch(
+                f"{_K8S_HOST}/apis/networking.k8s.io/v1/namespaces/{ns}/ingresses/{target}",
+                headers={**headers, "Content-Type": "application/merge-patch+json"},
+                json={"metadata": {"annotations": ann}},
+            )
+            if pr.status_code in (200, 201):
+                log.info("Patch ingress hub: %s → proxy-read-timeout 600", target)
+            else:
+                log.warning("Patch ingress hub: patch KO (%d) %s",
+                            pr.status_code, pr.text[:200])
+    except Exception as exc:
+        log.warning("Patch ingress hub échoué: %s: %s", type(exc).__name__, exc)
 
 
 # ── Bootstrap GeoAI GPU pod ───────────────────────────────────────────────────
@@ -561,6 +638,7 @@ async def lifespan(app: FastAPI):
         log.info("Cache restauré : %d session(s) actives", len(_active_sessions))
     task = asyncio.create_task(sessions.cleanup_loop())
     asyncio.create_task(_bootstrap_agent())
+    asyncio.create_task(_patch_own_ingress_timeout())
     asyncio.create_task(_bootstrap_geoai_gpu())
     yield
     task.cancel()
