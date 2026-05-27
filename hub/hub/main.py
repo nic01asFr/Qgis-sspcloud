@@ -335,30 +335,35 @@ async def _patch_own_ingress_timeout() -> None:
             if r.status_code != 200:
                 log.warning("Patch ingress hub: list KO (%d)", r.status_code)
                 return
-            target = None
+            # Cibles : l'ingress du hub (trouvé par hostname, créé par le
+            # launcher) ET l'ingress agent "qgis-agent" (créé par le hub avant
+            # le fix create-path — self-heal des déploiements existants). Tous
+            # deux portent du trafic long (>60s) : /mcp pour le hub, SSE chat
+            # pour l'agent.
+            targets: list[tuple[str, dict]] = []
             for ing in (r.json().get("items") or []):
+                name  = ing["metadata"]["name"]
                 hosts = [ru.get("host", "")
                          for ru in ing.get("spec", {}).get("rules", [])]
-                if hub_host in hosts:
-                    target = ing["metadata"]["name"]
-                    cur = ing["metadata"].get("annotations", {}) or {}
-                    break
-            if not target:
-                log.warning("Patch ingress hub: ingress %s introuvable", hub_host)
+                if hub_host in hosts or name == "qgis-agent":
+                    targets.append((name, ing["metadata"].get("annotations", {}) or {}))
+            if not targets:
+                log.warning("Patch ingress: aucun ingress cible (%s / qgis-agent)", hub_host)
                 return
-            if all(cur.get(k) == v for k, v in ann.items()):
-                log.info("Patch ingress hub: %s déjà à jour (no-op)", target)
-                return
-            pr = await client.patch(
-                f"{_K8S_HOST}/apis/networking.k8s.io/v1/namespaces/{ns}/ingresses/{target}",
-                headers={**headers, "Content-Type": "application/merge-patch+json"},
-                json={"metadata": {"annotations": ann}},
-            )
-            if pr.status_code in (200, 201):
-                log.info("Patch ingress hub: %s → proxy-read-timeout 600", target)
-            else:
-                log.warning("Patch ingress hub: patch KO (%d) %s",
-                            pr.status_code, pr.text[:200])
+            for name, cur in targets:
+                if all(cur.get(k) == v for k, v in ann.items()):
+                    log.info("Patch ingress: %s déjà à jour (no-op)", name)
+                    continue
+                pr = await client.patch(
+                    f"{_K8S_HOST}/apis/networking.k8s.io/v1/namespaces/{ns}/ingresses/{name}",
+                    headers={**headers, "Content-Type": "application/merge-patch+json"},
+                    json={"metadata": {"annotations": ann}},
+                )
+                if pr.status_code in (200, 201):
+                    log.info("Patch ingress: %s → proxy-read-timeout 600", name)
+                else:
+                    log.warning("Patch ingress: %s KO (%d) %s",
+                                name, pr.status_code, pr.text[:200])
     except Exception as exc:
         log.warning("Patch ingress hub échoué: %s: %s", type(exc).__name__, exc)
 
