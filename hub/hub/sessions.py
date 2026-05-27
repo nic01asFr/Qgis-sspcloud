@@ -428,6 +428,26 @@ def _kubectl_patch_replicas(ss_name: str, replicas: int) -> bool:
     return r.returncode == 0
 
 
+def _kubectl_set_env(ss_name: str, env: dict) -> bool:
+    """Patch des env vars sur un StatefulSet existant (kubectl set env).
+
+    Idempotent : kubectl ne déclenche un rolling restart que si une valeur
+    change réellement. Sert à garantir HUB_URL/HUB_API_KEY sur les workspaces
+    créés AVANT l'injection centralisée (sinon publish_artifact échoue car ces
+    vars ne sont posées qu'à la création du manifest). La clé API étant stable
+    (create_or_get_api_key), les appels suivants sont des no-op (pas de restart)."""
+    env = {k: v for k, v in (env or {}).items() if v}
+    if not env:
+        return True
+    args = ["kubectl", "set", "env", f"statefulset/{ss_name}",
+            "-n", _NAMESPACE, "-c", "qgis"]
+    args += [f"{k}={v}" for k, v in env.items()]
+    r = subprocess.run(args, capture_output=True, text=True, timeout=15)
+    if r.returncode != 0:
+        print(f"[sessions] set env {ss_name} échec: {(r.stderr or r.stdout)[:200]}")
+    return r.returncode == 0
+
+
 def _ss_exists(ss_name: str) -> bool:
     r = subprocess.run(
         ["kubectl", "get", "statefulset", ss_name,
@@ -543,6 +563,12 @@ async def create_session(owner: str, extra_env: dict | None = None) -> dict:
             status = SESSION_STARTING
         else:
             status = SESSION_STARTING if not _pod_ready(pod_name) else SESSION_READY
+        # Garantir HUB_URL/HUB_API_KEY même sur un workspace créé AVANT
+        # l'injection centralisée (sinon publish_artifact échoue). Idempotent :
+        # restart seulement si la valeur change (clé stable → no-op ensuite).
+        _kubectl_set_env(ws, {
+            k: extra_env[k] for k in ("HUB_URL", "HUB_API_KEY") if k in extra_env
+        })
         # Toujours s'assurer que l'ingress existe (sessions créées avant déploiement feature)
         _ensure_novnc_ingress(owner)
 
