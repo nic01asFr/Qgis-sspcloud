@@ -55,27 +55,35 @@ _bearer = HTTPBearer()
 # ── Base de données API keys ───────────────────────────────────────────────────
 
 async def init_apikeys_db() -> None:
+    """Init de la DB des cles API hub.
+
+    AUCUN wipe automatique sur exception. La DB est persistante (PVC) et
+    contient les cles de TOUS les users — un wipe silencieux desync l'env
+    des agents (qui gardent l'ancienne cle dans leur SS) et tous leurs
+    appels /mcp renvoient 401 muettement (tools vus comme `{}` cote LLM).
+    CREATE TABLE IF NOT EXISTS est idempotent ; si le connect echoue
+    (lock SQLite transitoire, schema mismatch), on log.error et raise pour
+    investigation humaine. Un crash explicite est plus sain qu'un wipe.
+    """
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    for attempt in range(2):
-        try:
-            async with aiosqlite.connect(_DB_PATH) as db:
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS api_keys (
-                        id         TEXT PRIMARY KEY,
-                        username   TEXT NOT NULL UNIQUE,
-                        created_at INTEGER NOT NULL,
-                        last_used  INTEGER NOT NULL,
-                        expires_at INTEGER DEFAULT NULL
-                    )
-                """)
-                await db.commit()
-            break
-        except Exception as exc:
-            if attempt == 0:
-                log.warning("DB api_keys corrompue, recréation: %s", exc)
-                _DB_PATH.unlink(missing_ok=True)
-            else:
-                raise
+    try:
+        async with aiosqlite.connect(_DB_PATH) as db:
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id         TEXT PRIMARY KEY,
+                    username   TEXT NOT NULL UNIQUE,
+                    created_at INTEGER NOT NULL,
+                    last_used  INTEGER NOT NULL,
+                    expires_at INTEGER DEFAULT NULL
+                )
+            """)
+            await db.commit()
+    except Exception as exc:
+        log.error(
+            "init_apikeys_db ECHEC sur %s : %s — la DB N'A PAS ete wipee "
+            "(volontaire, voir docstring). Investiguer.", _DB_PATH, exc,
+        )
+        raise
 
 
 async def create_or_get_api_key(username: str) -> str:

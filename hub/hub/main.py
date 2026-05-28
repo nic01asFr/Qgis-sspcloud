@@ -174,39 +174,72 @@ async def _bootstrap_agent() -> None:
         )
         if r.status_code == 200:
             # Agent existant : patcher les env vars critiques (HUB_API_KEY, LLM_API_KEY)
-            # pour s'assurer qu'ils sont à jour (en cas de bootstrap depuis ancienne image)
-            try:
-                patch_env = [
-                    {"name": "HUB_API_KEY",  "value": hub_api_key},
-                    {"name": "LLM_API_KEY",  "value": llm_api_key},
-                    {"name": "HUB_URL",      "value": _HUB_URL},
-                    {"name": "DATA_DIR",     "value": "/home/onyxia/work/qgis-agent-data"},
-                    {"name": "ONYXIA_USER",  "value": username},
-                ]
-                existing_env = (r.json().get("spec", {}).get("template", {})
-                                .get("spec", {}).get("containers", [{}])[0]
-                                .get("env", []))
-                existing_names = {e["name"] for e in existing_env}
-                new_env = [e for e in existing_env if e["name"] not in {p["name"] for p in patch_env}]
-                new_env.extend(patch_env)
-                await client.patch(
-                    f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/qgis-agent",
-                    headers={**headers, "Content-Type": "application/strategic-merge-patch+json"},
-                    json={"spec": {"template": {"spec": {"containers": [{"name": "agent", "env": new_env}]}}}},
-                )
-                log.info("bootstrap: qgis-agent env patché pour %s", username)
-                # Supprimer le pod pour forcer redémarrage avec les nouvelles vars
+            # pour s'assurer qu'ils sont à jour (en cas de redémarrage du hub
+            # avec une DB regenerée, etc.).
+            #
+            # CRITIQUE : ce patch DOIT reussir. Auparavant, un échec etait
+            # swallow en log.warning silencieux → l'agent gardait une cle
+            # HUB_API_KEY stale (l'ancienne d'un boot precedent), tous ses
+            # appels /mcp renvoyaient 401 muet → le LLM voyait `{}` partout
+            # pour les tools → boucle inefficace puis decrochage silencieux.
+            # On retry 3 fois avant d'abandonner, et on log.error tres fort.
+            patch_env = [
+                {"name": "HUB_API_KEY",  "value": hub_api_key},
+                {"name": "LLM_API_KEY",  "value": llm_api_key},
+                {"name": "HUB_URL",      "value": _HUB_URL},
+                {"name": "DATA_DIR",     "value": "/home/onyxia/work/qgis-agent-data"},
+                {"name": "ONYXIA_USER",  "value": username},
+            ]
+            existing_env = (r.json().get("spec", {}).get("template", {})
+                            .get("spec", {}).get("containers", [{}])[0]
+                            .get("env", []))
+            new_env = [e for e in existing_env
+                       if e["name"] not in {p["name"] for p in patch_env}]
+            new_env.extend(patch_env)
+
+            patch_url = f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/qgis-agent"
+            patch_headers = {**headers, "Content-Type": "application/strategic-merge-patch+json"}
+            patch_body = {"spec": {"template": {"spec":
+                {"containers": [{"name": "agent", "env": new_env}]}}}}
+
+            patched_ok = False
+            for attempt in range(3):
                 try:
-                    del_headers = {k: v for k, v in headers.items() if k != "Content-Type"}
-                    await client.delete(
-                        f"{_K8S_HOST}/api/v1/namespaces/{ns}/pods/qgis-agent-0",
-                        headers=del_headers,
-                    )
-                    log.info("bootstrap: pod qgis-agent-0 supprimé pour redémarrage")
+                    pr = await client.patch(patch_url, headers=patch_headers, json=patch_body)
+                    if pr.status_code >= 300:
+                        raise RuntimeError(f"HTTP {pr.status_code}: {pr.text[:200]}")
+                    log.info("bootstrap: qgis-agent env patché pour %s (try %d/3)",
+                             username, attempt + 1)
+                    patched_ok = True
+                    break
                 except Exception as exc:
-                    log.warning("bootstrap: suppression pod agent échouée: %s", exc)
+                    log.warning("bootstrap: patch agent try %d/3 échec: %s: %s",
+                                attempt + 1, type(exc).__name__, exc)
+                    if attempt < 2:
+                        await asyncio.sleep(2)
+            if not patched_ok:
+                log.error(
+                    "bootstrap: patch agent IMPOSSIBLE après 3 tentatives — "
+                    "l'agent garde une HUB_API_KEY potentiellement stale, "
+                    "ses appels /mcp risquent de renvoyer 401 silencieux. "
+                    "Verifier RBAC k8s ou redeployer l'agent SS a la main."
+                )
+                return  # ne pas supprimer le pod : env pas à jour
+
+            # Patch OK : supprimer le pod pour qu'il redemarre avec le nouvel env
+            try:
+                del_headers = {k: v for k, v in headers.items() if k != "Content-Type"}
+                dr = await client.delete(
+                    f"{_K8S_HOST}/api/v1/namespaces/{ns}/pods/qgis-agent-0",
+                    headers=del_headers,
+                )
+                if dr.status_code >= 300 and dr.status_code != 404:
+                    log.warning("bootstrap: delete pod agent HTTP %d: %s",
+                                dr.status_code, dr.text[:200])
+                else:
+                    log.info("bootstrap: pod qgis-agent-0 supprimé pour redémarrage")
             except Exception as exc:
-                log.warning("bootstrap: patch agent échoué: %s", exc)
+                log.warning("bootstrap: suppression pod agent échouée: %s", exc)
             return
 
         log.info("bootstrap: création qgis-agent pour %s dans %s", username, ns)
