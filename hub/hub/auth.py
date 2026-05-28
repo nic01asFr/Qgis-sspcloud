@@ -37,7 +37,15 @@ _JWKS_URL = f"{_SSPCLOUD_ISSUER}/protocol/openid-connect/certs"
 _ADMIN_USERS = set(
     u.strip() for u in os.getenv("ADMIN_USERS", "").split(",") if u.strip()
 )
-_DATA_DIR = Path(os.getenv("DATA_DIR", "/tmp/qgis-mcp/server-data"))
+# Defaut persistant : si /home/onyxia/work est monte (PVC, cas onboarde), on
+# ecrit dedans pour que apikeys.db survive aux redeploys du hub. Sinon /tmp
+# (dev local, ephemere). Le chemin matche celui de scripts/server_init.sh
+# pour preserver la continuite avec les hubs deployes via start_hub.sh.
+_DATA_DIR = Path(os.getenv("DATA_DIR") or (
+    "/home/onyxia/work/qgis-mcp/server-data"
+    if Path("/home/onyxia/work").is_dir()
+    else "/tmp/qgis-mcp/server-data"
+))
 _DB_PATH  = _DATA_DIR / "apikeys.db"
 
 _jwks   = PyJWKClient(_JWKS_URL, cache_keys=True)

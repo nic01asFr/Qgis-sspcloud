@@ -40,7 +40,14 @@ from typing import Any
 
 import aiosqlite
 
-_DATA_DIR = Path(os.getenv("DATA_DIR", "/tmp/qgis-mcp/server-data"))
+# Defaut persistant : si /home/onyxia/work (PVC) existe, on ecrit dedans pour
+# que studies.db survive aux redeploys hub (sinon toutes les etudes user
+# disparaissent au moindre push d'image). Cf. auth.py meme strategie.
+_DATA_DIR = Path(os.getenv("DATA_DIR") or (
+    "/home/onyxia/work/qgis-mcp/server-data"
+    if Path("/home/onyxia/work").is_dir()
+    else "/tmp/qgis-mcp/server-data"
+))
 _DB_PATH  = _DATA_DIR / "studies.db"
 
 

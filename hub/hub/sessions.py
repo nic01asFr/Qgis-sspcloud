@@ -35,7 +35,14 @@ from pathlib import Path
 
 import aiosqlite
 
-_DATA_DIR = Path(os.getenv("DATA_DIR", "/tmp/qgis-mcp/server-data"))
+# Defaut persistant : si /home/onyxia/work (PVC) existe, on ecrit dedans pour
+# que sessions.db survive aux redeploys (sinon une session active perd son
+# binding workspace au redeploy hub). Cf. auth.py meme strategie.
+_DATA_DIR = Path(os.getenv("DATA_DIR") or (
+    "/home/onyxia/work/qgis-mcp/server-data"
+    if Path("/home/onyxia/work").is_dir()
+    else "/tmp/qgis-mcp/server-data"
+))
 _DB_PATH  = _DATA_DIR / "sessions.db"
 
 def _resolve_namespace() -> str:
