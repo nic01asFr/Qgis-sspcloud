@@ -145,20 +145,16 @@ async def _bootstrap_agent() -> None:
 
     hub_api_key = await auth.create_or_get_api_key(username)
 
-    # Chercher la config LLM SSPCloud dans les secrets du namespace.
-    # Onyxia stocke la config de l'AI Assistant (datalab account -> Profil) dans
-    # un secret par service : `<service>-secretassistant`, cle `config.json`.
-    # Le JSON ressemble a :
-    #   {
-    #     "model_provider_id": "openai-chat:devstral-2:123b",
-    #     "fields": {"openai-chat:devstral-2:123b":
-    #         {"openai_api_base": "https://llm.lab.sspcloud.fr/api"}},
-    #     "api_keys": {"OPENAI_API_KEY": "sk-..."}
-    #   }
-    # On extrait LLM_API_KEY + LLM_MODEL + LLM_BASE_URL pour l'agent.
-    llm_api_key  = ""
-    llm_model    = ""
-    llm_base_url = ""
+    # Chercher la cle LLM SSPCloud dans les secrets du namespace.
+    # Onyxia stocke la config AI Assistant (datalab account -> Profil) dans
+    # `<service>-secretassistant`, cle `config.json` :
+    #   {"api_keys": {"OPENAI_API_KEY": "sk-..."}, ...}
+    # On extrait UNIQUEMENT la cle. Le modele et la base URL LLM sont
+    # gerés cote agent (_MODEL_BY_PROFILE dans agent/qgis_agent.py) : ils
+    # pointent vers les modeles SSPCloud reellement disponibles
+    # (qwen3-6-35b-moe, gemma4-26b-moe), pas vers le model_provider_id par
+    # defaut du config.json datalab (souvent un modele inexistant).
+    llm_api_key = ""
 
     async with httpx.AsyncClient(verify=False, timeout=15) as client:
         try:
@@ -181,18 +177,12 @@ async def _bootstrap_agent() -> None:
                     continue
                 key = (cfg.get("api_keys") or {}).get("OPENAI_API_KEY", "")
                 if not key:
-                    continue  # secret existe mais clé pas encore renseignée
+                    continue  # secret existe mais cle pas encore renseignee
                 llm_api_key = key
-                provider_id = cfg.get("model_provider_id") or ""
-                # "openai-chat:devstral-2:123b" -> "devstral-2:123b"
-                llm_model = provider_id.split(":", 1)[1] if ":" in provider_id else provider_id
-                fields = (cfg.get("fields") or {}).get(provider_id) or {}
-                llm_base_url = fields.get("openai_api_base") or ""
-                log.info("bootstrap: LLM config trouvee dans %s (model=%s)",
-                         name, llm_model or "?")
+                log.info("bootstrap: LLM_API_KEY trouve dans %s", name)
                 break
         except Exception as exc:
-            log.warning("bootstrap: impossible de lire LLM config depuis secrets: %s", exc)
+            log.warning("bootstrap: impossible de lire LLM_API_KEY depuis secrets: %s", exc)
         # Vérifier si qgis-agent existe déjà
         r = await client.get(
             f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/qgis-agent",
@@ -211,8 +201,6 @@ async def _bootstrap_agent() -> None:
                     "key":  "HUB_API_KEY",
                 }}},
                 {"name": "LLM_API_KEY",  "value": llm_api_key},
-                {"name": "LLM_MODEL",    "value": llm_model},
-                {"name": "LLM_BASE_URL", "value": llm_base_url},
                 {"name": "HUB_URL",      "value": _HUB_URL},
                 {"name": "DATA_DIR",     "value": "/home/onyxia/work/qgis-agent-data"},
                 {"name": "ONYXIA_USER",  "value": username},
@@ -301,8 +289,6 @@ async def _bootstrap_agent() -> None:
                                 "key":  "HUB_API_KEY",
                             }}},
                             {"name": "LLM_API_KEY",  "value": llm_api_key},
-                            {"name": "LLM_MODEL",    "value": llm_model},
-                            {"name": "LLM_BASE_URL", "value": llm_base_url},
                         ],
                         "readinessProbe": {
                             "httpGet": {"path": "/", "port": 8888},
