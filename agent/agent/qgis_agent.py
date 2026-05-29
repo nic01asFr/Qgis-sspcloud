@@ -1699,8 +1699,19 @@ ne vient pas d'un outil cette session, la supprimer.
             log.debug("auto insight_extractor skip: %s", e)
 
         # Auto-save du projet QGIS si ce turn a modifié l'état (tool whitelist).
-        # Fire-and-forget vers le hub : exec save_project côté workspace. Garantit
-        # que /data/studies/{active}/project.qgz suit le travail courant sans que
-        # l'agent ait à appeler save_project explicitement.
+        # BLOQUANT (pas fire-and-forget) pour garantir la coherence avec les
+        # snapshots pre-mutating (CHARTE §9 decision #3 : "bloquant avant
+        # mutating") et avec treatments.jsonl (ecrit synchrone). Si l'agent
+        # crash entre create_task et flush HTTP, on perdrait le .qgz a jour
+        # tandis que treatments garderait trace -> rollback restaurerait un
+        # etat desync. Cf. CHARTE Principe 2 (audit honnete) + Principe 4
+        # (snapshots bloquants). Optimisation async = phase ulterieure
+        # documentee si la latence devient un probleme observable.
         if any(c["tool"] in _MUTATING_TOOLS for c in tool_calls_made):
-            asyncio.create_task(self._autosave_active_study())
+            try:
+                await self._autosave_active_study()
+            except Exception as exc:
+                log.error(
+                    "Auto-save bloquant a echoue (turn termine quand meme) : "
+                    "%s: %s", type(exc).__name__, exc,
+                )

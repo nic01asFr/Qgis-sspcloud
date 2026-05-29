@@ -321,12 +321,56 @@ async def extract_insights_endpoint(request: Request):
 
 # ── Interface principale ───────────────────────────────────────────────────────
 
+async def _fetch_active_study_id() -> str | None:
+    """Recupere l'id de l'etude active cote hub (sentinel central).
+
+    Best-effort : si le hub n'est pas joignable ou pas d'etude active,
+    retourne None. Utilise au GET / pour retrouver la derniere session
+    liee a l'etude (au lieu d'une uuid orpheline) — CHARTE §2.
+    """
+    hub_url = os.getenv("HUB_URL", "")
+    api_key = os.getenv("HUB_API_KEY", "")
+    if not (hub_url and api_key):
+        return None
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=5) as c:
+            r = await c.get(
+                f"{hub_url}/studies/active",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if r.status_code == 200 and r.json():
+                return r.json().get("id")
+    except Exception:
+        pass
+    return None
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    """Interface chat principale."""
+    """Interface chat principale.
+
+    Si une etude est active cote hub et qu'une session chat anterieure y est
+    rattachee, on la reprend (continuite UX — l'historique reste accessible).
+    Sinon nouvelle session uuid. Cf. CHARTE §2 (etude = unite du cycle).
+    """
     profile_id = request.cookies.get("profile_id", _DEFAULT_PROFILE)
     sessions   = await memory.get_recent_sessions("user", limit=5)
     projects   = await memory.list_projects(profile_id)
+
+    # Reprise de la derniere session liee a l'etude active (Fix Bug B).
+    # Le query param ?new=1 force une nouvelle session (pour "Nouvelle
+    # conversation" futur). Sinon, si etude active + session anterieure
+    # rattachee, on la reprend.
+    session_id: str | None = None
+    if request.query_params.get("new") != "1":
+        active_study_id = await _fetch_active_study_id()
+        if active_study_id:
+            session_id = await memory.get_latest_session_for_study(
+                "user", active_study_id,
+            )
+    if not session_id:
+        session_id = str(uuid.uuid4())
 
     return templates.TemplateResponse(request, "chat.html", {
         "profile_id":   profile_id,
@@ -334,7 +378,7 @@ async def index(request: Request):
         "portal_url":   os.getenv("PORTAL_URL", ""),
         "sessions":     sessions,
         "projects":     projects[:5],
-        "session_id":   str(uuid.uuid4()),
+        "session_id":   session_id,
     })
 
 
@@ -405,10 +449,15 @@ async def chat(
     # Premier message utilisateur de la session → étiquette de session
     # (sinon la sidebar affiche `Session abcd1234` illisible — cf. audit UX).
     # On tronque à 80 caractères pour rester lisible dans la sidebar.
+    # On lie aussi la session a l'etude active au moment de la creation
+    # (Fix Bug B — Sessions chat orphelines). Cf. CHARTE §2.
     if not history:
         title = (message or "").strip().replace("\n", " ")[:80]
         if title:
             await memory.set_session_summary(session_id, title)
+        active_study_id = await _fetch_active_study_id()
+        if active_study_id:
+            await memory.set_session_study(session_id, active_study_id)
     history_formatted = [
         {"role": m["role"], "content": m["content"]}
         for m in history

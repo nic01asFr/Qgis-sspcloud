@@ -2455,6 +2455,20 @@ async def create_session(
             _install_audit_trail_safe(session, user["username"])
         )
 
+    # Re-hydrater l'etude active dans le pod workspace fraichement cree.
+    # Sans ce hook, /sessions cree un pod vierge -> l'agent appelle des tools
+    # qui muent un projet vide -> _autosave_active_study ecrit un .qgz vide
+    # qui ECRASE le travail precedent. Le bug etait silencieux car le hook
+    # n'existait que dans /workspace/wake (clic user). Cf. CHARTE_AGENT §4
+    # (etude active = projet charge) et la docstring l.2937 de
+    # _auto_activate_active_study_after_wake qui anticipait deja ce cas.
+    if _STUDIES_AVAILABLE:
+        task = asyncio.create_task(
+            _auto_activate_active_study_after_wake(user["username"])
+        )
+        _background_anchors.add(task)
+        task.add_done_callback(_background_anchors.discard)
+
     return _session_view(session)
 
 

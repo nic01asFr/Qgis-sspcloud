@@ -54,8 +54,15 @@ async def init() -> None:
                 ended_at    INTEGER,
                 zone        TEXT,
                 summary     TEXT,
-                tags        TEXT
+                tags        TEXT,
+                -- Lien session <-> etude active au moment de la conversation.
+                -- NULL = exploration libre (pas d'etude). CHARTE §2 : "L'etude est
+                -- l'unite qui traverse tout le cycle". Permet de retrouver la
+                -- derniere conversation d'une etude au reload du desk.
+                study_id    TEXT
             );
+            CREATE INDEX IF NOT EXISTS idx_sessions_username_study
+                ON sessions(username, study_id, started_at DESC);
 
             CREATE TABLE IF NOT EXISTS messages (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,8 +141,61 @@ async def init() -> None:
             CREATE INDEX IF NOT EXISTS idx_ckpt_session ON checkpoints(session_id, message_idx);
             CREATE INDEX IF NOT EXISTS idx_ckpt_created ON checkpoints(created_at);
         """)
+
+        # Migration : pour les DB pre-existantes creees avant l'ajout de
+        # sessions.study_id. Le CREATE TABLE ci-dessus ne s'applique qu'aux
+        # bases neuves (IF NOT EXISTS). On detecte la colonne et l'ajoute si
+        # absente, sans casser les donnees existantes.
+        cols = [
+            r[1] for r in
+            await (await db.execute("PRAGMA table_info(sessions)")).fetchall()
+        ]
+        if "study_id" not in cols:
+            await db.execute("ALTER TABLE sessions ADD COLUMN study_id TEXT")
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_username_study "
+                "ON sessions(username, study_id, started_at DESC)"
+            )
+            log.info("Migration : sessions.study_id ajoute (DB pre-existante)")
+
         await db.commit()
     log.info("Mémoire initialisée : %s", _DB_PATH)
+
+
+async def set_session_study(session_id: str, study_id: str | None) -> None:
+    """Associe une session chat a son etude active au moment de la conversation.
+
+    Appele depuis POST /chat apres _resolve_active_profile. Permet de retrouver
+    "la derniere conversation tenue sur cette etude" au reload du desk.
+    CHARTE §2 : etude = unite du cycle.
+    """
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "UPDATE sessions SET study_id = ? WHERE id = ?",
+            (study_id, session_id),
+        )
+        await db.commit()
+
+
+async def get_latest_session_for_study(
+    username: str, study_id: str
+) -> str | None:
+    """Retourne l'id de la derniere session liee a cette etude pour cet user.
+
+    Utilise au GET / pour reprendre la conversation en cours sur l'etude
+    active, plutot que de creer une uuid fraiche orpheline.
+    Retourne None si aucune session ou si study_id vide.
+    """
+    if not study_id:
+        return None
+    async with aiosqlite.connect(_DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT id FROM sessions WHERE username = ? AND study_id = ? "
+            "ORDER BY started_at DESC LIMIT 1",
+            (username, study_id),
+        )
+        row = await cur.fetchone()
+        return row[0] if row else None
 
 
 # ── Phase 4 : Insights agentiques (couche 3) ──────────────────────────────────
