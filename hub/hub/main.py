@@ -145,28 +145,54 @@ async def _bootstrap_agent() -> None:
 
     hub_api_key = await auth.create_or_get_api_key(username)
 
-    # Chercher le token LLM SSPCloud dans les secrets du namespace
-    # Onyxia injecte SSPCloud_API_KEY dans le secret *-secretextraenv de chaque service
-    llm_api_key = os.getenv("SSPCloud_API_KEY", "")
+    # Chercher la config LLM SSPCloud dans les secrets du namespace.
+    # Onyxia stocke la config de l'AI Assistant (datalab account -> Profil) dans
+    # un secret par service : `<service>-secretassistant`, cle `config.json`.
+    # Le JSON ressemble a :
+    #   {
+    #     "model_provider_id": "openai-chat:devstral-2:123b",
+    #     "fields": {"openai-chat:devstral-2:123b":
+    #         {"openai_api_base": "https://llm.lab.sspcloud.fr/api"}},
+    #     "api_keys": {"OPENAI_API_KEY": "sk-..."}
+    #   }
+    # On extrait LLM_API_KEY + LLM_MODEL + LLM_BASE_URL pour l'agent.
+    llm_api_key  = ""
+    llm_model    = ""
+    llm_base_url = ""
 
     async with httpx.AsyncClient(verify=False, timeout=15) as client:
-        if not llm_api_key:
-            try:
-                sr = await client.get(
-                    f"{_K8S_HOST}/api/v1/namespaces/{ns}/secrets",
-                    headers=headers, params={"fieldSelector": "type=Opaque"},
-                )
-                import base64 as _b64
-                for secret in (sr.json().get("items") or []):
-                    name = secret.get("metadata", {}).get("name", "")
-                    if "secretextraenv" in name:
-                        raw = secret.get("data", {}).get("SSPCloud_API_KEY")
-                        if raw:
-                            llm_api_key = _b64.b64decode(raw).decode()
-                            log.info("bootstrap: LLM_API_KEY trouvé dans %s", name)
-                            break
-            except Exception as exc:
-                log.warning("bootstrap: impossible de lire LLM_API_KEY depuis secrets: %s", exc)
+        try:
+            sr = await client.get(
+                f"{_K8S_HOST}/api/v1/namespaces/{ns}/secrets",
+                headers=headers, params={"fieldSelector": "type=Opaque"},
+            )
+            import base64 as _b64
+            import json as _json
+            for secret in (sr.json().get("items") or []):
+                name = secret.get("metadata", {}).get("name", "")
+                if "secretassistant" not in name:
+                    continue
+                raw = secret.get("data", {}).get("config.json")
+                if not raw:
+                    continue
+                try:
+                    cfg = _json.loads(_b64.b64decode(raw).decode())
+                except Exception:
+                    continue
+                key = (cfg.get("api_keys") or {}).get("OPENAI_API_KEY", "")
+                if not key:
+                    continue  # secret existe mais clé pas encore renseignée
+                llm_api_key = key
+                provider_id = cfg.get("model_provider_id") or ""
+                # "openai-chat:devstral-2:123b" -> "devstral-2:123b"
+                llm_model = provider_id.split(":", 1)[1] if ":" in provider_id else provider_id
+                fields = (cfg.get("fields") or {}).get(provider_id) or {}
+                llm_base_url = fields.get("openai_api_base") or ""
+                log.info("bootstrap: LLM config trouvee dans %s (model=%s)",
+                         name, llm_model or "?")
+                break
+        except Exception as exc:
+            log.warning("bootstrap: impossible de lire LLM config depuis secrets: %s", exc)
         # Vérifier si qgis-agent existe déjà
         r = await client.get(
             f"{_K8S_HOST}/apis/apps/v1/namespaces/{ns}/statefulsets/qgis-agent",
@@ -185,6 +211,8 @@ async def _bootstrap_agent() -> None:
                     "key":  "HUB_API_KEY",
                 }}},
                 {"name": "LLM_API_KEY",  "value": llm_api_key},
+                {"name": "LLM_MODEL",    "value": llm_model},
+                {"name": "LLM_BASE_URL", "value": llm_base_url},
                 {"name": "HUB_URL",      "value": _HUB_URL},
                 {"name": "DATA_DIR",     "value": "/home/onyxia/work/qgis-agent-data"},
                 {"name": "ONYXIA_USER",  "value": username},
@@ -273,6 +301,8 @@ async def _bootstrap_agent() -> None:
                                 "key":  "HUB_API_KEY",
                             }}},
                             {"name": "LLM_API_KEY",  "value": llm_api_key},
+                            {"name": "LLM_MODEL",    "value": llm_model},
+                            {"name": "LLM_BASE_URL", "value": llm_base_url},
                         ],
                         "readinessProbe": {
                             "httpGet": {"path": "/", "port": 8888},
@@ -2576,6 +2606,42 @@ async def update_agent_config(request: Request):
             log.warning("admin/agent-config: suppression pod échouée: %s", exc)
 
     return JSONResponse({"ok": True})
+
+
+@app.get("/api/refresh-llm-config", response_class=HTMLResponse)
+@app.post("/api/refresh-llm-config")
+async def refresh_llm_config(request: Request):
+    """Re-lit la config LLM SSPCloud et resynchronise l'agent.
+
+    Declenche par le bouton "Verifier ma config" du bandeau agent quand
+    l'utilisateur vient de renseigner sa cle dans datalab.sspcloud.fr/account
+    (section AI Assistant). L'agent UI ouvre cette URL dans une popup
+    courte (cross-origin : seul le portail a le cookie OIDC permettant
+    d'agir sur le namespace).
+
+    Mecanisme : rappelle `_bootstrap_agent()`, qui relit
+    `*-secretassistant/config.json` du namespace, patche l'env du SS
+    qgis-agent (LLM_API_KEY/LLM_MODEL/LLM_BASE_URL) et supprime le pod
+    qgis-agent-0 -> redemarrage avec la cle fraiche.
+    """
+    try:
+        await _bootstrap_agent()
+        return HTMLResponse(
+            "<!doctype html><html lang=fr><meta charset=utf-8>"
+            "<title>Cle LLM resynchronisee</title>"
+            "<style>body{font:14px system-ui;padding:24px;color:#333}</style>"
+            "<body><p><strong>Configuration LLM rechargee.</strong></p>"
+            "<p>L'agent redemarre avec la nouvelle cle. Vous pouvez "
+            "fermer cette fenetre.</p>"
+            "<script>setTimeout(()=>window.close(),1500)</script>"
+        )
+    except Exception as exc:
+        log.exception("refresh-llm-config: %s", exc)
+        return HTMLResponse(
+            f"<!doctype html><html lang=fr><meta charset=utf-8>"
+            f"<body><p>Erreur de resynchronisation : {exc}</p>",
+            status_code=500,
+        )
 
 
 @app.get("/admin/workspace-info")
