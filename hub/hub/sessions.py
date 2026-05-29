@@ -318,6 +318,15 @@ spec:
           value: "/data"
         - name: PYTHONUNBUFFERED
           value: "1"
+        # HUB_API_KEY via Secret namespace-level (jamais inline). Le tool
+        # publish_artifact du workspace POST vers {{HUB_URL}}/publish avec
+        # cette cle ; en la rattachant au Secret on garantit qu'elle suit
+        # la cle COURANTE du hub (pas de desync apres redeploy hub).
+        - name: HUB_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: qgis-hub-apikey
+              key: HUB_API_KEY
 {profile_env_yaml}        resources:
           limits:
             cpu: "{_CPU_LIMIT}"
@@ -527,28 +536,25 @@ async def create_session(owner: str, extra_env: dict | None = None) -> dict:
     Note : changer le profil après le 1er démarrage nécessite un restart
     du pod (kubectl rollout restart) — à voir en Phase 5 (profil dynamique).
     """
-    # Injection centralisée des creds hub (HUB_URL + HUB_API_KEY) pour que le
-    # tool publish_artifact fonctionne, QUEL QUE SOIT le chemin de création du
-    # workspace (wake via POST /sessions, profil, _get_or_create_session…).
-    # Avant, l'injection n'était que dans _get_or_create_session → publish
-    # échouait quand le pod était créé via le bouton "Réveiller" (POST /sessions).
+    # Injection HUB_URL inline dans l'env workspace (var simple, pas de
+    # rotation possible). HUB_API_KEY n'est PLUS injectee ici : elle est
+    # referencee via secretKeyRef directement dans _statefulset_manifest
+    # (Secret `qgis-hub-apikey`, source de verite namespace-level — survit
+    # aux redeploys hub, jamais de desync entre workspace et hub).
     extra_env = dict(extra_env or {})
-    # HUB_URL : env explicite (cas nic01asfr via start_hub.sh) sinon dérivé de
-    # l'owner. Un hub lancé par Onyxia (onboarding standard) n'exporte PAS
-    # HUB_URL → os.getenv vide → publish_artifact échouait sur "HUB_URL absent".
-    # Le hub d'un user est toujours à user-{owner}-qgis.user.lab.sspcloud.fr
-    # (ingress.hostname posé par le launcher).
     _hub_url = os.getenv("HUB_URL", "") or (
         f"https://user-{owner}-qgis.user.lab.sspcloud.fr" if owner else ""
     )
     if _hub_url:
         extra_env.setdefault("HUB_URL", _hub_url)
-    if "HUB_API_KEY" not in extra_env:
-        try:
-            from hub import auth  # lazy : évite tout cycle d'import au load
-            extra_env["HUB_API_KEY"] = await auth.create_or_get_api_key(owner)
-        except Exception as exc:
-            print(f"[sessions] HUB_API_KEY non injectée pour {owner}: {exc}")
+    # On garantit toutefois que le Secret existe AVANT de creer le workspace,
+    # sinon kubelet refuserait de demarrer le pod (secretKeyRef vers Secret
+    # absent = pod en CreateContainerConfigError).
+    try:
+        from hub import auth  # lazy : evite cycle import au load
+        await auth.create_or_get_api_key(owner)
+    except Exception as exc:
+        print(f"[sessions] Secret qgis-hub-apikey non garanti pour {owner}: {exc}")
 
     ws = _workspace_name(owner)
     session_id = _session_id_for(owner)
@@ -577,12 +583,15 @@ async def create_session(owner: str, extra_env: dict | None = None) -> dict:
             status = SESSION_STARTING
         else:
             status = SESSION_STARTING if not _pod_ready(pod_name) else SESSION_READY
-        # Garantir HUB_URL/HUB_API_KEY même sur un workspace créé AVANT
-        # l'injection centralisée (sinon publish_artifact échoue). Idempotent :
-        # restart seulement si la valeur change (clé stable → no-op ensuite).
-        _kubectl_set_env(ws, {
-            k: extra_env[k] for k in ("HUB_URL", "HUB_API_KEY") if k in extra_env
-        })
+        # Garantir HUB_URL meme sur un workspace cree AVANT l'injection
+        # centralisee. HUB_API_KEY n'est plus pousse ici : il est attache
+        # via secretKeyRef dans le manifest. Pour les workspaces existants
+        # avec HUB_API_KEY en valeur inline (legacy pre-refonte), un patch
+        # API direct serait necessaire ; en pratique on laisse l'inline
+        # cohabiter — `auth.create_or_get_api_key` synchronise le Secret a
+        # la cle ACTUELLE, donc le publish_artifact du workspace reussit
+        # tant que la cle inline correspond a la cle courante.
+        _kubectl_set_env(ws, {"HUB_URL": extra_env["HUB_URL"]} if "HUB_URL" in extra_env else {})
         # Toujours s'assurer que l'ingress existe (sessions créées avant déploiement feature)
         _ensure_novnc_ingress(owner)
 

@@ -173,18 +173,17 @@ async def _bootstrap_agent() -> None:
             headers=headers,
         )
         if r.status_code == 200:
-            # Agent existant : patcher les env vars critiques (HUB_API_KEY, LLM_API_KEY)
-            # pour s'assurer qu'ils sont à jour (en cas de redémarrage du hub
-            # avec une DB regenerée, etc.).
-            #
-            # CRITIQUE : ce patch DOIT reussir. Auparavant, un échec etait
-            # swallow en log.warning silencieux → l'agent gardait une cle
-            # HUB_API_KEY stale (l'ancienne d'un boot precedent), tous ses
-            # appels /mcp renvoyaient 401 muet → le LLM voyait `{}` partout
-            # pour les tools → boucle inefficace puis decrochage silencieux.
-            # On retry 3 fois avant d'abandonner, et on log.error tres fort.
+            # Agent existant : reconfigurer son env pour pointer sur le Secret
+            # k8s `qgis-hub-apikey` (refonte : Secret = source de verite, plus
+            # de valeur inline). Cas typique : SS deja deployee avec une cle
+            # inline en dur (legacy). On bascule vers secretKeyRef → le pod
+            # lira la cle COURANTE du Secret a chaque (re)demarrage, plus
+            # jamais de desync entre l'env de l'agent et la DB du hub.
             patch_env = [
-                {"name": "HUB_API_KEY",  "value": hub_api_key},
+                {"name": "HUB_API_KEY", "valueFrom": {"secretKeyRef": {
+                    "name": "qgis-hub-apikey",
+                    "key":  "HUB_API_KEY",
+                }}},
                 {"name": "LLM_API_KEY",  "value": llm_api_key},
                 {"name": "HUB_URL",      "value": _HUB_URL},
                 {"name": "DATA_DIR",     "value": "/home/onyxia/work/qgis-agent-data"},
@@ -265,7 +264,14 @@ async def _bootstrap_agent() -> None:
                             {"name": "ONYXIA_USER",  "value": username},
                             {"name": "DATA_DIR",     "value": "/home/onyxia/work/qgis-agent-data"},
                             {"name": "HUB_URL",      "value": _HUB_URL},
-                            {"name": "HUB_API_KEY",  "value": hub_api_key},
+                            # HUB_API_KEY via Secret namespace-level :
+                            # kubelet injecte la valeur courante a chaque
+                            # demarrage du pod. Plus de desync possible avec
+                            # la cle du hub (cf. auth.create_or_get_api_key).
+                            {"name": "HUB_API_KEY", "valueFrom": {"secretKeyRef": {
+                                "name": "qgis-hub-apikey",
+                                "key":  "HUB_API_KEY",
+                            }}},
                             {"name": "LLM_API_KEY",  "value": llm_api_key},
                         ],
                         "readinessProbe": {

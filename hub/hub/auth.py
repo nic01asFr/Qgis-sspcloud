@@ -15,9 +15,12 @@ que l'user colle dans sa config Claude Desktop — jamais mise à jour ensuite.
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import logging
 import os
 import secrets
+import subprocess
 import time
 from pathlib import Path
 
@@ -47,6 +50,70 @@ _DATA_DIR = Path(os.getenv("DATA_DIR") or (
     else "/tmp/qgis-mcp/server-data"
 ))
 _DB_PATH  = _DATA_DIR / "apikeys.db"
+
+# ── Source de verite : k8s Secret namespace-level ────────────────────────────
+# Pourquoi : `apikeys.db` etait dans le PVC du hub (`/home/onyxia/work/...`).
+# Or sur Onyxia, le PVC est attache au cycle de vie du service — supprimer
+# /redeployer le hub detruit le PVC → DB neuve → nouvelle cle. L'agent SS
+# garde l'ancienne cle dans son env → desync → tous les /mcp renvoient 401
+# silencieux (le bug recurrent qu'on a chasse). Le Secret survit a TOUT
+# (redeploy service, restart pod, suppression manuelle) — objet namespace-level.
+def _read_pod_namespace() -> str:
+    try:
+        return Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read_text().strip()
+    except Exception:
+        return ""
+
+_NAMESPACE   = _read_pod_namespace()
+_SECRET_NAME = "qgis-hub-apikey"
+_SECRET_KEY  = "HUB_API_KEY"
+# Cache memoire de la cle pour ne pas tirer un kubectl par /auth/apikey appel.
+# TTL court (5 min) — un revoke explicite invalide le cache.
+_cached_key: dict = {"value": "", "ts": 0.0}
+_CACHE_TTL = 300.0
+
+
+def _kubectl_get_secret_value(name: str, namespace: str, key: str) -> str | None:
+    """Lit la valeur d'une cle d'un Secret. None si absent. Sync (a wrapper to_thread)."""
+    if not namespace:
+        return None
+    r = subprocess.run(
+        ["kubectl", "get", "secret", name, "-n", namespace,
+         "-o", "jsonpath={.data." + key + "}"],
+        capture_output=True, text=True, timeout=10,
+    )
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    try:
+        return base64.b64decode(r.stdout.strip()).decode()
+    except Exception:
+        return None
+
+
+def _kubectl_create_secret(name: str, namespace: str, key: str, value: str) -> bool:
+    """Cree un Secret generique avec une cle. Idempotent (AlreadyExists = OK).
+    Renvoie True si Secret existe en sortie (cree ou deja la)."""
+    if not namespace:
+        return False
+    r = subprocess.run(
+        ["kubectl", "create", "secret", "generic", name,
+         "-n", namespace, f"--from-literal={key}={value}"],
+        capture_output=True, text=True, timeout=10,
+    )
+    if r.returncode == 0:
+        return True
+    return "AlreadyExists" in (r.stderr or "")
+
+
+def _kubectl_delete_secret(name: str, namespace: str) -> bool:
+    if not namespace:
+        return False
+    r = subprocess.run(
+        ["kubectl", "delete", "secret", name, "-n", namespace, "--ignore-not-found"],
+        capture_output=True, text=True, timeout=10,
+    )
+    return r.returncode == 0
+
 
 _jwks   = PyJWKClient(_JWKS_URL, cache_keys=True)
 _bearer = HTTPBearer()
@@ -88,57 +155,155 @@ async def init_apikeys_db() -> None:
 
 async def create_or_get_api_key(username: str) -> str:
     """
-    Retourne la clé API existante ou en génère une nouvelle.
-    Idempotent — le portail peut l'appeler plusieurs fois sans effet de bord.
-    La clé est stockée en clair (c'est elle-même l'ID) car elle contient
-    déjà 128 bits d'entropie — suffisant sans hachage supplémentaire.
-    """
-    async with aiosqlite.connect(_DB_PATH) as db:
-        row = await (await db.execute(
-            "SELECT id FROM api_keys WHERE username = ?", (username,)
-        )).fetchone()
+    Retourne la cle HUB_API_KEY de la namespace.
 
-        if row:
+    Source de verite = k8s Secret `qgis-hub-apikey` (namespace-level, survit
+    aux redeploys de service). Migration douce : si le Secret n'existe pas
+    encore mais qu'un `apikeys.db` legacy est present (hubs deployes AVANT
+    cette refonte), bascule la cle existante vers le Secret pour preserver
+    la continuite (l'agent et le hub continuent de matcher sans intervention).
+
+    Idempotent — le portail / _bootstrap_agent peuvent l'appeler n fois.
+    """
+    # 1) Cache memoire
+    now = time.time()
+    if _cached_key["value"] and (now - _cached_key["ts"]) < _CACHE_TTL:
+        return _cached_key["value"]
+
+    # 2) Lecture Secret (cas normal en prod, post-refonte)
+    if _NAMESPACE:
+        existing = await asyncio.to_thread(
+            _kubectl_get_secret_value, _SECRET_NAME, _NAMESPACE, _SECRET_KEY,
+        )
+        if existing:
+            _cached_key["value"] = existing
+            _cached_key["ts"] = now
+            return existing
+
+    # 3) Migration legacy : reprendre la cle depuis apikeys.db si elle existe
+    legacy_key: str | None = None
+    if _DB_PATH.exists():
+        try:
+            async with aiosqlite.connect(_DB_PATH) as db:
+                row = await (await db.execute(
+                    "SELECT id FROM api_keys WHERE username = ?", (username,)
+                )).fetchone()
+                if row:
+                    legacy_key = row[0]
+                    log.info(
+                        "Migration apikeys.db -> Secret %s/%s pour %s",
+                        _NAMESPACE, _SECRET_NAME, username,
+                    )
+        except Exception as exc:
+            log.warning("Lecture legacy apikeys.db echec: %s", exc)
+
+    # 4) Generation si pas de legacy
+    new_key = legacy_key or f"qgis_{username}_{secrets.token_hex(16)}"
+
+    # 5) Creation Secret (atomique cote k8s, idempotent : AlreadyExists OK)
+    if _NAMESPACE:
+        ok = await asyncio.to_thread(
+            _kubectl_create_secret, _SECRET_NAME, _NAMESPACE, _SECRET_KEY, new_key,
+        )
+        if ok:
+            # Relire pour gerer la race "AlreadyExists" : un autre process a
+            # peut-etre cree le Secret entre etapes 2 et 5 avec une cle
+            # differente. La cle dans le Secret est la verite.
+            confirmed = await asyncio.to_thread(
+                _kubectl_get_secret_value, _SECRET_NAME, _NAMESPACE, _SECRET_KEY,
+            )
+            if confirmed:
+                _cached_key["value"] = confirmed
+                _cached_key["ts"] = now
+                return confirmed
+        else:
+            log.error(
+                "create_or_get_api_key: echec creation Secret %s/%s — "
+                "fallback DB legacy (cle volatile)", _NAMESPACE, _SECRET_NAME,
+            )
+
+    # 6) Fallback DB (dev local sans k8s, OU echec irrecuperable Secret).
+    #    Sert aussi de filet : si on est ici sans Secret + sans DB, on insere
+    #    new_key en DB pour stocker quelque part.
+    try:
+        async with aiosqlite.connect(_DB_PATH) as db:
+            row = await (await db.execute(
+                "SELECT id FROM api_keys WHERE username = ?", (username,)
+            )).fetchone()
+            if row:
+                return row[0]
+            ts = int(time.time())
             await db.execute(
-                "UPDATE api_keys SET last_used = ? WHERE username = ?",
-                (int(time.time()), username),
+                "INSERT INTO api_keys (id, username, created_at, last_used) "
+                "VALUES (?, ?, ?, ?)",
+                (new_key, username, ts, ts),
             )
             await db.commit()
-            return row[0]
-
-        key = f"qgis_{username}_{secrets.token_hex(16)}"
-        now = int(time.time())
-        await db.execute(
-            "INSERT INTO api_keys (id, username, created_at, last_used) VALUES (?, ?, ?, ?)",
-            (key, username, now, now),
-        )
-        await db.commit()
-        log.info("API key créée pour %s", username)
-        return key
+            log.info("API key creee (fallback DB) pour %s", username)
+            return new_key
+    except Exception as exc:
+        log.error("Fallback DB creation echec : %s — retourne cle ephemere", exc)
+        return new_key
 
 
 async def revoke_api_key(username: str) -> None:
-    async with aiosqlite.connect(_DB_PATH) as db:
-        await db.execute("DELETE FROM api_keys WHERE username = ?", (username,))
-        await db.commit()
+    """Revoque la cle (supprime Secret + DB legacy)."""
+    if _NAMESPACE:
+        await asyncio.to_thread(_kubectl_delete_secret, _SECRET_NAME, _NAMESPACE)
+    _cached_key["value"] = ""
+    _cached_key["ts"] = 0.0
+    if _DB_PATH.exists():
+        try:
+            async with aiosqlite.connect(_DB_PATH) as db:
+                await db.execute(
+                    "DELETE FROM api_keys WHERE username = ?", (username,)
+                )
+                await db.commit()
+        except Exception:
+            pass
 
 
 async def _validate_api_key(key: str) -> dict | None:
-    """Valide une clé API hub. None si invalide/expirée."""
-    async with aiosqlite.connect(_DB_PATH) as db:
-        row = await (await db.execute(
-            "SELECT username, expires_at FROM api_keys WHERE id = ?", (key,)
-        )).fetchone()
-    if not row:
+    """Valide une cle API hub.
+
+    Compare contre le Secret de la namespace courante (post-refonte) ET
+    contre la DB legacy si elle existe (compat upgrade en cours).
+    """
+    if not key:
         return None
-    username, expires_at = row
-    if expires_at and time.time() > expires_at:
-        return None
-    return {
-        "username": username,
-        "role": "admin" if username in _ADMIN_USERS else "user",
-        "source": "apikey",
-    }
+    # 1) Secret (source de verite)
+    if _NAMESPACE:
+        current = await asyncio.to_thread(
+            _kubectl_get_secret_value, _SECRET_NAME, _NAMESPACE, _SECRET_KEY,
+        )
+        if current and current == key:
+            username = _NAMESPACE.removeprefix("user-")
+            return {
+                "username": username,
+                "role": "admin" if username in _ADMIN_USERS else "user",
+                "source": "apikey",
+            }
+    # 2) DB legacy (compat upgrade)
+    if _DB_PATH.exists():
+        try:
+            async with aiosqlite.connect(_DB_PATH) as db:
+                row = await (await db.execute(
+                    "SELECT username, expires_at FROM api_keys WHERE id = ?",
+                    (key,),
+                )).fetchone()
+        except Exception:
+            return None
+        if not row:
+            return None
+        username, expires_at = row
+        if expires_at and time.time() > expires_at:
+            return None
+        return {
+            "username": username,
+            "role": "admin" if username in _ADMIN_USERS else "user",
+            "source": "apikey",
+        }
+    return None
 
 
 # ── Validation OIDC SSPCloud ───────────────────────────────────────────────────
