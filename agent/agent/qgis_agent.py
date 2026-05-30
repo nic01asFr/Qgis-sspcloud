@@ -42,13 +42,23 @@ def _get_model(profile_id: str) -> str:
     return _MODEL_BY_PROFILE.get(profile_id, _MODEL_BY_PROFILE["default"])
 
 # ── Config Hub MCP ─────────────────────────────────────────────────────────────
+# HUB_URL est OBLIGATOIRE : injecte par hub.main._bootstrap_agent dans l'env du
+# pod agent. Sans elle, l'agent ne peut pas atteindre le hub -> tools MCP KO,
+# profils non chargeables, etc. Fail-fast au demarrage plutot que de silently
+# tomber sur un fallback legacy `qgis-mcp-bridge` qui n'existe plus en prod.
 _ONYXIA_USER = os.getenv("ONYXIA_USER", "")
-_HUB_URL     = (
-    os.getenv("HUB_URL")
-    or (f"https://user-{_ONYXIA_USER}-qgis-mcp-bridge.user.lab.sspcloud.fr"
-        if _ONYXIA_USER else "")
-)
-_HUB_KEY  = os.getenv("HUB_API_KEY", os.getenv("QGIS_API_KEY", ""))
+_HUB_URL     = os.getenv("HUB_URL", "").rstrip("/")
+_HUB_KEY     = os.getenv("HUB_API_KEY", os.getenv("QGIS_API_KEY", ""))
+
+if not _HUB_URL:
+    # Pas de raise immediate (le module est importe au moment ou les env vars
+    # ne sont peut-etre pas encore disponibles dans certains contextes de
+    # test). On loggue fort ; l'enforcement strict est dans agent.main.startup.
+    log.warning(
+        "qgis_agent : HUB_URL absent au load du module. "
+        "L'agent ne pourra pas atteindre le hub. Verifiez l'injection env "
+        "dans le StatefulSet (hub._bootstrap_agent)."
+    )
 
 # ── Système de profils ─────────────────────────────────────────────────────────
 #

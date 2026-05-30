@@ -92,15 +92,14 @@ for _name in ("agent", "agent.main", "agent.embed_worker", "agent.vector_store",
 _DATA_DIR     = Path(os.getenv("DATA_DIR", "/data/agent"))
 _DEFAULT_PROFILE = os.getenv("QGIS_DEFAULT_PROFILE", "standard")
 
-# Hub URL : explicite ou auto-dérivé depuis ONYXIA_USER
+# Hub URL : injectee par hub._bootstrap_agent dans l'env du pod.
+# Pas de fallback `qgis-mcp-bridge` (legacy, host inexistant en prod).
+# La validation stricte est dans startup() ci-dessous.
 _ONYXIA_USER = os.getenv("ONYXIA_USER", "")
-_HUB_URL     = (
-    os.getenv("HUB_URL")
-    or (f"https://user-{_ONYXIA_USER}-qgis-mcp-bridge.user.lab.sspcloud.fr"
-        if _ONYXIA_USER else "")
-)
+_HUB_URL     = os.getenv("HUB_URL", "").rstrip("/")
 
-# Clé API hub : stockée dans Vault SSPCloud (secret hf-token ou variable agent)
+# Clé API hub : injectee via secretKeyRef vers Secret K8s qgis-hub-apikey.
+# Voir hub/main.py:_bootstrap_agent. Cle source-of-truth namespace-level.
 _HUB_API_KEY = os.getenv("HUB_API_KEY", os.getenv("QGIS_API_KEY", ""))
 
 _templates_dir = Path(__file__).parent.parent / "templates"
@@ -112,17 +111,34 @@ app = FastAPI(title="QGIS Agent", docs_url=None, redoc_url=None)
 @app.on_event("startup")
 async def startup():
     global _embed_task, _embed_stop
-    # Sanity check : la clé LLM doit être présente (sinon embeddings, chat,
-    # extracteur d'insights se taisent silencieusement). On warn fort plutôt
-    # que de partir et chercher pendant 1h.
+    # Fail-fast strict : HUB_URL est obligatoire en prod. Sans elle, l'agent
+    # est inutilisable (tools MCP, profils, sessions hub -> tous KO).
+    # Mieux vaut refuser de demarrer plutot que tomber sur des fallback legacy
+    # qui pointent vers des hosts inexistants (`qgis-mcp-bridge`, etc.).
+    if not _HUB_URL:
+        msg = (
+            "FATAL : HUB_URL absent de l'environnement. Le pod ne peut pas "
+            "demarrer. Verifier l'injection env dans le StatefulSet "
+            "(hub._bootstrap_agent doit poser HUB_URL=https://user-X-qgis...)."
+        )
+        log.error(msg)
+        raise RuntimeError(msg)
+    # LLM_API_KEY : non-bloquant (bandeau UI invite a configurer datalab account
+    # AI Assistant). Un user pas encore onboarde voit le bandeau dans le chat.
     if not os.getenv("LLM_API_KEY"):
         log.warning(
             "LLM_API_KEY absente de l'environnement — l'agent répondra avec "
             "des erreurs sur tout appel LLM (chat, embeddings, insight extractor). "
-            "Définir la variable dans le secret SSPCloud / .env."
+            "Bandeau UI invite l'utilisateur a configurer dans datalab account."
         )
-    if not os.getenv("HUB_API_KEY") and not os.getenv("QGIS_API_KEY"):
-        log.warning("HUB_API_KEY/QGIS_API_KEY absentes — les tools MCP QGIS échoueront.")
+    # HUB_API_KEY : injectee via secretKeyRef -> kubelet recharge a chaque
+    # demarrage. Si absente, log warning (tools MCP KO mais pod demarre quand
+    # meme pour l'observabilite).
+    if not _HUB_API_KEY:
+        log.warning(
+            "HUB_API_KEY/QGIS_API_KEY absentes — les tools MCP QGIS échoueront. "
+            "Verifier le Secret k8s qgis-hub-apikey."
+        )
 
     await memory.init()
     # Vector store : extension sqlite-vec + tables embed_chunks/vec_chunks idempotentes.
