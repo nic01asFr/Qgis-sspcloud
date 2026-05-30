@@ -132,6 +132,14 @@ async def startup():
         _embed_task = asyncio.create_task(embed_worker.run_forever(_embed_stop))
     except Exception as e:
         log.warning("vector_store / embed_worker indisponible : %s", e)
+    # Charger les profils depuis le hub (source de verite unique).
+    # Backround : sans bloquer le startup, on lance la requete. Si le hub
+    # n'est pas pret immediatement (race au cold start), `_PROFILES_CACHE`
+    # reste vide quelques secondes -> fallback prompt generique applique
+    # le temps que le fetch reussisse. Refresh manuel possible via
+    # POST /api/refresh-profiles.
+    from agent import qgis_agent as _qa
+    asyncio.create_task(_qa.fetch_profiles_from_hub())
     # Task de purge des vieux checkpoints — toutes les 6h, applique les
     # limites par défaut (20 max/session, 7j max). Permet de garder le PVC
     # propre sans intervention manuelle.
@@ -255,6 +263,29 @@ async def api_refresh_llm_config():
         return {"ok": True, "restarted": True}
     except Exception as exc:
         log.exception("refresh-llm-config proxy: %s", exc)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.post("/api/refresh-profiles")
+async def api_refresh_profiles():
+    """Re-fetch les profils depuis le hub et repeuple `_PROFILES_CACHE`.
+
+    A appeler apres modification d'un YAML cote hub + /profiles/reload.
+    Pas de restart pod necessaire — le cache est en memoire et le
+    prochain turn lira le profil mis a jour.
+
+    Reponse : {ok, count, ids}.
+    """
+    from agent import qgis_agent as _qa
+    try:
+        count = await _qa.fetch_profiles_from_hub()
+        return {
+            "ok":    count > 0,
+            "count": count,
+            "ids":   list(_qa._PROFILES_CACHE.keys()),
+        }
+    except Exception as exc:
+        log.exception("refresh-profiles: %s", exc)
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 

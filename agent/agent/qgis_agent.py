@@ -51,22 +51,93 @@ _HUB_URL     = (
 _HUB_KEY  = os.getenv("HUB_API_KEY", os.getenv("QGIS_API_KEY", ""))
 
 # ── Système de profils ─────────────────────────────────────────────────────────
-_PROFILES_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "qgis-mcp-hub", "api", "hub", "profiles")
+#
+# Source de verite : YAML cote hub (`hub/hub/profiles/*.yaml`). L'agent les
+# fetch via HTTP au demarrage du pod et les met en cache permanent (Option β
+# validee 2026-05-30). Bug historique : un `_PROFILES_DIR` filesystem pointait
+# vers un repo inexistant -> tous les profils etaient inertes en prod.
+#
+# Cache module-level : peuple par `fetch_profiles_from_hub()` appele dans le
+# startup event de agent.main. Refresh manuel via POST /api/refresh-profiles
+# (utile apres modification YAML cote hub + /profiles/reload).
+_PROFILES_CACHE: dict[str, dict] = {}
+
+
+async def fetch_profiles_from_hub() -> int:
+    """Recupere tous les profils depuis le hub et peuple `_PROFILES_CACHE`.
+
+    Appele au startup de l'agent (agent.main.startup) et par l'endpoint
+    /api/refresh-profiles. En cas d'echec (hub down au boot), on log un
+    warning mais le pod demarre quand meme avec cache vide -> fallback
+    prompt generique cf. `_load_profile_prompt`.
+
+    Returns:
+        Nombre de profils charges en cache.
+    """
+    global _PROFILES_CACHE
+    if not _HUB_URL:
+        log.warning("fetch_profiles : HUB_URL absent, profils non charges")
+        return 0
+    if not _HUB_KEY:
+        log.warning("fetch_profiles : HUB_API_KEY absent, profils non charges")
+        return 0
+    headers = {"Authorization": f"Bearer {_HUB_KEY}"}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            # /profiles renvoie la liste des id + meta (pas le full YAML)
+            r_list = await client.get(f"{_HUB_URL}/profiles", headers=headers)
+            if r_list.status_code != 200:
+                log.warning("fetch_profiles : /profiles HTTP %d", r_list.status_code)
+                return 0
+            profile_ids = [p.get("id") for p in r_list.json() if p.get("id")]
+            # Pour chaque id, fetch le YAML complet (avec agent_system_prompt,
+            # mcp_tools.allowed, etc.) via /profiles/{id}
+            new_cache: dict[str, dict] = {}
+            for pid in profile_ids:
+                try:
+                    r = await client.get(f"{_HUB_URL}/profiles/{pid}", headers=headers)
+                    if r.status_code == 200:
+                        data = r.json()
+                        if isinstance(data, dict):
+                            new_cache[pid] = data
+                except Exception as exc:
+                    log.warning("fetch_profiles : %s indispo : %s", pid, exc)
+            _PROFILES_CACHE = new_cache
+            log.info("fetch_profiles : %d profils en cache (%s)",
+                     len(_PROFILES_CACHE), ", ".join(_PROFILES_CACHE.keys()))
+            return len(_PROFILES_CACHE)
+    except Exception as exc:
+        log.warning("fetch_profiles : echec global : %s", exc)
+        return 0
 
 
 def _load_profile_prompt(profile_id: str) -> str:
-    """Charge le system prompt d'un profil YAML."""
-    try:
-        import yaml
-        profiles_path = os.getenv("PROFILES_DIR", _PROFILES_DIR)
-        f = os.path.join(profiles_path, f"{profile_id}.yaml")
-        if os.path.exists(f):
-            with open(f) as fh:
-                p = yaml.safe_load(fh)
-            return p.get("agent_system_prompt", "")
-    except Exception as e:
-        log.warning("Profil %s non chargé: %s", profile_id, e)
-    return ""
+    """Charge le system prompt d'un profil depuis le cache module-level.
+
+    Fallback chaine vide si profil absent du cache (par exemple si le
+    fetch initial a echoue). Le code amont (qgis_agent._build_prompt)
+    detecte la chaine vide et applique un prompt generique de secours.
+    """
+    profile = _PROFILES_CACHE.get(profile_id, {})
+    return profile.get("agent_system_prompt", "")
+
+
+def _get_profile_tools_whitelist(profile_id: str) -> list[str] | None:
+    """Retourne la whitelist mcp_tools.allowed du profil, ou None.
+
+    Convention YAML : `mcp_tools.allowed = "all"` ou `[liste, de, tools]`.
+    Retourne None si le profil est absent du cache OU si allowed="all" :
+    dans ces deux cas, pas de filtrage cote `_get_mcp_tools` (compat
+    arriere). Sinon une liste de noms exacts pour intersection.
+    """
+    profile = _PROFILES_CACHE.get(profile_id, {})
+    mcp_tools_cfg = profile.get("mcp_tools", {}) or {}
+    allowed = mcp_tools_cfg.get("allowed")
+    if allowed is None or allowed == "all":
+        return None
+    if isinstance(allowed, list):
+        return [str(t) for t in allowed]
+    return None
 
 
 # ── Outils MCP disponibles ─────────────────────────────────────────────────────
