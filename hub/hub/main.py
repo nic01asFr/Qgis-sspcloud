@@ -2229,6 +2229,46 @@ async def serve_published(
     if content is None:
         raise HTTPException(404, "Contenu disparu entre HEAD et GET")
 
+    # Injection mini-header CEREMA pour les storymaps HTML.
+    # Ajoute une banniere fixe haut de page (32px) avec : "CEREMA QGIS",
+    # auteur, etude source si dispo, date de publication. Donne du contexte
+    # au lecteur final (livrable plus orphelin). Le content-type doit etre
+    # text/html et le contenu doit contenir </body> (ce que generent les
+    # exports Leaflet/storymap).
+    ct = (meta.get("content_type", "") or "").lower()
+    if kind in ("storymap", "flux") and "html" in ct:
+        try:
+            html_str = content.decode("utf-8", errors="ignore")
+            import datetime as _dt
+            published_at = meta.get("last_modified") or meta.get("published_at")
+            date_str = ""
+            if isinstance(published_at, (int, float)):
+                date_str = _dt.datetime.fromtimestamp(published_at).strftime("%d/%m/%Y")
+            elif published_at:
+                try:
+                    date_str = str(published_at)[:10]
+                except Exception:
+                    pass
+            banner = (
+                '<div id="cerema-publi-banner" style="position:fixed;top:0;left:0;right:0;'
+                'height:32px;background:#000091;color:#fff;display:flex;align-items:center;'
+                'padding:0 14px;font:13px system-ui,sans-serif;z-index:99999;gap:14px;'
+                'box-shadow:0 1px 4px rgba(0,0,0,.15)">'
+                '<span style="font-weight:700">CEREMA</span>'
+                '<span style="opacity:.7">· QGIS</span>'
+                f'<span style="opacity:.85">— Publié par <strong>{owner}</strong></span>'
+                + (f'<span style="opacity:.7">· {date_str}</span>' if date_str else '')
+                + '<span style="margin-left:auto;opacity:.6;font-size:11px">'
+                'Livrable public — généré par l\'agent QGIS CEREMA'
+                '</span></div>'
+                '<style>body{padding-top:32px !important}</style>'
+            )
+            if "</body>" in html_str:
+                html_str = html_str.replace("</body>", banner + "</body>", 1)
+                content = html_str.encode("utf-8")
+        except Exception as exc:
+            log.warning("Banner injection failed for %s/%s: %s", kind, safe_slug, exc)
+
     return Response(
         content=content,
         media_type=meta.get("content_type", "application/octet-stream"),

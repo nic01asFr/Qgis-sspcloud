@@ -397,10 +397,16 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 
     <!-- Colonne centrale (canvas) : brand à gauche · centre · spacer droit -->
     <div class="hdr-center">
-      <div class="brand">
+      <!-- Fil d'Ariane : brand-link "Mon espace" > etude active > Bureau.
+           Le brand sert aussi de bouton retour (remplace l'ancien icone ↩
+           plus discret). Tooltip explicatif. -->
+      <a href="/workspace" class="brand" style="text-decoration:none;color:inherit"
+         title="Retour à mon espace de travail">
         <span class="op">CEREMA</span>
         <span class="sub">· QGIS</span>
-      </div>
+      </a>
+      <span style="color:var(--text-mention-grey);font-size:14px;margin:0 -2px"
+            aria-hidden="true">›</span>
       <div class="center-content">
         <div class="study-menu">
           <button class="study-trigger" id="study-trigger" onclick="toggleStudyMenu(event)"
@@ -453,10 +459,11 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         </div>
         {% if active_study %}
         <a href="/studies/{{ active_study_id }}/export" class="back-link"
-           title="Exporter l'étude au format ZIP (projet + data + treatments + exports)"
-           aria-label="Exporter l'étude au format ZIP">↓ ZIP</a>
+           title="Télécharger l'étude au format ZIP (projet + données + livrables)"
+           aria-label="Télécharger l'étude au format ZIP">↓ ZIP</a>
         {% endif %}
-        <a href="/workspace" class="back-link" title="Retour à mon espace" aria-label="Retour à mon espace">↩</a>
+        <!-- Icone retour ↩ retiree : le brand "CEREMA · QGIS" sert maintenant
+             de lien retour vers /workspace (fil d'Ariane). -->
       </div>
     </div>
 
