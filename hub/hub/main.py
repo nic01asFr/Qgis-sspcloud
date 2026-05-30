@@ -3059,7 +3059,15 @@ async def workspace_create_study(request: Request):
             r = await c.post("/studies",
                              headers={"Authorization": f"Bearer {api_key}"},
                              json={"name": name, "profile": profile})
-            new_id = r.json().get("id") if r.status_code == 200 else None
+            # POST /studies repond 201 Created (cf. l.1630). L'ancien test
+            # r.status_code == 200 ratait la creation -> new_id=None ->
+            # activate jamais appele -> etude creee mais inactive dans
+            # active_study table -> _fetch_active_study_id retourne None
+            # cote agent -> Fix Bug B (sessions.study_id) jamais populated.
+            # Observe 2026-05-30 sur test E2E final.
+            new_id = (r.json().get("id")
+                      if r.status_code in (200, 201)
+                      else None)
             if new_id:
                 await c.post(f"/studies/{new_id}/activate",
                              headers={"Authorization": f"Bearer {api_key}"})
