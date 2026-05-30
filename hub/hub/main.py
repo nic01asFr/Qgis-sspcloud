@@ -202,7 +202,11 @@ async def _bootstrap_agent() -> None:
                 }}},
                 {"name": "LLM_API_KEY",  "value": llm_api_key},
                 {"name": "HUB_URL",      "value": _HUB_URL},
-                {"name": "DATA_DIR",     "value": "/home/onyxia/work/qgis-agent-data"},
+                # DATA_DIR aligne sur le mountPath du PVC (voir spec creation
+                # ci-dessous). Pour les SS existants pre-PVC, ce path sera
+                # juste un dir vide rootfs — il faudra delete + recreate le
+                # SS pour beneficier du PVC reellement persistant.
+                {"name": "DATA_DIR",     "value": "/data"},
                 {"name": "ONYXIA_USER",  "value": username},
             ]
             existing_env = (r.json().get("spec", {}).get("template", {})
@@ -259,7 +263,14 @@ async def _bootstrap_agent() -> None:
 
         log.info("bootstrap: création qgis-agent pour %s dans %s", username, ns)
 
-        # StatefulSet
+        # StatefulSet avec PVC dedie pour la memoire agent.
+        # Sans PVC, le path DATA_DIR=/home/onyxia/work/qgis-agent-data atterrit
+        # sur le rootfs overlay du pod -> tout perdu au moindre restart
+        # (sessions chat, messages, insights, projets, recettes). Bug observe
+        # 2026-05-30 : Fix Bug B (sessions liees a l'etude) fonctionnait dans
+        # le pod courant mais s'effacait au redeploy. Fix : un volumeClaimTemplate
+        # nomme `data` que le SS materialise en PVC `data-qgis-agent-0` (10 Gi
+        # rook-ceph-block, la storageClass standard SSPCloud, cf. workspace QGIS).
         sts = {
             "apiVersion": "apps/v1", "kind": "StatefulSet",
             "metadata": {"name": "qgis-agent", "namespace": ns,
@@ -267,6 +278,14 @@ async def _bootstrap_agent() -> None:
             "spec": {
                 "serviceName": "qgis-agent", "replicas": 1,
                 "selector": {"matchLabels": {"app": "qgis-agent"}},
+                "volumeClaimTemplates": [{
+                    "metadata": {"name": "data"},
+                    "spec": {
+                        "accessModes":      ["ReadWriteOnce"],
+                        "storageClassName": "rook-ceph-block",
+                        "resources": {"requests": {"storage": "10Gi"}},
+                    },
+                }],
                 "template": {
                     "metadata": {"labels": {"app": "qgis-agent"}},
                     "spec": {"containers": [{
@@ -278,7 +297,9 @@ async def _bootstrap_agent() -> None:
                         "ports": [{"containerPort": 8888}],
                         "env": [
                             {"name": "ONYXIA_USER",  "value": username},
-                            {"name": "DATA_DIR",     "value": "/home/onyxia/work/qgis-agent-data"},
+                            # DATA_DIR pointe sur le mountPath du PVC ci-dessous
+                            # pour que memory.py l'utilise (cf. agent/memory.py:30).
+                            {"name": "DATA_DIR",     "value": "/data"},
                             {"name": "HUB_URL",      "value": _HUB_URL},
                             # HUB_API_KEY via Secret namespace-level :
                             # kubelet injecte la valeur courante a chaque
@@ -289,6 +310,9 @@ async def _bootstrap_agent() -> None:
                                 "key":  "HUB_API_KEY",
                             }}},
                             {"name": "LLM_API_KEY",  "value": llm_api_key},
+                        ],
+                        "volumeMounts": [
+                            {"name": "data", "mountPath": "/data"},
                         ],
                         "readinessProbe": {
                             "httpGet": {"path": "/", "port": 8888},
