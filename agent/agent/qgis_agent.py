@@ -516,6 +516,11 @@ class QGISAgent:
         self.session_id = session_id
         self.profile_id = profile_id
         self._tools_cache: list[dict] | None = None
+        # L2 project state mis a jour au debut de chaque turn par chat_stream.
+        # Lu par le tool loop pour detecter les args spatiaux generiques
+        # (ex: zone="Marseille") qui contredisent une bbox plus precise deja
+        # active dans le projet QGIS courant. Cf. _zone_context_warning.
+        self._project_state: dict | None = None
 
     async def _get_tools(self) -> list[dict]:
         if self._tools_cache is None:
@@ -634,6 +639,82 @@ class QGISAgent:
                                 sid, rs.status_code, rs.text[:200])
         except Exception as exc:
             log.warning("Auto-save étude fail : %s", exc)
+
+    # Outils dont les args spatiaux generiques peuvent ecraser le contexte L2.
+    # On garde-fou : si l'agent passe zone="Marseille" mais que le project_state
+    # a deja une bbox "Marseille 4e arrondissement" active, on injecte une note
+    # dans le tool result pour signaler le mismatch. L'agent peut soit confirmer
+    # (intention de re-elargir) soit re-appeler avec bbox precise.
+    _ZONE_SENSITIVE_TOOLS = {
+        "set_study_zone": ["target", "name"],
+        "run_recipe":     ["zone", "target", "bbox"],
+        "smart_load":     ["bbox"],
+        "add_from_catalog": ["bbox"],
+        "export_flood_map":     ["bbox"],
+        "export_web_map":       ["bbox"],
+        "export_temporal_map":  ["bbox"],
+    }
+
+    # Villes majeures dont le nom seul est ambigu vis-a-vis des arrondissements.
+    # Cf. memory _MAJOR_CITY_INSEE de BigQgisMCP : `?nom=Marseille` renvoie
+    # Marseillette (Aude) ; sans numero on suppose la commune principale.
+    _AMBIGUOUS_MAJOR_CITIES = {"marseille", "paris", "lyon"}
+
+    def _zone_context_warning(self, fn_name: str, fn_args: dict) -> str | None:
+        """Retourne un message d'alerte si l'agent passe un nom de ville
+        majeure generique alors que le project_state (L2) a deja une bbox
+        plus precise active. Retourne None sinon.
+
+        Strategie defensive : on n'ecrit PAS dans fn_args (l'agent peut avoir
+        l'intention legitime de reset la zone). On injecte juste une note
+        visible dans le tool result, ce qui guide l'agent au turn suivant.
+        """
+        if fn_name not in self._ZONE_SENSITIVE_TOOLS:
+            return None
+        ps = self._project_state or {}
+        # Cherche une zone active dans le project_state
+        zone_active = None
+        for k in ("study_zone", "active_zone", "zone"):
+            v = ps.get(k)
+            if isinstance(v, dict) and v.get("bbox"):
+                zone_active = v
+                break
+        if not zone_active:
+            return None
+        zone_name = (zone_active.get("name") or "").strip()
+        # Si le nom de zone L2 n'est pas un arrondissement/sous-zone, pas
+        # d'alerte (rien a perdre a re-confirmer la zone principale).
+        import re as _re
+        if not _re.search(r"\d|arrondissement|quartier|secteur|district",
+                          zone_name, _re.IGNORECASE):
+            return None
+        # Verifie si un arg attendu pour ce tool contient un nom de ville majeur seul
+        suspect = None
+        for arg_name in self._ZONE_SENSITIVE_TOOLS[fn_name]:
+            v = fn_args.get(arg_name)
+            if not isinstance(v, str):
+                continue
+            v_norm = v.strip().lower()
+            # Pas de chiffre, pas de virgule -> probable nom de ville seul
+            if _re.search(r"\d", v_norm):
+                continue
+            for city in self._AMBIGUOUS_MAJOR_CITIES:
+                if _re.search(rf"\b{city}\b", v_norm):
+                    suspect = (arg_name, v, city)
+                    break
+            if suspect:
+                break
+        if not suspect:
+            return None
+        arg_name, value, city = suspect
+        bbox = zone_active.get("bbox")
+        return (
+            f"\n\n⚠️ NOTE CONTEXTE L2 : Tu as passe `{arg_name}=\"{value}\"` mais "
+            f"la zone d'etude active est deja `{zone_name}` avec une bbox plus "
+            f"precise : {bbox}. Si tu voulais cibler cette sous-zone, refais le "
+            f"call avec `bbox={bbox}` au lieu du nom generique. Si tu veux "
+            f"vraiment re-elargir a {city.title()} entier, ignore cette note.\n"
+        )
 
     async def _fetch_project_state(self) -> dict | None:
         """L2 enrichi : récupère l'état du projet QGIS courant.
@@ -1039,6 +1120,8 @@ ne vient pas d'un outil cette session, la supprimer.
 
         active_study, active_treats = await active_study_task
         project_state = await project_state_task
+        # Stocke pour le tool loop (cf. _zone_context_warning ci-dessous)
+        self._project_state = project_state
         enrich_results = await enrich_task if enrich_task else []
 
         # Couches 2 + 3 assemblées dans memory.build_context_summary
@@ -1457,6 +1540,19 @@ ne vient pas d'un outil cette session, la supprimer.
                 else:
                     # Tool non mutating OU pas de stop_signal : exécution directe.
                     result = await _call_mcp_tool(fn_name, fn_args, username=self.username)
+
+                # Garde-fou L2 : si l'agent a passe un nom de ville generique
+                # alors qu'une sous-zone precise est active dans le project
+                # state, on prepend une note dans le result. L'agent peut
+                # decider quoi faire au turn suivant.
+                zone_warning = self._zone_context_warning(fn_name, fn_args)
+                if zone_warning:
+                    log.info(
+                        "Zone context mismatch sur %s args=%s -> note injectee",
+                        fn_name, fn_args,
+                    )
+                    result = result + zone_warning
+
                 tool_calls_made.append({"tool": fn_name, "args": fn_args, "result": result[:200]})
 
                 # Capter hub_url des publish_artifact reussis pour le hotfix
