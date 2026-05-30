@@ -1461,17 +1461,41 @@ ne vient pas d'un outil cette session, la supprimer.
 
                 # Capter hub_url des publish_artifact reussis pour le hotfix
                 # `[undefined](undefined)` applique en fin de turn.
+                #
+                # Strategie a 2 paliers parce que _call_mcp_tool peut concatener
+                # plusieurs chunks `text` MCP, ajouter du contexte KB
+                # (_maybe_enrich_with_kb_hint), ou retourner du JSON pretty
+                # entoure de texte. json.loads brut ne marche pas toujours.
                 if fn_name == "publish_artifact":
+                    hub_url, kind_val = None, None
+                    # Palier 1 : JSON pur
                     try:
                         parsed = json.loads(result)
-                        if isinstance(parsed, dict) and parsed.get("hub_url"):
-                            last_publish_info = {
-                                "hub_url": parsed["hub_url"],
-                                "kind":    parsed.get("kind") or "livrable",
-                                "slug":    parsed.get("slug") or "",
-                            }
+                        if isinstance(parsed, dict):
+                            hub_url  = parsed.get("hub_url")
+                            kind_val = parsed.get("kind")
                     except Exception:
                         pass
+                    # Palier 2 : regex tolerante (string contenant du JSON
+                    # embed ou texte autour). On extrait directement hub_url
+                    # qui doit etre une URL absolue https.
+                    if not hub_url:
+                        m = re.search(r'"hub_url"\s*:\s*"(https?://[^"]+)"', result)
+                        if m:
+                            hub_url = m.group(1)
+                        mk = re.search(r'"kind"\s*:\s*"([^"]+)"', result)
+                        if mk:
+                            kind_val = mk.group(1)
+                    if hub_url:
+                        last_publish_info = {
+                            "hub_url": hub_url,
+                            "kind":    kind_val or "livrable",
+                            "slug":    fn_args.get("slug") or "",
+                        }
+                        log.info(
+                            "publish_artifact OK capte : hub_url=%s kind=%s",
+                            hub_url, kind_val or "?",
+                        )
 
                 result_clean = result.strip()
                 if result_clean and result_clean not in ("{}", "null", "[]"):
