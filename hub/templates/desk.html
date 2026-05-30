@@ -404,13 +404,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       <div class="center-content">
         <div class="study-menu">
           <button class="study-trigger" id="study-trigger" onclick="toggleStudyMenu(event)"
-                  title="{% if active_study %}Étude active : {{ active_study.name }}
-Profil agent : {{ active_study.profile_label or active_study.profile }}
-Clique pour changer{% else %}Aucune étude active{% endif %}">
+                  title="{% if active_study %}Étude en cours : {{ active_study.name }} — clique pour en changer{% else %}Choisir une étude{% endif %}">
             <span>📂</span>
             {% if active_study %}
               <span class="study-name">{{ active_study.name }}</span>
-              <span class="profile" title="Profil agent">· {{ active_study.profile_label or active_study.profile }}</span>
             {% else %}
               <span>Choisir une étude…</span>
             {% endif %}
@@ -651,39 +648,39 @@ Clique pour changer{% else %}Aucune étude active{% endif %}">
     {% else %}
     <span class="badge warn">○ Endormi</span>
     {% endif %}
-    <span>{{ studies|length }} études</span>
+    <span>{{ studies|length }} étude{{ '' if studies|length == 1 else 's' }}</span>
     <span class="sep">|</span>
     <span id="footer-publi">
       <span id="footer-publi-count">{{ catalog_count }}</span>
-      publication<span id="footer-publi-s">{{ '' if catalog_count == 1 else 's' }}</span>
+      livrable<span id="footer-publi-s">{{ '' if catalog_count == 1 else 's' }}</span>
       <small style="opacity:.6" id="footer-publi-total"
         {% if not catalog_total or catalog_total == catalog_count %}style="display:none"{% endif %}>
-        (sur <span id="footer-publi-total-num">{{ catalog_total }}</span> compte)
+        / <span id="footer-publi-total-num">{{ catalog_total }}</span> au total
       </small>
     </span>
+    {% if insights|length > 0 %}
     <span class="sep">|</span>
-    <span>🧠 {{ insights|length }} insights</span>
+    <span title="Préférences et notes que l'agent a mémorisées">🧠 {{ insights|length }}</span>
+    {% endif %}
     <span class="sep">|</span>
     <!-- Chip GPU/IA : etat du pod geoai-gpu (ready, dormant, off, busy).
          Cliquable pour reveiller le pod a la demande. Polling
-         /geoai/status toutes les 20s. -->
-    <span id="gpu-chip" title="État du pod GeoAI GPU — clic pour réveiller"
+         /geoai/status toutes les 20s. Cache si pas deploye (ss_exists=false). -->
+    <span id="gpu-chip" title="État du moteur IA Vision — clic pour réveiller"
           style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;
                  padding:2px 8px;border-radius:10px;background:var(--background-alt-grey);
                  font-size:11px"
           onclick="wakeGpu()">
       <span id="gpu-dot"
             style="width:8px;height:8px;border-radius:50%;background:#999"></span>
-      <span id="gpu-label">GPU ?</span>
+      <span id="gpu-label">IA Vision</span>
     </span>
-    <span class="sep">|</span>
     {% if recent_treatments %}
-    <span>Récents :</span>
-    {% for t in recent_treatments[:4] %}
+    <span class="sep">|</span>
+    <span style="opacity:.7">Récent :</span>
+    {% for t in recent_treatments[:3] %}
     <span class="recent-tool">{{ t }}</span>
     {% endfor %}
-    {% else %}
-    <span style="opacity:.6">Aucun traitement récent</span>
     {% endif %}
     <span style="margin-left:auto" class="user-chip">{{ username }}</span>
   </footer>

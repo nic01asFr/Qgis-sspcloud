@@ -380,11 +380,16 @@ body.embed .msg .bubble pre{max-width:100%}
       <!-- Chip de contexte (routeur contextuel) : affiche le profil courant
            dérivé du render actif / étude / form. Cliquable pour override
            manuel (rare — l'usage normal est automatique). -->
+      <!-- Chip de contexte : indicateur read-only (mode derive du contexte
+           de navigation actuel). Tooltip explique. Long-clic (ou double-clic)
+           pour reveler le combobox override (cas rares : forcer un mode).
+           Conforme a l'archi cible : profil = propriete emergente, pas un
+           input user. Cf. ARCHITECTURE_AGENT.md (a venir). -->
       <button type="button" id="context-chip" class="context-chip"
-              onclick="toggleProfileMenu()" title="Mode agent courant (cliquer pour modifier)">
+              ondblclick="toggleProfileMenu()"
+              title="Mode agent dérivé du contexte de navigation. Double-clic pour forcer un autre mode.">
         <span class="ctx-icon" id="ctx-icon">📂</span>
         <span class="ctx-label" id="ctx-label">{{ profile_id }}</span>
-        <span class="ctx-caret">▾</span>
       </button>
       <!-- Override manuel (caché par défaut, déplié au clic chip) -->
       <select id="profile-select" onchange="changeProfile(this.value)"

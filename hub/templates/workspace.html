@@ -65,63 +65,64 @@
 <section class="fr-py-6w">
 <div class="fr-container">
 
-  <!-- KPI -->
+  <!-- KPI : 3 indicateurs lisibles (jargon retire) -->
   <div class="kpi-grid">
     <div class="kpi">
       <div class="kpi-value">{{ studies|length }}</div>
-      <div class="kpi-label">Études actives</div>
+      <div class="kpi-label">{% if studies|length == 1 %}Étude en cours{% else %}Études en cours{% endif %}</div>
     </div>
     <div class="kpi">
-      <div class="kpi-value">{{ catalog_count }}</div>
-      <div class="kpi-label">Publications</div>
-    </div>
-    <div class="kpi" style="border-top-color:#1f6f3f">
-      <div class="kpi-value">{{ insights_count }}</div>
-      <div class="kpi-label">Insights mémoire</div>
+      <div class="kpi-value">{{ catalog_total or catalog_count }}</div>
+      <div class="kpi-label">{% if (catalog_total or catalog_count) == 1 %}Livrable publié{% else %}Livrables publiés{% endif %}</div>
     </div>
     <div class="kpi" style="border-top-color:#d64d00">
-      <div class="kpi-value">{{ session_status }}</div>
-      <div class="kpi-label">Workspace</div>
+      <div class="kpi-value">
+        {% if session_ready %}<span style="color:#18753c">✓</span>{% else %}<span style="color:#999">💤</span>{% endif %}
+      </div>
+      <div class="kpi-label">{% if session_ready %}Bureau actif{% else %}Bureau en veille{% endif %}</div>
     </div>
   </div>
 
-  <!-- Triptyque d'usage -->
-  <p class="chapter-title">Accéder à mes outils</p>
-  <div class="fr-grid-row fr-grid-row--gutters">
-    <div class="fr-col-12 fr-col-md-3">
-      <a href="/desk" class="tile-action" style="border-color:var(--border-action-high-blue-france)">
-        <span class="tile-icon">🪟</span>
-        <p class="tile-title">Bureau intégré <span class="active-badge">RECO</span></p>
-        <p class="tile-desc">Vue unifiée : agent + canvas QGIS + ressources dans un seul écran ergonomique.</p>
-      </a>
-    </div>
-    <div class="fr-col-12 fr-col-md-3">
-      <a href="{{ agent_url }}" class="tile-action" target="_blank">
-        <span class="tile-icon">💬</span>
-        <p class="tile-title">Agent QGIS — Chat</p>
-        <p class="tile-desc">Pour piloter sans le canvas. Conversation pleine page.</p>
-      </a>
-    </div>
-    <div class="fr-col-12 fr-col-md-3">
-      <a href="{{ novnc_url }}" class="tile-action" target="_blank">
-        <span class="tile-icon">🖥</span>
-        <p class="tile-title">Bureau QGIS Desktop</p>
-        <p class="tile-desc">QGIS natif plein écran dans le navigateur.</p>
-      </a>
-    </div>
-    <div class="fr-col-12 fr-col-md-3">
-      <a href="#catalogue" class="tile-action">
-        <span class="tile-icon">📚</span>
-        <p class="tile-title">Mes publications</p>
-        <p class="tile-desc">Storymaps, flux, recettes publiées.</p>
-      </a>
-    </div>
+  <!-- UNE entree principale : "Ouvrir mon bureau" si etude active, sinon CTA creation -->
+  <div style="margin:24px 0">
+    {% if active_study %}
+    <a href="/desk" class="fr-btn fr-btn--lg" style="font-weight:700;padding:16px 32px;font-size:1.05rem">
+      🪟 Continuer mon travail sur « {{ active_study.name }} »
+    </a>
+    {% elif studies %}
+    <a href="#mes-etudes" class="fr-btn fr-btn--lg" style="font-weight:700;padding:16px 32px;font-size:1.05rem">
+      📂 Choisir une étude ci-dessous
+    </a>
+    {% else %}
+    <a href="#nouvelle-etude" class="fr-btn fr-btn--lg" style="font-weight:700;padding:16px 32px;font-size:1.05rem">
+      ✨ Créer ma première étude
+    </a>
+    {% endif %}
+    <!-- Acces secondaires regroupes derriere un disclosure -->
+    <details style="display:inline-block;margin-left:12px;font-size:.85rem">
+      <summary style="cursor:pointer;color:var(--text-action-high-blue-france)">
+        Plus d'options ▾
+      </summary>
+      <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+        <a href="{{ agent_url }}" target="_blank" class="fr-btn fr-btn--secondary fr-btn--sm">
+          💬 Agent en plein écran
+        </a>
+        <a href="{{ novnc_url }}" target="_blank" class="fr-btn fr-btn--secondary fr-btn--sm">
+          🖥 QGIS Desktop seul
+        </a>
+        <a href="#catalogue" class="fr-btn fr-btn--secondary fr-btn--sm">
+          📚 Mes livrables
+        </a>
+      </div>
+    </details>
   </div>
 
   <!-- Études -->
-  <p class="chapter-title fr-mt-5w">Mes études</p>
+  <p class="chapter-title fr-mt-5w" id="mes-etudes">Mes études</p>
   <p class="fr-text--sm fr-mb-3w">
-    Une étude = un projet QGIS + une conversation + un profil + un audit trail. Tu peux jongler entre dossiers sans tout perdre.
+    Chaque étude regroupe un dossier de travail : ta carte, tes données, tes
+    conversations avec l'agent, et les livrables que tu produis. Tu peux
+    travailler sur plusieurs études en parallèle.
   </p>
 
   {% if studies %}
@@ -170,7 +171,8 @@
   </div>
   {% endif %}
 
-  <form method="POST" action="/workspace/study/new" class="fr-mt-3w" style="display:flex;gap:8px;flex-wrap:wrap">
+  <form id="nouvelle-etude" method="POST" action="/workspace/study/new" class="fr-mt-3w"
+        style="display:flex;gap:8px;flex-wrap:wrap">
     <input name="name" type="text" required placeholder="Nom de la nouvelle étude (ex: Inondation Lavandou)"
            class="fr-input" style="flex:1;min-width:240px">
     <select name="profile" class="fr-select" style="max-width:200px">
@@ -187,9 +189,9 @@
   </form>
 
   <!-- Catalogue -->
-  <p class="chapter-title fr-mt-5w" id="catalogue">Mes publications</p>
+  <p class="chapter-title fr-mt-5w" id="catalogue">Mes livrables publiés</p>
   {% if catalog_items %}
-  <p class="fr-text--sm fr-mb-3w">Livrables publics, accessibles indépendamment de ton workspace.</p>
+  <p class="fr-text--sm fr-mb-3w">Cartes, rapports et recettes accessibles publiquement (sans authentification).</p>
   {% set study_names = {} %}
   {% for s in studies %}{% set _ = study_names.update({s.id: s.name}) %}{% endfor %}
   <table class="fr-table">
