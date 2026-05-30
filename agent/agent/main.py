@@ -363,22 +363,26 @@ async def index(request: Request):
     # conversation" futur). Sinon, si etude active + session anterieure
     # rattachee, on la reprend.
     session_id: str | None = None
+    session_resumed: bool = False
     if request.query_params.get("new") != "1":
         active_study_id = await _fetch_active_study_id()
         if active_study_id:
             session_id = await memory.get_latest_session_for_study(
                 "user", active_study_id,
             )
+            if session_id:
+                session_resumed = True
     if not session_id:
         session_id = str(uuid.uuid4())
 
     return templates.TemplateResponse(request, "chat.html", {
-        "profile_id":   profile_id,
-        "hub_url":      _HUB_URL,
-        "portal_url":   os.getenv("PORTAL_URL", ""),
-        "sessions":     sessions,
-        "projects":     projects[:5],
-        "session_id":   session_id,
+        "profile_id":      profile_id,
+        "hub_url":         _HUB_URL,
+        "portal_url":      os.getenv("PORTAL_URL", ""),
+        "sessions":        sessions,
+        "projects":        projects[:5],
+        "session_id":      session_id,
+        "session_resumed": session_resumed,
     })
 
 

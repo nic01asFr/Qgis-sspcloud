@@ -939,10 +939,27 @@ async function reattachRollbackButtonsFromHistory() {
 
 // Trigger reattach au DOMContentLoaded + à chaque clic sur une session
 // dans la sidebar (qui re-render l'historique via /sessions/{id}/messages).
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => reattachRollbackButtonsFromHistory());
-} else {
+//
+// Auto-load de l'historique au mount si la session a ete REPRISE par le
+// serveur (Fix Bug B : GET / retrouve la derniere session liee a l'etude
+// active au lieu de generer une uuid fraiche). Sans ce hook, le session_id
+// est bien dans le DOM mais l'iframe affiche les suggestions par defaut.
+function _onChatReady() {
   reattachRollbackButtonsFromHistory();
+  const sessionResumed = {{ 'true' if session_resumed else 'false' }};
+  if (sessionResumed) {
+    const sid = document.getElementById('session-id').value;
+    if (sid) {
+      // loadSession est defini plus bas dans ce fichier : fetch
+      // /sessions/{sid}/messages et re-render l'historique.
+      loadSession(sid);
+    }
+  }
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', _onChatReady);
+} else {
+  _onChatReady();
 }
 
 function foldToolResults(container) {
