@@ -418,17 +418,21 @@ Clique pour changer{% else %}Aucune étude active{% endif %}">
           </button>
           <div class="study-dropdown" id="study-dropdown">
             {% if studies %}
+              <div style="font-size:10px;color:var(--text-mention-grey);
+                          text-transform:uppercase;letter-spacing:.5px;
+                          padding:4px 10px 2px">Mes études</div>
               {% for s in studies %}
               <form method="POST" action="/workspace/study/{{ s.id }}/activate?return_to=desk" style="margin:0">
                 <button type="submit" class="item {% if s.id == active_study_id %}active{% endif %}"
                         style="width:100%;text-align:left;background:transparent;border:none;font-family:inherit"
-                        title="Profil: {{ s.profile }} · {{ s.id }}">
-                  <span class="ic">📂</span>
-                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.name }}</span>
+                        title="Profil: {{ s.profile }}">
+                  <span class="ic">{% if s.id == active_study_id %}✓{% else %}📂{% endif %}</span>
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">{{ s.name }}</span>
                   <span class="prof">{{ s.profile }}</span>
                 </button>
               </form>
               {% endfor %}
+              <div style="height:1px;background:var(--border-default-grey);margin:6px 0"></div>
             {% endif %}
             <form class="new-form" method="POST" action="/workspace/study/new?return_to=desk">
               <input name="name" required placeholder="Nom de la nouvelle étude…">
@@ -443,6 +447,11 @@ Clique pour changer{% else %}Aucune étude active{% endif %}">
               </select>
               <button type="submit">+ Nouvelle étude</button>
             </form>
+            <a href="/workspace" style="display:block;padding:8px 10px;
+               font-size:11px;color:var(--text-mention-grey);
+               text-decoration:none;border-top:1px solid var(--border-default-grey)">
+              ← Toutes mes études et publications
+            </a>
           </div>
         </div>
         {% if active_study %}
@@ -1228,7 +1237,9 @@ async function refreshCatalogPanel() {
           const ic = ICONS[kind] || '📦';
           const slug = escapeHtml(it.slug);
           const hubUrl = it.hub_url || it.url || '#';
-          const sizeKb = it.size ? Math.round(it.size / 1024) : null;
+          // size_kb fourni par le serveur (cf. /desk/catalog enrichi).
+          // Fallback sur size en octets si endpoint plus ancien.
+          const sizeKb = it.size_kb || (it.size ? Math.round(it.size / 1024) : null);
           const sid = it.study_id || '';
           const isActive = sid && sid === activeSid;
           const studyLabel = labels[sid] || (sid ? sid.slice(0, 8) : 'sans étude');

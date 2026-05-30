@@ -820,6 +820,19 @@ async def _desk_context() -> dict:
                     r = await c.get(f"/catalog/{_ONYXIA_USER}", headers=headers)
                     if r.status_code == 200:
                         all_items = r.json().get("items", [])
+                        # Enrichir avec hub_url + size_kb (cf. /desk/catalog).
+                        # Sans ca, le template Jinja {{item.hub_url}} resout
+                        # vide et le href tombe sur la page courante (/desk).
+                        for it in all_items:
+                            kind = it.get("kind", "")
+                            slug = it.get("slug", "")
+                            if kind and slug and not it.get("hub_url"):
+                                it["hub_url"] = (
+                                    f"{_HUB_URL}/published/{_ONYXIA_USER}/{kind}/{slug}"
+                                )
+                            sz = it.get("size")
+                            if sz and not it.get("size_kb"):
+                                it["size_kb"] = max(1, round(sz / 1024))
                         items = [i for i in all_items
                                  if i.get("study_id") == ctx["active_study_id"]][:30]
                         ctx.update(catalog_items=items,
@@ -1396,11 +1409,30 @@ async def hub_login(key: str = "", request: Request = None):
 async def hub_home(request: Request):
     """Page d'accueil — readiness probe K8s (302 sans auth = OK) + redirect.
 
-    Cible /workspace plutôt que /desk : la vue workspace (études +
-    catalogue + outils) est plus pertinente comme "home" — l'user choisit
-    son étude, puis ouvre /desk pour bosser dessus. /desk reste accessible
-    via le portail au 1er déploiement (lien direct) et depuis /workspace.
+    Comportement intelligent : si l'user a deja une etude active, on saute
+    direct sur /desk (gain de clic, etude en cours par defaut). Sinon
+    /workspace pour qu'il en choisisse une ou la cree. Le forcing sur
+    /workspace est conservable via /workspace explicite.
+
+    Pour les readiness probes K8s (sans cookie), on retombe sur /workspace
+    sans appel DB additionnel.
     """
+    try:
+        # Si pas de cookie auth, redirect simple vers /workspace (sans toucher
+        # studies pour eviter latence sur les readiness probes anonymes).
+        cookie_key = request.cookies.get("hub_api_key", "")
+        if not cookie_key.startswith("qgis_"):
+            return RedirectResponse("/workspace", status_code=302)
+        # User authentifie : on regarde s'il a une etude active.
+        if _STUDIES_AVAILABLE:
+            try:
+                active_sid = await studies.get_active_study_id(_ONYXIA_USER)
+                if active_sid:
+                    return RedirectResponse("/desk", status_code=302)
+            except Exception:
+                pass
+    except Exception:
+        pass
     return RedirectResponse("/workspace", status_code=302)
     username = user["username"]
     all_sessions = await sessions.list_sessions(username)
@@ -3304,6 +3336,20 @@ async def desk_catalog():
                 r = await c.get(f"/catalog/{_ONYXIA_USER}", headers=headers)
                 if r.status_code == 200:
                     all_items = r.json().get("items", [])
+                    # Enrichir chaque item avec hub_url + size_kb (champs UI).
+                    # Le catalog S3 stocke `url` (MinIO direct) et `size` (octets),
+                    # mais le drawer cote UI veut un lien stable via le hub
+                    # (proxy /published/...) et une taille humaine en ko.
+                    for it in all_items:
+                        kind = it.get("kind", "")
+                        slug = it.get("slug", "")
+                        if kind and slug and not it.get("hub_url"):
+                            it["hub_url"] = (
+                                f"{_HUB_URL}/published/{_ONYXIA_USER}/{kind}/{slug}"
+                            )
+                        sz = it.get("size")
+                        if sz and not it.get("size_kb"):
+                            it["size_kb"] = max(1, round(sz / 1024))
                     out["total_count"] = len(all_items)
                     if active_sid:
                         items = [i for i in all_items

@@ -137,16 +137,26 @@
         <span class="fr-badge fr-badge--sm fr-badge--info fr-badge--no-icon">{{ s.profile }}</span>
       </div>
       <div class="study-actions">
-        {% if s.id != active_study_id %}
-        <form method="POST" action="/workspace/study/{{ s.id }}/activate" style="margin:0">
-          <button type="submit" class="fr-btn fr-btn--secondary fr-btn--sm">Activer</button>
+        {% if s.id == active_study_id %}
+        <!-- Action principale : ouvrir le bureau sur cette etude (deja active). -->
+        <a href="/desk" class="fr-btn fr-btn--sm" style="font-weight:700">
+          Ouvrir le bureau →
+        </a>
+        {% else %}
+        <!-- Carte non active : "Ouvrir" active + redirige en un seul POST. -->
+        <form method="POST" action="/workspace/study/{{ s.id }}/activate?return_to=desk"
+              style="margin:0">
+          <button type="submit" class="fr-btn fr-btn--sm" style="font-weight:700">
+            Ouvrir →
+          </button>
         </form>
         {% endif %}
         <a href="/studies/{{ s.id }}/export" class="fr-btn fr-btn--tertiary fr-btn--sm"
-           title="Télécharger l'étude au format ZIP (projet QGIS + data + treatments + exports)">
-          Exporter (ZIP)
+           title="Télécharger l'étude au format ZIP (projet QGIS + données + exports)">
+          ↓ ZIP
         </a>
-        <form method="POST" action="/workspace/study/{{ s.id }}/archive" style="margin:0">
+        <form method="POST" action="/workspace/study/{{ s.id }}/archive" style="margin:0"
+              onsubmit="return confirm('Archiver cette étude ? Tu pourras toujours en créer une nouvelle.');">
           <button type="submit" class="fr-btn fr-btn--tertiary fr-btn--sm">Archiver</button>
         </form>
       </div>
