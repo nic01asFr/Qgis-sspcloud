@@ -1087,6 +1087,10 @@ ne vient pas d'un outil cette session, la supprimer.
 
         full_response = ""
         tool_calls_made = []
+        # On capte le hub_url du dernier publish_artifact reussi pour pouvoir
+        # patcher en fin de turn les liens fantomes [undefined](undefined)
+        # que le LLM genere parfois (cf. hotfix infra ci-dessous).
+        last_publish_info: dict = {}
 
         # Boucle agent : LLM → tool calls → LLM → ...
         # 20 itérations = budget pour analyse multi-étapes + construction
@@ -1455,6 +1459,20 @@ ne vient pas d'un outil cette session, la supprimer.
                     result = await _call_mcp_tool(fn_name, fn_args, username=self.username)
                 tool_calls_made.append({"tool": fn_name, "args": fn_args, "result": result[:200]})
 
+                # Capter hub_url des publish_artifact reussis pour le hotfix
+                # `[undefined](undefined)` applique en fin de turn.
+                if fn_name == "publish_artifact":
+                    try:
+                        parsed = json.loads(result)
+                        if isinstance(parsed, dict) and parsed.get("hub_url"):
+                            last_publish_info = {
+                                "hub_url": parsed["hub_url"],
+                                "kind":    parsed.get("kind") or "livrable",
+                                "slug":    parsed.get("slug") or "",
+                            }
+                    except Exception:
+                        pass
+
                 result_clean = result.strip()
                 if result_clean and result_clean not in ("{}", "null", "[]"):
                     if "![" in result_clean and "](data:" in result_clean:
@@ -1667,6 +1685,40 @@ ne vient pas d'un outil cette session, la supprimer.
                 r'<switch_profile>\s*[a-zA-Z0-9_]+\s*</switch_profile>\s*',
                 '', full_response, flags=_re_end.IGNORECASE,
             )
+
+        # Hot-fix `[undefined](undefined)` : qwen3-6-35b-moe genere parfois un
+        # lien fantome au lieu de copier la vraie URL retournee par
+        # publish_artifact. On utilise last_publish_info (capte au moment du
+        # tool call, avant troncature DB) pour substituer les liens markdown
+        # defectueux (texte OU url == "undefined") par le bon lien.
+        # Robuste a deux cas : `[undefined](undefined)` et `[texte](undefined)`.
+        if last_publish_info:
+            pub_url  = last_publish_info["hub_url"]
+            pub_kind = last_publish_info["kind"]
+            def _patch_link(m):
+                text = m.group(1).strip()
+                url  = m.group(2).strip()
+                if url == "undefined" or text == "undefined":
+                    safe_text = (text if text and text != "undefined"
+                                 else f"Voir le {pub_kind}")
+                    return f"[{safe_text}]({pub_url})"
+                return m.group(0)
+            patched = re.sub(
+                r'\[([^\]]*)\]\(([^)]+)\)', _patch_link, full_response,
+            )
+            if patched != full_response:
+                log.info("Hot-fix [undefined] -> %s applique au turn", pub_url)
+                full_response = patched
+            # Append un lien actionnable si l'agent a parle de "undefined"
+            # en plein texte sans markdown (cas tres rare).
+            elif ("undefined" in full_response.lower()
+                  and pub_url not in full_response):
+                suffix = (
+                    f"\n\n*Lien publication :* "
+                    f"[Voir le {pub_kind}]({pub_url})"
+                )
+                full_response += suffix
+                yield suffix
 
         # Sauvegarder la réponse complète en mémoire. Les data-URLs d'images
         # sont stripées de l'historique persisté : sinon, au turn N+1, le
