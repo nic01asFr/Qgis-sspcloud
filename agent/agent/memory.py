@@ -686,18 +686,13 @@ async def list_projects(profile_id: str | None = None) -> list[dict]:
 
 
 # ── Recettes ───────────────────────────────────────────────────────────────────
-
-async def save_recipe(recipe_id: str, name: str, steps: list,
-                      profile_id: str = "standard", description: str = "") -> None:
-    now = int(time.time())
-    async with aiosqlite.connect(_DB_PATH) as db:
-        await db.execute("""
-            INSERT OR REPLACE INTO recipes
-            (id, name, profile_id, description, steps, created_at)
-            VALUES (?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM recipes WHERE id=?), ?))
-        """, (recipe_id, name, profile_id, description,
-               json.dumps(steps), recipe_id, now))
-        await db.commit()
+#
+# Note A.6 (2026-05-30) : `save_recipe` retire car JAMAIS appelee (table
+# recipes morte cote agent). Le vrai CRUD recettes sera implemente cote hub
+# en V2 (Q3 valide : workspace PVC `/data/studies/{sid}/recipes/` + catalog
+# SQLite hub). En attendant, `list_recipes` est conserve pour la lecture
+# uniquement (utilise par recipe_matcher.py et /recipes endpoint).
+# Cf. project_qgis_sspcloud_v1_publication_plan + decisions Q1-Q8.
 
 
 async def list_recipes(profile_id: str | None = None) -> list[dict]:

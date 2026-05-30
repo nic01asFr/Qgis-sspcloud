@@ -35,6 +35,15 @@ jobs:
             ghcr.io/${{ env.OWNER }}/qgis-agent:latest
             ghcr.io/${{ env.OWNER }}/qgis-agent:${{ github.sha }}
 
+      # Smoke test post-build : verifie que les imports critiques ne sont pas
+      # casses. Sans cela, un commit avec import circulaire ou typo nom module
+      # passe le build (Docker ne lance pas le code) et casse le pod au demarrage.
+      - name: Smoke test imports
+        run: |
+          docker run --rm --entrypoint python \
+            ghcr.io/${{ env.OWNER }}/qgis-agent:${{ github.sha }} \
+            -c "import agent.main; import agent.qgis_agent; print('agent imports OK')"
+
   build-hub:
     runs-on: ubuntu-latest
     permissions:
@@ -59,6 +68,12 @@ jobs:
           tags: |
             ghcr.io/${{ env.OWNER }}/qgis-hub:latest
             ghcr.io/${{ env.OWNER }}/qgis-hub:${{ github.sha }}
+
+      - name: Smoke test imports
+        run: |
+          docker run --rm --entrypoint python \
+            ghcr.io/${{ env.OWNER }}/qgis-hub:${{ github.sha }} \
+            -c "import hub.main; print('hub imports OK')"
 
   # build-workspace : image QGIS Desktop (ubuntu + QGIS complet ~30min).
   # Buildée manuellement depuis BigQgisMCP, disponible sur ghcr.io/nic01asfr/qgisremotemcp:latest.
