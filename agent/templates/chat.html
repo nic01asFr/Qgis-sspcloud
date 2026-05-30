@@ -193,6 +193,20 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
 /* Images de tools (ex: get_screenshot) rendues inline dans la bulle. */
 .msg .bubble img{max-width:100%;height:auto;border-radius:4px;margin:8px 0;
   border:1px solid var(--border-default-grey);display:block}
+/* Mode embed (desk) : le canvas noVNC est cote-a-cote, les screenshots
+   d'outils inline deviennent redondants et alourdissent la conversation.
+   On les replie dans un <details> par defaut (clic pour deplier si besoin
+   de comparer avec une etape passee).
+   `details > img` reste visible quand le user clique. */
+body.embed .msg .bubble img{display:none}
+body.embed .msg .bubble details.embed-screenshot{display:block;margin:4px 0;
+  font-size:11px;color:var(--text-mention-grey);cursor:pointer}
+body.embed .msg .bubble details.embed-screenshot[open] img{display:block}
+body.embed .msg .bubble details.embed-screenshot summary{
+  padding:2px 6px;border-radius:3px;
+  background:var(--background-alt-grey);display:inline-block;list-style:none}
+body.embed .msg .bubble details.embed-screenshot summary::before{
+  content:"📸 ";opacity:.6}
 .chat-input{padding:10px 16px 0;background:#fff;border-top:1px solid var(--border-default-grey);
   flex-shrink:0}
 .status-bar{font-size:11.5px;color:var(--text-action-high-blue-france);margin-bottom:6px;
@@ -984,6 +998,23 @@ function foldToolResults(container) {
   if (!container) return;
   // Attache d'abord les boutons rollback (commentaires ckpt:ID → blockquotes)
   attachRollbackButtons(container);
+  // Mode embed : enveloppe chaque <img data:...> dans un <details> repliable
+  // pour eviter la redondance avec le canvas noVNC voisin. CSS cache l'img
+  // par defaut, le user peut cliquer "Voir la capture" pour deplier.
+  if (document.body.classList.contains('embed')) {
+    container.querySelectorAll('img').forEach(img => {
+      if (img.closest('details.embed-screenshot')) return;  // deja wrapped
+      const src = img.getAttribute('src') || '';
+      if (!src.startsWith('data:image/')) return;
+      const det = document.createElement('details');
+      det.className = 'embed-screenshot';
+      const sum = document.createElement('summary');
+      sum.textContent = 'Voir la capture';
+      det.appendChild(sum);
+      img.parentNode.insertBefore(det, img);
+      det.appendChild(img);
+    });
+  }
   container.querySelectorAll('pre').forEach(pre => {
     if (pre.closest('details.tool-result')) return;          // déjà wrapped
     const txt = (pre.textContent || '').trim();
@@ -1014,6 +1045,13 @@ function foldToolResults(container) {
     }
     const details = document.createElement('details');
     details.className = 'tool-result' + (isError ? ' tool-error' : '');
+    // Replier par defaut : seul un libelle compact est visible. L'user
+    // clique pour deplier le JSON brut. Reduit le bruit visuel quand la
+    // conversation defile sur plusieurs tools (run_recipe 17 steps).
+    details.open = false;
+    // Exception : on auto-ouvre les ERREURS pour que l'agent ET l'user
+    // voient immediatement le contenu sans clic supplementaire.
+    if (isError) details.open = true;
     const summary = document.createElement('summary');
     summary.textContent = label;
     pre.parentNode.insertBefore(details, pre);
