@@ -570,18 +570,36 @@ if (typeof marked !== 'undefined' && marked.use) {
     verifyStatus.className = 'verify-status';
     verifyStatus.textContent = 'Vérification en cours…';
 
-    let popup = null;
     try {
-      if (PORTAL_URL) {
-        // Ouverture d'une popup vers le portail : il a le cookie OIDC et
-        // peut lookup Vault + repush l'agent. Si réussi il renvoie ok=true.
+      // Proxy same-origin via l'agent (POST /api/refresh-llm-config). Le
+      // serveur agent appelle le hub avec HUB_API_KEY -- pas de popup
+      // cross-origin (bloquee par les navigateurs apres async), pas de
+      // PORTAL_URL a configurer cote frontend. Le pod agent va redemarrer
+      // si une nouvelle cle est detectee -- le polling /api/status detecte
+      // la transition has_llm_key true/false.
+      let proxyOk = false;
+      try {
+        const pr = await fetch('/api/refresh-llm-config', {
+          method: 'POST',
+          headers: {'Accept': 'application/json'},
+        });
+        if (pr.ok) {
+          proxyOk = true;
+        }
+      } catch (_e) {
+        // proxy down -> fallback popup vers portail (legacy path)
+      }
+
+      // Fallback popup uniquement si proxy KO ET PORTAL_URL configure
+      let popup = null;
+      if (!proxyOk && PORTAL_URL) {
         const refreshUrl = PORTAL_URL.replace(/\/$/, '') + '/api/refresh-llm-config';
         popup = window.open(refreshUrl, '_llm_refresh',
                            'width=520,height=320,noopener=0');
       }
 
-      // Quelle que soit l'issue popup (bloquée ou pas), on re-poll
-      // l'agent dans 4s pour récupérer le nouvel état.
+      // Re-poll dans 4s (l'agent redemarre, on attend qu'il revienne ready
+      // avec la nouvelle cle).
       await new Promise(r => setTimeout(r, 4000));
       lastHasLlm = null; // force refresh visuel
       await pollStatus();

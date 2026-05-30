@@ -1073,12 +1073,20 @@ document.getElementById('toggle-publi')?.addEventListener('click', () => {
 // qui rerender 'Bureau endormi' tant que le pod n'est pas ready (~35s) ;
 // l'utilisateur ne voit AUCUN signe que sa commande est passée. On force
 // donc l'affichage d'un spinner immédiat + polling toutes les 2s.
+// Garde-fou anti-double-clic : si wake est deja en cours, on no-op.
+// Le hub a aussi un lock asyncio cote serveur, mais on evite l'appel
+// reseau inutile + l'animation UI deja active.
+let _wakeInProgress = false;
 async function wakeWorkspace() {
+  if (_wakeInProgress) return;
+  _wakeInProgress = true;
   const empty = document.getElementById('canvas-empty-wake');
   const waking = document.getElementById('canvas-empty-waking');
   const elapsed = document.getElementById('wake-elapsed');
   const progress = document.getElementById('wake-progress');
-  if (!empty || !waking) return;
+  const wakeBtn = document.getElementById('wake-btn');
+  if (wakeBtn) wakeBtn.disabled = true;
+  if (!empty || !waking) { _wakeInProgress = false; return; }
   empty.style.display = 'none';
   waking.style.display = 'flex';
   // Lance le réveil
@@ -1086,6 +1094,8 @@ async function wakeWorkspace() {
     await fetch('/workspace/wake', {method: 'POST'});
   } catch (e) {
     progress.textContent = 'Erreur réseau — réessaie dans quelques secondes.';
+    _wakeInProgress = false;
+    if (wakeBtn) wakeBtn.disabled = false;
     return;
   }
   // Polling de l'état toutes les 2s

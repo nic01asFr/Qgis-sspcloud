@@ -3000,6 +3000,24 @@ async def workspace_page(request: Request):
 # pas dans certaines configs uvicorn). On les garde tant qu'elles tournent.
 _background_anchors: set = set()
 
+# Locks par owner pour serialiser les operations de creation/reveil
+# workspace. Sans ca, deux requetes /workspace/wake en rafale (double-clic
+# bouton, popup + redirect, retry navigation) peuvent declencher deux
+# kubectl apply en parallele. _kubectl_apply est idempotent (le manifest
+# resultant est le meme) mais on garde la barriere pour eviter le bruit
+# logs et garantir une seule sequence "creation Service -> SS -> Ingress
+# -> background hook auto-activate" a la fois.
+_workspace_locks: dict = {}
+
+
+def _wake_lock(owner: str) -> asyncio.Lock:
+    """Retourne le lock partage pour les operations workspace d'un owner."""
+    lock = _workspace_locks.get(owner)
+    if lock is None:
+        lock = asyncio.Lock()
+        _workspace_locks[owner] = lock
+    return lock
+
 
 async def _auto_activate_active_study_after_wake(owner: str):
     """Au réveil du workspace, recharge le projet QGIS de l'étude active.
@@ -3026,19 +3044,27 @@ async def _auto_activate_active_study_after_wake(owner: str):
 @app.post("/workspace/wake")
 @app.get("/workspace/wake")
 async def workspace_wake(request: Request):
-    """Réveille le workspace QGIS endormi (scale 0→1) + recharge l'étude active."""
+    """Réveille le workspace QGIS endormi (scale 0→1) + recharge l'étude active.
+
+    Serialise via _wake_lock pour proteger des doubles appels (double-clic
+    bouton, popup+redirect concurrents). Si le workspace est deja en cours
+    de reveil ou ready, la seconde requete attend la fin de la premiere
+    puis retourne immediatement (idempotent).
+    """
     return_to = request.query_params.get("return_to", "")
-    try:
-        api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
-        async with httpx.AsyncClient(timeout=30, base_url=_SELF_URL) as c:
-            await c.post("/sessions", headers={"Authorization": f"Bearer {api_key}"}, json={})
-    except Exception:
-        pass
-    # Recharge le projet QGIS de l'étude active dès que le pod est prêt
-    # (en background — le wait pod ready peut prendre 30-60s).
-    task = asyncio.create_task(_auto_activate_active_study_after_wake(_ONYXIA_USER))
-    _background_anchors.add(task)
-    task.add_done_callback(_background_anchors.discard)
+    lock = _wake_lock(_ONYXIA_USER)
+    async with lock:
+        try:
+            api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+            async with httpx.AsyncClient(timeout=30, base_url=_SELF_URL) as c:
+                await c.post("/sessions", headers={"Authorization": f"Bearer {api_key}"}, json={})
+        except Exception:
+            pass
+        # Recharge le projet QGIS de l'étude active dès que le pod est prêt
+        # (en background — le wait pod ready peut prendre 30-60s).
+        task = asyncio.create_task(_auto_activate_active_study_after_wake(_ONYXIA_USER))
+        _background_anchors.add(task)
+        task.add_done_callback(_background_anchors.discard)
     if return_to == "desk":
         return RedirectResponse("/desk", status_code=302)
     return {"ok": True}

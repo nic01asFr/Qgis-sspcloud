@@ -309,6 +309,15 @@ async def _validate_api_key(key: str) -> dict | None:
 # ── Validation OIDC SSPCloud ───────────────────────────────────────────────────
 
 def _validate_oidc_token(token: str) -> dict:
+    """Valide un token OIDC SSPCloud (Keycloak datalab).
+
+    Note session : SSPCloud Keycloak gere son propre cycle d'expiration des
+    tokens (parametres upstream, hors controle hub). Cote utilisateur final
+    naviguant via le navigateur, la session HUB persistante (cookie
+    hub_api_key, max_age 90j) reste valide independamment, et un 401 ici
+    declenche un retry transparent via /authorize si Keycloak session
+    encore vive, ou un re-login complet sinon.
+    """
     try:
         signing_key = _jwks.get_signing_key_from_jwt(token)
         data = jwt.decode(

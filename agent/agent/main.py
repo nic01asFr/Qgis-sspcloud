@@ -222,6 +222,42 @@ async def api_status():
     }
 
 
+@app.post("/api/refresh-llm-config")
+async def api_refresh_llm_config():
+    """Proxy same-origin vers le hub `/api/refresh-llm-config`.
+
+    Permet au bouton 'Vérifier ma config' du bandeau agent d'éliminer la
+    popup cross-origin (bloquée par certains navigateurs apres async).
+    L'agent appelle le hub server-side avec HUB_API_KEY (deja injectée en
+    env), le hub re-lit le secretassistant et patche l'env du SS agent.
+
+    Reponse JSON minimale : {ok: bool, restarted: bool}.
+    Apres succes, l'agent va redemarrer (sigterm depuis kubelet). Le client
+    UI continue son polling /api/status -> bandeau cache des que LLM_API_KEY
+    est detecte au reboot.
+    """
+    import httpx as _httpx
+    hub_url = os.getenv("HUB_URL", "").rstrip("/")
+    hub_key = os.getenv("HUB_API_KEY", "")
+    if not hub_url:
+        return JSONResponse(
+            {"ok": False, "error": "HUB_URL non configure"}, status_code=503,
+        )
+    headers = {"Authorization": f"Bearer {hub_key}"} if hub_key else {}
+    try:
+        async with _httpx.AsyncClient(timeout=20) as c:
+            r = await c.post(f"{hub_url}/api/refresh-llm-config", headers=headers)
+            if r.status_code >= 300:
+                return JSONResponse(
+                    {"ok": False, "error": f"hub HTTP {r.status_code}"},
+                    status_code=502,
+                )
+        return {"ok": True, "restarted": True}
+    except Exception as exc:
+        log.exception("refresh-llm-config proxy: %s", exc)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
 @app.get("/memory/embed/stats")
 async def embed_stats():
     """Compteurs du worker d'indexation : indexed vs pending par source."""
