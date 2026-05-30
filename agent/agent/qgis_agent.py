@@ -143,7 +143,17 @@ def _get_profile_tools_whitelist(profile_id: str) -> list[str] | None:
 # ── Outils MCP disponibles ─────────────────────────────────────────────────────
 
 async def _get_mcp_tools(profile_id: str = "standard") -> list[dict]:
-    """Récupère la liste des outils MCP du hub, filtrée selon le profil."""
+    """Récupère la liste des outils MCP du hub, filtrée selon le profil.
+
+    Le YAML profil declare `mcp_tools.allowed = "all"` (tous les tools) OU
+    une liste explicite. Le filtrage applique l'intersection avec la liste
+    full retournee par le hub. Si le profil n'est pas dans le cache ou si
+    `allowed = "all"`, comportement legacy : on retourne tous les tools.
+
+    Egalement applique `mcp_tools.disabled = [...]` (blacklist additionnelle)
+    si declare. Permet : risk_analyst exclut explicitement `delete_file`,
+    storymap_creator exclut `restart_qgis_engine`, etc.
+    """
     if not _HUB_URL or not _HUB_KEY:
         return []
     try:
@@ -154,12 +164,36 @@ async def _get_mcp_tools(profile_id: str = "standard") -> list[dict]:
                 headers={"Authorization": f"Bearer {_HUB_KEY}"},
             )
             data = resp.json()
-            tools = data.get("result", {}).get("tools", [])
-            log.info("MCP tools disponibles: %d", len(tools))
-            return tools
+            all_tools = data.get("result", {}).get("tools", [])
     except Exception as e:
         log.warning("MCP tools non récupérés: %s", e)
         return []
+
+    # Filtrage par profil : whitelist (allowed) + blacklist (disabled).
+    # Si profil pas dans le cache (fetch initial pas encore reussi, ou
+    # profile_id custom), on revient au comportement legacy (tous les tools).
+    profile = _PROFILES_CACHE.get(profile_id, {})
+    mcp_tools_cfg = profile.get("mcp_tools", {}) or {}
+    allowed = mcp_tools_cfg.get("allowed")
+    disabled = set(mcp_tools_cfg.get("disabled", []) or [])
+
+    filtered = all_tools
+    if isinstance(allowed, list) and allowed:
+        allowed_set = set(allowed)
+        filtered = [t for t in filtered if t.get("name") in allowed_set]
+    if disabled:
+        filtered = [t for t in filtered if t.get("name") not in disabled]
+
+    if len(filtered) != len(all_tools):
+        log.info(
+            "MCP tools filtres pour profil '%s' : %d/%d (allowed=%s, disabled=%d)",
+            profile_id, len(filtered), len(all_tools),
+            "list" if isinstance(allowed, list) else (allowed or "all"),
+            len(disabled),
+        )
+    else:
+        log.info("MCP tools (profil '%s', non filtre) : %d", profile_id, len(filtered))
+    return filtered
 
 
 def _extract_error_signature(tool_result: str) -> str | None:
