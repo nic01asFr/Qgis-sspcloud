@@ -3223,6 +3223,75 @@ async def desk_agent_health():
         return {"ready": False}
 
 
+@app.get("/desk/catalog")
+async def desk_catalog():
+    """Renvoie l'etat catalogue + counters pour le desk.
+
+    Endpoint cookie-auth-friendly (utilise _ONYXIA_USER cote serveur, pas
+    de header X-Hub-API-Key requis) appele par desk.html apres un
+    publish_artifact reussi pour rafraichir compteur footer + drawer
+    sans recharger toute la page. Cf. postMessage 'qgis_publish_done'
+    emis depuis chat.html (agent iframe).
+
+    Retourne :
+      {
+        "active_study_id": str|None,
+        "items": [...]  // publications de l'etude active (max 30)
+        "study_count": int,
+        "total_count": int,  // toutes etudes confondues pour le footer
+        "study_labels": {sid: label}  // mapping pour badges UI
+      }
+    """
+    out = {
+        "active_study_id": None,
+        "items":           [],
+        "study_count":     0,
+        "total_count":     0,
+        "study_labels":    {},
+    }
+    try:
+        api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+        headers = {"Authorization": f"Bearer {api_key}"}
+        active_sid = None
+        async with httpx.AsyncClient(timeout=8, base_url=_SELF_URL) as c:
+            try:
+                r = await c.get("/studies/active", headers=headers)
+                if r.status_code == 200:
+                    d = r.json() or {}
+                    active_sid = d.get("id")
+            except Exception:
+                pass
+            try:
+                # Build study_id -> label mapping pour les badges UI
+                r = await c.get("/studies", headers=headers)
+                if r.status_code == 200:
+                    for st in (r.json() or []):
+                        sid = st.get("id")
+                        if sid:
+                            out["study_labels"][sid] = (
+                                st.get("name") or st.get("label")
+                                or sid[:8]
+                            )
+            except Exception:
+                pass
+            try:
+                r = await c.get(f"/catalog/{_ONYXIA_USER}", headers=headers)
+                if r.status_code == 200:
+                    all_items = r.json().get("items", [])
+                    out["total_count"] = len(all_items)
+                    if active_sid:
+                        items = [i for i in all_items
+                                 if i.get("study_id") == active_sid][:30]
+                        out["items"]       = items
+                        out["study_count"] = len(items)
+                    out["active_study_id"] = active_sid
+            except Exception:
+                pass
+    except Exception as exc:
+        log.warning("desk_catalog: %s", exc)
+    return out
+
+
 @app.get("/desk/memory")
 async def desk_get_memory():
     r = await _agent_call("GET", "/user/memory")

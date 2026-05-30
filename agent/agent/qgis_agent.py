@@ -1507,11 +1507,41 @@ ne vient pas d'un outil cette session, la supprimer.
                         )
                         yield f"\n```\n{result_preview}\n```\n"
 
+                # Yield direct du lien livrable AVANT la synthese LLM : garantit
+                # qu'on voit toujours la bonne URL meme si le LLM hallucine
+                # [undefined](undefined) ensuite. Le post-turn hot-fix etait
+                # casse architecturalement (modifie full_response apres
+                # streaming, le DOM n'est jamais maj cote client). Solution :
+                # rendre le lien visible immediatement et injecter une
+                # directive dans le tool result envoye au LLM (cf. bloc ci-dessous).
+                if last_publish_info and fn_name == "publish_artifact":
+                    pub_url  = last_publish_info["hub_url"]
+                    pub_kind = last_publish_info["kind"]
+                    visible_link = (
+                        f"\n\n📎 **Livrable publie** : "
+                        f"[Voir le {pub_kind}]({pub_url})\n"
+                    )
+                    yield visible_link
+                    full_response += visible_link
+
                 llm_result = re.sub(
                     r'!\[[^\]]*\]\(data:image/[^)]+\)',
                     '[image affichée à l\'utilisateur]',
                     result,
                 )
+                # Pour publish_artifact, appendre une directive explicite au tool
+                # result envoye au LLM : "si tu veux mentionner le livrable dans
+                # ta synthese, utilise EXACTEMENT cette ligne". Evite que qwen3
+                # invente [undefined](undefined) par mauvais parsing du JSON.
+                if last_publish_info and fn_name == "publish_artifact":
+                    llm_result += (
+                        f"\n\n>>> DIRECTIVE SYNTHESE : Le lien du livrable a "
+                        f"deja ete affiche a l'utilisateur juste au-dessus. "
+                        f"Tu n'as PAS besoin de le repeter. Confirme simplement "
+                        f"la publication en 1-2 phrases factuelles (kind, slug, "
+                        f"contenu). NE GENERE PAS de markdown [texte](url) "
+                        f"pointant vers le livrable -- c'est deja fait. <<<"
+                    )
                 messages.append({
                     "role":         "tool",
                     "tool_call_id": tc["id"],
@@ -1710,39 +1740,20 @@ ne vient pas d'un outil cette session, la supprimer.
                 '', full_response, flags=_re_end.IGNORECASE,
             )
 
-        # Hot-fix `[undefined](undefined)` : qwen3-6-35b-moe genere parfois un
-        # lien fantome au lieu de copier la vraie URL retournee par
-        # publish_artifact. On utilise last_publish_info (capte au moment du
-        # tool call, avant troncature DB) pour substituer les liens markdown
-        # defectueux (texte OU url == "undefined") par le bon lien.
-        # Robuste a deux cas : `[undefined](undefined)` et `[texte](undefined)`.
+        # Post-turn cleanup : on retire les eventuels [undefined](undefined)
+        # residuels dans full_response (cas ou le LLM en a genere malgre la
+        # directive). Pas de yield ici (texte deja stream cote UI) -- on
+        # nettoie juste le snapshot persiste en memoire pour ne pas polluer
+        # le contexte des turns suivants. Le lien correct a deja ete yield
+        # juste apres publish_artifact (cf. visible_link plus haut).
         if last_publish_info:
             pub_url  = last_publish_info["hub_url"]
             pub_kind = last_publish_info["kind"]
-            def _patch_link(m):
-                text = m.group(1).strip()
-                url  = m.group(2).strip()
-                if url == "undefined" or text == "undefined":
-                    safe_text = (text if text and text != "undefined"
-                                 else f"Voir le {pub_kind}")
-                    return f"[{safe_text}]({pub_url})"
-                return m.group(0)
-            patched = re.sub(
-                r'\[([^\]]*)\]\(([^)]+)\)', _patch_link, full_response,
+            full_response = re.sub(
+                r'\[(?:undefined|[^\]]*)\]\(undefined\)',
+                f"[Voir le {pub_kind}]({pub_url})",
+                full_response,
             )
-            if patched != full_response:
-                log.info("Hot-fix [undefined] -> %s applique au turn", pub_url)
-                full_response = patched
-            # Append un lien actionnable si l'agent a parle de "undefined"
-            # en plein texte sans markdown (cas tres rare).
-            elif ("undefined" in full_response.lower()
-                  and pub_url not in full_response):
-                suffix = (
-                    f"\n\n*Lien publication :* "
-                    f"[Voir le {pub_kind}]({pub_url})"
-                )
-                full_response += suffix
-                yield suffix
 
         # Sauvegarder la réponse complète en mémoire. Les data-URLs d'images
         # sont stripées de l'historique persisté : sinon, au turn N+1, le

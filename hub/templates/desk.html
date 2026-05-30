@@ -493,10 +493,10 @@ Clique pour changer{% else %}Aucune étude active{% endif %}">
 
     <!-- Onglet Publications (existant) -->
     <div class="rpane" data-rpane="publi">
-      <div class="publi-list">
+      <div class="publi-list" id="resources-publi-list">
         {% if catalog_items %}
           {% for item in catalog_items[:30] %}
-          <a href="{{ item.hub_url }}" target="_blank" class="publi-item"
+          <a href="{{ item.hub_url }}" target="_blank" class="publi-item is-active-study"
              data-render-kind="{{ item.kind }}" data-render-id="{{ item.slug }}"
              data-render-title="{{ item.slug }}"
              onclick="setActiveRender('{{ item.kind }}', '{{ item.slug }}', '{{ item.slug }}')"
@@ -511,7 +511,10 @@ Clique pour changer{% else %}Aucune étude active{% endif %}">
             </span>
             <div class="info">
               <div class="name">{{ item.slug }}</div>
-              <div class="meta">{{ item.kind }} · {{ item.size_kb }} ko</div>
+              <div class="meta">
+                <span class="study-badge">étude courante</span>
+                {{ item.kind }}{% if item.size_kb %} · {{ item.size_kb }} ko{% endif %}
+              </div>
             </div>
           </a>
           {% endfor %}
@@ -641,11 +644,13 @@ Clique pour changer{% else %}Aucune étude active{% endif %}">
     {% endif %}
     <span>{{ studies|length }} études</span>
     <span class="sep">|</span>
-    <span>
-      {{ catalog_count }} publication{{ '' if catalog_count == 1 else 's' }}
-      {% if catalog_total and catalog_total != catalog_count %}
-        <small style="opacity:.6">(sur {{ catalog_total }} compte)</small>
-      {% endif %}
+    <span id="footer-publi">
+      <span id="footer-publi-count">{{ catalog_count }}</span>
+      publication<span id="footer-publi-s">{{ '' if catalog_count == 1 else 's' }}</span>
+      <small style="opacity:.6" id="footer-publi-total"
+        {% if not catalog_total or catalog_total == catalog_count %}style="display:none"{% endif %}>
+        (sur <span id="footer-publi-total-num">{{ catalog_total }}</span> compte)
+      </small>
     </span>
     <span class="sep">|</span>
     <span>🧠 {{ insights|length }} insights</span>
@@ -1162,6 +1167,75 @@ async function wakeWorkspace() {
   // Lancer la vérification initiale après 2s (laisser le hub démarrer)
   setTimeout(checkAgent, 2000);
 })();
+
+// ── Refresh catalogue apres publish_artifact ─────────────────────────────
+// L'iframe agent emet postMessage 'qgis_publish_done' (lien direct visible)
+// et 'qgis_agent_turn_done' (fin de tour). On refetch /desk/catalog pour
+// mettre a jour compteur footer + drawer Publi sans recharger la page.
+async function refreshCatalogPanel() {
+  try {
+    const r = await fetch('/desk/catalog', { credentials: 'include' });
+    if (!r.ok) return;
+    const d = await r.json();
+    // Footer counter
+    const cnt = document.getElementById('footer-publi-count');
+    const s   = document.getElementById('footer-publi-s');
+    const tot = document.getElementById('footer-publi-total');
+    const totN = document.getElementById('footer-publi-total-num');
+    const badge = document.getElementById('publi-count-badge');
+    if (cnt) cnt.textContent = d.study_count;
+    if (s)   s.textContent   = d.study_count === 1 ? '' : 's';
+    if (totN) totN.textContent = d.total_count;
+    if (tot) tot.style.display = (d.total_count && d.total_count !== d.study_count) ? '' : 'none';
+    if (badge) badge.textContent = d.study_count;
+    // Drawer publi : on re-render la liste si visible et endpoint dispo
+    const list = document.getElementById('resources-publi-list')
+              || document.querySelector('.rpane[data-rpane="publi"] .publi-list');
+    if (list && Array.isArray(d.items)) {
+      if (d.items.length === 0) {
+        list.innerHTML = '<div class="publi-empty">Aucune publication dans cette étude.</div>';
+      } else {
+        const escapeHtml = (s) => String(s || '').replace(/[<>&"]/g,
+          c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+        const labels = d.study_labels || {};
+        const activeSid = d.active_study_id;
+        const ICONS = {storymap:'📖', pdf:'📄', dataset:'📊', flux:'🌐', recipe:'📋'};
+        list.innerHTML = d.items.map(it => {
+          const kind = it.kind || 'fichier';
+          const ic = ICONS[kind] || '📦';
+          const slug = escapeHtml(it.slug);
+          const hubUrl = it.hub_url || it.url || '#';
+          const sizeKb = it.size ? Math.round(it.size / 1024) : null;
+          const sid = it.study_id || '';
+          const isActive = sid && sid === activeSid;
+          const studyLabel = labels[sid] || (sid ? sid.slice(0, 8) : 'sans étude');
+          const badge = isActive
+            ? '<span class="study-badge">étude courante</span>'
+            : `<span class="study-badge" style="background:#eee;color:#666">étude ${escapeHtml(studyLabel)}</span>`;
+          const sizePart = sizeKb ? ` · ${sizeKb} ko` : '';
+          const cls = `publi-item${isActive ? ' is-active-study' : ''}`;
+          return `<a class="${cls}" target="_blank" rel="noopener" href="${hubUrl}"
+                     data-render-kind="${escapeHtml(kind)}"
+                     data-render-id="${slug}" data-render-title="${slug}"
+                     onclick="setActiveRender('${escapeHtml(kind)}', '${slug}', '${slug}')">
+            <span class="ic">${ic}</span>
+            <div class="info">
+              <div class="name">${slug}</div>
+              <div class="meta">${badge} ${escapeHtml(kind)}${sizePart}</div>
+            </div></a>`;
+        }).join('');
+      }
+    }
+  } catch {}
+}
+
+window.addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || typeof d !== 'object') return;
+  if (d.type === 'qgis_publish_done' || d.type === 'qgis_agent_turn_done') {
+    refreshCatalogPanel();
+  }
+});
 </script>
 </body>
 </html>
