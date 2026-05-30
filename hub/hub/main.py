@@ -288,7 +288,16 @@ async def _bootstrap_agent() -> None:
                 }],
                 "template": {
                     "metadata": {"labels": {"app": "qgis-agent"}},
-                    "spec": {"containers": [{
+                    "spec": {
+                        # Le PVC `data` est cree par kubelet avec ownership
+                        # root par defaut. L'agent tourne en USER 1000
+                        # (cf. Dockerfile.agent l.13) -> sans fsGroup le pod
+                        # crashe au startup avec PermissionError /data/sessions.
+                        # fsGroup demande a kubelet de chgrp+chmod le volume
+                        # avec gid=1000 a la creation, rendant /data
+                        # writable par l'agent.
+                        "securityContext": {"fsGroup": 1000},
+                        "containers": [{
                         "name": "agent",
                         "image": _AGENT_IMAGE,
                         "imagePullPolicy": "Always",
