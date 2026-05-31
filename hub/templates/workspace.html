@@ -196,11 +196,11 @@
   {% for s in studies %}{% set _ = study_names.update({s.id: s.name}) %}{% endfor %}
   <table class="fr-table">
     <thead>
-      <tr><th>Type</th><th>Slug</th><th>Étude</th><th>Taille</th><th>Date</th><th>Lien</th></tr>
+      <tr><th>Type</th><th>Slug</th><th>Étude</th><th>Taille</th><th>Date</th><th>Lien</th><th>Actions</th></tr>
     </thead>
     <tbody>
       {% for item in catalog_items %}
-      <tr>
+      <tr data-slug="{{ item.slug }}" data-kind="{{ item.kind }}">
         <td><span class="fr-badge fr-badge--sm fr-badge--info fr-badge--no-icon">{{ item.kind }}</span></td>
         <td>{{ item.slug }}</td>
         <td>
@@ -219,10 +219,47 @@
         <td>{{ item.size_kb }} ko</td>
         <td>{{ item.date }}</td>
         <td><a href="{{ item.hub_url }}" target="_blank" class="fr-link">Ouvrir →</a></td>
+        <td>
+          <button type="button" class="fr-btn fr-btn--tertiary-no-outline fr-btn--sm"
+                  onclick="unpublishArtifact('{{ item.kind }}', '{{ item.slug }}', this)"
+                  title="Dépublier ce livrable (suppression S3 + catalogue). Action irréversible.">
+            🗑 Dépublier
+          </button>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  <script>
+  async function unpublishArtifact(kind, slug, btn) {
+    if (!confirm(`Dépublier « ${slug} » (${kind}) ?\n\nLe fichier sera supprimé du stockage S3 et retiré du catalogue. Cette action est irréversible.`)) {
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = '⏳ Suppression…';
+    try {
+      const r = await fetch(`/publish/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (r.status === 204 || r.ok) {
+        const tr = btn.closest('tr');
+        tr.style.transition = 'opacity .3s';
+        tr.style.opacity = '0';
+        setTimeout(() => tr.remove(), 300);
+      } else {
+        const txt = await r.text();
+        alert(`Échec de la dépublication (HTTP ${r.status}) : ${txt.slice(0, 200)}`);
+        btn.disabled = false;
+        btn.textContent = '🗑 Dépublier';
+      }
+    } catch (e) {
+      alert(`Erreur réseau : ${e.message || e}`);
+      btn.disabled = false;
+      btn.textContent = '🗑 Dépublier';
+    }
+  }
+  </script>
   {% else %}
   <div class="empty-state">
     <span class="icon">📦</span>

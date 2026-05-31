@@ -404,12 +404,30 @@ body.embed .msg .bubble pre{max-width:100%}
         <option value="guided_tour" {% if profile_id=='guided_tour' %}selected{% endif %}>Guide</option>
       </select>
       <div class="spacer"></div>
+      <button type="button" class="tool-btn" id="btn-new-conv"
+              onclick="startNewConversation()"
+              title="Démarre une nouvelle conversation (la session actuelle est conservée dans l'historique des sessions). Utile si la conversation a accumulé trop d'erreurs ou si tu changes de sujet.">
+        ➕ Nouvelle conv
+      </button>
       <button type="button" class="tool-btn" id="btn-memory"
               onclick="toggleMemoryDrawer()" title="Voir et éditer la mémoire de l'agent">
         🧠 Mémoire
       </button>
       <a href="{{ (portal_url or hub_url) ~ '/desk' if (portal_url or hub_url) else '/desk' }}" target="_blank">🖥 Bureau QGIS</a>
     </div>
+    <script>
+    function startNewConversation() {
+      if (!confirm('Démarrer une nouvelle conversation ?\n\n' +
+                   'La session actuelle est sauvegardée et reste accessible depuis ' +
+                   '« Sessions récentes ». Tu repartiras sur un contexte propre.')) {
+        return;
+      }
+      // En mode embed (iframe du desk), recharger l'iframe agent. Sinon, full page.
+      const url = window.location.pathname + '?new=1' +
+                  (window.location.search.includes('embed=') ? '&embed=1' : '');
+      window.location.href = url;
+    }
+    </script>
 
     <!-- Mémoire drawer : liste des insights + lien vers édition complète -->
     <aside id="memory-drawer" class="memory-drawer" aria-hidden="true">

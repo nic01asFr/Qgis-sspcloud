@@ -657,12 +657,12 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     {% endif %}
     <span>{{ studies|length }} étude{{ '' if studies|length == 1 else 's' }}</span>
     <span class="sep">|</span>
-    <span id="footer-publi">
+    <span id="footer-publi" title="Livrables publiés dans l'étude active vs sur l'ensemble de ton compte (toutes études confondues)">
       <span id="footer-publi-count">{{ catalog_count }}</span>
-      livrable<span id="footer-publi-s">{{ '' if catalog_count == 1 else 's' }}</span>
+      livrable<span id="footer-publi-s">{{ '' if catalog_count == 1 else 's' }}</span> ici
       <small style="opacity:.6" id="footer-publi-total"
         {% if not catalog_total or catalog_total == catalog_count %}style="display:none"{% endif %}>
-        / <span id="footer-publi-total-num">{{ catalog_total }}</span> au total
+        / <span id="footer-publi-total-num">{{ catalog_total }}</span> sur ton compte
       </small>
     </span>
     {% if insights|length > 0 %}
@@ -1009,6 +1009,19 @@ document.querySelectorAll('.rtab').forEach(t => {
   });
 });
 
+// Helper fetch avec timeout (AbortController). Sans cela, /desk/layers ou
+// /desk/study-files peut etre en attente indefiniment cote ingress -> l'UI
+// reste sur "Chargement..." sans recours.
+async function _fetchWithTimeout(url, timeoutMs = 12000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, {cache: 'no-store', signal: ctrl.signal});
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 // Couches QGIS — consomme /desk/layers (hub), qui interroge MCP get_project_info.
 // Distingue 3 états : workspace endormi / projet vide / projet avec couches.
 async function loadResourceLayers() {
@@ -1016,8 +1029,8 @@ async function loadResourceLayers() {
   if (!c) return;
   c.innerHTML = '<div class="publi-empty">Chargement…</div>';
   try {
-    const r = await fetch('/desk/layers', {cache: 'no-store'});
-    if (!r.ok) throw new Error('http');
+    const r = await _fetchWithTimeout('/desk/layers', 12000);
+    if (!r.ok) throw new Error('http_' + r.status);
     const d = await r.json();
     const layers = (d && d.layers) || [];
     const state = d?.state || 'ok';
@@ -1027,7 +1040,8 @@ async function loadResourceLayers() {
       return;
     }
     if (state === 'error' || state === 'unknown') {
-      c.innerHTML = '<div class="publi-empty">État du workspace indéterminé. Réessaie.</div>';
+      c.innerHTML = '<div class="publi-empty">État du workspace indéterminé. ' +
+                    '<a href="#" onclick="loadResourceLayers();return false">Réessayer ↻</a></div>';
       return;
     }
     if (!layers.length) {
@@ -1048,7 +1062,10 @@ async function loadResourceLayers() {
       </div>`;
     }).join('');
   } catch (e) {
-    c.innerHTML = '<div class="publi-empty">Workspace endormi ou inaccessible.</div>';
+    const reason = e?.name === 'AbortError' ? 'délai dépassé (12 s)'
+                                            : 'workspace endormi ou inaccessible';
+    c.innerHTML = `<div class="publi-empty">${reason}. ` +
+                  `<a href="#" onclick="loadResourceLayers();return false">Réessayer ↻</a></div>`;
   }
 }
 
@@ -1058,8 +1075,8 @@ async function loadResourceFiles() {
   if (!c) return;
   c.innerHTML = '<div class="publi-empty">Chargement…</div>';
   try {
-    const r = await fetch('/desk/study-files', {cache: 'no-store'});
-    if (!r.ok) throw new Error('http');
+    const r = await _fetchWithTimeout('/desk/study-files', 12000);
+    if (!r.ok) throw new Error('http_' + r.status);
     const d = await r.json();
     const files = (d && d.files) || [];
     if (!files.length) {
@@ -1081,7 +1098,10 @@ async function loadResourceFiles() {
       </div>`;
     }).join('');
   } catch (e) {
-    c.innerHTML = '<div class="publi-empty">Workspace endormi ou liste indisponible.</div>';
+    const reason = e?.name === 'AbortError' ? 'délai dépassé (12 s)'
+                                            : 'workspace endormi ou liste indisponible';
+    c.innerHTML = `<div class="publi-empty">${reason}. ` +
+                  `<a href="#" onclick="loadResourceFiles();return false">Réessayer ↻</a></div>`;
   }
 }
 
@@ -1093,6 +1113,14 @@ document.getElementById('toggle-publi')?.addEventListener('click', () => {
     _resLayersLoaded = true;
   }
 });
+
+// Si le drawer Ressources est ouvert au render initial (state show-publi
+// preserve dans localStorage ou par template), declencher loadResourceLayers
+// immediatement -- sinon le placeholder "Chargement..." persiste indefiniment.
+if (desk.classList.contains('show-publi') && !_resLayersLoaded) {
+  loadResourceLayers();
+  _resLayersLoaded = true;
+}
 
 // ── Réveil du bureau QGIS : feedback visuel + polling ─────────────────────
 // Sans ce hook, le clic 'Réveiller le bureau' POST puis redirige sur /desk
