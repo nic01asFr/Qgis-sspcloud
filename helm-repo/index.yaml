@@ -3,9 +3,9 @@ entries:
   qgis-hub:
   - apiVersion: v2
     appVersion: latest
-    created: "2026-05-21T00:16:57.0005214+02:00"
+    created: "2026-05-31T10:46:40.829197978Z"
     description: Service QGIS Desktop + Agent IA pour agents CEREMA sur SSPCloud
-    digest: 32c707e3b924910694b9d7653909275751a4dede2a7550d100fee10419c163da
+    digest: 2efc474c65f9c5ff55e8b5ab89c2a8778e5a5370ffe0b1342dba3707212dce26
     home: https://github.com/nic01asFr/Qgis-sspcloud
     keywords:
     - qgis
@@ -19,4 +19,4 @@ entries:
     urls:
     - https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/helm-repo/qgis-hub-1.0.0.tgz
     version: 1.0.0
-generated: "2026-05-21T00:16:57.0005214+02:00"
+generated: "2026-05-31T10:46:40.828596512Z"
