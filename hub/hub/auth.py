@@ -20,11 +20,12 @@ import base64
 import logging
 import os
 import secrets
-import subprocess
+import ssl
 import time
 from pathlib import Path
 
 import aiosqlite
+import httpx
 import jwt
 from jwt import PyJWKClient
 from fastapi import Depends, HTTPException, Request, status
@@ -67,52 +68,106 @@ def _read_pod_namespace() -> str:
 _NAMESPACE   = _read_pod_namespace()
 _SECRET_NAME = "qgis-hub-apikey"
 _SECRET_KEY  = "HUB_API_KEY"
-# Cache memoire de la cle pour ne pas tirer un kubectl par /auth/apikey appel.
+# Cache memoire de la cle pour ne pas tirer un API K8s par /auth/apikey appel.
 # TTL court (5 min) — un revoke explicite invalide le cache.
 _cached_key: dict = {"value": "", "ts": 0.0}
 _CACHE_TTL = 300.0
 
+# ── Acces direct API K8s (sans dependance kubectl binary) ─────────────────────
+# Bug #15 V1.1 (2026-05-31) : le code utilisait subprocess.run(["kubectl", ...])
+# mais l'image Docker hub (FROM inseefrlab/onyxia-jupyter-python) n'a PAS
+# kubectl installe. Resultat : FileNotFoundError silencieuse a chaque appel
+# auth -> Secret K8s jamais lu/cree -> validate_api_key retourne None -> 401
+# sur tous les endpoints auth-protected -> _desk_context() recoit studies=[]
+# -> UX cassee post-redeploiement fresh.
+#
+# Fix : utiliser httpx vers kubernetes.default.svc avec le token du
+# ServiceAccount (meme pattern que dans main.py _bootstrap_agent).
+_K8S_HOST = "https://kubernetes.default.svc"
 
-def _kubectl_get_secret_value(name: str, namespace: str, key: str) -> str | None:
-    """Lit la valeur d'une cle d'un Secret. None si absent. Sync (a wrapper to_thread)."""
+def _k8s_sa_token() -> str:
+    try:
+        return Path("/var/run/secrets/kubernetes.io/serviceaccount/token").read_text().strip()
+    except Exception:
+        return ""
+
+
+async def _k8s_get_secret_value(name: str, namespace: str, key: str) -> str | None:
+    """Lit la valeur d'une cle d'un Secret via l'API K8s HTTP. None si absent."""
     if not namespace:
         return None
-    r = subprocess.run(
-        ["kubectl", "get", "secret", name, "-n", namespace,
-         "-o", "jsonpath={.data." + key + "}"],
-        capture_output=True, text=True, timeout=10,
-    )
-    if r.returncode != 0 or not r.stdout.strip():
+    token = _k8s_sa_token()
+    if not token:
         return None
     try:
-        return base64.b64decode(r.stdout.strip()).decode()
-    except Exception:
+        async with httpx.AsyncClient(verify=False, timeout=10) as c:
+            r = await c.get(
+                f"{_K8S_HOST}/api/v1/namespaces/{namespace}/secrets/{name}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        if r.status_code != 200:
+            return None
+        data_b64 = (r.json().get("data") or {}).get(key)
+        if not data_b64:
+            return None
+        return base64.b64decode(data_b64).decode()
+    except Exception as exc:
+        log.warning("k8s get_secret %s/%s/%s echec : %s",
+                    namespace, name, key, exc)
         return None
 
 
-def _kubectl_create_secret(name: str, namespace: str, key: str, value: str) -> bool:
-    """Cree un Secret generique avec une cle. Idempotent (AlreadyExists = OK).
-    Renvoie True si Secret existe en sortie (cree ou deja la)."""
+async def _k8s_create_secret(name: str, namespace: str, key: str, value: str) -> bool:
+    """Cree un Secret namespace-level. Idempotent (AlreadyExists = OK)."""
     if not namespace:
         return False
-    r = subprocess.run(
-        ["kubectl", "create", "secret", "generic", name,
-         "-n", namespace, f"--from-literal={key}={value}"],
-        capture_output=True, text=True, timeout=10,
-    )
-    if r.returncode == 0:
-        return True
-    return "AlreadyExists" in (r.stderr or "")
+    token = _k8s_sa_token()
+    if not token:
+        return False
+    body = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "type": "Opaque",
+        "metadata": {"name": name, "namespace": namespace},
+        "data": {key: base64.b64encode(value.encode()).decode()},
+    }
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=10) as c:
+            r = await c.post(
+                f"{_K8S_HOST}/api/v1/namespaces/{namespace}/secrets",
+                headers={"Authorization": f"Bearer {token}",
+                         "Content-Type": "application/json"},
+                json=body,
+            )
+        if r.status_code in (200, 201):
+            return True
+        # AlreadyExists est un cas normal (idempotent)
+        if r.status_code == 409 or "AlreadyExists" in r.text:
+            return True
+        log.warning("k8s create_secret %s/%s echec %d : %s",
+                    namespace, name, r.status_code, r.text[:200])
+        return False
+    except Exception as exc:
+        log.warning("k8s create_secret %s/%s exception : %s", namespace, name, exc)
+        return False
 
 
-def _kubectl_delete_secret(name: str, namespace: str) -> bool:
+async def _k8s_delete_secret(name: str, namespace: str) -> bool:
+    """Supprime un Secret. Idempotent (404 = deja absent = OK)."""
     if not namespace:
         return False
-    r = subprocess.run(
-        ["kubectl", "delete", "secret", name, "-n", namespace, "--ignore-not-found"],
-        capture_output=True, text=True, timeout=10,
-    )
-    return r.returncode == 0
+    token = _k8s_sa_token()
+    if not token:
+        return False
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=10) as c:
+            r = await c.delete(
+                f"{_K8S_HOST}/api/v1/namespaces/{namespace}/secrets/{name}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        return r.status_code in (200, 404)
+    except Exception:
+        return False
 
 
 _jwks   = PyJWKClient(_JWKS_URL, cache_keys=True)
@@ -172,9 +227,7 @@ async def create_or_get_api_key(username: str) -> str:
 
     # 2) Lecture Secret (cas normal en prod, post-refonte)
     if _NAMESPACE:
-        existing = await asyncio.to_thread(
-            _kubectl_get_secret_value, _SECRET_NAME, _NAMESPACE, _SECRET_KEY,
-        )
+        existing = await _k8s_get_secret_value(_SECRET_NAME, _NAMESPACE, _SECRET_KEY)
         if existing:
             _cached_key["value"] = existing
             _cached_key["ts"] = now
@@ -202,16 +255,12 @@ async def create_or_get_api_key(username: str) -> str:
 
     # 5) Creation Secret (atomique cote k8s, idempotent : AlreadyExists OK)
     if _NAMESPACE:
-        ok = await asyncio.to_thread(
-            _kubectl_create_secret, _SECRET_NAME, _NAMESPACE, _SECRET_KEY, new_key,
-        )
+        ok = await _k8s_create_secret(_SECRET_NAME, _NAMESPACE, _SECRET_KEY, new_key)
         if ok:
             # Relire pour gerer la race "AlreadyExists" : un autre process a
             # peut-etre cree le Secret entre etapes 2 et 5 avec une cle
             # differente. La cle dans le Secret est la verite.
-            confirmed = await asyncio.to_thread(
-                _kubectl_get_secret_value, _SECRET_NAME, _NAMESPACE, _SECRET_KEY,
-            )
+            confirmed = await _k8s_get_secret_value(_SECRET_NAME, _NAMESPACE, _SECRET_KEY)
             if confirmed:
                 _cached_key["value"] = confirmed
                 _cached_key["ts"] = now
@@ -249,7 +298,7 @@ async def create_or_get_api_key(username: str) -> str:
 async def revoke_api_key(username: str) -> None:
     """Revoque la cle (supprime Secret + DB legacy)."""
     if _NAMESPACE:
-        await asyncio.to_thread(_kubectl_delete_secret, _SECRET_NAME, _NAMESPACE)
+        await _k8s_delete_secret(_SECRET_NAME, _NAMESPACE)
     _cached_key["value"] = ""
     _cached_key["ts"] = 0.0
     if _DB_PATH.exists():
@@ -273,9 +322,7 @@ async def _validate_api_key(key: str) -> dict | None:
         return None
     # 1) Secret (source de verite)
     if _NAMESPACE:
-        current = await asyncio.to_thread(
-            _kubectl_get_secret_value, _SECRET_NAME, _NAMESPACE, _SECRET_KEY,
-        )
+        current = await _k8s_get_secret_value(_SECRET_NAME, _NAMESPACE, _SECRET_KEY)
         if current and current == key:
             username = _NAMESPACE.removeprefix("user-")
             return {

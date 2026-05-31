@@ -3168,26 +3168,61 @@ async def workspace_create_study(request: Request):
     target = "/desk" if return_to == "desk" else "/workspace"
     if not name:
         return RedirectResponse(f"{target}?error=name_required", status_code=302)
+    # Bug #14 V1.1 : ancien code masquait toute exception silencieusement -> on
+    # ne savait pas pourquoi l'etude restait inactive apres creation. On log
+    # explicitement chaque erreur + retry 2x sur l'activation (souvent
+    # transitoire si la table active_study n'est pas encore initialisee).
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
         async with httpx.AsyncClient(timeout=15, base_url=_SELF_URL) as c:
             r = await c.post("/studies",
                              headers={"Authorization": f"Bearer {api_key}"},
                              json={"name": name, "profile": profile})
-            # POST /studies repond 201 Created (cf. l.1630). L'ancien test
-            # r.status_code == 200 ratait la creation -> new_id=None ->
-            # activate jamais appele -> etude creee mais inactive dans
-            # active_study table -> _fetch_active_study_id retourne None
-            # cote agent -> Fix Bug B (sessions.study_id) jamais populated.
-            # Observe 2026-05-30 sur test E2E final.
-            new_id = (r.json().get("id")
-                      if r.status_code in (200, 201)
-                      else None)
-            if new_id:
-                await c.post(f"/studies/{new_id}/activate",
-                             headers={"Authorization": f"Bearer {api_key}"})
-    except Exception:
-        pass
+            if r.status_code not in (200, 201):
+                log.error("workspace_create_study: POST /studies HTTP %d : %s",
+                          r.status_code, r.text[:200])
+                return RedirectResponse(f"{target}?error=create_failed",
+                                        status_code=302)
+            new_id = r.json().get("id")
+            if not new_id:
+                log.error("workspace_create_study: POST /studies sans 'id' : %s",
+                          r.text[:200])
+                return RedirectResponse(f"{target}?error=no_id", status_code=302)
+            # Activation avec retry — _validate_api_key peut etre transitoirement
+            # KO si le Secret K8s vient d'etre cree (cache 5min stale).
+            activate_ok = False
+            for attempt in range(2):
+                try:
+                    ar = await c.post(
+                        f"/studies/{new_id}/activate",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                    )
+                    if ar.status_code in (200, 201, 204):
+                        activate_ok = True
+                        break
+                    log.warning(
+                        "workspace_create_study: activate %s try %d/2 HTTP %d : %s",
+                        new_id, attempt + 1, ar.status_code, ar.text[:200],
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "workspace_create_study: activate %s try %d/2 exception : %s",
+                        new_id, attempt + 1, exc,
+                    )
+                await asyncio.sleep(0.5)
+            if not activate_ok:
+                log.error(
+                    "workspace_create_study: activation %s echec apres 2 tentatives "
+                    "— l'etude existe mais n'est PAS active. User devra l'activer "
+                    "manuellement via /workspace.", new_id,
+                )
+                return RedirectResponse(f"{target}?error=activate_failed",
+                                        status_code=302)
+            log.info("workspace_create_study: etude %s (%s) creee + activee OK",
+                     new_id, name[:30])
+    except Exception as exc:
+        log.exception("workspace_create_study: exception inattendue : %s", exc)
+        return RedirectResponse(f"{target}?error=exception", status_code=302)
     return RedirectResponse(target, status_code=302)
 
 
