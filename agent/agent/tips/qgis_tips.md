@@ -323,3 +323,164 @@ pattern: |
       if i >= 5: break
       print(f.name())
 note: QgsFields supporte get_item par index entier mais PAS par slice. list(layer.fields()) donne une vraie list slicable. Idem pour QgsFeatureIterator (utiliser itertools.islice).
+
+## tip: Itérer et modifier le layer tree (ordre de rendu)
+symptom: QgsLayerTree object has no attribute id type insertChild QgsLayerTreeNode AttributeError layerTreeRoot iterate children setCustomLayerOrder reorder layers raster basemap au-dessus
+pattern: |
+  # Le layer tree contient des NODES (groupes ou couches), pas des layers directs.
+  # Pour itérer/modifier, passer par root.children() ou findLayers().
+  from qgis.core import (
+      QgsProject, QgsLayerTreeLayer, QgsLayerTreeGroup,
+  )
+  project = QgsProject.instance()
+  root = project.layerTreeRoot()
+
+  # Itérer enfants directs (groupes + couches) — utiliser isinstance, PAS .type/.id
+  for node in root.children():
+      if isinstance(node, QgsLayerTreeLayer):
+          layer = node.layer()           # accès à la couche réelle
+          print("couche :", layer.name(), "id :", layer.id())
+      elif isinstance(node, QgsLayerTreeGroup):
+          print("groupe :", node.name())
+
+  # Parcourir TOUTES les couches (récursif, ignore les groupes)
+  for tree_layer in root.findLayers():    # liste de QgsLayerTreeLayer
+      lyr = tree_layer.layer()
+
+  # Réordonner avec custom order (plus fiable que déplacer les nodes)
+  # Ordre = haut à bas dans le panneau Couches (le dernier est dessiné en premier).
+  # Pour mettre le raster basemap TOUT EN BAS :
+  basemap = project.mapLayersByName("Plan IGN v2")[0]
+  others  = [l for l in project.mapLayers().values() if l.id() != basemap.id()]
+  order   = [l.id() for l in others] + [basemap.id()]   # basemap en dernier
+  root.setHasCustomLayerOrder(True)
+  root.setCustomLayerOrder(order)
+
+  # Déplacer un node dans l'arbre (si tu veux réorganiser visuellement aussi)
+  parent = tree_layer.parent()
+  parent.removeChildNode(tree_layer)
+  parent.insertChildNode(0, tree_layer.clone())   # 0 = top, -1 = bottom
+note: Jamais `.id()` ou `.type()` sur un QgsLayerTreeNode. Utiliser isinstance(node, QgsLayerTreeLayer | QgsLayerTreeGroup). Pour l'ordre de rendu PDF/canvas, préférer setCustomLayerOrder([ids]) (haut->bas) à insertChildNode. Le raster basemap doit être en DERNIER dans la liste pour être rendu EN BAS (les vecteurs au-dessus).
+
+## tip: Compter / lister les couches du projet
+symptom: QgsProject object has no attribute mapLayerCount count layers AttributeError compter couches projet len mapLayers
+pattern: |
+  from qgis.core import QgsProject, QgsVectorLayer, QgsRasterLayer
+  project = QgsProject.instance()
+
+  # Compter — count() ou len(mapLayers())
+  total = project.count()                          # entier
+  total_bis = len(project.mapLayers())             # équivalent
+
+  # Toutes les couches comme dict {id: layer}
+  layers = project.mapLayers()                     # dict[str, QgsMapLayer]
+
+  # Filtrer par type
+  vector = [l for l in layers.values() if isinstance(l, QgsVectorLayer)]
+  raster = [l for l in layers.values() if isinstance(l, QgsRasterLayer)]
+  print(f"total={total}, vector={len(vector)}, raster={len(raster)}")
+
+  # Récupérer par nom (liste, peut être vide)
+  by_name = project.mapLayersByName("Bâtiments (BD TOPO)")
+  if by_name:
+      layer = by_name[0]
+
+  # Récupérer par id (None si absent)
+  layer = project.mapLayer("layer_id_xxx")
+note: project.mapLayerCount() N'EXISTE PAS. Utiliser project.count() (entier) ou len(project.mapLayers()) (dict). mapLayersByName retourne une LIST (peut être vide ou contenir doublons). mapLayer(id) retourne None si absent.
+
+## tip: Charger un raster WMS / WMTS / XYZ (basemap IGN)
+symptom: QgsRasterLayer WMS WMTS XYZ basemap charger fond carte IGN Plan ortho data.geopf.fr provider URI
+pattern: |
+  from qgis.core import QgsRasterLayer, QgsProject
+  project = QgsProject.instance()
+
+  # IGN Plan v2 via WMTS (Géoplateforme officielle, sans clé)
+  uri_plan = (
+      "tileMatrixSet=PM&crs=EPSG:3857&layers=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2"
+      "&styles=normal&format=image/png"
+      "&url=https://data.geopf.fr/wmts?REQUEST=GetCapabilities&SERVICE=WMTS"
+  )
+  plan = QgsRasterLayer(uri_plan, "Plan IGN v2", "wms")  # provider 'wms' couvre WMS et WMTS
+  if not plan.isValid():
+      raise RuntimeError(f"WMTS invalide : {plan.error().summary()}")
+  project.addMapLayer(plan)
+
+  # Ortho IGN via WMTS
+  uri_ortho = (
+      "tileMatrixSet=PM&crs=EPSG:3857&layers=ORTHOIMAGERY.ORTHOPHOTOS"
+      "&styles=normal&format=image/jpeg"
+      "&url=https://data.geopf.fr/wmts?REQUEST=GetCapabilities&SERVICE=WMTS"
+  )
+  ortho = QgsRasterLayer(uri_ortho, "Ortho IGN", "wms")
+  project.addMapLayer(ortho)
+
+  # XYZ tile (OSM par exemple)
+  uri_xyz = "type=xyz&url=https://tile.openstreetmap.org/{z}/{x}/{y}.png&zmax=19"
+  osm = QgsRasterLayer(uri_xyz, "OSM", "wms")
+  project.addMapLayer(osm)
+note: Provider="wms" pour WMS, WMTS et XYZ (l'URI distingue par 'type=xyz' ou paramètres WMTS). Toujours vérifier isValid() AVANT addMapLayer pour éviter une couche vide silencieuse. Pour le rendu PDF, placer ces basemaps en BAS du custom layer order (cf. tip "Itérer et modifier le layer tree").
+
+## tip: Symbologie graduée (choroplèthe) — pattern factory complet
+symptom: QgsGraduatedSymbolRenderer unexpected type int argument constructor classification graduated choropleth getColorRamp updateClasses Mode Quantile EqualInterval
+pattern: |
+  # Le constructeur direct QgsGraduatedSymbolRenderer(field, classes, ...) n'accepte
+  # PAS plus de 2 args et casse souvent en "unexpected type 'int'". Utiliser le
+  # pattern factory : symbol par défaut → renderer vide → classification → ramp.
+  from qgis.core import (
+      QgsSymbol, QgsGraduatedSymbolRenderer, QgsClassificationQuantile,
+      QgsStyle,
+  )
+
+  field = "exposes_T100"
+  layer.setRenderer(QgsGraduatedSymbolRenderer())   # renderer vide
+  renderer = layer.renderer()
+  renderer.setClassAttribute(field)
+  renderer.setSourceSymbol(QgsSymbol.defaultSymbol(layer.geometryType()))
+
+  # Méthode de classification (Quantile / EqualInterval / NaturalBreaks / Jenks)
+  renderer.setClassificationMethod(QgsClassificationQuantile())
+
+  # Recalcule les bornes depuis les data
+  renderer.updateClasses(layer, 5)   # 5 classes (n_classes)
+
+  # Color ramp depuis le style global
+  style = QgsStyle.defaultStyle()
+  ramp = style.colorRamp("Reds")     # ou "Blues", "Spectral", "Viridis"...
+  renderer.updateColorRamp(ramp)
+
+  layer.triggerRepaint()
+note: 4 étapes obligatoires dans l'ordre : (1) setClassAttribute(champ), (2) setSourceSymbol(defaultSymbol(geomType)), (3) setClassificationMethod + updateClasses(layer, n), (4) updateColorRamp(QgsStyle.colorRamp("nom")). Jamais le constructeur direct avec plus de 2 args. Pour les color ramps disponibles : QgsStyle.defaultStyle().colorRampNames().
+
+## tip: Exporter PDF / Atlas via QgsLayoutExporter
+symptom: QgsLayoutExporter export PDF image atlas multi pages layoutManager layoutByName ExportResult Success FileError
+pattern: |
+  from qgis.core import (
+      QgsProject, QgsLayoutExporter,
+  )
+  project = QgsProject.instance()
+  layout = project.layoutManager().layoutByName("Mon layout A3")
+  if layout is None:
+      raise RuntimeError("Layout introuvable — vérifier layoutManager().printLayouts() pour la liste")
+
+  exporter = QgsLayoutExporter(layout)
+
+  # Export PDF simple (une page = le layout courant)
+  settings = QgsLayoutExporter.PdfExportSettings()
+  settings.dpi = 300
+  settings.rasterizeWholeImage = False     # garder les vecteurs vectoriels
+  result = exporter.exportToPdf("/data/exports/carte.pdf", settings)
+  if result != QgsLayoutExporter.ExportResult.Success:
+      raise RuntimeError(f"Export PDF échoué : code={result}")
+
+  # Export atlas (une page par feature de la coverage layer)
+  atlas = layout.atlas()
+  if atlas and atlas.enabled():
+      result = exporter.exportToPdf(atlas, "/data/exports/atlas.pdf", settings)
+      print(f"Atlas exporté : {atlas.count()} pages")
+
+  # Export image PNG d'une page
+  img_settings = QgsLayoutExporter.ImageExportSettings()
+  img_settings.dpi = 200
+  exporter.exportToImage("/data/exports/page.png", img_settings)
+note: ExportResult enum : Success=0, FileError=1, PrintError=2, SvgLayerError=3, IteratorError=4, MemoryError=5, FileNameExpressionError=6. Toujours tester result == Success (pas == 0 si tu importes l'enum). Le tool MCP `export_pdf` est plus simple à utiliser dans 95% des cas — ne réimplémenter via PyQGIS QUE pour atlas, options DPI custom, ou export multi-formats.
