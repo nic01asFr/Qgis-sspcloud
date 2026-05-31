@@ -1424,16 +1424,18 @@ async def hub_login(key: str = "", request: Request = None):
 
 @app.get("/", response_class=HTMLResponse)
 async def hub_home(request: Request):
-    """Page d'accueil — readiness probe K8s (302 sans auth = OK) + redirect.
+    """Page d'accueil — readiness probe K8s + redirect intelligent humain.
 
-    Comportement intelligent : si l'user a deja une etude active, on saute
-    direct sur /desk (gain de clic, etude en cours par defaut). Sinon
-    /workspace pour qu'il en choisisse une ou la cree. Le forcing sur
-    /workspace est conservable via /workspace explicite.
-
-    Pour les readiness probes K8s (sans cookie), on retombe sur /workspace
-    sans appel DB additionnel.
+    Le chart Onyxia jupyter-python hardcode son readinessProbe sur `GET /`
+    avec timeoutSeconds=2. Kubelet suit les redirects 3xx, donc rediriger
+    vers /workspace (lourd : DB queries + httpx K8s API) faisait
+    occasionnellement timeout le probe -> pod marque Ready=False sans
+    raison reelle (le hub continue de servir). Court-circuit pour
+    User-Agent "kube-probe/*" : 200 OK statique immediat. Les humains
+    gardent leur redirect intelligent vers /desk ou /workspace.
     """
+    if "kube-probe" in request.headers.get("user-agent", "").lower():
+        return Response(content="ok", media_type="text/plain", status_code=200)
     try:
         # Si pas de cookie auth, redirect simple vers /workspace (sans toucher
         # studies pour eviter latence sur les readiness probes anonymes).
