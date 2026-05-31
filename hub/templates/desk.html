@@ -1114,10 +1114,11 @@ document.getElementById('toggle-publi')?.addEventListener('click', () => {
   }
 });
 
-// Si le drawer Ressources est ouvert au render initial (state show-publi
-// preserve dans localStorage ou par template), declencher loadResourceLayers
-// immediatement -- sinon le placeholder "Chargement..." persiste indefiniment.
-if (desk.classList.contains('show-publi') && !_resLayersLoaded) {
+// Sidebar gauche RESSOURCES est toujours visible (pas un drawer toggle).
+// L'onglet Couches est actif par defaut : on charge ses donnees immediatement
+// au render. Sans cela, le placeholder "Chargement..." persiste indefiniment
+// car le hook click toggle-publi du header concerne UN AUTRE drawer (publi-only).
+if (document.getElementById('resources-layers-list') && !_resLayersLoaded) {
   loadResourceLayers();
   _resLayersLoaded = true;
 }
