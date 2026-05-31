@@ -1096,11 +1096,12 @@ async def oauth_token(
 
 
 # ── Healthcheck ────────────────────────────────────────────────────────────────
-
-@app.get("/")
-async def root():
-    """Readiness probe Kubernetes — 200 sans auth."""
-    return {"status": "ok", "service": "qgis-mcp-hub"}
+#
+# La route GET "/" est définie plus bas (ligne 1424, `hub_home`) avec
+# RedirectResponse intelligent vers /desk ou /workspace selon l'état de l'user.
+# Le readiness probe K8s utilise `/health` (cf. charts/qgis-hub/templates/
+# statefulset.yaml:86,92) — pas besoin d'une route "/" JSON dédiée qui
+# masquerait `hub_home` (FastAPI prend la 1ère déclaration).
 
 
 @app.get("/health")
