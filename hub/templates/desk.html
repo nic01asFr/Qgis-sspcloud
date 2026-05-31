@@ -1177,7 +1177,11 @@ async function wakeWorkspace() {
       .catch(() => setTimeout(checkAgent, 5000));
   }
 
-  // Si l'iframe charge et que son contenu indique une erreur, remettre le loader
+  // Si l'iframe charge et que son contenu indique une erreur, remettre le loader.
+  // En cross-origin (SecurityError sur contentDocument), on NE conclut PAS que
+  // l'agent est prêt : une page 502/503 servie par l'ingress est aussi
+  // cross-origin et faisait sauter le loader vers "no available server".
+  // Source de vérité unique = /desk/agent-health (cf. checkAgent).
   iframe.addEventListener('load', function() {
     try {
       const body = iframe.contentDocument && iframe.contentDocument.body;
@@ -1190,18 +1194,16 @@ async function wakeWorkspace() {
         loader.style.display = 'flex';
         iframe.style.display = 'none';
         setTimeout(checkAgent, 5000);
-      } else if (iframe.style.display === 'none') {
-        // iframe chargée correctement mais encore cachée : révéler
-        showAgent();
       }
+      // Sinon (same-origin et pas d'erreur) : ne rien faire, checkAgent décide.
     } catch(e) {
-      // Cross-origin attendu : l'agent répond — révéler l'iframe
-      if (iframe.style.display === 'none') showAgent();
+      // Cross-origin : indécidable depuis ici. Laisser checkAgent() trancher.
     }
   });
 
-  // Lancer la vérification initiale après 2s (laisser le hub démarrer)
-  setTimeout(checkAgent, 2000);
+  // Lancer la vérification immédiate (et non +2s) : le loader reste visible
+  // tant que /desk/agent-health ne dit pas ready=true.
+  checkAgent();
 })();
 
 // ── Refresh catalogue apres publish_artifact ─────────────────────────────
