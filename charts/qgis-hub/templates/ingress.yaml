@@ -6,8 +6,15 @@ metadata:
   labels:
     {{- include "qgis-hub.labels" . | nindent 4 }}
   annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: 512m
+    # Timeouts longs pour run_recipe (~5 min), smart_load BD TOPO (~2 min),
+    # SSE streaming chat agent. Sans ces 4 annotations, les requêtes
+    # tombent en 504 Gateway Timeout au bout de 60s (défaut nginx-ingress).
+    # Cohérent avec _patch_own_ingress_timeout() dans hub/hub/main.py qui
+    # self-heal les ingress Onyxia (chart launcher) au démarrage du hub.
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
 spec:
   ingressClassName: {{ .Values.ingress.ingressClassName }}
   rules:

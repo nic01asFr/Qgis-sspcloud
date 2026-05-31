@@ -729,9 +729,25 @@ async def lifespan(app: FastAPI):
             _active_sessions[s["owner"]] = s["id"]
     if _active_sessions:
         log.info("Cache restauré : %d session(s) actives", len(_active_sessions))
+
+    # CRITIQUE (Bug #8 V1.1) : patcher l'ingress proxy-read-timeout=600 AVANT
+    # de servir des requêtes. Si on le fait en background (asyncio.create_task),
+    # les premières requêtes longues (run_recipe ~5min, smart_load BD TOPO ~2min)
+    # tombent en 504 pendant que le patch tourne — observé E2E 2026-05-31 : la
+    # recette `risque_inondation` perd 5/17 steps sur 504 timeout.
+    # Cap dur à 20s pour ne pas bloquer le startup si l'API K8s est lente/down ;
+    # en cas d'échec, on continue (degraded mode, observable dans les logs).
+    try:
+        await asyncio.wait_for(_patch_own_ingress_timeout(), timeout=20)
+    except Exception as exc:
+        log.warning(
+            "Startup: patch ingress timeout/échec (%s) — hub démarre quand même "
+            "mais les requêtes longues risquent 504 jusqu'au prochain restart.",
+            exc,
+        )
+
     task = asyncio.create_task(sessions.cleanup_loop())
     asyncio.create_task(_bootstrap_agent())
-    asyncio.create_task(_patch_own_ingress_timeout())
     asyncio.create_task(_bootstrap_geoai_gpu())
     yield
     task.cancel()
