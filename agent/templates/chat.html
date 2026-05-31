@@ -521,11 +521,21 @@ if (new URLSearchParams(location.search).get('embed') === '1') {
 // Tous les liens markdown rendus par l'agent doivent ouvrir un nouvel onglet
 // (sinon, en mode embed iframe, le clic navigue l'iframe vers la cible et
 // remplace le chat agent — l'user a signalé ce bug le 2026-05-26).
+// Supporte les deux APIs marked.js :
+//   v9-  : renderer.link(href, title, text)  ← positional (cas observé : tous
+//          les liens livrables rendus en <a href="undefined">undefined</a>)
+//   v10+ : renderer.link({ href, title, text })  ← objet
 if (typeof marked !== 'undefined' && marked.use) {
   marked.use({
     renderer: {
-      link({ href, title, text }) {
-        const t = title ? ` title="${title.replace(/"/g, '&quot;')}"` : '';
+      link(...args) {
+        let href, title, text;
+        if (typeof args[0] === 'object' && args[0] !== null) {
+          ({ href, title, text } = args[0]);
+        } else {
+          [href, title, text] = args;
+        }
+        const t = title ? ` title="${String(title).replace(/"/g, '&quot;')}"` : '';
         return `<a href="${href}" target="_blank" rel="noopener noreferrer"${t}>${text}</a>`;
       },
     },
