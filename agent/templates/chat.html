@@ -612,6 +612,54 @@ if (typeof marked !== 'undefined' && marked.use) {
     }
   }
 
+  // Helper : fetch + parse JSON robuste — gère le cas où l'ingress retourne
+  // du HTML 502/503 pendant que le pod agent redémarre (le déclenchement de
+  // _bootstrap_agent côté hub fait `kubectl delete pod qgis-agent-0`, ce qui
+  // cause 10-30s d'indisponibilité). Sans ce garde-fou, JSON.parse('<!doctype...')
+  // lève "unexpected keyword at line 1 column 1" qui était affiché brut à
+  // l'utilisateur comme "Erreur de vérification" — Bug C + D (2026-06-01).
+  async function _fetchJsonStrict(url, opts) {
+    const r = await fetch(url, opts);
+    const ct = (r.headers.get('content-type') || '').toLowerCase();
+    if (!ct.includes('application/json')) {
+      const e = new Error('agent-restarting');
+      e.code = 'NON_JSON';
+      e.status = r.status;
+      throw e;
+    }
+    if (!r.ok) {
+      const e = new Error('http-' + r.status);
+      e.code = 'HTTP_ERR';
+      e.status = r.status;
+      throw e;
+    }
+    return r.json();
+  }
+
+  // Retry actif sur /api/status — utilisé après refresh-llm-config qui peut
+  // redémarrer le pod agent. Max ~45s (15 tentatives x 3s) ; affiche un
+  // message "Agent IA redémarre…" persistant pendant le retry, plutôt qu'une
+  // pseudo-erreur "JSON parse" qui désoriente l'utilisateur.
+  async function _waitForAgentReady(maxTries) {
+    maxTries = maxTries || 15;
+    for (let i = 1; i <= maxTries; i++) {
+      try {
+        const data = await _fetchJsonStrict('/api/status', {cache: 'no-store'});
+        return data;  // succès — agent répond en JSON
+      } catch (e) {
+        // 502/HTML/timeout : on retry. Message d'attente plus long que celui
+        // d'origine ('Vérification en cours…') pour clarifier que ça avance.
+        verifyStatus.className = 'verify-status';
+        verifyStatus.textContent =
+          'Agent IA en cours de redémarrage… (' + i + '/' + maxTries + ')';
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+    const timeoutErr = new Error('agent-still-down');
+    timeoutErr.code = 'TIMEOUT';
+    throw timeoutErr;
+  }
+
   verifyBtn.addEventListener('click', async () => {
     verifyBtn.disabled = true;
     verifyStatus.className = 'verify-status';
@@ -622,8 +670,8 @@ if (typeof marked !== 'undefined' && marked.use) {
       // serveur agent appelle le hub avec HUB_API_KEY -- pas de popup
       // cross-origin (bloquee par les navigateurs apres async), pas de
       // PORTAL_URL a configurer cote frontend. Le pod agent va redemarrer
-      // si une nouvelle cle est detectee -- le polling /api/status detecte
-      // la transition has_llm_key true/false.
+      // si une nouvelle cle est detectee -- on attend ensuite le retour
+      // ready via _waitForAgentReady (retry resilient au HTML 502 ingress).
       let proxyOk = false;
       try {
         const pr = await fetch('/api/refresh-llm-config', {
@@ -645,15 +693,17 @@ if (typeof marked !== 'undefined' && marked.use) {
                            'width=520,height=320,noopener=0');
       }
 
-      // Re-poll dans 4s (l'agent redemarre, on attend qu'il revienne ready
-      // avec la nouvelle cle).
-      await new Promise(r => setTimeout(r, 4000));
-      lastHasLlm = null; // force refresh visuel
-      await pollStatus();
+      // Délai initial 8s (vs 4s avant) — laisse au pod agent le temps de
+      // démarrer la phase de Pull/Running. Puis retry resilient jusqu'à 45s.
+      await new Promise(r => setTimeout(r, 8000));
+      const data = await _waitForAgentReady(15);
       if (popup) { try { popup.close(); } catch(e) {} }
 
-      const r = await fetch('/api/status', {cache: 'no-store'});
-      const data = await r.json();
+      // Force refresh visuel du bandeau via pollStatus interne (qui met à
+      // jour lastHasLlm + setBannerVisible)
+      lastHasLlm = null;
+      await pollStatus();
+
       if (data.has_llm_key) {
         verifyStatus.className = 'verify-status ok';
         verifyStatus.textContent = 'Clé LLM détectée. Tu peux maintenant chatter !';
@@ -664,7 +714,17 @@ if (typeof marked !== 'undefined' && marked.use) {
       }
     } catch (e) {
       verifyStatus.className = 'verify-status err';
-      verifyStatus.textContent = 'Erreur de vérification : ' + (e.message || e);
+      if (e && e.code === 'TIMEOUT') {
+        verifyStatus.textContent =
+          "L'agent IA met plus de temps que prévu à redémarrer. "
+          + "Patiente ~30 s et relance la vérification.";
+      } else if (e && e.code === 'NON_JSON') {
+        verifyStatus.textContent =
+          "L'agent IA n'a pas encore répondu. Relance la vérification dans quelques secondes.";
+      } else {
+        // Erreur réseau réelle, on garde le message d'origine
+        verifyStatus.textContent = 'Erreur de vérification : ' + (e.message || e);
+      }
     } finally {
       verifyBtn.disabled = false;
     }

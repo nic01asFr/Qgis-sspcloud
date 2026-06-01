@@ -3222,6 +3222,37 @@ async def workspace_create_study(request: Request):
                                         status_code=302)
             log.info("workspace_create_study: etude %s (%s) creee + activee OK",
                      new_id, name[:30])
+
+            # Bug B fix (2026-06-01) : la création + activation appellent
+            # `_execute_python_in_workspace` pour init_pod_layout_code et
+            # activate_pod_code (qui crée le projet QGIS vide si absent).
+            # Mais ces appels MCP échouent silencieusement quand le pod
+            # workspace est endormi (scale=0). Résultat observé en E2E :
+            # l'utilisateur arrive sur /desk avec une étude active mais
+            # le QGIS Desktop reste endormi et sans projet ouvert -> doit
+            # cliquer manuellement "Réveiller le bureau" puis "Nouveau
+            # projet".
+            # Solution : déclencher /workspace/wake en fire-and-forget. Le
+            # endpoint wake :
+            #   1. Scale le SS workspace 0->1 (apply manifest idempotent)
+            #   2. Lance _auto_activate_active_study_after_wake() en
+            #      background qui attend que le pod soit Ready puis appelle
+            #      activate_pod_code(active_sid) -> charge le .qgz existant
+            #      ou crée un projet QGIS vide + setFileName.
+            # Ainsi quand l'utilisateur atterrit sur /desk, le workspace
+            # se réveille tout seul et le projet QGIS s'ouvre tout seul.
+            try:
+                await c.post("/workspace/wake",
+                             headers={"Authorization": f"Bearer {api_key}"})
+                log.info("workspace_create_study: wake auto déclenché pour étude %s",
+                         new_id)
+            except Exception as wake_exc:
+                # Non-fatal — l'utilisateur peut toujours cliquer "Réveiller
+                # le bureau" manuellement depuis /desk.
+                log.warning(
+                    "workspace_create_study: wake auto échoué (non-fatal, "
+                    "user peut wake manuel depuis /desk) : %s", wake_exc,
+                )
     except Exception as exc:
         log.exception("workspace_create_study: exception inattendue : %s", exc)
         return RedirectResponse(f"{target}?error=exception", status_code=302)
@@ -3235,6 +3266,21 @@ async def workspace_activate_study(sid: str, request: Request):
         async with httpx.AsyncClient(timeout=15, base_url=_SELF_URL) as c:
             await c.post(f"/studies/{sid}/activate",
                          headers={"Authorization": f"Bearer {api_key}"})
+            # Bug B fix (2026-06-01) : trigger wake aussi à l'activation
+            # d'une étude existante depuis l'UI. Même raison que dans
+            # workspace_create_study — sans wake, le _execute_python_in_workspace
+            # de activate_pod_code échoue silencieusement et le projet QGIS de
+            # l'étude n'est pas chargé. Idempotent : si le workspace est déjà
+            # Ready, _auto_activate_active_study_after_wake ré-exécutera
+            # activate_pod_code (qui se contente de read le .qgz à nouveau).
+            try:
+                await c.post("/workspace/wake",
+                             headers={"Authorization": f"Bearer {api_key}"})
+            except Exception as wake_exc:
+                log.warning(
+                    "workspace_activate_study: wake auto échoué (non-fatal) : %s",
+                    wake_exc,
+                )
     except Exception:
         pass
     return_to = request.query_params.get("return_to", "")
