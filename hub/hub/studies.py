@@ -377,16 +377,34 @@ if qgz.exists():
     except Exception as exc:
         print(f"PROJECT_LOAD_ERR {{exc}}")
 else:
-    # Pas de .qgz et pas d'autosave récent : nouveau projet vide MAIS on fixe
-    # le fileName pour que toute save ultérieure aille au bon endroit.
+    # Pas de .qgz et pas d'autosave récent : nouveau projet vide. On fixe le
+    # fileName ET on persiste un .qgz vide sur disque, sinon QGIS considère
+    # qu'aucun projet n'est ouvert et affiche le Welcome screen ("New Empty
+    # Project" card) au lieu du workspace projet. Cf. retour user E2E 2026-06-02 :
+    # apres creation d'etude QGIS restait sur Welcome alors que techniquement
+    # le projet etait clear+bind.
     try:
         from qgis.core import QgsProject
         QgsProject.instance().clear()
         qgz.parent.mkdir(parents=True, exist_ok=True)
         QgsProject.instance().setFileName(str(qgz))
-        print(f"PROJECT_CLEARED_AND_BOUND path={{qgz}}")
-    except Exception:
-        pass
+        # Bug B v3 (2026-06-02) : write() persiste le .qgz vide sur disque.
+        # Cela fait basculer QGIS du Welcome screen vers le workspace projet
+        # (la barre titre affiche le nom de fichier, le canvas s'active).
+        wrote = QgsProject.instance().write()
+        # Ensure UI is refreshed and the Welcome page is dismissed.
+        try:
+            from qgis.utils import iface
+            if iface is not None:
+                # zoomToFullExtent() force le canvas a s'afficher au lieu du
+                # Welcome. Inoffensif sur projet vide (no-op).
+                iface.mapCanvas().zoomToFullExtent()
+                iface.mapCanvas().refresh()
+        except Exception as _iface_exc:
+            print(f"NEW_PROJECT_IFACE_REFRESH_ERR {{_iface_exc}}")
+        print(f"PROJECT_CREATED_AND_SAVED path={{qgz}} wrote={{wrote}}")
+    except Exception as exc:
+        print(f"NEW_PROJECT_ERR {{exc}}")
 
 # Filet de sécurité : fermer toute dialog modale survivante via xdotool.
 # Couvre les cas où la modale apparaît malgré nos précautions (timing,
