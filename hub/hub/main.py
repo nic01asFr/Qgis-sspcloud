@@ -245,7 +245,60 @@ async def _bootstrap_agent() -> None:
                 )
                 return  # ne pas supprimer le pod : env pas à jour
 
-            # Patch OK : supprimer le pod pour qu'il redemarre avec le nouvel env
+            # Patch sts OK : spec K8s a jour (futurs restarts pod liront la
+            # bonne env). Maintenant on propage la cle EN RAM au pod courant
+            # sans le restart -> downtime 0s, plus de Bug C+D structurel.
+            #
+            # Option alpha (2026-06-02) : webhook agent /api/reload-llm-key
+            # plutot que delete pod. L'agent expose un endpoint qui met a jour
+            # os.environ["LLM_API_KEY"] -> les lectures dynamiques cote agent
+            # (qgis_agent._llm_api_key(), vector_store, insight_extractor, STT)
+            # voient la nouvelle cle au prochain call LLM. Aucun restart pod.
+            #
+            # Compat ascendante : si l'agent tourne sur une vieille image sans
+            # ce endpoint, le webhook retourne 404 -> on tombe dans le fallback
+            # legacy `delete pod qgis-agent-0`.
+            reloaded_in_ram = False
+            try:
+                # Service DNS interne cluster : qgis-agent.<ns>.svc.cluster.local:8888
+                # (le Service `qgis-agent` est cree plus bas dans _bootstrap_agent
+                # quand le sts est nouveau ; pour un sts existant il existe deja).
+                webhook_url = f"http://qgis-agent.{ns}.svc.cluster.local:8888/api/reload-llm-key"
+                wr = await client.post(
+                    webhook_url,
+                    json={"llm_api_key": llm_api_key},
+                    headers={"X-Hub-Auth": hub_api_key,
+                             "Content-Type": "application/json"},
+                    timeout=5,
+                )
+                if wr.status_code == 200:
+                    reloaded_in_ram = True
+                    log.info(
+                        "bootstrap: webhook agent reload-llm-key OK pour %s "
+                        "(zero downtime, no pod restart)", username,
+                    )
+                elif wr.status_code == 404:
+                    log.info(
+                        "bootstrap: agent vieille image (404 sur /api/reload-llm-key) "
+                        "-> fallback delete pod pour propager la nouvelle env",
+                    )
+                else:
+                    log.warning(
+                        "bootstrap: webhook agent HTTP %d (%s) -> fallback delete pod",
+                        wr.status_code, wr.text[:200],
+                    )
+            except Exception as wexc:
+                log.warning(
+                    "bootstrap: webhook agent KO (%s: %s) -> fallback delete pod",
+                    type(wexc).__name__, wexc,
+                )
+
+            if reloaded_in_ram:
+                return  # Pas de restart pod : tout est in-RAM, downtime = 0s
+
+            # Fallback legacy : delete pod -> kubelet recree avec env spec a jour.
+            # Cas typiques : agent pas encore demarre (pas de listener webhook),
+            # vieille image agent sans le endpoint, pb reseau cluster-interne.
             try:
                 del_headers = {k: v for k, v in headers.items() if k != "Content-Type"}
                 dr = await client.delete(
@@ -256,7 +309,7 @@ async def _bootstrap_agent() -> None:
                     log.warning("bootstrap: delete pod agent HTTP %d: %s",
                                 dr.status_code, dr.text[:200])
                 else:
-                    log.info("bootstrap: pod qgis-agent-0 supprimé pour redémarrage")
+                    log.info("bootstrap: pod qgis-agent-0 supprimé pour redémarrage (fallback)")
             except Exception as exc:
                 log.warning("bootstrap: suppression pod agent échouée: %s", exc)
             return

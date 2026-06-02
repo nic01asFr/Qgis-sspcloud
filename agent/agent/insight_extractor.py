@@ -29,7 +29,10 @@ log = logging.getLogger("agent.insight_extractor")
 
 _LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://llm.lab.sspcloud.fr/api")
 # Fallback aligné sur qgis_agent.py / vector_store.py (clef partagée projet SSPCloud).
-_LLM_API_KEY  = os.getenv("LLM_API_KEY", "")
+# Lecture dynamique pour pick-up sans restart pod (cf. Option alpha 2026-06-02,
+# webhook /api/reload-llm-key cote agent).
+def _llm_api_key() -> str:
+    return os.environ.get("LLM_API_KEY", "")
 # On utilise le modèle principal de l'agent pour cohérence stylistique.
 _LLM_MODEL    = os.getenv("LLM_MODEL", "gemma4-26b-moe")
 
@@ -105,7 +108,7 @@ async def extract_for_session(
     Extrait les insights d'une session donnée. Retourne un résumé :
     {"added": [...], "skipped": [...], "error": str | None}.
     """
-    if not _LLM_API_KEY:
+    if not _llm_api_key():
         return {"added": [], "skipped": [], "error": "LLM_API_KEY manquante"}
 
     msgs = await memory.get_session_messages(session_id, limit=_MAX_MSGS)
@@ -129,7 +132,7 @@ async def extract_for_session(
             r = await cli.post(
                 f"{_LLM_BASE_URL}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {_LLM_API_KEY}",
+                    "Authorization": f"Bearer {_llm_api_key()}",
                     "Content-Type": "application/json",
                 },
                 json=payload,

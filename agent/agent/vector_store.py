@@ -37,8 +37,12 @@ log = logging.getLogger("agent.vector_store")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 _LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://llm.lab.sspcloud.fr/api")
-_LLM_API_KEY  = os.getenv("LLM_API_KEY", "")
 _EMBED_MODEL  = os.getenv("EMBED_MODEL", "qwen3-embedding-8b")
+
+
+def _llm_api_key() -> str:
+    """Lecture dynamique (cf. Option alpha 2026-06-02 / webhook reload-llm-key)."""
+    return os.environ.get("LLM_API_KEY", "")
 
 # Matryoshka : qwen3-embedding-8b natif 4096 dims, on tronque à 1024.
 # 4× moins de stockage SQLite, ~98% perfs MTEB (Vespa benchmark 2025).
@@ -99,7 +103,7 @@ async def embed(text: str) -> list[float]:
         r = await cli.post(
             f"{_LLM_BASE_URL}/embeddings",
             headers={
-                "Authorization": f"Bearer {_LLM_API_KEY}",
+                "Authorization": f"Bearer {_llm_api_key()}",
                 "Content-Type": "application/json",
             },
             json={"model": _EMBED_MODEL, "input": text},
@@ -125,7 +129,7 @@ async def embed_batch(texts: list[str]) -> list[list[float]]:
         r = await cli.post(
             f"{_LLM_BASE_URL}/embeddings",
             headers={
-                "Authorization": f"Bearer {_LLM_API_KEY}",
+                "Authorization": f"Bearer {_llm_api_key()}",
                 "Content-Type": "application/json",
             },
             json={"model": _EMBED_MODEL, "input": texts},

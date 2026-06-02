@@ -246,6 +246,53 @@ async def api_status():
     }
 
 
+@app.post("/api/reload-llm-key")
+async def api_reload_llm_key(request: Request):
+    """Webhook interne appele par le hub (cf. Option alpha 2026-06-02).
+
+    Le hub, apres avoir lu la cle dans le Secret SSPCloud AI Assistant via
+    `_bootstrap_agent`, appelle ce endpoint pour que l'agent reload sa
+    `LLM_API_KEY` EN RAM (os.environ) sans restart pod. Toutes les lectures
+    dynamiques de la cle (qgis_agent._llm_api_key(), insight_extractor,
+    vector_store, STT) la voient au prochain call LLM.
+
+    Avant ce mecanisme, le hub faisait `kubectl delete pod qgis-agent-0`
+    pour propager la nouvelle env -> ~30s downtime + ingress 502 -> bug
+    "JSON parse" dans l'UI chat (Bug C+D). Avec ce webhook, downtime = 0s,
+    user voit la cle prise en compte immediatement.
+
+    Auth via X-Hub-Auth header = HUB_API_KEY shared secret (deja inject
+    en env des 2 pods via Secret K8s `qgis-hub-apikey`).
+
+    Body : {"llm_api_key": "<sk-...>"} (string, vide => no-op).
+
+    Retour : {"ok": true, "has_key": <bool>}.
+
+    Compat : si le hub appelle un agent vieille image qui n'a PAS ce
+    endpoint, il recevra 404 cote hub -> fallback delete pod (legacy).
+    """
+    expected = os.getenv("HUB_API_KEY", "")
+    if not expected:
+        # Cas dev / non-K8s : pas d'auth configuree, on refuse par defaut
+        raise HTTPException(503, "HUB_API_KEY non configure cote agent")
+    if request.headers.get("X-Hub-Auth") != expected:
+        raise HTTPException(403, "X-Hub-Auth invalide")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    new_key = (body.get("llm_api_key") or "").strip() if isinstance(body, dict) else ""
+    if new_key:
+        os.environ["LLM_API_KEY"] = new_key
+        log.info(
+            "reload-llm-key: cle LLM rechargee in-memory (len=%d, no pod restart)",
+            len(new_key),
+        )
+    else:
+        log.warning("reload-llm-key: cle vide recue (no-op)")
+    return {"ok": True, "has_key": bool(new_key)}
+
+
 @app.post("/api/refresh-llm-config")
 async def api_refresh_llm_config():
     """Proxy same-origin vers le hub `/api/refresh-llm-config`.
@@ -812,7 +859,8 @@ _STT_URL = os.getenv(
     "STT_URL",
     "https://llm.lab.sspcloud.fr/api/v1/audio/transcriptions",
 )
-_STT_KEY = os.getenv("LLM_API_KEY", "")
+# _STT_KEY supprime : lecture dynamique via os.environ a chaque appel STT
+# (cf. Option alpha 2026-06-02, webhook /api/reload-llm-key).
 
 
 @app.post("/stt")
@@ -833,7 +881,7 @@ async def speech_to_text(
         try:
             r = await cli.post(
                 _STT_URL,
-                headers={"Authorization": f"Bearer {_STT_KEY}"},
+                headers={"Authorization": f"Bearer {os.environ.get('LLM_API_KEY', '')}"},
                 files={"file": (filename, audio_bytes, content_type)},
                 data={"language": language},
             )

@@ -28,7 +28,23 @@ log = logging.getLogger("agent.qgis_agent")
 
 # ── Config SSPCloud LLM ────────────────────────────────────────────────────────
 _LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://llm.lab.sspcloud.fr/api")
-_LLM_API_KEY  = os.getenv("LLM_API_KEY", "")
+
+
+def _llm_api_key() -> str:
+    """Lecture dynamique de la cle LLM (cf. Option alpha 2026-06-02).
+
+    Avant : `_LLM_API_KEY = os.getenv("LLM_API_KEY", "")` figeait la valeur
+    au moment de l'import du module Python. Une mise a jour de l'env via
+    le webhook /api/reload-llm-key (POST par le hub apres lecture du Secret
+    SSPCloud AI Assistant) n'etait pas visible : il fallait un restart pod.
+    En lisant os.environ a chaque appel LLM, on rend l'agent capable de
+    pick-up la nouvelle cle sans restart -> bug C+D structurellement
+    resolu, downtime ~0s.
+
+    Cache impossible : le caller fait potentiellement 100+ chunks SSE par
+    requete, mais le cout d'un os.environ.get est negligeable (~µs).
+    """
+    return os.environ.get("LLM_API_KEY", "")
 
 # Modèle par profil :
 # qwen3-6-35b-moe : function calling natif, thinking séparé → optimal pour tools
@@ -1326,7 +1342,7 @@ ne vient pas d'un outil cette session, la supprimer.
                     f"{_LLM_BASE_URL}/chat/completions",
                     json=payload,
                     headers={
-                        "Authorization": f"Bearer {_LLM_API_KEY}",
+                        "Authorization": f"Bearer {_llm_api_key()}",
                         "Content-Type":  "application/json",
                     }
                 ) as resp:
@@ -1423,7 +1439,7 @@ ne vient pas d'un outil cette session, la supprimer.
                                         "max_tokens": 600,
                                     },
                                     headers={
-                                        "Authorization": f"Bearer {_LLM_API_KEY}",
+                                        "Authorization": f"Bearer {_llm_api_key()}",
                                         "Content-Type":  "application/json",
                                     }
                                 ) as resp_f:
@@ -1861,7 +1877,7 @@ ne vient pas d'un outil cette session, la supprimer.
                             "max_tokens": 1024,
                         },
                         headers={
-                            "Authorization": f"Bearer {_LLM_API_KEY}",
+                            "Authorization": f"Bearer {_llm_api_key()}",
                             "Content-Type":  "application/json",
                         }
                     ) as resp_final:
