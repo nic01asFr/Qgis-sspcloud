@@ -3176,7 +3176,14 @@ async def workspace_create_study(request: Request):
     # transitoire si la table active_study n'est pas encore initialisee).
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
-        async with httpx.AsyncClient(timeout=15, base_url=_SELF_URL) as c:
+        # Bug B fix v2 (2026-06-02) : timeout 15s -> 60s. Le endpoint /studies
+        # appelle _execute_python_in_workspace(init_pod_layout_code) qui a un
+        # timeout MCP interne de 30s (cf. L1656). Quand le pod workspace est
+        # endormi (scale=0), le MCP attend 30s avant de timeout, ce qui faisait
+        # un ReadTimeout cote ce client (timeout 15s) -> exception inattendue ->
+        # ?error=exception alors que l'etude EST creee. Avec 60s on absorbe le
+        # worst case + le wake auto qu'on declenche apres a le temps de demarrer.
+        async with httpx.AsyncClient(timeout=60, base_url=_SELF_URL) as c:
             r = await c.post("/studies",
                              headers={"Authorization": f"Bearer {api_key}"},
                              json={"name": name, "profile": profile})
@@ -3263,7 +3270,10 @@ async def workspace_create_study(request: Request):
 async def workspace_activate_study(sid: str, request: Request):
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
-        async with httpx.AsyncClient(timeout=15, base_url=_SELF_URL) as c:
+        # Bug B fix v2 (2026-06-02) : timeout 15s -> 60s pour absorber le worst
+        # case ou _execute_python_in_workspace (appele par /studies/{sid}/activate
+        # via activate_pod_code) timeout 30s MCP quand le workspace est endormi.
+        async with httpx.AsyncClient(timeout=60, base_url=_SELF_URL) as c:
             await c.post(f"/studies/{sid}/activate",
                          headers={"Authorization": f"Bearer {api_key}"})
             # Bug B fix (2026-06-01) : trigger wake aussi à l'activation
