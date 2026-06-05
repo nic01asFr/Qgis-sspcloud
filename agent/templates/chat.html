@@ -707,10 +707,44 @@ if (typeof marked !== 'undefined' && marked.use) {
       if (data.has_llm_key) {
         verifyStatus.className = 'verify-status ok';
         verifyStatus.textContent = 'Clé LLM détectée. Tu peux maintenant chatter !';
+      } else if (!popup && PORTAL_URL) {
+        // Le proxy hub a repondu OK mais l'agent n'a TOUJOURS pas de cle :
+        // typiquement le hub a appele _bootstrap_agent() qui n'a rien
+        // trouve cote Secret K8s (cas user vierge, OWUI api_key pas encore
+        // generee). Bascule auto sur le portail qui sait fetch OWUI via
+        // le cookie OIDC user (cf. portal /api/refresh-llm-config).
+        verifyStatus.className = 'verify-status';
+        verifyStatus.textContent =
+          'Recuperation de la cle depuis Open WebUI…';
+        const refreshUrl = PORTAL_URL.replace(/\/$/, '') + '/api/refresh-llm-config';
+        popup = window.open(refreshUrl, '_llm_refresh',
+                            'width=520,height=320,noopener=0');
+        // Le portail fait OWUI + POST hub /admin/agent-config en quelques
+        // secondes -> re-poll /api/status pour detecter has_llm_key=true.
+        await new Promise(r => setTimeout(r, 6000));
+        let finalData = data;
+        try {
+          finalData = await _waitForAgentReady(15);
+        } catch (_e) {}
+        try { if (popup) popup.close(); } catch (_e) {}
+        lastHasLlm = null;
+        await pollStatus();
+        if (finalData && finalData.has_llm_key) {
+          verifyStatus.className = 'verify-status ok';
+          verifyStatus.textContent =
+            'Cle LLM recuperee automatiquement depuis Open WebUI.';
+        } else {
+          verifyStatus.className = 'verify-status err';
+          verifyStatus.textContent =
+            'Aucune cle disponible. Connecte-toi une fois sur '
+            + 'llm.lab.sspcloud.fr (SSO) pour creer ton compte, puis '
+            + 'relance la verification.';
+        }
       } else {
         verifyStatus.className = 'verify-status err';
         verifyStatus.textContent =
-          'Pas de clé trouvée. Vérifie les étapes ci-dessus puis réessaie.';
+          'Pas de cle trouvee. Connecte-toi sur llm.lab.sspcloud.fr (SSO) '
+          + 'puis reessaie.';
       }
     } catch (e) {
       verifyStatus.className = 'verify-status err';
