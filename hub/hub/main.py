@@ -2759,7 +2759,16 @@ async def update_agent_config(request: Request):
             "LLM_API_KEY": llm_api_key,
             "PORTAL_URL":  portal_url,
         }
-        new_env = [e for e in existing_env if e["name"] not in patch_vars]
+        # Fix 2026-06-05 : ne retirer du existing_env QUE les vars qu'on va
+        # effectivement remplacer (valeur non vide). Sinon le filter ci-dessous
+        # supprimait HUB_API_KEY (valueFrom secretKeyRef du Secret partage)
+        # quand le portail envoyait hub_api_key="" -> agent demarrait sans
+        # HUB_API_KEY -> calls /mcp en 401 silencieux. Cas observe E2E avec
+        # nicolaslaval : DB portail purgee -> _get_user_hub_creds None ->
+        # fallback get_api_key echoue -> hub_api_key="" envoye au hub ->
+        # secretKeyRef ecrase.
+        keys_to_replace = {k for k, v in patch_vars.items() if v}
+        new_env = [e for e in existing_env if e["name"] not in keys_to_replace]
         new_env.extend([{"name": k, "value": v} for k, v in patch_vars.items() if v])
 
         patch_headers = {**headers,
