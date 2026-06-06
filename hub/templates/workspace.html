@@ -175,16 +175,10 @@
         style="display:flex;gap:8px;flex-wrap:wrap">
     <input name="name" type="text" required placeholder="Nom de la nouvelle étude (ex: Inondation Lavandou)"
            class="fr-input" style="flex:1;min-width:240px">
-    <select name="profile" class="fr-select" style="max-width:200px">
-      <option value="standard">Standard</option>
-      <option value="risk_analyst">Risques naturels</option>
-      <option value="storymap_creator">Storymap</option>
-      <option value="map_composer">Compositeur cartes</option>
-      <option value="geoai_analyst">IA Vision</option>
-      <option value="db_analyst">Analyse DB</option>
-      <option value="recipe_creator">Recettes</option>
-      <option value="guided_tour">Guide</option>
-    </select>
+    <!-- Profil agent : retire de l'UI 2026-06-06. Le profil est active
+         contextuellement par l'agent (storymap/geoai/db/...) selon l'action
+         user. Le POST /studies utilise "standard" par defaut cote serveur
+         (form.get("profile", "standard") dans workspace_create_study). -->
     <button type="submit" class="fr-btn">+ Nouvelle étude</button>
   </form>
 

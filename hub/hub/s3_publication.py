@@ -347,3 +347,32 @@ def rebuild_catalog(owner: str) -> list[dict]:
             it["published_at"] = it.get("last_modified", 0)
     _save_catalog(owner, items)
     return items
+
+
+def purge_all_publications(owner: str) -> dict:
+    """Supprime TOUTES les publications d'un owner (S3 + catalogue).
+
+    Cas d'usage : cleanup apres tests de dev / artefacts residuels.
+    Renvoie {"deleted": N, "errors": [...]}. Operation DESTRUCTIVE et
+    IRREVERSIBLE — les liens publics vers ces publications cassent.
+    """
+    items = list_published(owner)
+    deleted = 0
+    errors: list[str] = []
+    client, bucket, _ = _get_s3_client(owner)
+    for it in items:
+        try:
+            client.delete_object(Bucket=bucket, Key=it["key"])
+            deleted += 1
+        except Exception as exc:
+            errors.append(f"{it['key']}: {type(exc).__name__}: {exc}")
+            log.warning("purge_all_publications: %s/%s echec : %s",
+                        owner, it["key"], exc)
+    # Ecrase le catalogue avec liste vide (idempotent meme si delete partiel).
+    try:
+        _save_catalog(owner, [])
+    except Exception as exc:
+        errors.append(f"catalog: {type(exc).__name__}: {exc}")
+        log.warning("purge_all_publications: save_catalog vide echec : %s", exc)
+    return {"owner": owner, "deleted": deleted,
+            "total_listed": len(items), "errors": errors}

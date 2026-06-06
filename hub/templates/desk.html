@@ -439,15 +439,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             {% endif %}
             <form class="new-form" method="POST" action="/workspace/study/new?return_to=desk">
               <input name="name" required placeholder="Nom de la nouvelle étude…">
-              <select name="profile">
-                <option value="standard">Standard</option>
-                <option value="risk_analyst">Risques naturels</option>
-                <option value="storymap_creator">Storymap</option>
-                <option value="map_composer">Cartographe</option>
-                <option value="geoai_analyst">IA Vision</option>
-                <option value="db_analyst">DB</option>
-                <option value="recipe_creator">Recettes</option>
-              </select>
+              <!-- Profil agent : retire de l'UI 2026-06-06. Active
+                   contextuellement par l'agent (cf. workspace.html note). -->
               <button type="submit">+ Nouvelle étude</button>
             </form>
             <a href="/workspace" style="display:block;padding:8px 10px;
@@ -489,7 +482,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   <aside class="desk-publi">
     <div class="publi-drawer-header">
       <span class="publi-label">Ressources</span>
-      <span class="publi-count" id="publi-count-badge">{{ catalog_count }}</span>
+      <span class="publi-count" id="publi-count-badge"
+            title="{{ catalog_count }} publication(s) sur ce compte (cumul toutes etudes)">{{ catalog_count }}</span>
     </div>
     <div class="rtabs">
       <button class="rtab active" data-rtab="layers" title="Couches du projet QGIS courant">🗺 Couches</button>

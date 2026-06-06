@@ -2483,6 +2483,35 @@ async def unpublish_artifact(
     s3_publication.delete(user["username"], kind, slug)
 
 
+@app.delete("/publications", status_code=status.HTTP_200_OK)
+async def purge_all_user_publications(
+    user: dict = Depends(auth.get_current_user),
+    confirm: str = "",
+):
+    """Purge TOUTES les publications de l'user authentifie.
+
+    Operation DESTRUCTIVE et IRREVERSIBLE — supprime les fichiers S3 +
+    catalogue. Cas d'usage : nettoyage apres tests de dev / artefacts
+    residuels qui faussent le compteur "X publications de l'etude".
+
+    Garde-fou : ?confirm=PURGE_ALL (chaine litterale) requis pour eviter
+    une suppression accidentelle.
+
+    Reponse : {"owner", "deleted", "total_listed", "errors"}.
+    """
+    if not _S3_AVAILABLE:
+        raise HTTPException(503, "Publication S3 indisponible")
+    if confirm != "PURGE_ALL":
+        raise HTTPException(
+            400,
+            "Operation destructive : ajouter ?confirm=PURGE_ALL pour valider.",
+        )
+    result = s3_publication.purge_all_publications(user["username"])
+    log.warning("purge_all_user_publications: %s -> %d supprimees / %d listees",
+                user["username"], result["deleted"], result["total_listed"])
+    return result
+
+
 @app.get("/catalog/{owner}")
 async def get_owner_catalog(
     owner: str,
