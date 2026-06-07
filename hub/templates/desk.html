@@ -428,10 +428,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
               <form method="POST" action="/workspace/study/{{ s.id }}/activate?return_to=desk" style="margin:0">
                 <button type="submit" class="item {% if s.id == active_study_id %}active{% endif %}"
                         style="width:100%;text-align:left;background:transparent;border:none;font-family:inherit"
-                        title="Profil: {{ s.profile }}">
+                        title="{{ s.name }}">
                   <span class="ic">{% if s.id == active_study_id %}✓{% else %}📂{% endif %}</span>
                   <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">{{ s.name }}</span>
-                  <span class="prof">{{ s.profile }}</span>
+                  {# Badge profil retire de l'UI 2026-06-07 : profil contextuel #}
                 </button>
               </form>
               {% endfor %}

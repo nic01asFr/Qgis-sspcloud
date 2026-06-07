@@ -377,32 +377,12 @@ body.embed .msg .bubble pre{max-width:100%}
   <main class="chat-main">
 
     <div class="chat-toolbar">
-      <!-- Chip de contexte (routeur contextuel) : affiche le profil courant
-           dérivé du render actif / étude / form. Cliquable pour override
-           manuel (rare — l'usage normal est automatique). -->
-      <!-- Chip de contexte : indicateur read-only (mode derive du contexte
-           de navigation actuel). Tooltip explique. Long-clic (ou double-clic)
-           pour reveler le combobox override (cas rares : forcer un mode).
-           Conforme a l'archi cible : profil = propriete emergente, pas un
-           input user. Cf. ARCHITECTURE_AGENT.md (a venir). -->
-      <button type="button" id="context-chip" class="context-chip"
-              ondblclick="toggleProfileMenu()"
-              title="Mode agent dérivé du contexte de navigation. Double-clic pour forcer un autre mode.">
-        <span class="ctx-icon" id="ctx-icon">📂</span>
-        <span class="ctx-label" id="ctx-label">{{ profile_id }}</span>
-      </button>
-      <!-- Override manuel (caché par défaut, déplié au clic chip) -->
-      <select id="profile-select" onchange="changeProfile(this.value)"
-              aria-label="Profil agent" style="display:none">
-        <option value="standard" {% if profile_id=='standard' %}selected{% endif %}>Standard</option>
-        <option value="geoai_analyst" {% if profile_id=='geoai_analyst' %}selected{% endif %}>IA Vision</option>
-        <option value="risk_analyst" {% if profile_id=='risk_analyst' %}selected{% endif %}>Risques</option>
-        <option value="db_analyst" {% if profile_id=='db_analyst' %}selected{% endif %}>Données / DB</option>
-        <option value="storymap_creator" {% if profile_id=='storymap_creator' %}selected{% endif %}>Storymap</option>
-        <option value="map_composer" {% if profile_id=='map_composer' %}selected{% endif %}>Cartographe</option>
-        <option value="recipe_creator" {% if profile_id=='recipe_creator' %}selected{% endif %}>Recettes</option>
-        <option value="guided_tour" {% if profile_id=='guided_tour' %}selected{% endif %}>Guide</option>
-      </select>
+      <!-- Selecteur profil agent : retire de l'UI 2026-06-07.
+           Le profil reste calcule cote serveur ({{ profile_id }}) et derive
+           du contexte de navigation (render actif / etude / form). Conserve
+           comme input hidden pour compat JS (changeProfile/profile-select).
+           Cf. project_contextual_profiles_and_gpu_indicator. -->
+      <input type="hidden" id="profile-select" value="{{ profile_id }}">
       <div class="spacer"></div>
       <button type="button" class="tool-btn" id="btn-new-conv"
               onclick="startNewConversation()"

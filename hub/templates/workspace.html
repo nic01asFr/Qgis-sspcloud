@@ -134,9 +134,8 @@
         {{ s.name }}
         {% if s.id == active_study_id %}<span class="active-badge">ACTIVE</span>{% endif %}
       </h3>
-      <div class="study-meta">
-        <span class="fr-badge fr-badge--sm fr-badge--info fr-badge--no-icon">{{ s.profile }}</span>
-      </div>
+      {# Badge profil retire de l'UI 2026-06-07 : profil contextuel,
+         calcule cote serveur, plus expose comme axe de choix user. #}
       <div class="study-actions">
         {% if s.id == active_study_id %}
         <!-- Action principale : ouvrir le bureau sur cette etude (deja active). -->
