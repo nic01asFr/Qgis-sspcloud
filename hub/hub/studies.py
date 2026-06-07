@@ -389,17 +389,30 @@ else:
         qgz.parent.mkdir(parents=True, exist_ok=True)
         QgsProject.instance().setFileName(str(qgz))
         # Bug B v3 (2026-06-02) : write() persiste le .qgz vide sur disque.
-        # Cela fait basculer QGIS du Welcome screen vers le workspace projet
-        # (la barre titre affiche le nom de fichier, le canvas s'active).
         wrote = QgsProject.instance().write()
-        # Ensure UI is refreshed and the Welcome page is dismissed.
+        # Bug B v3 complement (2026-06-07) : write() seul ne ferme pas le
+        # Welcome widget QGIS qui flotte sur le canvas. Il faut OUVRIR
+        # explicitement le projet via iface.addProject() pour que QGIS
+        # dismiss le Welcome et active la barre de titre + tabs projet.
+        # iface.zoomToFullExtent() seul ne suffit pas car il agit sur le
+        # canvas (deja vide) sans toucher au widget Welcome au-dessus.
         try:
             from qgis.utils import iface
             if iface is not None:
-                # zoomToFullExtent() force le canvas a s'afficher au lieu du
-                # Welcome. Inoffensif sur projet vide (no-op).
-                iface.mapCanvas().zoomToFullExtent()
-                iface.mapCanvas().refresh()
+                # iface.addProject(qgz) charge le projet comme si l'user
+                # avait fait File -> Open Project. Cela ferme le Welcome
+                # widget et bascule l'UI en mode "projet ouvert".
+                try:
+                    iface.addProject(str(qgz))
+                except Exception as _open_exc:
+                    print(f"NEW_PROJECT_ADD_PROJECT_ERR {{_open_exc}}")
+                # zoomToFullExtent + refresh derriere pour assurer un canvas
+                # affiche meme si addProject n'a pas trigger un redraw.
+                try:
+                    iface.mapCanvas().zoomToFullExtent()
+                    iface.mapCanvas().refresh()
+                except Exception:
+                    pass
         except Exception as _iface_exc:
             print(f"NEW_PROJECT_IFACE_REFRESH_ERR {{_iface_exc}}")
         print(f"PROJECT_CREATED_AND_SAVED path={{qgz}} wrote={{wrote}}")
