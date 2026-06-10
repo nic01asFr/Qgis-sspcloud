@@ -47,11 +47,14 @@ def _llm_api_key() -> str:
     return os.environ.get("LLM_API_KEY", "")
 
 # Modèle par profil :
-# qwen3-6-35b-moe : function calling natif, thinking séparé → optimal pour tools
-# gemma4-26b-moe  : vision base64 → optimal pour validation images GeoAI
+# gemma4-26b-moe  : chat + function calling + vision (testes OK 2026-06-10)
+# qwen3-6-35b-moe : function calling natif mais DOWN cote SSPCloud 2026-06-09
+#   (liste dans /api/models mais /chat/completions hang silencieusement).
+#   A retablir comme default si SSPCloud rend qwen3 fonctionnel a nouveau.
+# Override possible via env LLM_MODEL (kubectl set env sts/qgis-agent LLM_MODEL=...).
 _MODEL_BY_PROFILE = {
     "geoai_analyst": "gemma4-26b-moe",   # vision pour validation détections
-    "default":        "qwen3-6-35b-moe", # tool calling fiable
+    "default":       "gemma4-26b-moe",   # seul modele chat sain actuellement
 }
 
 def _get_model(profile_id: str) -> str:
@@ -1336,6 +1339,17 @@ ne vient pas d'un outil cette session, la supprimer.
                 # puis auto sur les suivantes (évite boucle infinie)
                 payload["tool_choice"] = "auto"
 
+            # Trace LLM call : aide a diagnostiquer les hangs silencieux comme
+            # qwen3-6-35b-moe DOWN 2026-06-09 (modele liste mais inerte cote
+            # SSPCloud, /chat/completions ne stream rien -> agent bloque jusqu'au
+            # timeout). Sans ce log on perd 30+ min a comprendre ou ca coince.
+            log.info(
+                "LLM call iter=%d model=%s msgs=%d tools=%d url=%s",
+                iteration, model, len(messages), len(tools) if tools else 0,
+                _LLM_BASE_URL,
+            )
+            llm_t0 = asyncio.get_event_loop().time()
+
             async with httpx.AsyncClient(timeout=120) as client:
                 async with client.stream(
                     "POST",
@@ -1346,6 +1360,26 @@ ne vient pas d'un outil cette session, la supprimer.
                         "Content-Type":  "application/json",
                     }
                 ) as resp:
+                    # Fail-fast sur 4xx/5xx : sans cela, un 400 "Model not found"
+                    # ou 503 fait que aiter_lines() ne yield rien -> agent hang
+                    # silencieusement jusqu'au timeout 120s. On loggue + leve
+                    # une erreur visible (catchee dans event_stream -> SSE 'error').
+                    if resp.status_code >= 400:
+                        body = b""
+                        try:
+                            body = await resp.aread()
+                        except Exception:
+                            pass
+                        body_text = body.decode("utf-8", errors="replace")[:500]
+                        log.error(
+                            "LLM HTTP %d on model=%s : %s",
+                            resp.status_code, model, body_text,
+                        )
+                        raise RuntimeError(
+                            f"LLM API a renvoye HTTP {resp.status_code} "
+                            f"pour le modele '{model}'. Reponse: {body_text}"
+                        )
+
                     chunk_text     = ""
                     tool_call_data: dict[int, dict] = {}
                     finish_reason  = None
