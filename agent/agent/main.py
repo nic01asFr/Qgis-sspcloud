@@ -25,7 +25,7 @@ from typing import AsyncGenerator
 
 import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
@@ -484,6 +484,16 @@ async def index(request: Request):
     rattachee, on la reprend (continuite UX — l'historique reste accessible).
     Sinon nouvelle session uuid. Cf. CHARTE §2 (etude = unite du cycle).
     """
+    # Court-circuit kube-probe (clone du fix Bug #17 cote hub_home).
+    # La readinessProbe sts qgis-agent historique hardcode path:"/" avec
+    # timeoutSeconds:1. Sans ce court-circuit, chaque probe declenche queries
+    # SQLite + fetch hub (_fetch_active_study_id), ce qui timeout en cold start
+    # -> Ready=False pendant 5-17 min. Diagnostique 2026-06-12 (nicolaslaval +
+    # rbouzige). Le nouveau sts (cf hub _bootstrap_agent) utilise /health mais
+    # les pods existants gardent path:"/" tant que le sts n'est pas re-cree.
+    if "kube-probe" in request.headers.get("user-agent", "").lower():
+        return Response(content="ok", media_type="text/plain", status_code=200)
+
     profile_id = request.cookies.get("profile_id", _DEFAULT_PROFILE)
     sessions   = await memory.get_recent_sessions("user", limit=5)
     projects   = await memory.list_projects(profile_id)

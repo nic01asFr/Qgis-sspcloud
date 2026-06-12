@@ -377,9 +377,16 @@ async def _bootstrap_agent() -> None:
                             {"name": "data", "mountPath": "/data"},
                         ],
                         "readinessProbe": {
-                            "httpGet": {"path": "/", "port": 8888},
-                            "initialDelaySeconds": 30, "periodSeconds": 10,
-                            "failureThreshold": 30,
+                            # Probe vers /health (route lite : retourne juste
+                            # {status: ok}, zero query DB, zero call hub).
+                            # Auparavant path:"/" + timeoutSeconds:1 hardcode
+                            # par chart Onyxia -> chaque probe declenchait
+                            # queries SQLite + fetch hub _fetch_active_study_id
+                            # -> cold start 5-17 min observable (cf. fix
+                            # 2026-06-12 sur nicolaslaval / rbouzige).
+                            "httpGet": {"path": "/health", "port": 8888},
+                            "initialDelaySeconds": 5, "periodSeconds": 5,
+                            "timeoutSeconds": 3, "failureThreshold": 12,
                         },
                     }]},
                 },
