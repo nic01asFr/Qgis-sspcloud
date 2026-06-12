@@ -47,14 +47,19 @@ def _llm_api_key() -> str:
     return os.environ.get("LLM_API_KEY", "")
 
 # Modèle par profil :
-# gemma4-26b-moe  : chat + function calling + vision (testes OK 2026-06-10)
-# qwen3-6-35b-moe : function calling natif mais DOWN cote SSPCloud 2026-06-09
-#   (liste dans /api/models mais /chat/completions hang silencieusement).
-#   A retablir comme default si SSPCloud rend qwen3 fonctionnel a nouveau.
+# qwen3-6-35b-moe : function calling natif + thinking separe (reasoning_content)
+#   → optimal pour agentique (appelle les tools direct au lieu d'expliquer).
+#   Down SSPCloud 2026-06-09 -> 2026-06-12 (~3 jours), retabli avec
+#   system_fingerprint=vllm-0.22.0. Restaure comme default (re-test 2026-06-12).
+# gemma4-26b-moe  : vision base64 natif + chat + function calling.
+#   Reste optimal pour validation images GeoAI (profil geoai_analyst).
+#   Moins agressif sur tool_calls que qwen3 -> tend a narrer ("je vais X")
+#   au lieu d'agir. Acceptable fallback chat si qwen3 down.
 # Override possible via env LLM_MODEL (kubectl set env sts/qgis-agent LLM_MODEL=...).
+# Backlog : discovery dynamique au boot (~30 LOC) pour basculer auto si rotation.
 _MODEL_BY_PROFILE = {
-    "geoai_analyst": "gemma4-26b-moe",   # vision pour validation détections
-    "default":       "gemma4-26b-moe",   # seul modele chat sain actuellement
+    "geoai_analyst": "gemma4-26b-moe",     # vision pour validation détections
+    "default":       "qwen3-6-35b-moe",    # function calling natif, agentique
 }
 
 def _get_model(profile_id: str) -> str:
