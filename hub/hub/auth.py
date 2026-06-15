@@ -444,3 +444,127 @@ async def _build_jwks_cache() -> None:
         _jwks.get_jwk_set(refresh=True)
     except Exception as exc:
         log.warning("Pré-chauffe JWKS échouée: %s", exc)
+
+
+# ── Phase 0ter (RGPD) : Middleware OIDC pour protéger l'accès UI ──────────────
+# Sans cela, n'importe qui avec l'URL `user-X-qgis.user.lab.sspcloud.fr/desk`
+# accède à l'espace user-X (fuite RGPD critique). Le portail set un cookie
+# oidc_token avec Domain=.user.lab.sspcloud.fr (cf. commit Phase 0ter Step 1),
+# le middleware vérifie ce cookie et 403 si le preferred_username ne matche
+# pas ONYXIA_USER (le owner du namespace).
+
+# Routes publiques : healthchecks K8s + endpoints d'identification
+_OIDC_MIDDLEWARE_PUBLIC = (
+    "/health",        # readinessProbe K8s
+    "/healthz",       # alias
+    "/api/version",   # Phase 1 auto-update (poll public)
+)
+
+# Routes inter-pods : Bearer HUB_API_KEY = clé hub partagée entre hub et agent
+# (agent appelle /mcp du hub, portail appelle /api/hub-status, etc.)
+_OIDC_MIDDLEWARE_INTER_POD = (
+    "/mcp",                     # agent -> hub MCP
+    "/api/hub-status",          # portail polling
+    "/api/admin",               # actions admin (ADMIN_TOKEN ou HUB_API_KEY)
+    "/api/reload-llm-key",      # webhook portail
+    "/api/reload-hub-key",      # webhook futur (Mini-Phase 0bis)
+)
+
+
+def _is_inter_pod_authorized(request: "Request") -> bool:
+    """True si la requête vient d'un pod interne avec Bearer HUB_API_KEY valide."""
+    import os
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return False
+    presented = auth_header.removeprefix("Bearer ").strip()
+    expected = os.environ.get("HUB_API_KEY", "")
+    return bool(expected) and presented == expected
+
+
+def _portal_login_redirect_url(request: "Request") -> str:
+    """URL portail pour login utilisateur. Fallback hardcode si PORTAL_URL absent."""
+    import os
+    portal = os.environ.get("PORTAL_URL", "").rstrip("/")
+    if not portal:
+        # Convention SSPCloud : portail admin nic01asfr (par defaut)
+        portal = "https://user-nic01asfr-qgis-mcp-portal-bridge.user.lab.sspcloud.fr"
+    # Le portail redirigera vers `next` apres validation token
+    next_url = str(request.url)
+    from urllib.parse import quote
+    return f"{portal}/?next={quote(next_url, safe='')}"
+
+
+async def oidc_auth_middleware(request: "Request", call_next):
+    """Middleware FastAPI : vérifie cookie OIDC + match preferred_username == ONYXIA_USER.
+
+    Whitelist :
+      - Routes publiques (healthchecks)
+      - Routes inter-pod si Authorization: Bearer HUB_API_KEY match env
+      - kube-probe user-agent (court-circuit identique a Bug #17 fix)
+
+    Sinon : décode cookie oidc_token, check claims.preferred_username ==
+    ONYXIA_USER, sinon 403/redirect portail.
+    """
+    import os
+    from fastapi.responses import JSONResponse, RedirectResponse
+    path = request.url.path
+
+    # 1. Routes publiques (probe, version)
+    if any(path == p or path.startswith(p + "/") for p in _OIDC_MIDDLEWARE_PUBLIC):
+        return await call_next(request)
+
+    # 2. Court-circuit kube-probe (idem Bug #17 fix L1490 hub_home)
+    if "kube-probe" in request.headers.get("user-agent", "").lower():
+        return await call_next(request)
+
+    # 3. Routes inter-pod avec Bearer HUB_API_KEY
+    if any(path == p or path.startswith(p + "/") for p in _OIDC_MIDDLEWARE_INTER_POD):
+        if _is_inter_pod_authorized(request):
+            return await call_next(request)
+        # Sinon on tombe sur le check OIDC ci-dessous (fallback UI)
+
+    # 4. Routes UI : cookie OIDC obligatoire
+    token = request.cookies.get("oidc_token") or ""
+    if not token:
+        # Pas de cookie -> redirect vers portail pour saisie token
+        # (Browser navigation : auto follow 302). Si XHR/fetch (Accept ne
+        # contient pas text/html), retourne 401 JSON a la place.
+        accept = request.headers.get("accept", "")
+        if "text/html" in accept:
+            return RedirectResponse(_portal_login_redirect_url(request), status_code=302)
+        return JSONResponse(
+            {"detail": "Auth requise. Va sur le portail pour t'identifier.",
+             "portal_url": _portal_login_redirect_url(request)},
+            status_code=401,
+        )
+
+    # 5. Décode JWT + vérifie ownership
+    onyxia_user = os.environ.get("ONYXIA_USER", "")
+    try:
+        signing_key = _jwks.get_signing_key_from_jwt(token)
+        claims = jwt.decode(
+            token, signing_key.key, algorithms=["RS256"],
+            options={"verify_aud": False},
+        )
+    except jwt.ExpiredSignatureError:
+        return RedirectResponse(_portal_login_redirect_url(request), status_code=302)
+    except Exception as exc:
+        return JSONResponse(
+            {"detail": f"Token invalide : {exc}"},
+            status_code=401,
+        )
+
+    claimed_user = claims.get("preferred_username") or claims.get("sub", "")
+    if onyxia_user and claimed_user != onyxia_user:
+        return JSONResponse(
+            {"detail": f"Cet espace appartient a '{onyxia_user}'. Tu es "
+                       f"connecte en tant que '{claimed_user}'. Connecte-toi "
+                       f"sur ton propre espace via le portail."},
+            status_code=403,
+        )
+
+    # OK : injecte claims dans request.state pour downstream
+    request.state.oidc_claims = claims
+    request.state.oidc_user = claimed_user
+    return await call_next(request)

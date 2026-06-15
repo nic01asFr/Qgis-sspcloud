@@ -822,6 +822,30 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Phase 0ter (RGPD) : middleware OIDC qui protege l'acces UI par check
+# preferred_username == ONYXIA_USER. Sans cela, n'importe qui avec l'URL hub
+# accede a l'espace user. Cf. hub/hub/auth.py:oidc_auth_middleware pour la
+# logique de whitelist (healthchecks, inter-pod Bearer, kube-probe).
+app.middleware("http")(auth.oidc_auth_middleware)
+
+
+@app.get("/auth/whoami")
+async def auth_whoami(request: Request):
+    """Endpoint debug : retourne le user authentifie (apres middleware OIDC).
+    Utile pour verifier que le cookie OIDC est bien recu et decode."""
+    claims = getattr(request.state, "oidc_claims", None)
+    if not claims:
+        return {"authenticated": False, "reason": "no_oidc_claims_in_request"}
+    return {
+        "authenticated": True,
+        "username": claims.get("preferred_username"),
+        "email": claims.get("email"),
+        "name": claims.get("name"),
+        "exp": claims.get("exp"),
+        "onyxia_user_owner": _ONYXIA_USER,
+        "match": claims.get("preferred_username") == _ONYXIA_USER,
+    }
+
 
 def _resolve_onyxia_user() -> str:
     """Résout le username depuis ONYXIA_USER env ou namespace K8s (fallback).
