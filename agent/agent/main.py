@@ -417,6 +417,52 @@ async def api_reload_llm_key(request: Request):
     return {"ok": True, "has_key": bool(new_key)}
 
 
+@app.post("/api/reload-hub-key")
+async def api_reload_hub_key(request: Request):
+    """Webhook interne : rotation de HUB_API_KEY (Mini-Phase 0bis Bug 5.9).
+
+    Symetrique a /api/reload-llm-key mais pour HUB_API_KEY.
+
+    Probleme adresse : si le hub regenere sa cle (rotation, redeploiement, reset
+    Secret K8s), l'agent garde son ancienne HUB_API_KEY env -> tous les calls
+    /mcp sont rejetes "Cle API invalide" -> tools MCP KO silencieux (cf. bug
+    nic01asfr 2026-06-15 : 2 tools natifs au lieu de 43, rien dans QGIS).
+
+    Auth : X-Hub-Auth header = ANCIENNE HUB_API_KEY (que l'agent connait encore).
+    Le hub qui declenche la rotation connait l'ancienne (vient de la lire avant
+    de generer la nouvelle) -> peut authentifier. Window de 5 min apres rotation
+    suffit pour propager.
+
+    Body : {"new_hub_api_key": "<qgis_username_hex32>"} (string).
+
+    Retour : {"ok": true, "rotated": <bool>}.
+    """
+    expected_old = os.getenv("HUB_API_KEY", "")
+    if not expected_old:
+        raise HTTPException(503, "HUB_API_KEY non configure cote agent")
+    if request.headers.get("X-Hub-Auth") != expected_old:
+        raise HTTPException(403, "X-Hub-Auth invalide (ancien HUB_API_KEY attendu)")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    new_key = (body.get("new_hub_api_key") or "").strip() if isinstance(body, dict) else ""
+    if not new_key:
+        return {"ok": True, "rotated": False, "reason": "empty key"}
+    os.environ["HUB_API_KEY"] = new_key
+    # qgis_agent.py utilise _HUB_API_KEY (lu au import time L67). Rebind dynamique :
+    try:
+        from agent import qgis_agent as _qa
+        _qa._HUB_API_KEY = new_key
+    except Exception as e:
+        log.warning("reload-hub-key: rebind qgis_agent._HUB_API_KEY echoue: %s", e)
+    log.info(
+        "reload-hub-key: cle HUB rotee in-memory (len=%d, no pod restart)",
+        len(new_key),
+    )
+    return {"ok": True, "rotated": True}
+
+
 @app.post("/api/refresh-llm-config")
 async def api_refresh_llm_config():
     """Proxy same-origin vers le hub `/api/refresh-llm-config`.
