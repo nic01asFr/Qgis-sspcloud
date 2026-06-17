@@ -947,14 +947,21 @@ async def proxy_workspace_vnc_ws(client_ws: WebSocket):
         return
 
     # Tunnel WS bidirectionnel : client_ws <-> upstream noVNC websockify
-    await client_ws.accept(subprotocol="binary")
+    # Subprotocol "binary" : noVNC client moderne ne le demande PAS (la version
+    # actuelle vnc_lite.html envoie pas de Sec-WebSocket-Protocol). Si on
+    # declarait "binary" unilateralement -> handshake fail RFC 6455. On
+    # forwarde uniquement si le client le demande, sinon on accepte sans.
+    requested = list(client_ws.scope.get("subprotocols") or [])
+    accept_protocol = "binary" if "binary" in requested else None
+    await client_ws.accept(subprotocol=accept_protocol)
     upstream_host = _workspace_internal_host()
     upstream_url = f"ws://{upstream_host}:6080/websockify"
     import websockets, asyncio as _asyncio
     try:
-        async with websockets.connect(
-            upstream_url, subprotocols=["binary"]
-        ) as upstream:
+        connect_kwargs = {}
+        if accept_protocol:
+            connect_kwargs["subprotocols"] = [accept_protocol]
+        async with websockets.connect(upstream_url, **connect_kwargs) as upstream:
             async def client_to_upstream():
                 try:
                     while True:
