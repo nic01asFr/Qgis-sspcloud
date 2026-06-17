@@ -559,7 +559,13 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
          le scaleViewport de vnc_lite.html (qui lit `scale`, pas `resize`) → fit
          complet sans zone vide ni scrollbar. -->
     <div class="iframe-fit">
-      <iframe src="{{ novnc_url }}/vnc_lite.html?autoconnect=1&reconnect=1&scale=true&quality=6&show_dot=false&logging=warn"
+      {# Phase 0ter Steps 4-6 : iframe noVNC same-origin via reverse proxy hub
+         /workspace/vnc/* (au lieu de l'ingress public qgis-workspace-X-novnc.*
+         qui n'a pas de middleware OIDC). Le cookie OIDC du hub est partage
+         via Domain=.user.lab.sspcloud.fr -> middleware hub protege l'acces.
+         Le param `path=workspace/vnc/websockify` indique a noVNC client ou
+         se connecter pour le WebSocket (relatif a la racine du browser). #}
+      <iframe src="/workspace/vnc/vnc_lite.html?path=workspace/vnc/websockify&autoconnect=1&reconnect=1&scale=true&quality=6&show_dot=false&logging=warn"
               allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>
     </div>
     {% else %}

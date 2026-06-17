@@ -39,9 +39,10 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, WebSocket, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from starlette.websockets import WebSocketDisconnect
 from pathlib import Path
 
 from hub import auth, sessions
@@ -845,6 +846,145 @@ async def auth_whoami(request: Request):
         "onyxia_user_owner": _ONYXIA_USER,
         "match": claims.get("preferred_username") == _ONYXIA_USER,
     }
+
+
+# ── Phase 0ter Steps 4-5 (RGPD) : Reverse proxy noVNC same-origin ─────────────
+# Avant ce fix, l'iframe workspace pointait directement sur l'ingress public
+# `qgis-workspace-X-novnc.user.lab.sspcloud.fr` (sans middleware OIDC). Le
+# reverse proxy via hub permet :
+#   - Same-origin (cookie OIDC du hub partage via Domain=.user.lab.sspcloud.fr)
+#   - Le middleware hub protege l'acces (owner check)
+#   - Pas de modification cote BigQgisMCP (workspace reste accessible en interne
+#     via service cluster, mais pas expose publiquement avec auth)
+#
+# Architecture :
+#   Browser -> hub/workspace/vnc/{path}        (HTTP GET assets noVNC HTML/JS)
+#   Browser -> hub/workspace/vnc/websockify    (WS bidirectionnel canal noVNC)
+#                  ↓ middleware OIDC ✓
+#                  ↓ reverse proxy
+#   workspace internal qgis-workspace-X.user-X.svc.cluster.local:6080
+#
+# Workspace endormi (scale 0) : upstream call echoue -> retourne 503 avec
+# message clair. Le bouton "Reveiller le bureau" du desk.html reste utilisable.
+
+def _workspace_internal_host() -> str:
+    """DNS interne du workspace pour reverse proxy (skip ingress public)."""
+    user = _ONYXIA_USER
+    ns = sessions._NAMESPACE or (f"user-{user}" if user else "default")
+    return f"qgis-workspace-{user}.{ns}.svc.cluster.local"
+
+
+@app.api_route(
+    "/workspace/vnc/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
+)
+async def proxy_workspace_vnc_http(path: str, request: Request):
+    """Reverse proxy HTTP pour les assets statiques noVNC (vnc_lite.html, JS, CSS).
+    Middleware OIDC s'applique deja (owner check via cookie)."""
+    upstream_host = _workspace_internal_host()
+    upstream_url = f"http://{upstream_host}:6080/{path}"
+    qs = str(request.query_params)
+    if qs:
+        upstream_url += f"?{qs}"
+    # Strip headers qui ne doivent pas etre forwardes
+    fwd_headers = {
+        k: v for k, v in request.headers.items()
+        if k.lower() not in ("host", "cookie", "authorization", "content-length")
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
+            proxied = await client.request(
+                method=request.method,
+                url=upstream_url,
+                content=await request.body(),
+                headers=fwd_headers,
+            )
+        # Strip headers de reponse qui peuvent casser le tunnel
+        resp_headers = {
+            k: v for k, v in proxied.headers.items()
+            if k.lower() not in ("content-encoding", "transfer-encoding", "connection")
+        }
+        return Response(
+            content=proxied.content,
+            status_code=proxied.status_code,
+            headers=resp_headers,
+            media_type=proxied.headers.get("content-type"),
+        )
+    except httpx.ConnectError:
+        # Workspace endormi (scale 0) ou pas encore Ready
+        return JSONResponse(
+            {"detail": "Workspace endormi. Reveille-le depuis le desk."},
+            status_code=503,
+        )
+    except Exception as exc:
+        log.warning("proxy_workspace_vnc_http error: %s", exc)
+        return JSONResponse({"detail": f"Proxy error: {exc}"}, status_code=502)
+
+
+@app.websocket("/workspace/vnc/websockify")
+async def proxy_workspace_vnc_ws(client_ws: WebSocket):
+    """Reverse proxy WebSocket pour le canal noVNC (binary frames bidirectionnel).
+    Le middleware HTTP middleware ne s'applique PAS aux upgrades WS (FastAPI bug).
+    On verifie manuellement le cookie OIDC avant accept.
+    """
+    # Auth manuelle pour WebSocket (middleware HTTP ne s'applique pas)
+    token = client_ws.cookies.get("oidc_token") or ""
+    if not token:
+        await client_ws.close(code=4401, reason="No OIDC cookie")
+        return
+    try:
+        from jwt import decode as _jwt_decode
+        signing_key = auth._jwks.get_signing_key_from_jwt(token)
+        claims = _jwt_decode(
+            token, signing_key.key, algorithms=["RS256"],
+            options={"verify_aud": False},
+        )
+        if claims.get("preferred_username") != _ONYXIA_USER:
+            await client_ws.close(code=4403, reason=f"Owner mismatch (expected {_ONYXIA_USER})")
+            return
+    except Exception as exc:
+        await client_ws.close(code=4401, reason=f"Token invalide: {exc}")
+        return
+
+    # Tunnel WS bidirectionnel : client_ws <-> upstream noVNC websockify
+    await client_ws.accept(subprotocol="binary")
+    upstream_host = _workspace_internal_host()
+    upstream_url = f"ws://{upstream_host}:6080/websockify"
+    import websockets, asyncio as _asyncio
+    try:
+        async with websockets.connect(
+            upstream_url, subprotocols=["binary"]
+        ) as upstream:
+            async def client_to_upstream():
+                try:
+                    while True:
+                        msg = await client_ws.receive_bytes()
+                        await upstream.send(msg)
+                except WebSocketDisconnect:
+                    pass
+                except Exception as e:
+                    log.debug("ws c2u: %s", e)
+
+            async def upstream_to_client():
+                try:
+                    async for msg in upstream:
+                        if isinstance(msg, (bytes, bytearray)):
+                            await client_ws.send_bytes(msg)
+                        else:
+                            await client_ws.send_text(msg)
+                except Exception as e:
+                    log.debug("ws u2c: %s", e)
+
+            await _asyncio.gather(
+                client_to_upstream(), upstream_to_client(),
+                return_exceptions=True,
+            )
+    except Exception as exc:
+        log.warning("proxy_workspace_vnc_ws upstream connect failed: %s", exc)
+        try:
+            await client_ws.close(code=1011, reason=f"Upstream KO: {exc}")
+        except Exception:
+            pass
 
 
 def _resolve_onyxia_user() -> str:

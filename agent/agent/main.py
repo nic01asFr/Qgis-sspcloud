@@ -108,6 +108,130 @@ templates      = Jinja2Templates(directory=str(_templates_dir))
 app = FastAPI(title="QGIS Agent", docs_url=None, redoc_url=None)
 
 
+# ── Phase 0ter Steps 7-8 (RGPD) : Middleware OIDC agent ───────────────────────
+# Sans cela, n'importe qui avec l'URL user-X-qgis-agent.user.lab.sspcloud.fr
+# accede a l'agent chat de user X (fuite RGPD critique).
+#
+# Architecture symetrique au hub :
+#   - Cookie oidc_token partage via Domain=.user.lab.sspcloud.fr (portail Step 1)
+#   - Verify JWT via JWKS Keycloak SSPCloud + check preferred_username == ONYXIA_USER
+#   - Whitelist : /health, /api/status, /api/version (probes K8s + version check)
+#   - Inter-pod : X-Hub-Auth ou Authorization Bearer ${HUB_API_KEY} skip
+#     (cf. /api/reload-llm-key webhook appele par le hub)
+#   - kube-probe user-agent skip (probes K8s)
+
+_AGENT_PUBLIC_ROUTES = ("/health", "/api/status", "/api/version")
+_AGENT_INTER_POD_ROUTES = (
+    "/api/reload-llm-key",
+    "/api/refresh-llm-config",
+    "/api/refresh-profiles",
+)
+
+_JWKS_CACHE = None
+_KEYCLOAK_ISSUER = os.getenv(
+    "SSPCLOUD_ISSUER",
+    "https://auth.lab.sspcloud.fr/auth/realms/sspcloud",
+)
+
+
+def _get_jwks_client():
+    """Cache PyJWKClient sur l'instance Keycloak SSPCloud."""
+    global _JWKS_CACHE
+    if _JWKS_CACHE is None:
+        from jwt import PyJWKClient
+        _JWKS_CACHE = PyJWKClient(
+            f"{_KEYCLOAK_ISSUER}/protocol/openid-connect/certs",
+            cache_keys=True,
+        )
+    return _JWKS_CACHE
+
+
+def _portal_login_url_agent(request: Request) -> str:
+    """URL portail pour redirect login. Fallback hardcode si PORTAL_URL absent."""
+    portal = os.getenv("PORTAL_URL", "").rstrip("/")
+    if not portal:
+        portal = "https://user-nic01asfr-qgis-mcp-portal-bridge.user.lab.sspcloud.fr"
+    from urllib.parse import quote
+    return f"{portal}/?next={quote(str(request.url), safe='')}"
+
+
+@app.middleware("http")
+async def agent_oidc_middleware(request: Request, call_next):
+    """Middleware OIDC agent symetrique au hub. Cf. hub/hub/auth.py:oidc_auth_middleware."""
+    path = request.url.path
+    # 1. Routes publiques
+    if any(path == p or path.startswith(p + "/") for p in _AGENT_PUBLIC_ROUTES):
+        return await call_next(request)
+    # 2. Court-circuit kube-probe
+    if "kube-probe" in request.headers.get("user-agent", "").lower():
+        return await call_next(request)
+    # 3. Inter-pod (hub -> agent via X-Hub-Auth ou Bearer)
+    if any(path == p or path.startswith(p + "/") for p in _AGENT_INTER_POD_ROUTES):
+        expected = os.environ.get("HUB_API_KEY", "")
+        if expected:
+            x_hub = request.headers.get("x-hub-auth", "")
+            auth_hdr = request.headers.get("authorization", "")
+            presented = (
+                x_hub
+                or (auth_hdr.removeprefix("Bearer ").strip()
+                    if auth_hdr.startswith("Bearer ") else "")
+            )
+            if presented == expected:
+                return await call_next(request)
+    # 4. UI : cookie OIDC obligatoire
+    token = request.cookies.get("oidc_token") or ""
+    if not token:
+        accept = request.headers.get("accept", "")
+        if "text/html" in accept:
+            return RedirectResponse(_portal_login_url_agent(request), status_code=302)
+        return JSONResponse(
+            {"detail": "Auth requise. Va sur le portail pour t'identifier.",
+             "portal_url": _portal_login_url_agent(request)},
+            status_code=401,
+        )
+    # 5. Decode JWT + verify ownership
+    try:
+        from jwt import decode as _jwt_decode, ExpiredSignatureError
+        signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
+        claims = _jwt_decode(
+            token, signing_key.key, algorithms=["RS256"],
+            options={"verify_aud": False},
+        )
+    except Exception as exc:
+        if "Signature has expired" in str(exc):
+            return RedirectResponse(_portal_login_url_agent(request), status_code=302)
+        return JSONResponse({"detail": f"Token invalide : {exc}"}, status_code=401)
+    onyxia_user = os.environ.get("ONYXIA_USER", "")
+    claimed_user = claims.get("preferred_username") or claims.get("sub", "")
+    if onyxia_user and claimed_user != onyxia_user:
+        return JSONResponse(
+            {"detail": f"Cet espace appartient a '{onyxia_user}'. Tu es "
+                       f"connecte en tant que '{claimed_user}'."},
+            status_code=403,
+        )
+    request.state.oidc_claims = claims
+    request.state.oidc_user = claimed_user
+    return await call_next(request)
+
+
+@app.get("/auth/whoami")
+async def auth_whoami_agent(request: Request):
+    """Endpoint debug agent : retourne le user authentifie (apres middleware OIDC).
+    Phase 0ter symetrique au hub /auth/whoami."""
+    claims = getattr(request.state, "oidc_claims", None)
+    if not claims:
+        return {"authenticated": False, "reason": "no_oidc_claims_in_request"}
+    return {
+        "authenticated": True,
+        "username": claims.get("preferred_username"),
+        "email": claims.get("email"),
+        "name": claims.get("name"),
+        "exp": claims.get("exp"),
+        "onyxia_user_owner": os.environ.get("ONYXIA_USER", ""),
+        "match": claims.get("preferred_username") == os.environ.get("ONYXIA_USER", ""),
+    }
+
+
 @app.on_event("startup")
 async def startup():
     global _embed_task, _embed_stop
