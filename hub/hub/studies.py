@@ -466,7 +466,12 @@ else:
 
 
 def list_recipes_pod_code(sid: str) -> str:
-    """Code Python pour lister les recipes user d'une etude (PVC)."""
+    """Code Python pour lister les recipes user d'une etude (PVC).
+
+    Skip les fichiers `.archived.<ts>` (soft delete) : pattern reconnu par
+    delete_recipe_pod_code = `{slug}.archived.<ts>{ext}`. Sans ce filtrage,
+    les archived apparaissent dans la liste UI/agent -> confusion user.
+    """
     return f"""
 from pathlib import Path
 import json, hashlib
@@ -476,6 +481,9 @@ out = []
 if recipes_dir.is_dir():
     for ext in ("*.yaml", "*.yml", "*.json"):
         for p in sorted(recipes_dir.glob(ext)):
+            # Skip archived (soft delete : `{{slug}}.archived.<ts>{{ext}}`)
+            if ".archived." in p.name:
+                continue
             try:
                 content = p.read_text(encoding="utf-8")
                 out.append({{
