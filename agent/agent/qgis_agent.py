@@ -565,19 +565,92 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
         "add_from_catalog":     600,
     }
     tool_timeout = _LONG_RUNNING_TOOLS.get(tool_name, 120)
+    # Bug #17a/b fix (cold start workspace MCP) : retry avec backoff sur
+    # erreurs transitoires. Le workspace pod peut etre Ready (Xvfb + QGIS
+    # OK) mais le serveur MCP intra-pod (port 8100) pas encore joignable
+    # pendant les premieres ~90s. Sans retry, l'agent abandonne au premier
+    # essai avec un JSON parse error muet et l'experience premier-tour est
+    # cassee. Ref mémoire project_bug_17_mcp_cold_start_502.
+    #
+    # Conditions de retry :
+    #   - HTTP 502/503/504 (hub/ingress en cours de boot)
+    #   - Body vide (le hub _proxy_request renvoie "" si pod KO)
+    #   - JSON parse failure (le body est du HTML d'erreur ingress)
+    # Pas de retry sur 4xx (bug applicatif, retry ne resout pas).
+    _RETRY_DELAYS = [2.0, 5.0, 10.0]  # cumul 17s = max acceptable UX
     try:
         async with httpx.AsyncClient(timeout=tool_timeout) as client:
-            resp = await client.post(
-                f"{_HUB_URL}/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id":      str(uuid.uuid4()),
-                    "method":  "tools/call",
-                    "params":  {"name": tool_name, "arguments": arguments},
-                },
-                headers={"Authorization": f"Bearer {_HUB_KEY}"},
-            )
-            data = resp.json()
+            data = None
+            last_error = None
+            for attempt in range(len(_RETRY_DELAYS) + 1):
+                try:
+                    resp = await client.post(
+                        f"{_HUB_URL}/mcp",
+                        json={
+                            "jsonrpc": "2.0",
+                            "id":      str(uuid.uuid4()),
+                            "method":  "tools/call",
+                            "params":  {"name": tool_name, "arguments": arguments},
+                        },
+                        headers={"Authorization": f"Bearer {_HUB_KEY}"},
+                    )
+                    # Status 5xx ou body vide -> transient, retry
+                    if resp.status_code in (502, 503, 504):
+                        last_error = f"HTTP {resp.status_code} (transient)"
+                        if attempt < len(_RETRY_DELAYS):
+                            log.warning(
+                                "MCP cold start? %s -> retry %d/%d in %.0fs",
+                                last_error, attempt + 1, len(_RETRY_DELAYS),
+                                _RETRY_DELAYS[attempt],
+                            )
+                            await asyncio.sleep(_RETRY_DELAYS[attempt])
+                            continue
+                        break
+                    body_text = resp.text
+                    if not body_text.strip():
+                        last_error = "body vide (cold start?)"
+                        if attempt < len(_RETRY_DELAYS):
+                            log.warning(
+                                "MCP body vide -> retry %d/%d in %.0fs",
+                                attempt + 1, len(_RETRY_DELAYS),
+                                _RETRY_DELAYS[attempt],
+                            )
+                            await asyncio.sleep(_RETRY_DELAYS[attempt])
+                            continue
+                        break
+                    try:
+                        data = resp.json()
+                        break  # success
+                    except (json.JSONDecodeError, ValueError) as je:
+                        last_error = f"JSON parse fail: body[:80]={body_text[:80]!r}"
+                        if attempt < len(_RETRY_DELAYS):
+                            log.warning(
+                                "MCP JSON parse fail -> retry %d/%d in %.0fs",
+                                attempt + 1, len(_RETRY_DELAYS),
+                                _RETRY_DELAYS[attempt],
+                            )
+                            await asyncio.sleep(_RETRY_DELAYS[attempt])
+                            continue
+                        break
+                except httpx.ConnectError as ce:
+                    # Reseau pas pret (pod en cours de scale up)
+                    last_error = f"ConnectError: {ce}"
+                    if attempt < len(_RETRY_DELAYS):
+                        log.warning(
+                            "MCP ConnectError -> retry %d/%d in %.0fs",
+                            attempt + 1, len(_RETRY_DELAYS),
+                            _RETRY_DELAYS[attempt],
+                        )
+                        await asyncio.sleep(_RETRY_DELAYS[attempt])
+                        continue
+                    raise
+            if data is None:
+                return json.dumps({
+                    "error": (
+                        f"MCP cold start ou hub down apres {len(_RETRY_DELAYS)+1} essais : "
+                        f"{last_error}. Attends ~30s et reessaye."
+                    )
+                })
             result = data.get("result", {})
             content = result.get("content", [])
             if content and isinstance(content, list):
