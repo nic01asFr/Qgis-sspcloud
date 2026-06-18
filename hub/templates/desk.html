@@ -489,6 +489,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       <button class="rtab active" data-rtab="layers" title="Couches du projet QGIS courant">🗺 Couches</button>
       <button class="rtab" data-rtab="publi" title="Publications et livrables">📚 Publi</button>
       <button class="rtab" data-rtab="files" title="Fichiers de l'étude">📁 Fichiers</button>
+      <button class="rtab" data-rtab="recipes" title="Recettes user de cette étude (éditables)">📋 Recettes</button>
     </div>
 
     <!-- Onglet Couches QGIS (chargé via /desk/layers) -->
@@ -547,7 +548,65 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <div class="publi-empty">Chargement…</div>
       </div>
     </div>
+
+    <!-- V1.5 Sprint 1 : Onglet Recettes user (CRUD via /studies/{sid}/recipes) -->
+    <div class="rpane" data-rpane="recipes">
+      <div style="padding:6px 8px;">
+        <button id="recipes-new-btn" class="fr-btn fr-btn--sm fr-btn--secondary"
+                style="font-size:11px; padding:4px 8px;"
+                title="Créer une nouvelle recette YAML">
+          ＋ Nouvelle recette
+        </button>
+      </div>
+      <div class="publi-list" id="resources-recipes-list">
+        <div class="publi-empty">Chargement…</div>
+      </div>
+    </div>
   </aside>
+
+  <!-- V1.5 Sprint 1 : Modal éditeur YAML recettes user (overlay full-screen) -->
+  <div id="recipe-editor-overlay" style="
+       display:none; position:fixed; inset:0; z-index:9999;
+       background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+    <div style="background:white; width:80%; max-width:900px; max-height:90vh;
+                display:flex; flex-direction:column; border-radius:6px;
+                box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+      <div style="padding:12px 16px; border-bottom:1px solid #ddd;
+                  display:flex; align-items:center; gap:12px;">
+        <strong style="flex:1;" id="recipe-editor-title">Recette : —</strong>
+        <span id="recipe-editor-meta" style="font-size:11px; color:#666;"></span>
+        <button onclick="closeRecipeEditor()"
+                style="border:0; background:#eee; padding:4px 10px; border-radius:4px;
+                       cursor:pointer;">✕ Fermer</button>
+      </div>
+      <div style="padding:12px 16px; display:flex; gap:8px; flex-wrap:wrap;">
+        <input id="recipe-editor-slug" type="text" placeholder="slug (ex: ma_recette)"
+               style="flex:1; min-width:180px; padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+        <input id="recipe-editor-name" type="text" placeholder="Nom affiché"
+               style="flex:1; min-width:180px; padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+        <select id="recipe-editor-format"
+                style="padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+          <option value="yaml">YAML</option>
+          <option value="json">JSON</option>
+        </select>
+      </div>
+      <textarea id="recipe-editor-content" spellcheck="false"
+                style="flex:1; min-height:400px; margin:0 16px; padding:10px;
+                       font-family:'Courier New', monospace; font-size:12px;
+                       border:1px solid #ccc; border-radius:4px;
+                       white-space:pre; overflow:auto;"></textarea>
+      <div id="recipe-editor-status" style="padding:4px 16px; min-height:20px; font-size:11px;"></div>
+      <div style="padding:12px 16px; border-top:1px solid #ddd; display:flex; gap:8px; justify-content:flex-end;">
+        <button onclick="closeRecipeEditor()" class="fr-btn fr-btn--secondary fr-btn--sm">
+          Annuler
+        </button>
+        <button id="recipe-editor-save" onclick="saveRecipeFromEditor()"
+                class="fr-btn fr-btn--sm">
+          💾 Sauvegarder
+        </button>
+      </div>
+    </div>
+  </div>
 
   <div class="handle h1" data-target="publi"></div>
 
@@ -1104,6 +1163,206 @@ async function loadResourceFiles() {
                   `<a href="#" onclick="loadResourceFiles();return false">Réessayer ↻</a></div>`;
   }
 }
+
+// ── V1.5 Sprint 1 : Recettes user (CRUD via /studies/{sid}/recipes) ──────
+// Lazy load au premier clic onglet. credentials: 'include' -> cookie hub_api_key
+// envoyé automatiquement, middleware OIDC valide via auth.get_current_user.
+
+let _resRecipesLoaded = false;
+let _activeStudyId = null;  // cache sid, invalidé via switch study event
+
+async function _getActiveStudyId() {
+  if (_activeStudyId) return _activeStudyId;
+  try {
+    const r = await fetch('/studies/active', { credentials: 'include' });
+    if (!r.ok) return null;
+    const d = await r.json();
+    _activeStudyId = d.id || null;
+    return _activeStudyId;
+  } catch (e) { return null; }
+}
+
+async function loadResourceRecipes() {
+  const c = document.getElementById('resources-recipes-list');
+  if (!c) return;
+  c.innerHTML = '<div class="publi-empty">Chargement…</div>';
+  const sid = await _getActiveStudyId();
+  if (!sid) {
+    c.innerHTML = '<div class="publi-empty">Aucune étude active.</div>';
+    return;
+  }
+  try {
+    const r = await _fetchWithTimeout(`/studies/${sid}/recipes`, 12000);
+    if (!r.ok) throw new Error('http_' + r.status);
+    const d = await r.json();
+    const recipes = (d && d.recipes) || [];
+    if (!recipes.length) {
+      c.innerHTML = '<div class="publi-empty">Aucune recette user.<br>' +
+        '<span style="font-size:10px">' +
+        'Demande à l\'agent : « crée une recette qui ... » ou clique ＋ Nouvelle.' +
+        '</span></div>';
+      return;
+    }
+    c.innerHTML = recipes.map(r => {
+      const slug = (r.slug || '?').toString();
+      const name = (r.name || slug).toString();
+      const fmt = r.format || 'yaml';
+      const v = r.version_num ? `v${r.version_num}` : '—';
+      const sz = r.size != null ? ` · ${Math.round(r.size/1024*10)/10} ko` : '';
+      const sha = r.sha ? r.sha.substring(0, 8) : '';
+      const pub = r.published_at ? '🌐 ' : '';
+      return `<div class="publi-item" data-slug="${slug.replace(/"/g, '&quot;')}">
+        <span class="ic">📋</span>
+        <div class="info" style="flex:1;">
+          <div class="name">${pub}${name.replace(/</g, '&lt;')}</div>
+          <div class="meta">${fmt.toUpperCase()} · ${v} · ${sha}${sz}</div>
+        </div>
+        <div style="display:flex; gap:2px;">
+          <button onclick="openRecipeEditor('${slug.replace(/'/g, '\\\'')}', false)"
+                  title="Voir / Éditer" style="border:0; background:transparent; cursor:pointer; padding:2px 4px;">✏</button>
+          <button onclick="deleteRecipe('${slug.replace(/'/g, '\\\'')}')"
+                  title="Supprimer (archive)" style="border:0; background:transparent; cursor:pointer; padding:2px 4px;">🗑</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    const reason = e?.name === 'AbortError' ? 'délai dépassé (12 s)'
+                                            : 'workspace endormi ou liste indisponible';
+    c.innerHTML = `<div class="publi-empty">${reason}. ` +
+                  `<a href="#" onclick="loadResourceRecipes();return false">Réessayer ↻</a></div>`;
+  }
+}
+
+async function openRecipeEditor(slug, isNew) {
+  const overlay = document.getElementById('recipe-editor-overlay');
+  const titleEl = document.getElementById('recipe-editor-title');
+  const metaEl = document.getElementById('recipe-editor-meta');
+  const slugEl = document.getElementById('recipe-editor-slug');
+  const nameEl = document.getElementById('recipe-editor-name');
+  const fmtEl = document.getElementById('recipe-editor-format');
+  const contentEl = document.getElementById('recipe-editor-content');
+  const statusEl = document.getElementById('recipe-editor-status');
+  statusEl.textContent = '';
+  slugEl.value = isNew ? '' : slug;
+  slugEl.disabled = !isNew;
+  if (isNew) {
+    titleEl.textContent = 'Nouvelle recette';
+    metaEl.textContent = '';
+    nameEl.value = '';
+    fmtEl.value = 'yaml';
+    contentEl.value = '# Recette user — YAML\n' +
+      'id: ma_recette\n' +
+      'name: Ma recette\n' +
+      'description: Décris ce qu\'elle fait\n' +
+      'parameters:\n' +
+      '  zone:\n' +
+      '    type: string\n' +
+      '    required: true\n' +
+      'steps:\n' +
+      '  - id: load_zone\n' +
+      '    tool: set_study_zone\n' +
+      '    params:\n' +
+      '      target: "$zone"\n';
+  } else {
+    titleEl.textContent = `Recette : ${slug}`;
+    contentEl.value = 'Chargement…';
+    const sid = await _getActiveStudyId();
+    if (!sid) { contentEl.value = 'Pas d\'étude active'; return; }
+    try {
+      const r = await fetch(`/studies/${sid}/recipes/${encodeURIComponent(slug)}`,
+        { credentials: 'include' });
+      if (!r.ok) { contentEl.value = `Erreur ${r.status}`; return; }
+      const d = await r.json();
+      contentEl.value = d.content || '';
+      nameEl.value = d.name || slug;
+      fmtEl.value = d.format || 'yaml';
+      metaEl.textContent = `v${d.version_num} · ${d.sha ? d.sha.substring(0,8) : ''}`;
+    } catch (e) {
+      contentEl.value = `Erreur fetch: ${e.message}`;
+    }
+  }
+  overlay.style.display = 'flex';
+}
+
+function closeRecipeEditor() {
+  document.getElementById('recipe-editor-overlay').style.display = 'none';
+}
+
+async function saveRecipeFromEditor() {
+  const slug = document.getElementById('recipe-editor-slug').value.trim();
+  const name = document.getElementById('recipe-editor-name').value.trim();
+  const fmt = document.getElementById('recipe-editor-format').value;
+  const content = document.getElementById('recipe-editor-content').value;
+  const statusEl = document.getElementById('recipe-editor-status');
+  if (!slug.match(/^[a-z0-9_-]+$/i)) {
+    statusEl.style.color = 'crimson';
+    statusEl.textContent = 'Slug invalide (a-z, 0-9, _, -)';
+    return;
+  }
+  if (!content.trim()) {
+    statusEl.style.color = 'crimson';
+    statusEl.textContent = 'Contenu vide';
+    return;
+  }
+  const sid = await _getActiveStudyId();
+  if (!sid) {
+    statusEl.style.color = 'crimson';
+    statusEl.textContent = 'Pas d\'étude active';
+    return;
+  }
+  statusEl.style.color = '#666';
+  statusEl.textContent = 'Sauvegarde…';
+  try {
+    const r = await fetch(`/studies/${sid}/recipes/${encodeURIComponent(slug)}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, name, format: fmt }),
+    });
+    if (!r.ok) {
+      const txt = await r.text();
+      statusEl.style.color = 'crimson';
+      statusEl.textContent = `Erreur ${r.status}: ${txt.substring(0, 150)}`;
+      return;
+    }
+    const d = await r.json();
+    statusEl.style.color = 'green';
+    statusEl.textContent = `✓ Sauvegardé v${d.version_num} (${(d.sha || '').substring(0,8)})`;
+    setTimeout(() => { closeRecipeEditor(); loadResourceRecipes(); }, 1200);
+  } catch (e) {
+    statusEl.style.color = 'crimson';
+    statusEl.textContent = `Erreur: ${e.message}`;
+  }
+}
+
+async function deleteRecipe(slug) {
+  if (!confirm(`Supprimer la recette "${slug}" (archive, restaurable) ?`)) return;
+  const sid = await _getActiveStudyId();
+  if (!sid) return;
+  try {
+    const r = await fetch(`/studies/${sid}/recipes/${encodeURIComponent(slug)}`, {
+      method: 'DELETE', credentials: 'include',
+    });
+    if (r.ok || r.status === 204) {
+      loadResourceRecipes();
+    } else {
+      alert(`Erreur suppression: HTTP ${r.status}`);
+    }
+  } catch (e) {
+    alert(`Erreur: ${e.message}`);
+  }
+}
+
+// Hook : bouton "Nouvelle recette" + lazy load au clic onglet
+document.getElementById('recipes-new-btn')?.addEventListener('click', () => {
+  openRecipeEditor('', true);
+});
+document.querySelector('.rtab[data-rtab="recipes"]')?.addEventListener('click', () => {
+  if (!_resRecipesLoaded) {
+    loadResourceRecipes();
+    _resRecipesLoaded = true;
+  }
+});
 
 // Au premier affichage du drawer Ressources, charge l'onglet Couches actif.
 // (loadResourceLayers est aussi déclenché par le toggle drawer dans toggle-publi.)
