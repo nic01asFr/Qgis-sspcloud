@@ -78,6 +78,37 @@ async def init_db() -> None:
                 study_id TEXT NOT NULL
             )
         """)
+        # V1.5 Sprint 1 : index recipes user (versioning SHA, audit).
+        # Le contenu YAML/JSON vit sur le PVC workspace, cette table track les
+        # metadonnees + chaine de versions. Une row par (sid, slug, sha) :
+        # historique conservé (pas de UPDATE, INSERT seulement, lookup latest
+        # via MAX(version_num)). status='active'|'archived' (soft delete).
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS recipes_index (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                sid TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                sha TEXT NOT NULL,
+                previous_sha TEXT,
+                version_num INTEGER NOT NULL DEFAULT 1,
+                owner TEXT NOT NULL,
+                name TEXT,
+                description TEXT,
+                format TEXT NOT NULL DEFAULT 'yaml',
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at INTEGER NOT NULL,
+                published_at INTEGER,
+                public_url TEXT
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_recipes_sid_slug
+                ON recipes_index(sid, slug, version_num DESC)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_recipes_owner
+                ON recipes_index(owner, status)
+        """)
         await db.commit()
 
 
@@ -219,6 +250,117 @@ async def set_active_study(owner: str, sid: str) -> None:
         await db.commit()
 
 
+# ── V1.5 Sprint 1 : recipes_index CRUD DB ─────────────────────────────────────
+
+async def recipe_index_insert(
+    sid: str, slug: str, sha: str, owner: str,
+    name: str = "", description: str = "", fmt: str = "yaml",
+    previous_sha: str = "",
+) -> int:
+    """Insert une nouvelle row recipes_index. Auto-increment version_num.
+
+    Pattern : pas de UPDATE -> nouvelle row a chaque save = audit trail.
+    Lookup latest via MAX(version_num) WHERE sid=? AND slug=? AND status='active'.
+    """
+    import time
+    async with aiosqlite.connect(_DB_PATH) as db:
+        # version_num = max(precedente)+1 ou 1 si premiere
+        cur = await db.execute(
+            "SELECT MAX(version_num) FROM recipes_index WHERE sid=? AND slug=?",
+            (sid, slug),
+        )
+        row = await cur.fetchone()
+        next_v = (row[0] or 0) + 1
+        cur = await db.execute(
+            """INSERT INTO recipes_index
+               (sid, slug, sha, previous_sha, version_num, owner, name,
+                description, format, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)""",
+            (sid, slug, sha, previous_sha or None, next_v, owner,
+             name or slug, description, fmt, int(time.time())),
+        )
+        await db.commit()
+        return cur.lastrowid or 0
+
+
+async def recipe_index_get_latest(sid: str, slug: str) -> dict | None:
+    """Retourne la derniere version active d'une recipe (None si absente)."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """SELECT * FROM recipes_index
+               WHERE sid=? AND slug=? AND status='active'
+               ORDER BY version_num DESC LIMIT 1""",
+            (sid, slug),
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+
+async def recipe_index_list(sid: str) -> list[dict]:
+    """Liste les recipes actives d'une etude (latest version uniquement)."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """SELECT r1.* FROM recipes_index r1
+               INNER JOIN (
+                   SELECT sid, slug, MAX(version_num) AS max_v
+                   FROM recipes_index
+                   WHERE sid=? AND status='active'
+                   GROUP BY sid, slug
+               ) r2 ON r1.sid=r2.sid AND r1.slug=r2.slug AND r1.version_num=r2.max_v
+               ORDER BY r1.created_at DESC""",
+            (sid,),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def recipe_index_history(sid: str, slug: str) -> list[dict]:
+    """Toutes les versions (actives + archivees) d'une recipe, plus recent d'abord."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """SELECT * FROM recipes_index
+               WHERE sid=? AND slug=?
+               ORDER BY version_num DESC""",
+            (sid, slug),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def recipe_index_archive(sid: str, slug: str) -> int:
+    """Soft delete : marque toutes les versions de (sid, slug) comme archived.
+
+    Pattern Q4 audit : on conserve l'historique pour audit + possibilite de
+    restauration. Le fichier sur PVC est renomme `.archived.<ts>` par
+    delete_recipe_pod_code (cf. studies.py:save_recipe_pod_code).
+    """
+    async with aiosqlite.connect(_DB_PATH) as db:
+        cur = await db.execute(
+            "UPDATE recipes_index SET status='archived' WHERE sid=? AND slug=?",
+            (sid, slug),
+        )
+        await db.commit()
+        return cur.rowcount
+
+
+async def recipe_index_mark_published(
+    sid: str, slug: str, version_num: int, public_url: str
+) -> None:
+    """Note qu'une version a ete publiee S3 (lien public_url)."""
+    import time
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            """UPDATE recipes_index
+               SET published_at=?, public_url=?
+               WHERE sid=? AND slug=? AND version_num=?""",
+            (int(time.time()), public_url, sid, slug, version_num),
+        )
+        await db.commit()
+
+
 async def get_or_create_default(owner: str, profile: str = "standard") -> dict:
     """
     Récupère l'étude active de l'user, sinon en crée une par défaut.
@@ -256,6 +398,120 @@ def study_treatments_path(sid: str) -> str:
 
 def study_exports_dir(sid: str) -> str:
     return f"/data/studies/{sid}/exports"
+
+
+def study_recipes_dir(sid: str) -> str:
+    """V1.5 Sprint 1 : dossier recipes user de l'etude sur le PVC workspace."""
+    return f"/data/studies/{sid}/recipes"
+
+
+# ── Helpers recipes pod-side (V1.5 Sprint 1) ──────────────────────────────────
+# Pattern : clone de init_pod_layout_code, generent du code Python a executer
+# cote pod workspace via execute_python. Le pod a un acces direct au PVC, donc
+# read/write/list/delete = primitives Path simples + markers stdout pour
+# remonter le resultat au hub via le bridge UNIX socket.
+
+def save_recipe_pod_code(sid: str, slug: str, content: str, fmt: str = "yaml") -> str:
+    """Code Python pour ecrire une recipe user sur le PVC workspace.
+
+    Le content est inject literal via repr -> safe contre injection (Python
+    parse une seule string, pas d'eval). Cree le dossier recipes/ si absent.
+    Retourne le SHA256 du contenu via marker stdout pour audit hub-side.
+    """
+    return f"""
+from pathlib import Path
+import hashlib
+sid = {sid!r}
+slug = {slug!r}
+fmt = {fmt!r}
+content = {content!r}
+recipes_dir = Path(f"/data/studies/{{sid}}/recipes")
+recipes_dir.mkdir(parents=True, exist_ok=True)
+# Strip extensions parasites du slug (safety)
+clean_slug = slug.replace("/", "_").replace("..", "_")
+target = recipes_dir / f"{{clean_slug}}.{{fmt}}"
+target.write_text(content, encoding="utf-8")
+sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
+print(f"RECIPE_SAVE_OK sid={{sid}} slug={{clean_slug}} fmt={{fmt}} sha={{sha}} path={{target}}")
+"""
+
+
+def read_recipe_pod_code(sid: str, slug: str) -> str:
+    """Code Python pour lire une recipe user depuis le PVC workspace.
+
+    Cherche .yaml puis .yml puis .json (priorite YAML cote user). Retourne le
+    contenu encode base64 via marker stdout (pour eviter probleme escape multi-
+    ligne dans la lecture stdout JSON cote hub). Le hub decode + retourne au
+    client.
+    """
+    return f"""
+from pathlib import Path
+import base64
+sid = {sid!r}
+slug = {slug!r}
+recipes_dir = Path(f"/data/studies/{{sid}}/recipes")
+found = None
+for ext in (".yaml", ".yml", ".json"):
+    candidate = recipes_dir / f"{{slug}}{{ext}}"
+    if candidate.exists():
+        found = candidate
+        break
+if found is None:
+    print(f"RECIPE_READ_NOT_FOUND sid={{sid}} slug={{slug}}")
+else:
+    content = found.read_text(encoding="utf-8")
+    b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    print(f"RECIPE_READ_OK sid={{sid}} slug={{slug}} fmt={{found.suffix.lstrip('.')}} b64={{b64}}")
+"""
+
+
+def list_recipes_pod_code(sid: str) -> str:
+    """Code Python pour lister les recipes user d'une etude (PVC)."""
+    return f"""
+from pathlib import Path
+import json, hashlib
+sid = {sid!r}
+recipes_dir = Path(f"/data/studies/{{sid}}/recipes")
+out = []
+if recipes_dir.is_dir():
+    for ext in ("*.yaml", "*.yml", "*.json"):
+        for p in sorted(recipes_dir.glob(ext)):
+            try:
+                content = p.read_text(encoding="utf-8")
+                out.append({{
+                    "slug": p.stem,
+                    "format": p.suffix.lstrip("."),
+                    "size": len(content),
+                    "sha": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                }})
+            except Exception:
+                pass
+print("RECIPE_LIST_OK " + json.dumps(out, ensure_ascii=False))
+"""
+
+
+def delete_recipe_pod_code(sid: str, slug: str) -> str:
+    """Code Python pour supprimer une recipe user sur le PVC workspace.
+
+    Soft delete : on renomme en `{slug}.archived.{ext}` plutot que rm direct,
+    permet restauration manuelle si besoin (audit trail).
+    """
+    return f"""
+from pathlib import Path
+import time
+sid = {sid!r}
+slug = {slug!r}
+recipes_dir = Path(f"/data/studies/{{sid}}/recipes")
+removed = []
+for ext in (".yaml", ".yml", ".json"):
+    p = recipes_dir / f"{{slug}}{{ext}}"
+    if p.exists():
+        ts = int(time.time())
+        archived = recipes_dir / f"{{slug}}.archived.{{ts}}{{ext}}"
+        p.rename(archived)
+        removed.append(str(archived))
+print(f"RECIPE_DELETE_OK sid={{sid}} slug={{slug}} archived={{removed}}")
+"""
 
 
 def init_pod_layout_code(sid: str, name: str, profile: str) -> str:
@@ -297,6 +553,21 @@ from pathlib import Path
 sid = {sid!r}
 Path("/data/.active_study").write_text(sid, encoding="utf-8")
 print(f"ACTIVE_STUDY={{sid}}")
+
+# V1.5 Sprint 1 : symlink /data/studies/active/recipes -> {{sid}}/recipes
+# pour que BigQgisMCP qgis_bridge.py voie les recipes user de l'etude active
+# via USER_RECIPES_DIR=/data/studies/active/recipes (env injected via STS
+# extra_env). Le symlink est re-cree a chaque activation -> follow study switch.
+try:
+    recipes_dir = Path(f"/data/studies/{{sid}}/recipes")
+    recipes_dir.mkdir(parents=True, exist_ok=True)
+    active_link = Path("/data/studies/active")
+    if active_link.is_symlink() or active_link.exists():
+        active_link.unlink(missing_ok=True)
+    active_link.symlink_to(f"/data/studies/{{sid}}")
+    print(f"ACTIVE_STUDY_SYMLINK ok -> {{sid}}")
+except Exception as e:
+    print(f"ACTIVE_STUDY_SYMLINK warn: {{e}}")
 
 qgz = Path(f"/data/studies/{{sid}}/project.qgz")
 

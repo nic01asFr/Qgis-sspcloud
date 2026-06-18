@@ -2438,6 +2438,216 @@ print("<<<TREATMENTS>>>" + json.dumps(out) + "<<<END>>>")
     return _json.loads(stdout[start + len("<<<TREATMENTS>>>"):end])
 
 
+# ── V1.5 Sprint 1 : Recipes CRUD endpoints ───────────────────────────────────
+# Pattern : SQLite hub track metadata + versioning SHA (recipes_index).
+#           Contenu YAML/JSON vit sur le PVC workspace `/data/studies/{sid}/recipes/`.
+#           Hub <-> Pod via execute_python + markers stdout (clone pattern
+#           treatments). Cf. studies.py:save_recipe_pod_code & co.
+# Endpoints :
+#   GET    /studies/{sid}/recipes                  - liste les recipes actives
+#   GET    /studies/{sid}/recipes/{slug}            - lit le contenu YAML/JSON
+#   PUT    /studies/{sid}/recipes/{slug}            - save (create ou update -> +version)
+#   DELETE /studies/{sid}/recipes/{slug}            - soft delete (archive)
+#   GET    /studies/{sid}/recipes/{slug}/history    - toutes les versions
+
+def _parse_recipe_save_marker(stdout: str) -> dict:
+    """Parse `RECIPE_SAVE_OK sid=... slug=... fmt=... sha=... path=...`."""
+    for line in stdout.splitlines():
+        if line.startswith("RECIPE_SAVE_OK"):
+            parts = dict(p.split("=", 1) for p in line.split()[1:] if "=" in p)
+            return parts
+    return {}
+
+
+def _parse_recipe_read_marker(stdout: str) -> dict:
+    """Parse `RECIPE_READ_OK sid=... slug=... fmt=... b64=...` ou NOT_FOUND."""
+    import base64
+    for line in stdout.splitlines():
+        if line.startswith("RECIPE_READ_NOT_FOUND"):
+            return {"found": False}
+        if line.startswith("RECIPE_READ_OK"):
+            parts = dict(p.split("=", 1) for p in line.split()[1:] if "=" in p)
+            if "b64" in parts:
+                try:
+                    parts["content"] = base64.b64decode(parts["b64"]).decode("utf-8")
+                except Exception:
+                    parts["content"] = ""
+            return {"found": True, **parts}
+    return {"found": False}
+
+
+def _parse_recipe_list_marker(stdout: str) -> list[dict]:
+    """Parse `RECIPE_LIST_OK <json_array>`."""
+    import json as _json
+    for line in stdout.splitlines():
+        if line.startswith("RECIPE_LIST_OK"):
+            payload = line[len("RECIPE_LIST_OK"):].strip()
+            try:
+                return _json.loads(payload)
+            except Exception:
+                return []
+    return []
+
+
+@app.get("/studies/{sid}/recipes")
+async def list_study_recipes(
+    sid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Liste les recipes user d'une etude (latest version uniquement).
+
+    Croise PVC (source de verite contenu) + DB hub (metadata + versioning).
+    Si une recipe est sur PVC mais pas en DB (legacy / restore manuel), on
+    l'ajoute quand meme avec `source: pvc_only` pour ne pas masquer.
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Etude introuvable")
+    # DB : recipes indexees
+    db_rows = await studies.recipe_index_list(sid)
+    db_by_slug = {r["slug"]: r for r in db_rows}
+    # PVC : recipes sur le PVC workspace
+    code = studies.list_recipes_pod_code(sid)
+    stdout = await _execute_python_in_workspace(user["username"], code)
+    pvc_files = _parse_recipe_list_marker(stdout)
+    pvc_by_slug = {f["slug"]: f for f in pvc_files}
+    # Merge (PVC autoritatif sur la presence ; DB sur les metadata)
+    result = []
+    for slug, pvc in pvc_by_slug.items():
+        meta = db_by_slug.get(slug, {})
+        result.append({
+            "slug": slug,
+            "format": pvc.get("format", "yaml"),
+            "size": pvc.get("size", 0),
+            "sha": pvc.get("sha", ""),
+            "name": meta.get("name") or slug,
+            "description": meta.get("description") or "",
+            "version_num": meta.get("version_num", 0),
+            "published_at": meta.get("published_at"),
+            "public_url": meta.get("public_url"),
+            "indexed": slug in db_by_slug,
+        })
+    return {"recipes": result, "count": len(result)}
+
+
+@app.get("/studies/{sid}/recipes/{slug}")
+async def get_study_recipe(
+    sid: str,
+    slug: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Lit le contenu d'une recipe user (YAML ou JSON brut)."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Etude introuvable")
+    code = studies.read_recipe_pod_code(sid, slug)
+    stdout = await _execute_python_in_workspace(user["username"], code)
+    parsed = _parse_recipe_read_marker(stdout)
+    if not parsed.get("found"):
+        raise HTTPException(404, f"Recipe '{slug}' introuvable dans l'etude {sid}")
+    meta = await studies.recipe_index_get_latest(sid, slug)
+    return {
+        "slug": slug,
+        "format": parsed.get("fmt", "yaml"),
+        "content": parsed.get("content", ""),
+        "version_num": meta["version_num"] if meta else 0,
+        "sha": meta["sha"] if meta else "",
+        "name": meta["name"] if meta else slug,
+        "description": meta["description"] if meta else "",
+        "published_at": meta["published_at"] if meta else None,
+        "public_url": meta["public_url"] if meta else None,
+    }
+
+
+@app.get("/studies/{sid}/recipes/{slug}/history")
+async def get_study_recipe_history(
+    sid: str,
+    slug: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Toutes les versions historiques d'une recipe (audit trail)."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Etude introuvable")
+    rows = await studies.recipe_index_history(sid, slug)
+    return {"versions": rows, "count": len(rows)}
+
+
+@app.put("/studies/{sid}/recipes/{slug}")
+async def save_study_recipe(
+    sid: str,
+    slug: str,
+    payload: dict,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Cree ou update une recipe user (chaque save = nouvelle version_num).
+
+    Body : {"content": "<yaml string>", "format": "yaml|json",
+            "name": "...", "description": "..."}
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Etude introuvable")
+    content = (payload.get("content") or "").strip()
+    if not content:
+        raise HTTPException(400, "Body champ 'content' obligatoire")
+    fmt = payload.get("format", "yaml").lower()
+    if fmt not in ("yaml", "json"):
+        raise HTTPException(400, "format doit etre 'yaml' ou 'json'")
+    # Save sur PVC (recupere le SHA via marker)
+    code = studies.save_recipe_pod_code(sid, slug, content, fmt)
+    stdout = await _execute_python_in_workspace(user["username"], code)
+    marker = _parse_recipe_save_marker(stdout)
+    sha = marker.get("sha", "")
+    if not sha:
+        raise HTTPException(500, f"Save recipe foire (marker absent): {stdout[:200]}")
+    # Index en DB (versioning incremental)
+    previous = await studies.recipe_index_get_latest(sid, slug)
+    rowid = await studies.recipe_index_insert(
+        sid=sid, slug=slug, sha=sha, owner=user["username"],
+        name=payload.get("name", "") or slug,
+        description=payload.get("description", "") or "",
+        fmt=fmt,
+        previous_sha=previous["sha"] if previous else "",
+    )
+    latest = await studies.recipe_index_get_latest(sid, slug)
+    return {
+        "slug": slug,
+        "sha": sha,
+        "version_num": latest["version_num"] if latest else 1,
+        "rowid": rowid,
+        "format": fmt,
+    }
+
+
+@app.delete("/studies/{sid}/recipes/{slug}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_study_recipe(
+    sid: str,
+    slug: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Soft delete : archive sur PVC (rename .archived.ts) + status='archived' en DB."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Etude introuvable")
+    # PVC : rename fichier en .archived.ts
+    code = studies.delete_recipe_pod_code(sid, slug)
+    await _execute_python_in_workspace(user["username"], code)
+    # DB : marque toutes les versions en archived
+    await studies.recipe_index_archive(sid, slug)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.get("/published/{owner}/{slug}")
 @app.get("/published/{owner}/{kind}/{slug}")
 async def serve_published(

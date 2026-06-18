@@ -318,6 +318,13 @@ spec:
           value: "/data"
         - name: PYTHONUNBUFFERED
           value: "1"
+        # V1.5 Sprint 1 : recipes user de l'etude active.
+        # `/data/studies/active` est un symlink maintenu par activate_pod_code
+        # (cf. studies.py:activate_pod_code) -> {{active_sid}}. BigQgisMCP
+        # qgis_bridge.py lit cette env (commit 3529d1c) et merge user recipes
+        # avec system recipes /app/recipes dans list_recipes.
+        - name: USER_RECIPES_DIR
+          value: "/data/studies/active/recipes"
         # HUB_API_KEY via Secret namespace-level (jamais inline). Le tool
         # publish_artifact du workspace POST vers {{HUB_URL}}/publish avec
         # cette cle ; en la rattachant au Secret on garantit qu'elle suit
