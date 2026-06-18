@@ -28,6 +28,15 @@ mcp_tools:
     - get_recipe
     - run_recipe
     - save_project
+    # V1.5 Sprint 1 : tools natifs CRUD recipes user (dispatch agent->hub).
+    # Permet a l'agent d'editer/versionner les recettes utilisateur depuis
+    # le chat. La whitelist controle aussi l'exposition au LLM cote agent
+    # (cf. qgis_agent.py:_get_tools).
+    - save_recipe
+    - get_recipe
+    - list_recipes_for_study
+    - delete_recipe
+    - get_recipe_history
 
 # Données de référence pour tester les recettes
 data_sources:

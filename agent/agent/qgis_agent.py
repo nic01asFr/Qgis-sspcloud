@@ -424,9 +424,96 @@ async def _call_mcp_tool(tool_name: str, arguments: dict, username: str = "user"
     return await _maybe_enrich_with_kb_hint(response)
 
 
+async def _resolve_active_sid(username: str) -> str | None:
+    """V1.5 Sprint 1 : resolve le sid de l'etude active de l'user via le hub.
+
+    Utilise par les tools natifs recipes (qui ont besoin du sid pour faire
+    les appels REST /studies/{sid}/recipes/...). Cache pas car l'etude peut
+    changer en cours de session (switch via UI desk).
+    """
+    if not _HUB_URL or not _HUB_KEY:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(
+                f"{_HUB_URL}/studies/active",
+                headers={"Authorization": f"Bearer {_HUB_KEY}"},
+            )
+            if r.status_code != 200:
+                return None
+            data = r.json()
+            return data.get("id")
+    except Exception:
+        return None
+
+
 async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "user") -> str:
-    """Appelle un outil. Court-circuite les outils natifs (mémoire) côté agent
-    avant de tenter le MCP hub QGIS."""
+    """Appelle un outil. Court-circuite les outils natifs (mémoire + recipes
+    user) côté agent avant de tenter le MCP hub QGIS."""
+
+    # V1.5 Sprint 1 : tools natifs recipes -> dispatch hub REST.
+    _RECIPE_TOOLS = {
+        "save_recipe", "get_recipe", "list_recipes_for_study",
+        "delete_recipe", "get_recipe_history",
+    }
+    # NB : on EXCLUT `get_recipe` du dispatch natif si le LLM passe `id` (kwarg
+    # du tool MCP system) au lieu de `slug` -> on retombe sur le MCP normal.
+    if tool_name in _RECIPE_TOOLS and (
+        tool_name != "get_recipe" or "slug" in arguments
+    ):
+        if not _HUB_URL or not _HUB_KEY:
+            return json.dumps({"error": "Hub non configure (recipes user)"})
+        sid = arguments.get("sid") or await _resolve_active_sid(username)
+        if not sid:
+            return json.dumps({"error": "Aucune etude active (cree-en une d'abord)"})
+        slug = arguments.get("slug", "")
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                headers = {"Authorization": f"Bearer {_HUB_KEY}"}
+                if tool_name == "save_recipe":
+                    body = {
+                        "content": arguments.get("content", ""),
+                        "format": arguments.get("format", "yaml"),
+                        "name": arguments.get("name", ""),
+                        "description": arguments.get("description", ""),
+                    }
+                    r = await client.put(
+                        f"{_HUB_URL}/studies/{sid}/recipes/{slug}",
+                        json=body, headers=headers,
+                    )
+                elif tool_name == "get_recipe":
+                    r = await client.get(
+                        f"{_HUB_URL}/studies/{sid}/recipes/{slug}",
+                        headers=headers,
+                    )
+                elif tool_name == "list_recipes_for_study":
+                    r = await client.get(
+                        f"{_HUB_URL}/studies/{sid}/recipes",
+                        headers=headers,
+                    )
+                elif tool_name == "delete_recipe":
+                    r = await client.delete(
+                        f"{_HUB_URL}/studies/{sid}/recipes/{slug}",
+                        headers=headers,
+                    )
+                elif tool_name == "get_recipe_history":
+                    r = await client.get(
+                        f"{_HUB_URL}/studies/{sid}/recipes/{slug}/history",
+                        headers=headers,
+                    )
+                else:
+                    return json.dumps({"error": f"Tool inconnu: {tool_name}"})
+            if r.status_code in (200, 204):
+                if r.status_code == 204:
+                    return json.dumps({"ok": True, "slug": slug, "deleted": True})
+                return r.text  # JSON deja
+            return json.dumps({
+                "error": f"hub {tool_name} HTTP {r.status_code}",
+                "detail": r.text[:300],
+            })
+        except Exception as e:
+            return json.dumps({"error": f"{tool_name} fail: {e}"})
+
     # Outils natifs côté agent — n'appellent pas le hub MCP.
     if tool_name in ("memory_search", "memory_similar"):
         try:
@@ -578,6 +665,127 @@ _MUTATING_TOOLS: frozenset[str] = frozenset({
 })
 
 
+# V1.5 Sprint 1 : tools natifs recipes user (CRUD + list).
+# Pattern : meme dispatch que _NATIVE_MEMORY_TOOLS (court-circuite le hub MCP,
+# mais appelle quand meme le hub via REST `/studies/{sid}/recipes/...`).
+# Le `sid` est resolu automatiquement via /studies/active si absent (l'agent
+# travaille toujours dans l'etude courante du user).
+_NATIVE_RECIPE_TOOLS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "save_recipe",
+            "description": (
+                "Sauvegarde une recette user dans l'etude courante. Premier "
+                "save = creation, save suivant avec meme slug = nouvelle "
+                "version (versioning SHA conserve l'historique). Le contenu "
+                "est du YAML decrivant la recette (id, name, parameters, "
+                "steps[tool, params, code]). Format identique aux recettes "
+                "system mais editable."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {
+                        "type": "string",
+                        "description": "Identifiant court de la recette (ex: 'ma_recette_inondation')",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Contenu YAML complet de la recette.",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Nom affiche dans l'UI (optionnel, fallback slug).",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Description courte de ce que fait la recette (optionnel).",
+                    },
+                    "format": {
+                        "type": "string",
+                        "enum": ["yaml", "json"],
+                        "default": "yaml",
+                    },
+                },
+                "required": ["slug", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_recipe",
+            "description": (
+                "Retourne le contenu YAML d'une recette user de l'etude "
+                "courante. Pour les recettes system (deja embarquees dans "
+                "/app/recipes), utilise plutot le tool MCP `get_recipe`."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string"},
+                },
+                "required": ["slug"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_recipes_for_study",
+            "description": (
+                "Liste les recettes user de l'etude courante (uniquement les "
+                "actives, latest version). Retourne slug, format, sha, "
+                "version_num, name, description. Differe du tool MCP "
+                "`list_recipes` qui liste TOUTES les recipes (system + user) "
+                "vues par le workspace QGIS."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_recipe",
+            "description": (
+                "Soft-delete une recette user (archive). Recuperable en "
+                "consultant l'historique (`get_recipe_history`). Le fichier "
+                "sur le PVC est renomme `.archived.<ts>`, pas supprime."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string"},
+                },
+                "required": ["slug"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_recipe_history",
+            "description": (
+                "Toutes les versions d'une recette (actives + archivees) "
+                "avec leur SHA, version_num, created_at. Utile pour audit "
+                "ou restauration manuelle."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string"},
+                },
+                "required": ["slug"],
+            },
+        },
+    },
+]
+
+
 _NATIVE_MEMORY_TOOLS: list[dict] = [
     {
         "type": "function",
@@ -668,6 +876,13 @@ class QGISAgent:
             # Outils natifs mémoire : exposés à l'agent comme n'importe quel
             # tool MCP. Le dispatch local court-circuite le hub QGIS.
             self._tools_cache.extend(_NATIVE_MEMORY_TOOLS)
+            # V1.5 Sprint 1 : tools natifs recipes user. Dispatch local appelle
+            # le hub REST /studies/{sid}/recipes/... Filtrage cohérent avec le
+            # mcp_tools whitelist du profil : si pas "all" et `save_recipe`
+            # absent de la whitelist, on n'expose pas les recipe tools natifs.
+            whitelist = _get_profile_tools_whitelist(self.profile_id)
+            if whitelist is None or "save_recipe" in whitelist:
+                self._tools_cache.extend(_NATIVE_RECIPE_TOOLS)
         return self._tools_cache
 
     async def set_profile(self, new_profile_id: str) -> None:
