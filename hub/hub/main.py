@@ -3821,6 +3821,145 @@ async def _agent_call(method: str, path: str, **kwargs):
         return await c.request(method, path, **kwargs)
 
 
+# ── V1.5 Sprint 1.3 : proxies /desk/recipes/* pour la UI desk ────────────────
+# Pattern symetrique a /desk/study-files (auth implicite via _ONYXIA_USER +
+# middleware OIDC Phase 0ter qui bloque les strangers). La UI desk dans le
+# browser n'a PAS de cookie hub_api_key (set seulement via /login?key=...),
+# donc on lui offre ces endpoints sans Depends(auth.get_current_user).
+# Logique metier deleguee aux fonctions studies.recipe_index_* (S1.1).
+
+@app.get("/desk/recipes")
+async def desk_recipes_list():
+    """UI desk : liste les recipes user de l'etude active (latest active)."""
+    if not _STUDIES_AVAILABLE:
+        return {"recipes": [], "count": 0}
+    active_sid = await studies.get_active_study_id(_ONYXIA_USER)
+    if not active_sid:
+        return {"recipes": [], "count": 0}
+    db_rows = await studies.recipe_index_list(active_sid)
+    db_by_slug = {r["slug"]: r for r in db_rows}
+    # PVC : best-effort (timeout court), fallback DB-only si workspace endormi
+    try:
+        all_sessions = await sessions.list_sessions(_ONYXIA_USER)
+        if all_sessions and all_sessions[0].get("status") == sessions.SESSION_READY:
+            code = studies.list_recipes_pod_code(active_sid)
+            stdout = await _execute_python_in_workspace(_ONYXIA_USER, code)
+            pvc_files = _parse_recipe_list_marker(stdout)
+            pvc_by_slug = {f["slug"]: f for f in pvc_files}
+        else:
+            pvc_by_slug = {}
+    except Exception:
+        pvc_by_slug = {}
+    # Union DB + PVC (preferer PVC pour size+sha, DB pour name+version)
+    slugs = set(db_by_slug.keys()) | set(pvc_by_slug.keys())
+    result = []
+    for slug in sorted(slugs):
+        meta = db_by_slug.get(slug, {})
+        pvc = pvc_by_slug.get(slug, {})
+        # Si workspace dort : on a juste les meta DB
+        result.append({
+            "slug": slug,
+            "format": pvc.get("format") or meta.get("format", "yaml"),
+            "size": pvc.get("size", 0),
+            "sha": pvc.get("sha") or meta.get("sha", ""),
+            "name": meta.get("name") or slug,
+            "description": meta.get("description") or "",
+            "version_num": meta.get("version_num", 0),
+            "published_at": meta.get("published_at"),
+            "public_url": meta.get("public_url"),
+            "indexed": slug in db_by_slug,
+        })
+    return {"recipes": result, "count": len(result), "sid": active_sid}
+
+
+@app.get("/desk/recipes/{slug}")
+async def desk_recipe_get(slug: str):
+    """UI desk : lit le contenu YAML/JSON d'une recipe user de l'etude active."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    active_sid = await studies.get_active_study_id(_ONYXIA_USER)
+    if not active_sid:
+        raise HTTPException(404, "Aucune etude active")
+    code = studies.read_recipe_pod_code(active_sid, slug)
+    stdout = await _execute_python_in_workspace(_ONYXIA_USER, code)
+    parsed = _parse_recipe_read_marker(stdout)
+    if not parsed.get("found"):
+        raise HTTPException(404, f"Recipe '{slug}' introuvable")
+    meta = await studies.recipe_index_get_latest(active_sid, slug)
+    return {
+        "slug": slug,
+        "format": parsed.get("fmt", "yaml"),
+        "content": parsed.get("content", ""),
+        "version_num": meta["version_num"] if meta else 0,
+        "sha": meta["sha"] if meta else "",
+        "name": meta["name"] if meta else slug,
+        "description": meta["description"] if meta else "",
+    }
+
+
+@app.put("/desk/recipes/{slug}")
+async def desk_recipe_save(slug: str, payload: dict):
+    """UI desk : create/update une recipe user (auto-version)."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    active_sid = await studies.get_active_study_id(_ONYXIA_USER)
+    if not active_sid:
+        raise HTTPException(404, "Aucune etude active")
+    content = (payload.get("content") or "").strip()
+    if not content:
+        raise HTTPException(400, "Body 'content' obligatoire")
+    fmt = payload.get("format", "yaml").lower()
+    if fmt not in ("yaml", "json"):
+        raise HTTPException(400, "format doit etre 'yaml' ou 'json'")
+    code = studies.save_recipe_pod_code(active_sid, slug, content, fmt)
+    stdout = await _execute_python_in_workspace(_ONYXIA_USER, code)
+    marker = _parse_recipe_save_marker(stdout)
+    sha = marker.get("sha", "")
+    if not sha:
+        raise HTTPException(500, f"Save KO: {stdout[:200]}")
+    previous = await studies.recipe_index_get_latest(active_sid, slug)
+    await studies.recipe_index_insert(
+        sid=active_sid, slug=slug, sha=sha, owner=_ONYXIA_USER,
+        name=payload.get("name", "") or slug,
+        description=payload.get("description", "") or "",
+        fmt=fmt,
+        previous_sha=previous["sha"] if previous else "",
+    )
+    latest = await studies.recipe_index_get_latest(active_sid, slug)
+    return {
+        "slug": slug,
+        "sha": sha,
+        "version_num": latest["version_num"] if latest else 1,
+        "format": fmt,
+    }
+
+
+@app.delete("/desk/recipes/{slug}", status_code=status.HTTP_204_NO_CONTENT)
+async def desk_recipe_delete(slug: str):
+    """UI desk : soft-delete une recipe (archive)."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    active_sid = await studies.get_active_study_id(_ONYXIA_USER)
+    if not active_sid:
+        raise HTTPException(404, "Aucune etude active")
+    code = studies.delete_recipe_pod_code(active_sid, slug)
+    await _execute_python_in_workspace(_ONYXIA_USER, code)
+    await studies.recipe_index_archive(active_sid, slug)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/desk/recipes/{slug}/history")
+async def desk_recipe_history(slug: str):
+    """UI desk : toutes les versions d'une recipe."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    active_sid = await studies.get_active_study_id(_ONYXIA_USER)
+    if not active_sid:
+        return {"versions": [], "count": 0}
+    rows = await studies.recipe_index_history(active_sid, slug)
+    return {"versions": rows, "count": len(rows)}
+
+
 @app.get("/desk/study-files")
 async def desk_study_files():
     """Liste les fichiers de l'étude active (data/, exports/, notes.md).
