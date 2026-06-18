@@ -1169,16 +1169,22 @@ async function loadResourceFiles() {
 // envoyé automatiquement, middleware OIDC valide via auth.get_current_user.
 
 let _resRecipesLoaded = false;
-let _activeStudyId = null;  // cache sid, invalidé via switch study event
+// `_activeStudyId` const Jinja injecte au render (L800) peut etre null si le
+// user n'a pas encore choisi d'etude. Fallback dynamique via /studies/active.
+let _cachedActiveSid = null;  // cache sid resolu dynamiquement
 
 async function _getActiveStudyId() {
-  if (_activeStudyId) return _activeStudyId;
+  // Priorite : const Jinja (peut etre null si la page est rendue sans etude)
+  if (typeof _activeStudyId !== 'undefined' && _activeStudyId) {
+    return _activeStudyId;
+  }
+  if (_cachedActiveSid) return _cachedActiveSid;
   try {
     const r = await fetch('/studies/active', { credentials: 'include' });
     if (!r.ok) return null;
     const d = await r.json();
-    _activeStudyId = d.id || null;
-    return _activeStudyId;
+    _cachedActiveSid = d.id || null;
+    return _cachedActiveSid;
   } catch (e) { return null; }
 }
 
