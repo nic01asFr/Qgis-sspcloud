@@ -468,6 +468,17 @@ _OIDC_MIDDLEWARE_INTER_POD = (
     "/api/admin",               # actions admin (ADMIN_TOKEN ou HUB_API_KEY)
     "/api/reload-llm-key",      # webhook portail
     "/api/reload-hub-key",      # webhook futur (Mini-Phase 0bis)
+    # Fix consolidation 2026-06-19 : /studies/* doit etre joignable via
+    # Bearer HUB_API_KEY pour :
+    #   - hub self-call /desk/catalog -> /studies/active (sinon footer
+    #     "0 etudes" + dropdown etude vide cote desk.html)
+    #   - agent _resolve_active_sid /studies/active (sinon tool natif
+    #     list_recipes_for_study retourne "aucune etude active" alors
+    #     que l'etude EST active en DB)
+    #   - agent save_recipe dispatch /studies/{sid}/recipes/{slug}
+    # Le Depends(get_current_user) cote endpoints continue de valider le
+    # Bearer + extraire l'identite -> meme niveau d'auth qu'avant.
+    "/studies",
 )
 
 
