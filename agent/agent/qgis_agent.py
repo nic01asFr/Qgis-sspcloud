@@ -1592,7 +1592,22 @@ ne vient pas d'un outil cette session, la supprimer.
         # Construire les messages
         messages = [{"role": "system", "content": system_prompt}]
         if history:
-            messages.extend(history[-20:])  # derniers 20 messages pour contexte
+            # Fix consolidation 2026-06-19 : strip les data-URLs d'images
+            # AVANT d'envoyer au LLM (image enfle de ~300 KB le contexte).
+            # Le storage SQLite garde les images intactes pour l'affichage
+            # UI (cf. add_message au-dessous). Strip est cible : on ne
+            # touche que les bulles assistant avec markdown image.
+            _IMG_RE = re.compile(r'!\[[^\]]*\]\(data:image/[^)]+\)')
+            history_for_llm = []
+            for msg in history[-20:]:
+                content = msg.get("content", "") or ""
+                if "data:image/" in content:
+                    content = _IMG_RE.sub(
+                        '[image affichée précédemment à l\'utilisateur]',
+                        content,
+                    )
+                history_for_llm.append({**msg, "content": content})
+            messages.extend(history_for_llm)
         messages.append({"role": "user", "content": user_message})
 
         full_response = ""
@@ -2309,17 +2324,19 @@ ne vient pas d'un outil cette session, la supprimer.
                 full_response,
             )
 
-        # Sauvegarder la réponse complète en mémoire. Les data-URLs d'images
-        # sont stripées de l'historique persisté : sinon, au turn N+1, le
-        # contexte LLM enfle de ~300 KB par screenshot et casse le modèle.
-        # L'utilisateur ne perd rien — l'image est dans la bulle DOM courante.
-        full_response_safe = re.sub(
-            r'!\[[^\]]*\]\(data:image/[^)]+\)',
-            '[image affichée précédemment à l\'utilisateur]',
-            full_response,
-        )
+        # Sauvegarder la réponse complète AVEC les images en memoire SQLite.
+        #
+        # Fix consolidation 2026-06-19 : on garde les data-URLs d'images dans
+        # la persistance pour que l'utilisateur les revoie au reload de la
+        # page (avant : le strip au WRITE faisait perdre les screenshots a
+        # la reouverture de session).
+        #
+        # Le strip pour eviter l'enflure du contexte LLM (300 KB/screenshot)
+        # est deplace dans le chargement de l'historique pour le LLM (cf.
+        # _strip_images_from_history). DB grossit un peu mais user voit ses
+        # screenshots persistes -> compromis acceptable (image ~300 KB jpeg).
         await memory.add_message(
-            self.session_id, "assistant", full_response_safe,
+            self.session_id, "assistant", full_response,
             tool_calls=tool_calls_made if tool_calls_made else None
         )
 
