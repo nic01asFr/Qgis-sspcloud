@@ -125,6 +125,16 @@ _AGENT_INTER_POD_ROUTES = (
     "/api/reload-llm-key",
     "/api/refresh-llm-config",
     "/api/refresh-profiles",
+    # Fix consolidation 2026-06-19 : ajout routes /user/* et /memory/*
+    # appelees par le hub via _agent_call (cf. hub main.py:_agent_call).
+    # Sans whitelist, le middleware OIDC agent bloque -> /desk/memory
+    # retourne body vide -> UI desk Memoire pane affiche "Chargement..."
+    # indefiniment + sections editables manquantes (identity, zones, data,
+    # methods, tools, vocabulary).
+    # Le check Bearer HUB_API_KEY (presented == os.environ['HUB_API_KEY'])
+    # garantit que seul le hub legitime passe (idem cote hub).
+    "/user",          # /user/memory, /user/preferences, /user/insights
+    "/memory",        # /memory/context, /memory/extract_insights, etc.
 )
 
 _JWKS_CACHE = None

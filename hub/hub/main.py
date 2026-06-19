@@ -3816,9 +3816,19 @@ async def desk_save_study(sid: str):
 # ── Proxy mémoire vers l'agent IA ─────────────────────────────────────────────
 
 async def _agent_call(method: str, path: str, **kwargs):
-    """Proxifie un appel vers le pod agent IA."""
+    """Proxifie un appel vers le pod agent IA.
+
+    Fix consolidation 2026-06-19 : ajoute Authorization Bearer HUB_API_KEY
+    pour que le middleware OIDC agent (Phase 0ter Steps 7-8) autorise via
+    sa whitelist inter-pod. Sans cela, les calls /desk/memory etc.
+    retournent 401 silencieux -> panneau Memoire UI affiche "Chargement..."
+    indefiniment puis sections editables manquantes.
+    """
+    api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+    headers = dict(kwargs.pop("headers", {}) or {})
+    headers.setdefault("Authorization", f"Bearer {api_key}")
     async with httpx.AsyncClient(timeout=10, base_url=_AGENT_URL or "http://127.0.0.1:8100") as c:
-        return await c.request(method, path, **kwargs)
+        return await c.request(method, path, headers=headers, **kwargs)
 
 
 # ── V1.5 Sprint 1.3 : proxies /desk/recipes/* pour la UI desk ────────────────
