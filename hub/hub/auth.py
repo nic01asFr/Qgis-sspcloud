@@ -479,6 +479,12 @@ _OIDC_MIDDLEWARE_INTER_POD = (
     # Le Depends(get_current_user) cote endpoints continue de valider le
     # Bearer + extraire l'identite -> meme niveau d'auth qu'avant.
     "/studies",
+    # Memes raisons : self-calls hub->hub identifies en audit grep
+    # (cf. main.py:3630, 4104, 1067 etc.) -> sans whitelist, les
+    # catalog/list, sessions/create, wake echouent silencieusement.
+    "/catalog",                 # hub -> hub catalog S3 listing
+    "/sessions",                # hub -> hub list/create sessions workspace
+    "/workspace/wake",          # hub -> hub wake workspace (api/start-study)
 )
 
 
