@@ -488,14 +488,33 @@ _OIDC_MIDDLEWARE_INTER_POD = (
 )
 
 
-def _is_inter_pod_authorized(request: "Request") -> bool:
-    """True si la requête vient d'un pod interne avec Bearer HUB_API_KEY valide."""
-    import os
+async def _is_inter_pod_authorized(request: "Request") -> bool:
+    """True si la requête vient d'un pod interne avec Bearer HUB_API_KEY valide.
+
+    Fix 2026-06-19 : compare contre la SOURCE DE VERITE (Secret K8s
+    qgis-hub-apikey) au lieu de os.environ qui peut etre vide ou stale
+    si la cle a rotate apres le boot du pod. Utilise le helper
+    `create_or_get_api_key` qui cache la valeur in-memory + relit Secret
+    si TTL expire (cf. _CACHE_TTL ligne 56). Sans ce fix, les self-calls
+    hub->hub avec Bearer HUB_API_KEY etaient rejetes silencieusement par
+    le middleware OIDC (alors meme que la route etait whitelist).
+    """
     auth_header = request.headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
         return False
     presented = auth_header.removeprefix("Bearer ").strip()
-    expected = os.environ.get("HUB_API_KEY", "")
+    if not presented:
+        return False
+    # Source de verite : Secret K8s qgis-hub-apikey via cache create_or_get_api_key.
+    # `_NAMESPACE` correspond a `user-<ONYXIA_USER>` -> removeprefix donne le user.
+    try:
+        expected = await create_or_get_api_key(
+            _NAMESPACE.removeprefix("user-") if _NAMESPACE else ""
+        )
+    except Exception:
+        # Fallback env var (compat ascendante si Secret K8s indisponible)
+        import os
+        expected = os.environ.get("HUB_API_KEY", "")
     return bool(expected) and presented == expected
 
 
@@ -537,7 +556,7 @@ async def oidc_auth_middleware(request: "Request", call_next):
 
     # 3. Routes inter-pod avec Bearer HUB_API_KEY
     if any(path == p or path.startswith(p + "/") for p in _OIDC_MIDDLEWARE_INTER_POD):
-        if _is_inter_pod_authorized(request):
+        if await _is_inter_pod_authorized(request):
             return await call_next(request)
         # Sinon on tombe sur le check OIDC ci-dessous (fallback UI)
 
