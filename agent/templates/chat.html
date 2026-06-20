@@ -309,7 +309,12 @@ body.embed .chat-toolbar{padding:6px 10px;font-size:11.5px}
 body.embed .msg .bubble{max-width:100%;overflow-wrap:anywhere}
 body.embed .msg .bubble pre{max-width:100%}
 
-@media(max-width:880px){
+/* Sprint UX-1 (2026-06-20) : seuil mobile abaisse de 880 a 700px.
+   880 cachait la sidebar sur des viewports tablettes/laptops moyens
+   (851px observe en consolidation) -> sidebar SUGGESTIONS + SESSIONS
+   RECENTES invisible alors qu'elle est utile. 700px = breakpoint
+   tablette portrait reel. Au-dessus : sidebar toujours visible. */
+@media(max-width:700px){
   .chat-app{grid-template-columns:1fr}
   .chat-sidebar{display:none}
 }
@@ -323,15 +328,58 @@ body.embed .msg .bubble pre{max-width:100%}
     <div class="fr-header__logo"><p class="fr-logo">République<br>Française</p></div>
     <div class="fr-header__operator">
       <p style="font-weight:700;font-size:14px;color:#000091">CEREMA</p>
-      <p style="font-size:10px;color:#666">QGIS Agent</p>
+      {# Sprint UX-1 (2026-06-20) : harmonisation wording avec workspace.html
+         operator (QGIS Service). Avant : 'QGIS Agent' incoherent vs workspace. #}
+      <p style="font-size:10px;color:#666">QGIS Service</p>
     </div>
   </div>
   <div class="fr-header__service">
-    <a href="/"><p class="fr-header__service-title">Agent QGIS — Chat</p></a>
+    {# Sprint UX-1 (2026-06-20) : titre 'Agent IA - Chat' coherent avec
+       l'onglet de navigation 'Agent IA seul'. Avant : 'Agent QGIS - Chat'. #}
+    <a href="/"><p class="fr-header__service-title">Agent IA — Chat</p></a>
     <p class="fr-header__service-tagline">Analyse géospatiale assistée par IA</p>
   </div></div>
 </div></div></div>
 </header>
+
+{# Sprint UX-1 (2026-06-20) : Menu de navigation global identique au hub
+   (workspace + desk). Cache en mode embed (iframe dans /desk) car la
+   nav est deja faite par le hub parent. #}
+<nav class="qgis-nav" role="navigation" aria-label="Navigation principale">
+  <div class="qgis-nav-inner">
+    <a href="{{ hub_url ~ '/workspace' if hub_url else '#' }}" class="qgis-nav-tab" data-route="workspace">
+      🏠 <span>Mon espace</span>
+    </a>
+    <a href="{{ hub_url ~ '/desk' if hub_url else '#' }}" class="qgis-nav-tab" data-route="desk">
+      🛠 <span>Bureau de travail</span>
+    </a>
+    <a href="/" class="qgis-nav-tab" data-route="agent">
+      💬 <span>Agent IA seul</span>
+    </a>
+  </div>
+</nav>
+<style>
+.qgis-nav{background:#fff;border-bottom:1px solid var(--border-default-grey);
+  position:sticky;top:0;z-index:25}
+.qgis-nav-inner{max-width:1200px;margin:0 auto;display:flex;gap:4px;
+  padding:4px 16px;overflow-x:auto}
+.qgis-nav-tab{display:inline-flex;align-items:center;gap:6px;
+  padding:8px 14px;font-size:13px;font-weight:500;
+  color:var(--text-default-grey);text-decoration:none;
+  border-radius:4px 4px 0 0;border-bottom:2px solid transparent;
+  white-space:nowrap;transition:background .15s,border-color .15s}
+.qgis-nav-tab:hover{background:var(--background-alt-grey)}
+.qgis-nav-tab.active{color:var(--text-action-high-blue-france);
+  border-bottom-color:currentColor;font-weight:700}
+body.embed .qgis-nav{display:none}
+</style>
+<script>
+(function(){
+  /* Detection route active : page agent standalone -> 'agent' */
+  var tab = document.querySelector('.qgis-nav-tab[data-route="agent"]');
+  if (tab) tab.classList.add('active');
+})();
+</script>
 
 <div class="chat-app">
 

@@ -61,6 +61,51 @@
 </div></div></div>
 </header>
 
+{# Sprint UX-1 (2026-06-20) : Menu de navigation global persistant sur les
+   3 vues (workspace, desk, agent). Donne a l'user une vue d'ensemble du
+   service + permet de basculer entre vues en 1 click. JS detecte la
+   route active pour highlight l'onglet courant. #}
+<nav class="qgis-nav" role="navigation" aria-label="Navigation principale">
+  <div class="qgis-nav-inner">
+    <a href="/workspace" class="qgis-nav-tab" data-route="workspace">
+      🏠 <span>Mon espace</span>
+    </a>
+    <a href="/desk" class="qgis-nav-tab" data-route="desk">
+      🛠 <span>Bureau de travail</span>
+    </a>
+    <a href="{{ agent_url }}" target="_blank" rel="noopener" class="qgis-nav-tab" data-route="agent">
+      💬 <span>Agent IA seul</span>
+      <span style="font-size:10px;opacity:.6;margin-left:2px">↗</span>
+    </a>
+  </div>
+</nav>
+<style>
+.qgis-nav{background:#fff;border-bottom:1px solid var(--border-default-grey);
+  position:sticky;top:0;z-index:25}
+.qgis-nav-inner{max-width:1200px;margin:0 auto;display:flex;gap:4px;
+  padding:4px 16px;overflow-x:auto}
+.qgis-nav-tab{display:inline-flex;align-items:center;gap:6px;
+  padding:8px 14px;font-size:13px;font-weight:500;
+  color:var(--text-default-grey);text-decoration:none;
+  border-radius:4px 4px 0 0;border-bottom:2px solid transparent;
+  white-space:nowrap;transition:background .15s,border-color .15s}
+.qgis-nav-tab:hover{background:var(--background-alt-grey)}
+.qgis-nav-tab.active{color:var(--text-action-high-blue-france);
+  border-bottom-color:currentColor;font-weight:700}
+</style>
+<script>
+(function(){
+  var path = location.pathname;
+  document.querySelectorAll('.qgis-nav-tab[data-route]').forEach(function(a){
+    var r = a.dataset.route;
+    if ((r==='workspace' && path.startsWith('/workspace')) ||
+        (r==='desk' && path.startsWith('/desk'))) {
+      a.classList.add('active');
+    }
+  });
+})();
+</script>
+
 <main role="main">
 <section class="fr-py-6w">
 <div class="fr-container">
@@ -138,10 +183,15 @@
          calcule cote serveur, plus expose comme axe de choix user. #}
       <div class="study-actions">
         {% if s.id == active_study_id %}
-        <!-- Action principale : ouvrir le bureau sur cette etude (deja active). -->
-        <a href="/desk" class="fr-btn fr-btn--sm" style="font-weight:700">
-          Ouvrir le bureau →
-        </a>
+        {# Sprint UX-1 (2026-06-20) : Le bouton "Ouvrir le bureau" sur la
+           card de l'etude ACTIVE faisait doublon avec le gros CTA principal
+           "Continuer mon travail sur «{nom}»" en haut de page (L89).
+           L'user voit le badge ACTIVE -> il sait que l'action principale
+           est celle du haut. Ici on garde juste les actions secondaires
+           (ZIP, Archiver) + un label informatif. #}
+        <span class="fr-text--sm" style="color:var(--text-mention-grey);font-style:italic;align-self:center">
+          ↑ ouverte dans le bureau
+        </span>
         {% else %}
         <!-- Carte non active : "Ouvrir" active + redirige en un seul POST. -->
         <form method="POST" action="/workspace/study/{{ s.id }}/activate?return_to=desk"
@@ -256,7 +306,18 @@
   {% else %}
   <div class="empty-state">
     <span class="icon">📦</span>
-    <p>Aucune publication. Crée une storymap ou un flux pour qu'elle apparaisse ici.</p>
+    <p>Aucune publication pour l'instant.</p>
+    {# Sprint UX-1 (2026-06-20) : CTA actionable au lieu de juste un texte
+       descriptif. Guide l'user vers /desk pour demander a l'agent. #}
+    <p style="margin-top:14px">
+      <a href="/desk" class="fr-btn fr-btn--sm fr-btn--secondary">
+        🤖 Demander à l'agent IA de créer une storymap →
+      </a>
+    </p>
+    <p style="margin-top:8px;font-size:0.85rem;color:var(--text-mention-grey)">
+      Astuce : dans le bureau, demande à l'agent « publie une storymap
+      pour mon étude » ou « crée un PDF du projet ».
+    </p>
   </div>
   {% endif %}
 
