@@ -808,8 +808,15 @@ async def chat(
                 yield f"data: {json.dumps({'text': chunk})}\n\n"
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
-            log.error("Erreur chat: %s", e, exc_info=True)
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            # Fix consolidation 2026-06-20 : str(e) etait parfois vide
+            # (httpx.RemoteProtocolError sans message, ValueError() etc.) ->
+            # UI bloquee sur "Analyse en cours..." indefiniment, user
+            # confondait avec hang infini. On ajoute class name + traceback
+            # short pour avoir au moins 1 info utile cote browser.
+            err_class = type(e).__name__
+            err_msg = str(e) or f"{err_class} (no message)"
+            log.error("Erreur chat (%s): %s", err_class, e, exc_info=True)
+            yield f"data: {json.dumps({'error': err_msg, 'error_class': err_class})}\n\n"
 
     return StreamingResponse(
         event_stream(),
