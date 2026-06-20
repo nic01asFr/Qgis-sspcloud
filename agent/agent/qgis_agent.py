@@ -50,19 +50,107 @@ def _llm_api_key() -> str:
 # qwen3-6-35b-moe : function calling natif + thinking separe (reasoning_content)
 #   → optimal pour agentique (appelle les tools direct au lieu d'expliquer).
 #   Down SSPCloud 2026-06-09 -> 2026-06-12 (~3 jours), retabli avec
-#   system_fingerprint=vllm-0.22.0. Restaure comme default (re-test 2026-06-12).
+#   system_fingerprint=vllm-0.22.0. RE-DOWN 2026-06-20 (recurrence).
 # gemma4-26b-moe  : vision base64 natif + chat + function calling.
 #   Reste optimal pour validation images GeoAI (profil geoai_analyst).
 #   Moins agressif sur tool_calls que qwen3 -> tend a narrer ("je vais X")
-#   au lieu d'agir. Acceptable fallback chat si qwen3 down.
+#   au lieu d'agir. Fallback chat fiable historiquement.
+# qwen3-vl        : multi-modal (vision + chat), nouveau modele SSPCloud
+#   apparu 2026-06-18. A tester pour upgrade fonctionnalites.
 # Override possible via env LLM_MODEL (kubectl set env sts/qgis-agent LLM_MODEL=...).
-# Backlog : discovery dynamique au boot (~30 LOC) pour basculer auto si rotation.
 _MODEL_BY_PROFILE = {
     "geoai_analyst": "gemma4-26b-moe",     # vision pour validation détections
     "default":       "qwen3-6-35b-moe",    # function calling natif, agentique
 }
 
+# Liste de fallback ordonnee (preferences -> degraded) pour discovery dynamique.
+# Si le 1er modele du profil est DOWN, on bascule auto sur le suivant. Pattern
+# documente en memoire incident 2026-06-20 (2eme recurrence qwen3 DOWN en 11
+# jours -> rotations SSPCloud frequentes, rollback manuel kubectl set env
+# devenait friction operationnelle).
+_MODEL_FALLBACKS = {
+    "default":       ["qwen3-6-35b-moe", "gemma4-26b-moe"],
+    "geoai_analyst": ["gemma4-26b-moe", "qwen3-vl"],  # qwen3-vl fallback vision
+}
+
+# Cache du modele resolu, TTL court (5 min). Permet de re-tester un modele
+# preferred apres une rotation SSPCloud sans restart pod.
+_MODEL_CACHE: dict[str, tuple[str, float]] = {}
+_MODEL_CACHE_TTL = 300.0  # 5 minutes
+
+
+async def _probe_model(model: str, timeout: float = 5.0) -> bool:
+    """Ping rapide chat-completions pour verifier qu'un modele repond.
+
+    Returns True si le LLM retourne HTTP 200 sous le timeout. Tout autre
+    cas (HTTP 4xx/5xx, timeout, exception reseau) = False. Pas de log si
+    OK ; warning si KO (le caller decidera quoi en faire).
+    """
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as c:
+            r = await c.post(
+                f"{_LLM_BASE_URL}/chat/completions",
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": "."}],
+                    "max_tokens": 1,
+                },
+                headers={
+                    "Authorization": f"Bearer {_llm_api_key()}",
+                    "Content-Type": "application/json",
+                },
+            )
+            return r.status_code == 200
+    except Exception as e:
+        log.warning("Probe LLM %s KO : %s", model, type(e).__name__)
+        return False
+
+
+async def _resolve_model(profile_id: str) -> str:
+    """Pick le 1er modele du fallback list qui repond. Cache 5 min.
+
+    - Si env LLM_MODEL est defini -> retourne directement (override force).
+    - Sinon : ping chaque modele de _MODEL_FALLBACKS[profile_id] dans l'ordre.
+    - Cache resultat 5 min pour eviter ping a chaque chat.
+    - Si tous DOWN -> retourne le 1er de la liste (let the chat fail with
+      a real error) + log critical.
+    """
+    override = os.getenv("LLM_MODEL", "").strip()
+    if override:
+        return override
+
+    now = time.monotonic()
+    cached = _MODEL_CACHE.get(profile_id)
+    if cached and (now - cached[1]) < _MODEL_CACHE_TTL:
+        return cached[0]
+
+    candidates = _MODEL_FALLBACKS.get(profile_id) or _MODEL_FALLBACKS["default"]
+    for model in candidates:
+        if await _probe_model(model):
+            if cached and cached[0] != model:
+                log.warning(
+                    "LLM rotation : profil %r bascule %s -> %s",
+                    profile_id, cached[0], model,
+                )
+            _MODEL_CACHE[profile_id] = (model, now)
+            return model
+
+    log.error(
+        "Aucun modele LLM disponible pour profil %r (testes : %s) ; "
+        "fallback sur %s qui va probablement echouer.",
+        profile_id, candidates, candidates[0],
+    )
+    _MODEL_CACHE[profile_id] = (candidates[0], now)
+    return candidates[0]
+
+
 def _get_model(profile_id: str) -> str:
+    """Sync legacy : retourne le default sans probe (fallback de sync code).
+
+    Pour le hot path async (chat_stream), utiliser _resolve_model() qui fait
+    le discovery dynamique. Ce sync wrapper reste pour les rares appels qui
+    n'ont pas de boucle async dispo.
+    """
     return _MODEL_BY_PROFILE.get(profile_id, _MODEL_BY_PROFILE["default"])
 
 # ── Config Hub MCP ─────────────────────────────────────────────────────────────
@@ -1633,8 +1721,11 @@ ne vient pas d'un outil cette session, la supprimer.
                 full_response += "\n\n⛔ Arrêté par l'utilisateur."
                 break
 
-            # Appel LLM
-            model = os.getenv("LLM_MODEL", _get_model(self.profile_id))
+            # Appel LLM. _resolve_model() respecte LLM_MODEL si defini
+            # (override force), sinon discovery dynamique : pick le 1er
+            # modele de _MODEL_FALLBACKS[profil] qui repond, cache 5 min.
+            # Pattern documente incident 2026-06-20 qwen3 DOWN recurrent.
+            model = await _resolve_model(self.profile_id)
             payload = {
                 "model":      model,
                 "messages":   messages,
