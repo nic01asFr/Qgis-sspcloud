@@ -393,7 +393,12 @@ body.embed .msg .bubble pre{max-width:100%}
               onclick="toggleMemoryDrawer()" title="Voir et éditer la mémoire de l'agent">
         🧠 Mémoire
       </button>
-      <a href="{{ (portal_url or hub_url) ~ '/desk' if (portal_url or hub_url) else '/desk' }}" target="_blank">🖥 Bureau QGIS</a>
+      {# Fix consolidation 2026-06-20 : utiliser hub_url (le hub du user)
+         pour le lien "Bureau QGIS", PAS portal_url. Le portail (nic01asfr)
+         sert uniquement a l'onboarding initial, pas a la navigation
+         courante. L'agent du user nicolaslaval doit pointer vers SON
+         hub /desk, pas vers le portail admin. #}
+      <a href="{{ hub_url ~ '/desk' if hub_url else '/desk' }}" target="_blank">🖥 Bureau QGIS</a>
     </div>
     <script>
     function startNewConversation() {
@@ -505,7 +510,10 @@ body.embed .msg .bubble pre{max-width:100%}
 <footer class="fr-footer" role="contentinfo"><div class="fr-container fr-container--fluid">
   <div class="fr-footer__bottom"><ul class="fr-footer__bottom-list">
     <li class="fr-footer__bottom-item"><span class="fr-footer__bottom-link">CEREMA · QGIS Service · Licence ouverte 2.0</span></li>
-    <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="{{ (portal_url or hub_url) ~ '/workspace' if (portal_url or hub_url) else '/workspace' }}">Mon espace</a></li>
+    {# Fix consolidation 2026-06-20 : meme raison que le lien Bureau QGIS,
+       Mon espace doit pointer vers le hub user (qui sert /workspace),
+       PAS vers le portail admin nic01asfr. #}
+    <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="{{ hub_url ~ '/workspace' if hub_url else '/workspace' }}">Mon espace</a></li>
   </ul></div>
 </div></footer>
 
