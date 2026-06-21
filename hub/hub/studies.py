@@ -865,12 +865,23 @@ if qgz.exists():
     try:
         from qgis.core import QgsProject
         proj = QgsProject.instance()
-        if _bad_handler is not None:
-            proj.setBadLayerHandler(_bad_handler)
-        ok = proj.read(str(qgz))
-        # read() positionne déjà fileName() ; on s'assure que le projet pointe
-        # bien sur le path canonique de l'étude (pas un autre chemin résolu).
-        proj.setFileName(str(qgz))
+        # Sprint UX-3 optim (2026-06-21) : skip le re-read si le projet est
+        # deja charge avec le bon path ET au moins 1 couche. Evite le triple
+        # load typique : activate_study -> activate_project chained -> wake
+        # background _auto_activate. Chacun re-read = ~3-5s + canvas flicker
+        # disgracieux. Idempotent au pattern, garde le filename canonique.
+        current = (proj.fileName() or "").strip()
+        n_layers_existing = len(proj.mapLayers())
+        if current == str(qgz) and n_layers_existing > 0:
+            print(f"PROJECT_ALREADY_LOADED path={{qgz}} n_layers={{n_layers_existing}}")
+            ok = True
+        else:
+            if _bad_handler is not None:
+                proj.setBadLayerHandler(_bad_handler)
+            ok = proj.read(str(qgz))
+            # read() positionne déjà fileName() ; on s'assure que le projet pointe
+            # bien sur le path canonique de l'étude (pas un autre chemin résolu).
+            proj.setFileName(str(qgz))
         try:
             from qgis.utils import iface
             if iface is not None:
@@ -1280,10 +1291,20 @@ if qgz.exists():
     try:
         from qgis.core import QgsProject
         proj = QgsProject.instance()
-        if _bad_handler is not None:
-            proj.setBadLayerHandler(_bad_handler)
-        ok = proj.read(str(qgz))
-        proj.setFileName(str(qgz))
+        # Sprint UX-3 optim (2026-06-21) : skip re-read si deja charge avec
+        # le bon path + couches. Idem activate_pod_code -> evite double load
+        # quand le chained activate_study->activate_project tombe sur le
+        # meme projet (cas le plus courant : 1 projet default par etude).
+        current = (proj.fileName() or "").strip()
+        n_layers_existing = len(proj.mapLayers())
+        if current == str(qgz) and n_layers_existing > 0:
+            print(f"PROJECT_ALREADY_LOADED path={{qgz}} n_layers={{n_layers_existing}}")
+            ok = True
+        else:
+            if _bad_handler is not None:
+                proj.setBadLayerHandler(_bad_handler)
+            ok = proj.read(str(qgz))
+            proj.setFileName(str(qgz))
         try:
             from qgis.utils import iface
             if iface is not None:

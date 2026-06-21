@@ -3992,17 +3992,48 @@ async def workspace_wake(request: Request):
     return_to = request.query_params.get("return_to", "")
     lock = _wake_lock(_ONYXIA_USER)
     async with lock:
+        was_ready_before = False
         try:
             api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
             async with httpx.AsyncClient(timeout=30, base_url=_SELF_URL) as c:
-                await c.post("/sessions", headers={"Authorization": f"Bearer {api_key}"}, json={})
+                # Sprint UX-3 optim (2026-06-21) : check status AVANT de
+                # creer/relancer la session. Si deja ready, on saute le
+                # _auto_activate background (pod n'a pas redemarre, le
+                # projet QGIS courant est deja loaded). Reduit le wake d'un
+                # pod ready de ~1.5s + flicker canvas a ~50ms (sessions GET).
+                try:
+                    r = await c.get(
+                        "/sessions",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                    )
+                    if r.status_code == 200:
+                        rows = r.json() or []
+                        was_ready_before = bool(
+                            rows and rows[0].get("status") == "ready"
+                        )
+                except Exception:
+                    pass
+                await c.post(
+                    "/sessions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={},
+                )
         except Exception:
             pass
         # Recharge le projet QGIS de l'étude active dès que le pod est prêt
-        # (en background — le wait pod ready peut prendre 30-60s).
-        task = asyncio.create_task(_auto_activate_active_study_after_wake(_ONYXIA_USER))
-        _background_anchors.add(task)
-        task.add_done_callback(_background_anchors.discard)
+        # (en background — le wait pod ready peut prendre 30-60s). Skip si
+        # le pod etait deja ready avant le wake (idempotent : projet QGIS
+        # toujours loaded en RAM, pas besoin de re-execute_python coûteux).
+        if not was_ready_before:
+            task = asyncio.create_task(
+                _auto_activate_active_study_after_wake(_ONYXIA_USER)
+            )
+            _background_anchors.add(task)
+            task.add_done_callback(_background_anchors.discard)
+        else:
+            log.debug(
+                "wake: pod was_ready_before -> skip _auto_activate background"
+            )
     if return_to == "desk":
         return RedirectResponse("/desk", status_code=302)
     return {"ok": True}
