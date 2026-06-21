@@ -138,6 +138,23 @@
         {{ s.name }}
         {% if s.id == active_study_id %}<span class="active-badge">ACTIVE</span>{% endif %}
       </h3>
+      {# Sprint UX-3 Commit 3 (2026-06-21) : badge projets de l'etude.
+         project_count est enrichi par /studies (cf. list_studies_endpoint).
+         default_project.label affiche le projet principal de cette etude. #}
+      {% if s.project_count and s.project_count > 0 %}
+      <p class="fr-text--xs" style="color:var(--text-mention-grey);margin:4px 0 8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span title="Projets QGIS dans cette étude">
+          📁 {{ s.project_count }}
+          {% if s.project_count == 1 %}projet{% else %}projets{% endif %}
+        </span>
+        {% if s.default_project %}
+        <span style="color:var(--text-mention-grey)">·</span>
+        <span title="Projet principal ouvert par défaut au lancement du bureau">
+          principal : <strong style="font-weight:600">{{ s.default_project.label }}</strong>
+        </span>
+        {% endif %}
+      </p>
+      {% endif %}
       {# Badge profil retire de l'UI 2026-06-07 : profil contextuel,
          calcule cote serveur, plus expose comme axe de choix user. #}
       <div class="study-actions">

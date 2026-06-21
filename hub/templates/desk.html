@@ -425,6 +425,16 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             <span>📂</span>
             {% if active_study %}
               <span class="study-name">{{ active_study.name }}</span>
+              {# Sprint UX-3 Commit 3 (2026-06-21) : badge projet actif a cote
+                 du nom etude. Si N>1 projets dans l'etude, indicateur '(N)'.
+                 Le dropdown projets est expose via le menu adjacent (cf.
+                 project-menu apres study-menu). #}
+              {% if active_project %}
+              <span style="font-size:11px;color:var(--text-mention-grey);margin-left:4px"
+                    title="Projet actif : {{ active_project.label }}">
+                · {{ active_project.label }}
+              </span>
+              {% endif %}
             {% else %}
               <span>Choisir une étude…</span>
             {% endif %}
@@ -442,10 +452,49 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                         title="{{ s.name }}">
                   <span class="ic">{% if s.id == active_study_id %}✓{% else %}📂{% endif %}</span>
                   <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">{{ s.name }}</span>
-                  {# Badge profil retire de l'UI 2026-06-07 : profil contextuel #}
+                  {% if s.project_count and s.project_count > 1 %}
+                  <span style="font-size:10px;color:var(--text-mention-grey)"
+                        title="{{ s.project_count }} projets QGIS">
+                    {{ s.project_count }}📁
+                  </span>
+                  {% endif %}
                 </button>
               </form>
               {% endfor %}
+              <div style="height:1px;background:var(--border-default-grey);margin:6px 0"></div>
+            {% endif %}
+
+            {# Sprint UX-3 Commit 3 (2026-06-21) : projets de l'etude active.
+               Visible UNIQUEMENT si une etude est active et a >=1 projet.
+               Switch projet via POST /studies/{sid}/projects/{pid}/activate.
+               Bouton 'Nouveau projet' en bas pour creer un scenario alternatif. #}
+            {% if active_study and projects_in_active_study %}
+              <div style="font-size:10px;color:var(--text-mention-grey);
+                          text-transform:uppercase;letter-spacing:.5px;
+                          padding:6px 10px 2px">
+                Projets de « {{ active_study.name }} »
+              </div>
+              {% for p in projects_in_active_study %}
+              <form method="POST"
+                    action="/workspace/project/{{ active_study.id }}/{{ p.pid }}/activate?return_to=desk"
+                    style="margin:0">
+                <button type="submit"
+                        class="item {% if active_project and active_project.pid == p.pid %}active{% endif %}"
+                        style="width:100%;text-align:left;background:transparent;border:none;font-family:inherit"
+                        title="{{ p.label }}{% if p.is_default %} (projet principal){% endif %}">
+                  <span class="ic">
+                    {% if active_project and active_project.pid == p.pid %}✓{% elif p.is_default %}⭐{% else %}📄{% endif %}
+                  </span>
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">{{ p.label }}</span>
+                </button>
+              </form>
+              {% endfor %}
+              <form class="new-form" method="POST"
+                    action="/workspace/project/{{ active_study.id }}/new?return_to=desk"
+                    style="margin:6px 0 0">
+                <input name="label" required placeholder="Nouveau projet (scénario, brouillon…)">
+                <button type="submit">+ Nouveau projet</button>
+              </form>
               <div style="height:1px;background:var(--border-default-grey);margin:6px 0"></div>
             {% endif %}
             <form class="new-form" method="POST" action="/workspace/study/new?return_to=desk">

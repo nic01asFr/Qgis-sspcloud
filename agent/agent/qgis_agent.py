@@ -535,6 +535,109 @@ async def _resolve_active_sid(username: str) -> str | None:
         return None
 
 
+async def _resolve_active_project(username: str) -> dict | None:
+    """Sprint UX-3 (2026-06-21) : resolve le projet QGIS actif de l'user.
+
+    Modele 1:N etude->projets : l'user a 1 etude active + 1 projet actif
+    DANS cette etude. Cette fonction interroge le hub /projects/active qui
+    renvoie {pid, sid, label, qgz_path, history_path, ...}.
+
+    Utilise par :
+    - L'append history.jsonl post-tool (cf. _append_history) pour macros
+    - Tools natifs futurs qui ont besoin du contexte projet (pas juste sid)
+
+    Retourne None si pas de projet actif (cas user vierge avant 1ere activation
+    -- le chained activate du Commit 2 cree automatiquement un default).
+    Compat ascendante : _resolve_active_sid reste pour les callers qui ont
+    juste besoin du sid (recipes, etc.).
+    """
+    if not _HUB_URL or not _HUB_KEY:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(
+                f"{_HUB_URL}/projects/active",
+                headers={"Authorization": f"Bearer {_HUB_KEY}"},
+            )
+            if r.status_code != 200:
+                return None
+            data = r.json()
+            return data if data else None
+    except Exception:
+        return None
+
+
+async def _append_history(
+    username: str, tool_name: str, arguments: dict, result_preview: str,
+) -> None:
+    """Sprint UX-3 (2026-06-21) : append un tool call dans history.jsonl du
+    projet actif (= source primaire pour macros = recettes analysees futures).
+
+    Format JSONL : 1 ligne = 1 event {ts, tool, args, result_preview, ...}.
+    Best-effort : si pas de projet actif, hub injoignable, ou pod workspace
+    endormi, on skip silencieusement -- l'enregistrement macro ne doit JAMAIS
+    casser le chat.
+
+    L'ecriture passe par execute_python cote pod workspace (le hub n'a pas
+    d'acces PVC direct, et le pod a deja le contexte projet via le symlink
+    /data/studies/active/project_active maintenu par activate_project_pod_code).
+    """
+    try:
+        # Recupere le projet actif (cached cote hub /projects/active).
+        project = await _resolve_active_project(username)
+        if not project:
+            return
+        history_path = project.get("history_path")
+        if not history_path:
+            return
+        # Event a appender
+        event = {
+            "ts":             int(asyncio.get_event_loop().time() * 1000),
+            "tool":           tool_name,
+            "args":           arguments,
+            "result_preview": (result_preview or "")[:200],
+            "pid":            project.get("pid"),
+            "sid":            project.get("sid"),
+        }
+        # Code Python a executer cote pod : append 1 line JSONL idempotent
+        # (mkdir parent si absent).
+        py_code = f"""
+from pathlib import Path
+import json
+p = Path({history_path!r})
+p.parent.mkdir(parents=True, exist_ok=True)
+with p.open('a', encoding='utf-8') as f:
+    f.write(json.dumps({event!r}, ensure_ascii=False) + '\\n')
+"""
+        # _HUB_URL + execute_python via /mcp est trop lourd pour 1 ligne (latence
+        # ~500ms par tool call). On laisse la fonction async fire-and-forget
+        # via asyncio.create_task pour ne pas bloquer le tool dispatch.
+        async def _fire():
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    payload = {
+                        "jsonrpc": "2.0", "id": "history-append",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "execute_python",
+                            "arguments": {"code": py_code},
+                        },
+                    }
+                    await client.post(
+                        f"{_HUB_URL}/mcp",
+                        json=payload,
+                        headers={
+                            "Authorization": f"Bearer {_HUB_KEY}",
+                            "Content-Type":  "application/json",
+                        },
+                    )
+            except Exception:
+                pass  # best-effort silent
+        asyncio.create_task(_fire())
+    except Exception:
+        pass  # ne JAMAIS casser le chat pour de l'enregistrement
+
+
 async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "user") -> str:
     """Appelle un outil. Court-circuite les outils natifs (mémoire + recipes
     user) côté agent avant de tenter le MCP hub QGIS."""
@@ -2118,6 +2221,13 @@ ne vient pas d'un outil cette session, la supprimer.
                     result = result + zone_warning
 
                 tool_calls_made.append({"tool": fn_name, "args": fn_args, "result": result[:200]})
+
+                # Sprint UX-3 (2026-06-21) : append history.jsonl du projet
+                # actif (fire-and-forget). Source primaire pour macros futures.
+                # Skip silencieux si pas de projet actif ou pod endormi.
+                await _append_history(
+                    self.username, fn_name, fn_args, result[:200],
+                )
 
                 # Capter hub_url des publish_artifact reussis pour le hotfix
                 # `[undefined](undefined)` applique en fin de turn.

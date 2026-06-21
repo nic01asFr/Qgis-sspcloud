@@ -1102,6 +1102,9 @@ async def _desk_context() -> dict:
         "session_status": "—", "session_ready": False, "novnc_url": "#",
         "insights": [], "insights_count": 0, "preferences": {},
         "recent_treatments": [],
+        # Sprint UX-3 Commit 3 (2026-06-21) : projet actif + liste des projets
+        # de l'etude active (pour dropdown switch dans desk header).
+        "active_project": None, "projects_in_active_study": [],
     }
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
@@ -1123,6 +1126,22 @@ async def _desk_context() -> dict:
                         cb(r.json())
                 except Exception:
                     pass
+            # Sprint UX-3 Commit 3 (2026-06-21) : projet actif + projets de
+            # l'etude active (alimente le menu deroulant header desk).
+            if ctx.get("active_study_id"):
+                try:
+                    r = await c.get("/projects/active", headers=headers)
+                    if r.status_code == 200:
+                        ctx["active_project"] = r.json()
+                    r2 = await c.get(
+                        f"/studies/{ctx['active_study_id']}/projects",
+                        headers=headers,
+                    )
+                    if r2.status_code == 200:
+                        ctx["projects_in_active_study"] = r2.json()
+                except Exception as exc:
+                    log.debug("Fetch projects desk_context : %s", exc)
+
             if ctx.get("active_study_id"):
                 try:
                     r = await c.get(f"/catalog/{_ONYXIA_USER}", headers=headers)
@@ -2027,10 +2046,33 @@ async def list_studies_endpoint(
     archived: bool = False,
     user: dict = Depends(auth.get_current_user),
 ):
-    """Liste les études de l'user. archived=true pour inclure les archivées."""
+    """Liste les études de l'user.
+
+    archived=true : inclure les études archivées.
+    Sprint UX-3 (2026-06-21) : enrichit chaque study avec :
+    - project_count : nombre de projets actifs dans l'etude
+    - default_project : projet 'principal' (label + pid) pour UI workspace
+      (badge 'Projet : X' sur la card etude).
+    """
     if not _STUDIES_AVAILABLE:
         return []
-    return await studies.list_studies(user["username"], include_archived=archived)
+    rows = await studies.list_studies(
+        user["username"], include_archived=archived,
+    )
+    # Enrichissement compteurs (best-effort, ne casse pas le payload base si DB
+    # study_projects pas encore migree).
+    try:
+        for s in rows:
+            s["project_count"] = await studies.count_projects(s["id"])
+            default = await studies.get_default_project(s["id"])
+            if default:
+                s["default_project"] = {
+                    "pid":   default["pid"],
+                    "label": default["label"],
+                }
+    except Exception as exc:
+        log.warning("Enrichissement project_count /studies KO : %s", exc)
+    return rows
 
 
 @app.get("/studies/active")
@@ -4112,6 +4154,85 @@ async def workspace_archive_study(sid: str, request: Request):
                            headers={"Authorization": f"Bearer {api_key}"})
     except Exception:
         pass
+    return_to = request.query_params.get("return_to", "")
+    target = "/desk" if return_to == "desk" else "/workspace"
+    return RedirectResponse(target, status_code=302)
+
+
+# ── Sprint UX-3 Commit 3 : UI wrappers projects (form POST -> 302 redirect) ──
+# Pattern strictement parallele aux workspace_activate_study + workspace_create_study.
+# Permet aux formulaires dans desk.html dropdown de fonctionner sans JS fetch.
+
+@app.post("/workspace/project/{sid}/{pid}/activate")
+async def workspace_activate_project(sid: str, pid: str, request: Request):
+    """UI wrapper : POST form depuis le dropdown desk -> activate project +
+    redirect /desk (ou /workspace selon return_to)."""
+    try:
+        api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+        async with httpx.AsyncClient(timeout=60, base_url=_SELF_URL) as c:
+            await c.post(
+                f"/studies/{sid}/projects/{pid}/activate",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            # Wake si endormi (meme rationale que workspace_activate_study)
+            try:
+                await c.post(
+                    "/workspace/wake",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+            except Exception as wake_exc:
+                log.warning(
+                    "workspace_activate_project: wake echoue (non-fatal): %s",
+                    wake_exc,
+                )
+    except Exception as exc:
+        log.warning("workspace_activate_project sid=%s pid=%s: %s", sid, pid, exc)
+    return_to = request.query_params.get("return_to", "")
+    target = "/desk" if return_to == "desk" else "/workspace"
+    return RedirectResponse(target, status_code=302)
+
+
+@app.post("/workspace/project/{sid}/new")
+async def workspace_create_project(sid: str, request: Request):
+    """UI wrapper : creer un nouveau projet dans l'etude + l'activer + redirect.
+
+    Body form-urlencoded : label (required), is_default (optional checkbox).
+    Apres creation, le nouveau projet devient automatiquement actif -> l'user
+    voit son nouveau projet vide dans le canvas.
+    """
+    try:
+        form = await request.form()
+    except Exception:
+        form = {}
+    label = (form.get("label") or "").strip() or "Nouveau projet"
+    is_default = bool(form.get("is_default"))
+    new_pid = None
+    try:
+        api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+        async with httpx.AsyncClient(timeout=60, base_url=_SELF_URL) as c:
+            r = await c.post(
+                f"/studies/{sid}/projects",
+                json={"label": label, "is_default": is_default},
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if r.status_code in (200, 201):
+                new_pid = r.json().get("pid")
+                # Active le nouveau projet immediatement (effet 'on cree + on
+                # bascule' = comportement attendu UX).
+                if new_pid:
+                    await c.post(
+                        f"/studies/{sid}/projects/{new_pid}/activate",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                    )
+            try:
+                await c.post(
+                    "/workspace/wake",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+            except Exception:
+                pass
+    except Exception as exc:
+        log.warning("workspace_create_project sid=%s: %s", sid, exc)
     return_to = request.query_params.get("return_to", "")
     target = "/desk" if return_to == "desk" else "/workspace"
     return RedirectResponse(target, status_code=302)
