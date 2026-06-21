@@ -77,8 +77,13 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
    (position:absolute, top:calc(100% + 6px)) est clippé sous la navbar et
    le menu ne s'ouvre pas. Le truncate est géré au niveau de .study-name
    qui a son propre overflow:hidden;text-overflow:ellipsis. */
-.hdr-center{display:flex;align-items:center;padding:0 60px;
-  min-width:0;gap:12px;justify-content:space-between}
+/* Sprint UX-3 fix (2026-06-21) : justify-content:space-between creait un
+   gros vide entre 'CEREMA · QGIS' et le bouton 'test ▾' (separateur '›'
+   orphelin au milieu). flex-start groupe brand + > + center-content
+   en bloc compact a gauche. Padding reduit 60->20px pour ne pas decaler
+   le contenu. */
+.hdr-center{display:flex;align-items:center;padding:0 20px;
+  min-width:0;gap:12px;justify-content:flex-start}
 .hdr-center .brand{display:flex;align-items:baseline;gap:8px;white-space:nowrap}
 .hdr-center .brand .op{font-weight:700;color:#000091;font-size:15px;line-height:1;
   letter-spacing:.4px}
@@ -1430,15 +1435,17 @@ document.getElementById('toggle-publi')?.addEventListener('click', () => {
 // Sprint UX-1 (2026-06-20) : drawer Ressources ouvert par defaut au 1er load.
 // Probleme observe : les 4 onglets Couches/Publi/Fichiers/Recettes (V1.5 S1)
 // sont caches derriere le toggle 📚 a gauche -> mauvaise decouvrabilite =
-// features livrees mais invisibles. Pour rendre visibles : ouvrir le drawer
-// par defaut, mais respecter sticky preference (si l'user le ferme, on garde
-// ferme au prochain load via localStorage).
+// Sprint UX-3 fix (2026-06-21) : opt-in au lieu d'opt-out. Le drawer
+// Ressources est un overlay (position:fixed) qui chevauche le canvas QGIS
+// -> user signalait 'le canvas est coupe par le drawer'. On garde FERME
+// par defaut. L'user peut ouvrir via le toggle ; sticky preference apres
+// premier opt-in pour garder ouvert si user le souhaite. La decouvrabilite
+// des recipes/publi est assuree par le badge sur le toggle + tooltip.
 const _RESS_PREF_KEY = 'qgis_desk_resources_open';
 const _ressOpenPref = localStorage.getItem(_RESS_PREF_KEY);
-if (_ressOpenPref !== '0') {
-  // Pas explicitement ferme -> ouvrir par defaut
+if (_ressOpenPref === '1') {
+  // L'user l'avait explicitement ouvert -> respecter
   desk.classList.add('show-publi');
-  // Trigger load des couches puisque drawer ouvert
   if (!_resLayersLoaded) {
     loadResourceLayers();
     _resLayersLoaded = true;
