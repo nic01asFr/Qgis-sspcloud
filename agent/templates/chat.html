@@ -405,6 +405,16 @@ body.embed .msg .bubble pre{max-width:100%}
               title="Démarre une nouvelle conversation (la session actuelle est conservée dans l'historique des sessions). Utile si la conversation a accumulé trop d'erreurs ou si tu changes de sujet.">
         ➕ <span class="tool-btn-label">Nouvelle</span>
       </button>
+      {# Sprint UX-3 fix (2026-06-22) : bouton 'Historique' ajoute pour
+         exposer les sessions recentes en mode embed (desk). Avant : sidebar
+         cachee via body.embed -> aucun acces aux sessions depuis /desk.
+         Maintenant : popover deroulant accessible aux 2 modes (standalone +
+         embed) avec liste des sessions cliquables. #}
+      <button type="button" class="tool-btn" id="btn-history"
+              onclick="toggleHistoryPopover(event)" aria-label="Historique des conversations"
+              title="Voir l'historique des conversations récentes">
+        📜 <span class="tool-btn-label">Historique</span>
+      </button>
       <button type="button" class="tool-btn" id="btn-memory"
               onclick="toggleMemoryDrawer()" aria-label="Memoire de l'agent"
               title="Voir et éditer la mémoire de l'agent">
@@ -415,6 +425,33 @@ body.embed .msg .bubble pre{max-width:100%}
          title="Ouvrir le Bureau QGIS dans un nouvel onglet (canvas + outils)">
         🖥 <span class="tool-btn-label">Bureau</span> ↗
       </a>
+
+      {# Popover historique : liste des sessions recentes, click -> loadSession.
+         Positionne en absolute par rapport a .chat-toolbar (position:relative).
+         Cache par defaut, toggle via JS. Fermeture click outside. #}
+      <div id="history-popover" class="history-popover" aria-hidden="true">
+        <div class="history-popover-header">
+          <span style="font-weight:700">📜 Conversations récentes</span>
+          <button type="button" class="close" onclick="toggleHistoryPopover(null,false)" aria-label="Fermer">✕</button>
+        </div>
+        <div class="history-popover-body">
+          {% if sessions %}
+          {% for s in sessions[:20] %}
+          <button type="button" class="history-item"
+                  onclick="loadSession('{{ s.id }}');toggleHistoryPopover(null,false)"
+                  title="{{ s.summary or 'Session ' + s.id[:8] }}">
+            <span class="ic">💬</span>
+            <span class="lbl">{{ s.summary[:50] if s.summary else 'Session ' + s.id[:8] }}</span>
+          </button>
+          {% endfor %}
+          {% else %}
+          <p class="history-empty">
+            Aucune conversation pour l'instant. Démarre une analyse pour
+            que tes sessions apparaissent ici.
+          </p>
+          {% endif %}
+        </div>
+      </div>
     </div>
     <style>
     /* Sprint UX-2 (2026-06-21) : labels textuels caches sur petit ecran,
@@ -423,6 +460,37 @@ body.embed .msg .bubble pre{max-width:100%}
     @media(max-width:600px){
       .chat-toolbar .tool-btn-label{display:none}
     }
+    /* Sprint UX-3 fix (2026-06-22) : popover historique conversations.
+       Positionne en absolute par rapport a .chat-toolbar (parent doit etre
+       position:relative -> ajoute via inline style sur l'element parent
+       OU via la rule .chat-toolbar deja position:relative). */
+    .chat-toolbar{position:relative}
+    .history-popover{
+      position:absolute;top:calc(100% + 4px);right:8px;
+      width:320px;max-height:60vh;
+      background:#fff;border:1px solid var(--border-default-grey);
+      border-radius:6px;box-shadow:0 6px 24px rgba(0,0,0,.15);
+      z-index:200;display:none;overflow:hidden;
+      flex-direction:column}
+    .history-popover.open{display:flex}
+    .history-popover-header{display:flex;align-items:center;justify-content:space-between;
+      padding:10px 14px;border-bottom:1px solid var(--border-default-grey);
+      font-size:13px;background:var(--background-alt-grey);flex-shrink:0}
+    .history-popover-header .close{background:transparent;border:none;
+      cursor:pointer;color:var(--text-mention-grey);font-size:16px;
+      padding:0 4px;line-height:1}
+    .history-popover-header .close:hover{color:var(--text-default-grey)}
+    .history-popover-body{overflow-y:auto;padding:6px 0;flex:1}
+    .history-item{display:flex;align-items:center;gap:8px;width:100%;
+      padding:8px 14px;border:none;background:transparent;
+      text-align:left;cursor:pointer;font-family:inherit;font-size:12.5px;
+      color:var(--text-default-grey);transition:background .12s}
+    .history-item:hover{background:var(--background-alt-grey)}
+    .history-item .ic{font-size:13px;opacity:.7;flex-shrink:0}
+    .history-item .lbl{flex:1;min-width:0;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .history-empty{font-size:12px;color:var(--text-mention-grey);
+      padding:14px 16px;margin:0;line-height:1.5}
     </style>
     <script>
     function startNewConversation() {
@@ -436,6 +504,32 @@ body.embed .msg .bubble pre{max-width:100%}
                   (window.location.search.includes('embed=') ? '&embed=1' : '');
       window.location.href = url;
     }
+
+    // Sprint UX-3 fix (2026-06-22) : popover historique conversations
+    // toggle. Force=true pour ouvrir, false pour fermer, null pour toggle.
+    // Click outside ferme le popover (event listener global ajoute au load).
+    function toggleHistoryPopover(event, force) {
+      if (event) { event.stopPropagation(); }
+      const pop = document.getElementById('history-popover');
+      if (!pop) return;
+      const willOpen = (force === true) ? true
+                     : (force === false) ? false
+                     : !pop.classList.contains('open');
+      pop.classList.toggle('open', willOpen);
+      pop.setAttribute('aria-hidden', willOpen ? 'false' : 'true');
+    }
+    // Fermeture click outside
+    document.addEventListener('click', (e) => {
+      const pop = document.getElementById('history-popover');
+      const btn = document.getElementById('btn-history');
+      if (!pop || !pop.classList.contains('open')) return;
+      if (pop.contains(e.target) || (btn && btn.contains(e.target))) return;
+      toggleHistoryPopover(null, false);
+    });
+    // Fermeture touche Echap
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') toggleHistoryPopover(null, false);
+    });
     </script>
 
     <!-- Mémoire drawer : liste des insights + lien vers édition complète -->
