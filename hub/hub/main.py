@@ -777,6 +777,59 @@ async def _bootstrap_geoai_gpu() -> None:
 
 # ── Lifespan ───────────────────────────────────────────────────────────────────
 
+async def _migrate_studies_to_projects() -> None:
+    """Sprint UX-3 (2026-06-21) : migration idempotente etudes -> 1:N projets.
+
+    Pour chaque study sans entree dans `study_projects`, on cree 1 default
+    project (is_default=1, label='Projet principal'). Le copy effectif du
+    .qgz legacy (/data/studies/{sid}/project.qgz) vers le nouveau path
+    (/data/studies/{sid}/projects/{pid}/project.qgz) est DEFER a la 1ere
+    activation : le hub n'a pas d'acces direct au PVC, il faut passer par
+    execute_python cote pod (et le pod peut etre endormi au boot).
+
+    Cette fonction est idempotente : si study_projects contient deja une row
+    pour la study, on skip. -> peut tourner a chaque boot.
+    """
+    if not _STUDIES_AVAILABLE:
+        return
+    try:
+        import aiosqlite
+        async with aiosqlite.connect(studies._DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("""
+                SELECT s.id, s.owner
+                FROM studies s
+                LEFT JOIN study_projects sp ON sp.sid = s.id
+                WHERE sp.pid IS NULL
+            """)
+            rows = await cursor.fetchall()
+            n_migrated = 0
+            for row in rows:
+                sid, owner = row["id"], row["owner"]
+                # create_project insere la row + UNSET les autres is_default
+                # (idempotent : aucun autre car la query ci-dessus garantit
+                # pas de project deja existant pour ce sid).
+                project = await studies.create_project(
+                    sid=sid, owner=owner,
+                    label="Projet principal", is_default=True,
+                )
+                n_migrated += 1
+                log.info(
+                    "Migration studies->projects : sid=%s -> pid=%s",
+                    sid, project["pid"],
+                )
+            if n_migrated > 0:
+                log.info(
+                    "Migration studies_to_projects : %d study(ies) migr(ee)s "
+                    "(filesystem copy defere a la 1ere activation)",
+                    n_migrated,
+                )
+    except Exception as exc:
+        log.warning(
+            "Migration studies_to_projects KO (degraded mode) : %s", exc,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await sessions.init_db()
@@ -784,6 +837,14 @@ async def lifespan(app: FastAPI):
     await auth._build_jwks_cache()
     if _STUDIES_AVAILABLE:
         await studies.init_db()
+        # Sprint UX-3 (2026-06-21) : migration idempotente etude -> projet 1:N.
+        # Pour chaque study existante sans entree dans study_projects, on cree
+        # 1 default project. Le copy effectif du .qgz legacy est defere a la
+        # premiere activation (laisse pour _activate_project_pod_side).
+        # Si la DB n'est pas joignable ou l'op echoue, on log et on continue
+        # (degraded). La migration est idempotente -> peut tourner a chaque
+        # boot sans casser.
+        await _migrate_studies_to_projects()
     # Restaurer le cache depuis la DB (évite doubles créations après redémarrage hub)
     for s in await sessions.list_sessions():
         if s["status"] == sessions.SESSION_READY:

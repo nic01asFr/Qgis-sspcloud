@@ -109,6 +109,50 @@ async def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_recipes_owner
                 ON recipes_index(owner, status)
         """)
+        # Sprint UX-3 (2026-06-21) : modele etude->projet 1:N.
+        # Une etude (container thematique) peut contenir N projets QGIS.
+        # Chaque projet a son propre .qgz + history.jsonl + .checkpoints/.
+        # is_default=1 marque le projet "principal" de l'etude (1 unique par sid),
+        # ouvert par defaut quand on active l'etude. Les scenarios alternatifs
+        # (variantes, brouillons) sont is_default=0.
+        # Cohabitation V1.5 recipes : recipes restent au niveau etude (pas par
+        # projet). Une recette s'applique sur le projet actif de l'etude active.
+        # history.jsonl = trace tool_calls + events par projet. Source primaire
+        # pour la generation de macros (Phase 11) -> analyzer LLM extrait une
+        # recette parametree de ce trace.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS study_projects (
+                pid TEXT PRIMARY KEY,
+                sid TEXT NOT NULL,
+                owner TEXT NOT NULL,
+                label TEXT NOT NULL,
+                qgz_path TEXT NOT NULL,
+                history_path TEXT,
+                created_at INTEGER NOT NULL,
+                last_active INTEGER NOT NULL,
+                is_default INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'active'
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_study_projects_sid
+                ON study_projects(sid, last_active DESC)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_study_projects_owner
+                ON study_projects(owner, status)
+        """)
+        # Projet actif (1 par owner). Independant de active_study : un user peut
+        # avoir une etude active avec un projet specifique selectionne.
+        # En pratique : quand on active une etude, on active aussi son projet
+        # is_default (cf. activate_study endpoint chained). L'user peut switcher
+        # de projet dans l'etude active sans changer l'etude active.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS active_project (
+                owner TEXT PRIMARY KEY,
+                pid TEXT NOT NULL
+            )
+        """)
         await db.commit()
 
 
@@ -357,6 +401,189 @@ async def recipe_index_mark_published(
                SET published_at=?, public_url=?
                WHERE sid=? AND slug=? AND version_num=?""",
             (int(time.time()), public_url, sid, slug, version_num),
+        )
+        await db.commit()
+
+
+# ── Sprint UX-3 : CRUD study_projects (1 etude -> N projets QGIS) ─────────────
+# Pattern strictement parallele au CRUD studies existant (create/get/list/touch/
+# update/archive + active_*). Cf. block etudes plus haut pour la conv naming.
+
+async def create_project(
+    sid: str,
+    owner: str,
+    label: str,
+    is_default: bool = False,
+) -> dict:
+    """Cree un projet dans l'etude. Si is_default=True, on UNSET le precedent
+    is_default de l'etude (1 unique par sid).
+
+    Le qgz_path et history_path suivent le layout standardise :
+      /data/studies/{sid}/projects/{pid}/project.qgz
+      /data/studies/{sid}/projects/{pid}/history.jsonl
+    """
+    pid = _new_id()
+    now = int(time.time())
+    label_safe = label.strip()[:120] or "Projet sans nom"
+    project = {
+        "pid":          pid,
+        "sid":          sid,
+        "owner":        owner,
+        "label":        label_safe,
+        "qgz_path":     f"/data/studies/{sid}/projects/{pid}/project.qgz",
+        "history_path": f"/data/studies/{sid}/projects/{pid}/history.jsonl",
+        "created_at":   now,
+        "last_active":  now,
+        "is_default":   1 if is_default else 0,
+        "status":       "active",
+    }
+    async with aiosqlite.connect(_DB_PATH) as db:
+        if is_default:
+            # UNSET tout autre is_default de cette etude (1 unique principal).
+            await db.execute(
+                "UPDATE study_projects SET is_default = 0 WHERE sid = ? AND is_default = 1",
+                (sid,),
+            )
+        await db.execute("""
+            INSERT INTO study_projects
+            (pid, sid, owner, label, qgz_path, history_path,
+             created_at, last_active, is_default, status)
+            VALUES (:pid, :sid, :owner, :label, :qgz_path, :history_path,
+                    :created_at, :last_active, :is_default, :status)
+        """, project)
+        await db.commit()
+    return project
+
+
+async def get_project(pid: str, owner: str | None = None) -> dict | None:
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        row = await (await db.execute(
+            "SELECT * FROM study_projects WHERE pid = ?", (pid,)
+        )).fetchone()
+    if not row:
+        return None
+    p = dict(row)
+    if owner and p["owner"] != owner:
+        return None
+    return p
+
+
+async def list_projects(sid: str, include_archived: bool = False) -> list[dict]:
+    """Liste les projets d'une etude. Tri last_active DESC -> dernier ouvert
+    en premier (pratique UX 'dernier projet chronologique')."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if include_archived:
+            rows = await (await db.execute(
+                "SELECT * FROM study_projects WHERE sid = ? "
+                "ORDER BY is_default DESC, last_active DESC",
+                (sid,)
+            )).fetchall()
+        else:
+            rows = await (await db.execute(
+                "SELECT * FROM study_projects WHERE sid = ? AND status = 'active' "
+                "ORDER BY is_default DESC, last_active DESC",
+                (sid,)
+            )).fetchall()
+    return [dict(r) for r in rows]
+
+
+async def touch_project(pid: str) -> None:
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "UPDATE study_projects SET last_active = ? WHERE pid = ?",
+            (int(time.time()), pid),
+        )
+        await db.commit()
+
+
+async def update_project(pid: str, **fields) -> dict | None:
+    """Mise a jour partielle. Champs autorises : label, is_default, status."""
+    allowed = {"label", "is_default", "status"}
+    fields = {k: v for k, v in fields.items() if k in allowed}
+    if not fields:
+        return await get_project(pid)
+    # is_default special : si on set is_default=1, UNSET tous les autres de l'etude
+    if fields.get("is_default") == 1:
+        p = await get_project(pid)
+        if p:
+            async with aiosqlite.connect(_DB_PATH) as db:
+                await db.execute(
+                    "UPDATE study_projects SET is_default = 0 "
+                    "WHERE sid = ? AND pid <> ?",
+                    (p["sid"], pid),
+                )
+                await db.commit()
+    setters = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values()) + [pid]
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            f"UPDATE study_projects SET {setters} WHERE pid = ?", values
+        )
+        await db.commit()
+    return await get_project(pid)
+
+
+async def archive_project(pid: str) -> None:
+    """Archive (soft delete) un projet. Files restent sur PVC."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "UPDATE study_projects SET status = 'archived' WHERE pid = ?", (pid,)
+        )
+        await db.commit()
+
+
+async def get_default_project(sid: str) -> dict | None:
+    """Retourne le projet 'principal' (is_default=1) ou le plus recent en
+    fallback (last_active DESC). Utile pour 'ouvrir l'etude' = ouvrir le
+    projet le plus pertinent."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT * FROM study_projects WHERE sid = ? AND status = 'active' "
+            "ORDER BY is_default DESC, last_active DESC LIMIT 1",
+            (sid,)
+        )
+        row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def count_projects(sid: str, include_archived: bool = False) -> int:
+    """Compte les projets d'une etude (pour badge UI 'N projets')."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        if include_archived:
+            cur = await db.execute(
+                "SELECT COUNT(*) FROM study_projects WHERE sid = ?", (sid,)
+            )
+        else:
+            cur = await db.execute(
+                "SELECT COUNT(*) FROM study_projects "
+                "WHERE sid = ? AND status = 'active'",
+                (sid,)
+            )
+        row = await cur.fetchone()
+    return row[0] if row else 0
+
+
+# ── Projet actif (par owner) ──────────────────────────────────────────────────
+# Parallele a active_study : 1 row par owner avec pid courant. Set par les
+# endpoints activate_project + cascade via activate_study (le projet is_default
+# de l'etude devient actif).
+
+async def get_active_project_id(owner: str) -> str | None:
+    async with aiosqlite.connect(_DB_PATH) as db:
+        row = await (await db.execute(
+            "SELECT pid FROM active_project WHERE owner = ?", (owner,)
+        )).fetchone()
+    return row[0] if row else None
+
+
+async def set_active_project(owner: str, pid: str) -> None:
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO active_project (owner, pid) VALUES (?, ?)",
+            (owner, pid),
         )
         await db.commit()
 
@@ -918,6 +1145,177 @@ else:
     except Exception as exc:
         print(f"CKPT_RESTORE_ERR {{exc}}")
 """
+
+
+# ── Sprint UX-3 : helpers pod-side projets (parallele etude) ──────────────────
+# Pattern : meme strategie que create_pod_layout_code + activate_pod_code mais
+# scope projet. Le hub n'a pas d'acces direct au PVC -> execute_python cote pod.
+
+def create_project_pod_code(
+    sid: str, pid: str, label: str, copy_from: str | None = None,
+) -> str:
+    """Cree le dossier projet + project.qgz + history.jsonl + meta.json.
+
+    Si copy_from est defini (ex: /data/studies/{sid}/project.qgz legacy),
+    copie le .qgz existant vers le nouveau path. Sinon le projet.qgz est cree
+    a la 1ere save (laisse vide pour l'instant). Cette fonction est appelee :
+    - Lors de la creation explicite d'un projet (POST /studies/{sid}/projects)
+    - Lors de la migration au startup (chaque etude existante -> 1 default)
+    - Lors de l'activation si le dossier projet n'existe pas (lazy)
+    """
+    copy_from_repr = repr(copy_from) if copy_from else "None"
+    return f"""
+from pathlib import Path
+import json, shutil as _sh, time
+sid = {sid!r}
+pid = {pid!r}
+label = {label!r}
+copy_from = {copy_from_repr}
+proj_dir = Path(f"/data/studies/{{sid}}/projects/{{pid}}")
+proj_dir.mkdir(parents=True, exist_ok=True)
+(proj_dir / ".checkpoints").mkdir(exist_ok=True)
+qgz = proj_dir / "project.qgz"
+hist = proj_dir / "history.jsonl"
+if not hist.exists():
+    hist.touch()
+meta_p = proj_dir / "meta.json"
+if not meta_p.exists():
+    meta_p.write_text(json.dumps({{
+        "pid": pid, "sid": sid, "label": label,
+        "created_at": int(time.time()),
+    }}, ensure_ascii=False, indent=2), encoding="utf-8")
+copied = False
+if copy_from:
+    src = Path(copy_from)
+    if src.exists() and not qgz.exists():
+        try:
+            _sh.copy2(str(src), str(qgz))
+            copied = True
+        except Exception as exc:
+            print(f"PROJECT_COPY_ERR {{exc}}")
+print(f"PROJECT_CREATE_OK sid={{sid}} pid={{pid}} qgz_exists={{qgz.exists()}} copied={{copied}}")
+"""
+
+
+def activate_project_pod_code(sid: str, pid: str) -> str:
+    """Active un projet : sentinel + symlink + load QGIS proj.
+
+    En complement de activate_pod_code (etude) :
+    - Sentinel /data/.active_project = pid
+    - Symlink /data/studies/active/project_active -> projects/{pid}/
+      (active_study symlink doit deja etre en place)
+    - QGIS proj.read(projects/{pid}/project.qgz) avec BadLayerHandler silent
+      (meme pattern que activate_pod_code)
+    """
+    return f"""
+import subprocess
+from pathlib import Path
+sid = {sid!r}
+pid = {pid!r}
+Path("/data/.active_project").write_text(pid, encoding="utf-8")
+print(f"ACTIVE_PROJECT={{pid}}")
+
+# Symlink projets actif (dans /data/studies/active/ qui pointe deja sur {{sid}})
+try:
+    active_proj_link = Path("/data/studies/active/project_active")
+    if active_proj_link.is_symlink() or active_proj_link.exists():
+        active_proj_link.unlink(missing_ok=True)
+    active_proj_link.symlink_to(f"/data/studies/{{sid}}/projects/{{pid}}")
+    print(f"ACTIVE_PROJECT_SYMLINK ok -> {{sid}}/projects/{{pid}}")
+except Exception as e:
+    print(f"ACTIVE_PROJECT_SYMLINK warn: {{e}}")
+
+# Lazy create du dossier projet si absent (idempotent)
+proj_dir = Path(f"/data/studies/{{sid}}/projects/{{pid}}")
+proj_dir.mkdir(parents=True, exist_ok=True)
+(proj_dir / ".checkpoints").mkdir(exist_ok=True)
+hist = proj_dir / "history.jsonl"
+if not hist.exists():
+    hist.touch()
+
+# Load QGIS proj : meme pattern que activate_pod_code (BadLayerHandler silent)
+qgz = proj_dir / "project.qgz"
+try:
+    from qgis.core import QgsProject, QgsProjectBadLayerHandler
+    from qgis.PyQt.QtCore import QSettings
+
+    class _SilentBadLayerHandler(QgsProjectBadLayerHandler):
+        def __init__(self):
+            super().__init__()
+            self.dropped = []
+        def handleBadLayers(self, layers):
+            for el in layers:
+                try:
+                    name = el.namedItem("layername").toElement().text()
+                    self.dropped.append(name)
+                except Exception:
+                    pass
+
+    _bad_handler = _SilentBadLayerHandler()
+    _settings = QSettings()
+    _settings.setValue("qgis/enableMacros", 0)
+    _settings.setValue("Qgis/askToSaveProjectChanges", False)
+    _settings.sync()
+except Exception as _exc:
+    print(f"PROJECT_SAFETY_SETUP_ERR {{_exc}}")
+    _bad_handler = None
+
+if qgz.exists():
+    try:
+        from qgis.core import QgsProject
+        proj = QgsProject.instance()
+        if _bad_handler is not None:
+            proj.setBadLayerHandler(_bad_handler)
+        ok = proj.read(str(qgz))
+        proj.setFileName(str(qgz))
+        try:
+            from qgis.utils import iface
+            if iface is not None:
+                try:
+                    iface.mapCanvas().zoomToFullExtent()
+                except Exception:
+                    pass
+                iface.mapCanvas().refresh()
+        except Exception:
+            pass
+        print(f"PROJECT_LOAD_OK ok={{ok}} path={{qgz}}")
+    except Exception as exc:
+        print(f"PROJECT_LOAD_ERR {{exc}}")
+else:
+    # Projet vide : on cree un .qgz placeholder pour eviter le Welcome widget
+    # QGIS au load. Meme strategie que activate_pod_code legacy.
+    try:
+        from qgis.core import QgsProject
+        QgsProject.instance().clear()
+        QgsProject.instance().setFileName(str(qgz))
+        try:
+            QgsProject.instance().writeEntry("Paths", "Absolute", False)
+        except Exception:
+            pass
+        wrote = QgsProject.instance().write()
+        print(f"PROJECT_CREATED_AND_SAVED path={{qgz}} wrote={{wrote}}")
+    except Exception as exc:
+        print(f"PROJECT_NEW_ERR {{exc}}")
+"""
+
+
+# ── Helpers FS path projets (parallele helpers etude) ─────────────────────────
+
+def project_dir(sid: str, pid: str) -> str:
+    """Chemin dossier projet sur PVC."""
+    return f"/data/studies/{sid}/projects/{pid}"
+
+
+def project_qgz_path(sid: str, pid: str) -> str:
+    return f"/data/studies/{sid}/projects/{pid}/project.qgz"
+
+
+def project_history_path(sid: str, pid: str) -> str:
+    return f"/data/studies/{sid}/projects/{pid}/history.jsonl"
+
+
+def project_checkpoints_dir(sid: str, pid: str) -> str:
+    return f"/data/studies/{sid}/projects/{pid}/.checkpoints"
 
 
 def purge_pod_layout_code(sid: str) -> str:
