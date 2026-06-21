@@ -190,23 +190,21 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
   border-left-color:#b34000;
 }
 
-/* Images de tools (ex: get_screenshot) rendues inline dans la bulle. */
+/* Images de tools (ex: get_screenshot) rendues inline dans la bulle.
+   Mode STANDALONE (vue agent seul) : visible direct (max-width 100%).
+   Sprint UX-3 fix (2026-06-21) : avant on wrappait en <details> avec
+   bouton 'Voir la capture' qui depliait l'image. User precise vouloir
+   l'image directement visible en standalone (zoom click pour fullscreen
+   ailleurs si besoin). On garde le inline simple. */
 .msg .bubble img{max-width:100%;height:auto;border-radius:4px;margin:8px 0;
-  border:1px solid var(--border-default-grey);display:block}
-/* Mode embed (desk) : le canvas noVNC est cote-a-cote, les screenshots
-   d'outils inline deviennent redondants et alourdissent la conversation.
-   On les replie dans un <details> par defaut (clic pour deplier si besoin
-   de comparer avec une etape passee).
-   `details > img` reste visible quand le user clique. */
+  border:1px solid var(--border-default-grey);display:block;cursor:zoom-in}
+/* Mode EMBED (iframe dans /desk) : le canvas noVNC est cote-a-cote
+   donc les screenshots sont COMPLETEMENT redondants. User precise
+   2026-06-21 'pas du tout besoin de voir la capture dans le chat desk'.
+   Cache : img + le wrapper <details.embed-screenshot> generes par le JS.
+   La conversation reste fluide texte uniquement. */
 body.embed .msg .bubble img{display:none}
-body.embed .msg .bubble details.embed-screenshot{display:block;margin:4px 0;
-  font-size:11px;color:var(--text-mention-grey);cursor:pointer}
-body.embed .msg .bubble details.embed-screenshot[open] img{display:block}
-body.embed .msg .bubble details.embed-screenshot summary{
-  padding:2px 6px;border-radius:3px;
-  background:var(--background-alt-grey);display:inline-block;list-style:none}
-body.embed .msg .bubble details.embed-screenshot summary::before{
-  content:"📸 ";opacity:.6}
+body.embed .msg .bubble details.embed-screenshot{display:none !important}
 .chat-input{padding:10px 16px 0;background:#fff;border-top:1px solid var(--border-default-grey);
   flex-shrink:0}
 .status-bar{font-size:11.5px;color:var(--text-action-high-blue-france);margin-bottom:6px;

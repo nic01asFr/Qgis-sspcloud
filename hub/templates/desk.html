@@ -153,11 +153,17 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .study-dropdown{position:absolute;top:calc(100% + 6px);left:0;background:#fff;
   border:1px solid var(--border-default-grey);border-radius:4px;
   box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:300px;max-width:360px;
-  z-index:100;display:none;max-height:70vh;overflow-y:auto}
+  z-index:100;display:none;max-height:70vh;overflow-y:auto;overflow-x:hidden}
 .study-dropdown.open{display:block}
+/* Sprint UX-3 fix (2026-06-21) : items truncated proprement, plus de
+   scroll horizontal disgracieux. min-width:0 sur le flex enfant + l'overflow
+   ellipsis sur le span enfant suffit. */
 .study-dropdown .item{display:flex;align-items:center;gap:8px;padding:8px 12px;
   font-size:12.5px;cursor:pointer;color:var(--text-default-grey);
-  border-bottom:1px solid var(--background-alt-grey)}
+  border-bottom:1px solid var(--background-alt-grey);
+  min-width:0;max-width:100%}
+.study-dropdown .item > span:not(.ic){overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;min-width:0;flex:1}
 .study-dropdown .item:hover{background:var(--background-alt-grey)}
 .study-dropdown .item.active{background:var(--background-alt-blue-france);
   color:var(--text-action-high-blue-france);font-weight:600}
@@ -446,33 +452,11 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             <span class="caret">▾</span>
           </button>
           <div class="study-dropdown" id="study-dropdown">
-            {% if studies %}
-              <div style="font-size:10px;color:var(--text-mention-grey);
-                          text-transform:uppercase;letter-spacing:.5px;
-                          padding:4px 10px 2px">Mes études</div>
-              {% for s in studies %}
-              <form method="POST" action="/workspace/study/{{ s.id }}/activate?return_to=desk" style="margin:0">
-                <button type="submit" class="item {% if s.id == active_study_id %}active{% endif %}"
-                        style="width:100%;text-align:left;background:transparent;border:none;font-family:inherit"
-                        title="{{ s.name }}">
-                  <span class="ic">{% if s.id == active_study_id %}✓{% else %}📂{% endif %}</span>
-                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">{{ s.name }}</span>
-                  {% if s.project_count and s.project_count > 1 %}
-                  <span style="font-size:10px;color:var(--text-mention-grey)"
-                        title="{{ s.project_count }} projets QGIS">
-                    {{ s.project_count }}📁
-                  </span>
-                  {% endif %}
-                </button>
-              </form>
-              {% endfor %}
-              <div style="height:1px;background:var(--border-default-grey);margin:6px 0"></div>
-            {% endif %}
-
-            {# Sprint UX-3 Commit 3 (2026-06-21) : projets de l'etude active.
-               Visible UNIQUEMENT si une etude est active et a >=1 projet.
-               Switch projet via POST /studies/{sid}/projects/{pid}/activate.
-               Bouton 'Nouveau projet' en bas pour creer un scenario alternatif. #}
+            {# Sprint UX-3 fix (2026-06-21) : dropdown desk = PROJETS UNIQUEMENT
+               de l'etude active. Plus de section 'Mes etudes' ici (changement
+               d'etude = retour /workspace pour bien voir le contexte cockpit).
+               Decision user : le desk est l'atelier sur 1 etude active ; pour
+               switcher d'etude, on remonte au workspace. #}
             {% if active_study and projects_in_active_study %}
               <div style="font-size:10px;color:var(--text-mention-grey);
                           text-transform:uppercase;letter-spacing:.5px;
@@ -490,7 +474,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                   <span class="ic">
                     {% if active_project and active_project.pid == p.pid %}✓{% elif p.is_default %}⭐{% else %}📄{% endif %}
                   </span>
-                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">{{ p.label }}</span>
+                  <span>{{ p.label }}</span>
                 </button>
               </form>
               {% endfor %}
@@ -500,14 +484,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                 <input name="label" required placeholder="Nouveau projet (scénario, brouillon…)">
                 <button type="submit">+ Nouveau projet</button>
               </form>
-              <div style="height:1px;background:var(--border-default-grey);margin:6px 0"></div>
             {% endif %}
-            <form class="new-form" method="POST" action="/workspace/study/new?return_to=desk">
-              <input name="name" required placeholder="Nom de la nouvelle étude…">
-              <!-- Profil agent : retire de l'UI 2026-06-06. Active
-                   contextuellement par l'agent (cf. workspace.html note). -->
-              <button type="submit">+ Nouvelle étude</button>
-            </form>
             <a href="/workspace" style="display:block;padding:8px 10px;
                font-size:11px;color:var(--text-mention-grey);
                text-decoration:none;border-top:1px solid var(--border-default-grey)">

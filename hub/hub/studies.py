@@ -844,6 +844,18 @@ try:
     _settings = QSettings()
     _settings.setValue("qgis/enableMacros", 0)  # 0 = Never, 1 = Ask, 2 = Always
     _settings.setValue("Qgis/askToSaveProjectChanges", False)
+    # Sprint UX-3 fix (2026-06-21) : forcer locale FR pour le user CEREMA.
+    # 3 cles QSettings que QGIS lit au demarrage / changement de locale :
+    # - locale/userLocale : la valeur principale (ex: 'fr')
+    # - locale/overrideFlag : True pour ignorer la locale OS et utiliser userLocale
+    # - locale/globalLocale : optionnel, pour les contenus 'global' (ex: aide)
+    # QGIS sait gerer le hot-reload partiel (menu, dialogs) sans restart du
+    # process, MAIS les widgets deja crees gardent leur libelle anglais ->
+    # pour un effet complet il faut redemarrer QGIS. Acceptable car la
+    # 1ere activation post-deploy redemarre le pod de toute facon.
+    _settings.setValue("locale/userLocale", "fr")
+    _settings.setValue("locale/overrideFlag", True)
+    _settings.setValue("locale/globalLocale", "fr")
     _settings.sync()
 except Exception as _exc:
     print(f"PROJECT_SAFETY_SETUP_ERR {{_exc}}")
@@ -1255,6 +1267,10 @@ try:
     _settings = QSettings()
     _settings.setValue("qgis/enableMacros", 0)
     _settings.setValue("Qgis/askToSaveProjectChanges", False)
+    # Sprint UX-3 fix (2026-06-21) : QGIS en francais (idem activate_pod_code).
+    _settings.setValue("locale/userLocale", "fr")
+    _settings.setValue("locale/overrideFlag", True)
+    _settings.setValue("locale/globalLocale", "fr")
     _settings.sync()
 except Exception as _exc:
     print(f"PROJECT_SAFETY_SETUP_ERR {{_exc}}")
