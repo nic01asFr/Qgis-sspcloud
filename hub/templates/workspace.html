@@ -61,50 +61,9 @@
 </div></div></div>
 </header>
 
-{# Sprint UX-1 (2026-06-20) : Menu de navigation global persistant sur les
-   3 vues (workspace, desk, agent). Donne a l'user une vue d'ensemble du
-   service + permet de basculer entre vues en 1 click. JS detecte la
-   route active pour highlight l'onglet courant. #}
-<nav class="qgis-nav" role="navigation" aria-label="Navigation principale">
-  <div class="qgis-nav-inner">
-    <a href="/workspace" class="qgis-nav-tab" data-route="workspace">
-      🏠 <span>Mon espace</span>
-    </a>
-    <a href="/desk" class="qgis-nav-tab" data-route="desk">
-      🛠 <span>Bureau de travail</span>
-    </a>
-    <a href="{{ agent_url }}" target="_blank" rel="noopener" class="qgis-nav-tab" data-route="agent">
-      💬 <span>Agent IA seul</span>
-      <span style="font-size:10px;opacity:.6;margin-left:2px">↗</span>
-    </a>
-  </div>
-</nav>
-<style>
-.qgis-nav{background:#fff;border-bottom:1px solid var(--border-default-grey);
-  position:sticky;top:0;z-index:25}
-.qgis-nav-inner{max-width:1200px;margin:0 auto;display:flex;gap:4px;
-  padding:4px 16px;overflow-x:auto}
-.qgis-nav-tab{display:inline-flex;align-items:center;gap:6px;
-  padding:8px 14px;font-size:13px;font-weight:500;
-  color:var(--text-default-grey);text-decoration:none;
-  border-radius:4px 4px 0 0;border-bottom:2px solid transparent;
-  white-space:nowrap;transition:background .15s,border-color .15s}
-.qgis-nav-tab:hover{background:var(--background-alt-grey)}
-.qgis-nav-tab.active{color:var(--text-action-high-blue-france);
-  border-bottom-color:currentColor;font-weight:700}
-</style>
-<script>
-(function(){
-  var path = location.pathname;
-  document.querySelectorAll('.qgis-nav-tab[data-route]').forEach(function(a){
-    var r = a.dataset.route;
-    if ((r==='workspace' && path.startsWith('/workspace')) ||
-        (r==='desk' && path.startsWith('/desk'))) {
-      a.classList.add('active');
-    }
-  });
-})();
-</script>
+{# Sprint UX-3 (2026-06-21) : navbar globale retiree. Les liens entre vues
+   sont accessibles via les CTA principaux (Continuer mon travail, cards
+   etudes) et le footer (Bureau de travail, Agent IA seul). #}
 
 <main role="main">
 <section class="fr-py-6w">

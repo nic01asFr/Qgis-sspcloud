@@ -340,44 +340,9 @@ body.embed .msg .bubble pre{max-width:100%}
 </div></div></div>
 </header>
 
-{# Sprint UX-1 (2026-06-20) : Menu de navigation global identique au hub
-   (workspace + desk). Cache en mode embed (iframe dans /desk) car la
-   nav est deja faite par le hub parent. #}
-<nav class="qgis-nav" role="navigation" aria-label="Navigation principale">
-  <div class="qgis-nav-inner">
-    <a href="{{ hub_url ~ '/workspace' if hub_url else '#' }}" class="qgis-nav-tab" data-route="workspace">
-      🏠 <span>Mon espace</span>
-    </a>
-    <a href="{{ hub_url ~ '/desk' if hub_url else '#' }}" class="qgis-nav-tab" data-route="desk">
-      🛠 <span>Bureau de travail</span>
-    </a>
-    <a href="/" class="qgis-nav-tab" data-route="agent">
-      💬 <span>Agent IA seul</span>
-    </a>
-  </div>
-</nav>
-<style>
-.qgis-nav{background:#fff;border-bottom:1px solid var(--border-default-grey);
-  position:sticky;top:0;z-index:25}
-.qgis-nav-inner{max-width:1200px;margin:0 auto;display:flex;gap:4px;
-  padding:4px 16px;overflow-x:auto}
-.qgis-nav-tab{display:inline-flex;align-items:center;gap:6px;
-  padding:8px 14px;font-size:13px;font-weight:500;
-  color:var(--text-default-grey);text-decoration:none;
-  border-radius:4px 4px 0 0;border-bottom:2px solid transparent;
-  white-space:nowrap;transition:background .15s,border-color .15s}
-.qgis-nav-tab:hover{background:var(--background-alt-grey)}
-.qgis-nav-tab.active{color:var(--text-action-high-blue-france);
-  border-bottom-color:currentColor;font-weight:700}
-body.embed .qgis-nav{display:none}
-</style>
-<script>
-(function(){
-  /* Detection route active : page agent standalone -> 'agent' */
-  var tab = document.querySelector('.qgis-nav-tab[data-route="agent"]');
-  if (tab) tab.classList.add('active');
-})();
-</script>
+{# Sprint UX-3 (2026-06-21) : navbar globale retiree. Les liens entre vues
+   sont deja accessibles via la toolbar chat (Bureau ↗), le footer
+   (Mon espace, Bureau de travail, Agent IA seul) et le brand header. #}
 
 <div class="chat-app">
 

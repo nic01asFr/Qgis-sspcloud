@@ -14,31 +14,14 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 /* Layout hybride : Publications = drawer overlay (superpose le canvas) ;
    Chat = sidebar grid (décale le canvas, ne le couvre pas).
    Canvas QGIS prend tout l'espace entre le bord gauche et le chat panel. */
-/* Sprint UX-1 (2026-06-20) : menu navigation global - styles + script
-   en bas du fichier (dans le bloc de scripts JS). Voir tag <nav class="qgis-nav">
-   dans le body, inseree comme grid-area:nav. */
-.qgis-nav{background:#fff;border-bottom:1px solid var(--border-default-grey);
-  display:flex;align-items:center;padding:0 16px;height:36px;
-  overflow-x:auto}
-.qgis-nav-inner{display:flex;gap:4px;align-items:center;height:100%}
-.qgis-nav-tab{display:inline-flex;align-items:center;gap:6px;
-  padding:6px 12px;font-size:13px;font-weight:500;
-  color:var(--text-default-grey);text-decoration:none;
-  border-radius:4px 4px 0 0;border-bottom:2px solid transparent;
-  white-space:nowrap;height:100%;
-  transition:background .15s,border-color .15s}
-.qgis-nav-tab:hover{background:var(--background-alt-grey)}
-.qgis-nav-tab.active{color:var(--text-action-high-blue-france);
-  border-bottom-color:currentColor;font-weight:700}
-
-/* Sprint UX-1 (2026-06-20) : +1 ligne 36px en haut pour le menu de
-   navigation global (slot "nav") afin que l'user voit en permanence
-   les 3 vues du service (Mon espace / Bureau / Agent IA seul). */
+/* Sprint UX-3 (2026-06-21) : navbar globale retiree. Grille restauree
+   a 3 lignes (header 48px + canvas 1fr + status 32px). Le brand
+   'CEREMA · QGIS' du desk-header pointe vers /workspace pour revenir
+   a la vue cockpit. */
 .desk{display:grid;
   grid-template-columns:1fr 6px var(--chat-w,340px);
-  grid-template-rows:36px 48px 1fr 32px;
+  grid-template-rows:48px 1fr 32px;
   grid-template-areas:
-    "nav nav nav"
     "header header header"
     "canvas h2  chat"
     "status status status";
@@ -409,23 +392,9 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 
 <div class="desk" id="desk">
 
-  {# Sprint UX-1 (2026-06-20) : Menu de navigation global persistant.
-     Slot grid-area:nav (36px de hauteur) au-dessus du header desk
-     compact. Donne acces direct aux 3 vues principales du service. #}
-  <nav class="qgis-nav" role="navigation" aria-label="Navigation principale" style="grid-area:nav">
-    <div class="qgis-nav-inner">
-      <a href="/workspace" class="qgis-nav-tab" data-route="workspace">
-        🏠 <span>Mon espace</span>
-      </a>
-      <a href="/desk" class="qgis-nav-tab" data-route="desk">
-        🛠 <span>Bureau de travail</span>
-      </a>
-      <a href="{{ agent_url }}" target="_blank" rel="noopener" class="qgis-nav-tab" data-route="agent">
-        💬 <span>Agent IA seul</span>
-        <span style="font-size:10px;opacity:.6;margin-left:2px">↗</span>
-      </a>
-    </div>
-  </nav>
+  {# Sprint UX-3 (2026-06-21) : navbar globale retiree (cf. workspace.html
+     et chat.html). Le brand 'CEREMA · QGIS' dans le desk-header reste
+     clickable -> /workspace. #}
 
   <!-- ── HEADER : 2 colonnes (centre + chat tabs) ─────────────── -->
   <header class="desk-header">
@@ -1693,18 +1662,6 @@ async function wakeGpu() {
 
 refreshGpuChip();
 setInterval(refreshGpuChip, 20000);
-
-// Sprint UX-1 (2026-06-20) : highlight l'onglet de navigation actif.
-(function(){
-  var path = location.pathname;
-  document.querySelectorAll('.qgis-nav-tab[data-route]').forEach(function(a){
-    var r = a.dataset.route;
-    if ((r==='workspace' && path.startsWith('/workspace')) ||
-        (r==='desk' && path.startsWith('/desk'))) {
-      a.classList.add('active');
-    }
-  });
-})();
 </script>
 </body>
 </html>
