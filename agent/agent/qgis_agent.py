@@ -2400,6 +2400,41 @@ ne vient pas d'un outil cette session, la supprimer.
                 '', full_response, flags=_re_end.IGNORECASE,
             )
 
+        # Post-turn screenshot auto (consolidation 2026-06-21) :
+        # User signale qu'il ne voit pas le canvas QGIS depuis la vue agent
+        # standalone. Avant : qwen3 appelait spontanement get_screenshot en
+        # fin d'action. Apres bascule gemma4 (qwen3 DOWN), gemma4 narre sans
+        # appeler les tools -> plus de visibilite du canvas.
+        # Solution : injecter un get_screenshot post-turn cote code (garanti,
+        # independant du LLM). Le CSS embed (chat.html L201 `body.embed img
+        # {display:none}`) masque automatiquement en mode iframe /desk.
+        #
+        # Conditions de skip :
+        # - L'agent a deja appele get_screenshot dans ce turn (eviter doublon)
+        # - Workspace endormi ou erreur MCP (best-effort, ne pas casser le chat)
+        # - Profil non-visuel (db_analyst : pas de canvas a montrer)
+        try:
+            already_screenshot = any(
+                tc.get("tool") == "get_screenshot"
+                for tc in (tool_calls_made or [])
+            )
+            non_visual_profiles = {"db_analyst"}
+            if (not already_screenshot
+                    and self.profile_id not in non_visual_profiles):
+                shot = await _call_mcp_tool_raw(
+                    "get_screenshot", {}, username=self.username,
+                )
+                # _call_mcp_tool_raw retourne du JSON ou markdown. Si c'est
+                # une string contenant data:image, on yield directement.
+                # Sinon (erreur), skip silencieux.
+                m = re.search(r'!\[[^\]]*\]\(data:image/[^)]+\)', shot or "")
+                if m:
+                    img_md = "\n\n" + m.group(0)
+                    yield img_md
+                    full_response += img_md
+        except Exception as exc:
+            log.debug("Post-turn screenshot skip : %s", exc)
+
         # Post-turn cleanup : on retire les eventuels [undefined](undefined)
         # residuels dans full_response (cas ou le LLM en a genere malgre la
         # directive). Pas de yield ici (texte deja stream cote UI) -- on
