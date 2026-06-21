@@ -485,6 +485,11 @@ _OIDC_MIDDLEWARE_INTER_POD = (
     "/catalog",                 # hub -> hub catalog S3 listing
     "/sessions",                # hub -> hub list/create sessions workspace
     "/workspace/wake",          # hub -> hub wake workspace (api/start-study)
+    # Sprint UX-3 Commit 2 (2026-06-21) : endpoints projects (1:N etude->projet).
+    # Inclus dans /studies/* (deja whitelist) via le startswith check, MAIS
+    # /projects/active est top-level -> whitelist explicite. Permet a l'agent
+    # (Bearer HUB_API_KEY) d'appeler /projects/active dans _resolve_active_project.
+    "/projects",
 )
 
 

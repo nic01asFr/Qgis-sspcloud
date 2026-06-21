@@ -1997,6 +1997,28 @@ async def create_study(
         )
     except Exception as exc:
         log.warning("Init layout étude %s : %s", s["id"], exc)
+    # Sprint UX-3 Commit 2 (2026-06-21) : chained create default project.
+    # Toute nouvelle etude commence avec 1 projet 'principal' (is_default=1).
+    # L'user peut creer des projets supplementaires via POST /studies/{sid}/projects
+    # apres coup. Le code pod-side (create dossier + .qgz) est best-effort :
+    # log warning + continue si le pod workspace est endormi.
+    try:
+        default_project = await studies.create_project(
+            sid=s["id"], owner=user["username"],
+            label="Projet principal", is_default=True,
+        )
+        await _execute_python_in_workspace(
+            user["username"],
+            studies.create_project_pod_code(
+                s["id"], default_project["pid"],
+                default_project["label"],
+                copy_from=None,  # nouvelle etude : pas de legacy a copier
+            ),
+        )
+        # Decore la response avec le default project (UI peut l'afficher direct)
+        s["default_project"] = default_project
+    except Exception as exc:
+        log.warning("Init default project pour etude %s : %s", s["id"], exc)
     return s
 
 
@@ -2090,7 +2112,48 @@ async def activate_study(
         )
     except Exception as exc:
         log.warning("Activation sentinel étude %s : %s", sid, exc)
-    return {"active_study": sid, "study": s}
+
+    # Sprint UX-3 Commit 2 (2026-06-21) : chained activate du projet default.
+    # Comportement attendu user 'Bureau de travail s'ouvre toujours dans le
+    # cadre d'une etude + dernier projet chronologique ouvert par defaut'.
+    # get_default_project ORDER BY is_default DESC, last_active DESC -> donne
+    # exactement ca : projet 'principal' sinon le plus recemment actif.
+    # Best-effort : si pas de projet (ancienne etude non-migree, race condition),
+    # on saute la cascade sans casser l'activation etude.
+    project_active = None
+    try:
+        default_p = await studies.get_default_project(sid)
+        if default_p is None:
+            # Etude sans projet : creer 1 default automatiquement (filet de
+            # securite pour studies anciennes non-migrees ou bug d'init).
+            default_p = await studies.create_project(
+                sid=sid, owner=user["username"],
+                label="Projet principal", is_default=True,
+            )
+            log.info(
+                "activate_study : etude %s sans projet -> default cree pid=%s",
+                sid, default_p["pid"],
+            )
+        await studies.set_active_project(user["username"], default_p["pid"])
+        await studies.touch_project(default_p["pid"])
+        try:
+            await _execute_python_in_workspace(
+                user["username"],
+                studies.activate_project_pod_code(sid, default_p["pid"]),
+            )
+        except Exception as exc:
+            log.warning(
+                "Activation pod-side projet %s : %s", default_p["pid"], exc,
+            )
+        project_active = default_p
+    except Exception as exc:
+        log.warning("Chained activate projet pour etude %s : %s", sid, exc)
+
+    return {
+        "active_study":   sid,
+        "study":          s,
+        "active_project": project_active,
+    }
 
 
 @app.post("/studies/{sid}/save")
@@ -2117,6 +2180,208 @@ async def save_study(
         log.warning("Save étude %s ERR : %s", sid, exc)
         return {"saved": False, "error": str(exc)}
     return {"saved": True, "sid": sid, "output": (out or "").strip()[:500]}
+
+
+# ── Sprint UX-3 Commit 2 : endpoints projects (1 etude -> N projets) ──────────
+# Pattern strictement parallele aux endpoints studies. Pre-requis : etude
+# accessible owner-checked via studies.get_study(sid, user["username"]).
+
+@app.get("/studies/{sid}/projects")
+async def list_projects_endpoint(
+    sid: str,
+    archived: bool = False,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Liste les projets d'une etude. Tri is_default DESC, last_active DESC
+    (le projet principal en premier, puis les autres par recence)."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    return await studies.list_projects(sid, include_archived=archived)
+
+
+@app.post("/studies/{sid}/projects", status_code=status.HTTP_201_CREATED)
+async def create_project_endpoint(
+    sid: str,
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Cree un nouveau projet dans l'etude. Body : {label, is_default?}.
+
+    is_default=True : UNSET les autres is_default de l'etude (1 unique).
+    Cote pod : cree le dossier + project.qgz vide (placeholder) + history.jsonl.
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    label = body.get("label", "").strip() or "Nouveau projet"
+    is_default = bool(body.get("is_default", False))
+
+    project = await studies.create_project(
+        sid=sid, owner=user["username"],
+        label=label, is_default=is_default,
+    )
+    try:
+        await _execute_python_in_workspace(
+            user["username"],
+            studies.create_project_pod_code(
+                sid, project["pid"], project["label"], copy_from=None,
+            ),
+        )
+    except Exception as exc:
+        log.warning(
+            "create_project pod-side pour pid=%s : %s", project["pid"], exc,
+        )
+    return project
+
+
+@app.get("/studies/{sid}/projects/{pid}")
+async def get_project_endpoint(
+    sid: str, pid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    p = await studies.get_project(pid, user["username"])
+    if not p or p["sid"] != sid:
+        raise HTTPException(404, "Projet introuvable dans cette étude")
+    return p
+
+
+@app.patch("/studies/{sid}/projects/{pid}")
+async def patch_project_endpoint(
+    sid: str, pid: str,
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Update partiel. Champs autorises : label, is_default, status."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    p = await studies.get_project(pid, user["username"])
+    if not p or p["sid"] != sid:
+        raise HTTPException(404, "Projet introuvable dans cette étude")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await studies.update_project(pid, **body)
+
+
+@app.delete("/studies/{sid}/projects/{pid}")
+async def archive_project_endpoint(
+    sid: str, pid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Archive (soft delete). Le projet disparait de la liste par defaut mais
+    les fichiers restent sur PVC (audit / restauration manuelle possible)."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    p = await studies.get_project(pid, user["username"])
+    if not p or p["sid"] != sid:
+        raise HTTPException(404, "Projet introuvable dans cette étude")
+    # Securite : on refuse l'archivage du projet default s'il y a d'autres projets
+    # actifs (sinon l'etude n'a plus de default). L'user doit set is_default sur
+    # un autre projet avant d'archiver l'ancien default.
+    if p["is_default"]:
+        others = [pp for pp in await studies.list_projects(sid) if pp["pid"] != pid]
+        if others:
+            raise HTTPException(
+                409,
+                "Impossible d'archiver le projet principal sans en désigner un "
+                "autre comme principal au préalable (PATCH is_default=1).",
+            )
+    await studies.archive_project(pid)
+    return {"archived": True, "pid": pid}
+
+
+@app.post("/studies/{sid}/projects/{pid}/activate")
+async def activate_project_endpoint(
+    sid: str, pid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Active un projet specifique d'une etude. Switch QGIS proj cote pod via
+    activate_project_pod_code (sentinel + symlink + proj.read).
+
+    Pre-requis : l'etude doit etre l'etude active (sinon on l'active aussi).
+    Effet de bord : touch_project pour mettre a jour last_active (utile pour
+    'dernier projet ouvert chronologiquement').
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    p = await studies.get_project(pid, user["username"])
+    if not p or p["sid"] != sid:
+        raise HTTPException(404, "Projet introuvable dans cette étude")
+    if p["status"] != "active":
+        raise HTTPException(400, f"Projet archivé (status={p['status']})")
+
+    # Si l'etude n'est pas active, l'activer en cascade (mais SANS re-trigger
+    # le chained activate de son default project -> on prefere notre pid choisi)
+    prev_sid = await studies.get_active_study_id(user["username"])
+    if prev_sid != sid:
+        # Save de l'etude sortante avant le switch (idempotent au pattern
+        # activate_study).
+        if prev_sid:
+            try:
+                await _execute_python_in_workspace(
+                    user["username"], studies.save_active_pod_code(prev_sid),
+                )
+            except Exception as exc:
+                log.warning("Save etude sortante %s : %s", prev_sid, exc)
+        await studies.set_active_study(user["username"], sid)
+        await studies.touch_study(sid)
+        try:
+            await _execute_python_in_workspace(
+                user["username"], studies.activate_pod_code(sid),
+            )
+        except Exception as exc:
+            log.warning("Activation sentinel etude %s : %s", sid, exc)
+
+    await studies.set_active_project(user["username"], pid)
+    await studies.touch_project(pid)
+    try:
+        await _execute_python_in_workspace(
+            user["username"], studies.activate_project_pod_code(sid, pid),
+        )
+    except Exception as exc:
+        log.warning("Activation pod-side projet %s : %s", pid, exc)
+    return {"active_project": pid, "project": p, "active_study": sid}
+
+
+@app.get("/projects/active")
+async def get_active_project_endpoint(
+    user: dict = Depends(auth.get_current_user),
+):
+    """Projet actif courant (depuis DB hub). Renvoie None si aucun projet
+    n'a ete active (cas user vierge avant 1ere activation)."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    active_pid = await studies.get_active_project_id(user["username"])
+    if not active_pid:
+        return None
+    p = await studies.get_project(active_pid, user["username"])
+    if not p or p["status"] != "active":
+        return None
+    return p
 
 
 @app.get("/studies/{sid}/publications")
