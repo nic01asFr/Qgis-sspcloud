@@ -8,41 +8,108 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/utility/utility.min.css">
 <style>
-.chapter-title{font-size:18px;font-weight:700;color:var(--text-title-blue-france);
+/* Sprint UX-3 refonte workspace (2026-06-21) :
+   - KPI cards plus riches : icone large + chiffre + label + sublabel
+   - Cards etudes layout 2 cols (info / actions) + meta enrichies
+   - Section 'Nouvelle etude' avec templates thematiques
+   - Memoire toujours visible (empty state explicite) */
+
+/* Chapter titles : icone + meilleure respiration */
+.chapter-title{font-size:1.25rem;font-weight:700;color:var(--text-title-blue-france);
   border-bottom:3px solid var(--border-action-high-blue-france);
-  padding-bottom:8px;margin-bottom:16px}
-.study-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
-  gap:14px;margin:14px 0}
-.study-card{background:#fff;border-radius:4px;padding:16px 18px;
+  padding-bottom:10px;margin-bottom:18px;
+  display:flex;align-items:center;gap:10px}
+.chapter-title .ch-ico{font-size:1.4rem;line-height:1}
+.chapter-desc{font-size:.9rem;color:var(--text-mention-grey);
+  margin:-8px 0 20px;line-height:1.5;max-width:780px}
+
+/* KPI grid enrichi : icone + chiffre + label + sublabel */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:14px;margin:16px 0 30px}
+.kpi{background:#fff;border-radius:8px;padding:18px 20px;
+  border:1px solid var(--border-default-grey);
   border-left:4px solid var(--border-action-high-blue-france);
-  box-shadow:0 1px 3px rgba(0,0,0,.06);transition:box-shadow .15s}
-.study-card:hover{box-shadow:0 3px 10px rgba(0,0,0,.1)}
-.study-name{font-size:1.05rem;font-weight:700;color:var(--text-title-blue-france);
-  margin:0 0 6px;line-height:1.2}
-.study-meta{font-size:.78rem;color:#666;margin-bottom:8px}
-.study-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
-.study-actions .fr-btn{font-size:.75rem;padding:.3rem .6rem}
-.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
-  gap:12px;margin:16px 0}
-.kpi{background:#fff;border-radius:4px;padding:14px 18px;
-  border-top:4px solid var(--border-action-high-blue-france);
-  box-shadow:0 1px 3px rgba(0,0,0,.06)}
-.kpi-value{font-size:1.6rem;font-weight:700;color:var(--text-title-grey);line-height:1}
-.kpi-label{font-size:.78rem;color:#666;margin-top:.3rem}
-.tile-action{background:#fff;border-radius:4px;padding:16px;
-  border:1px solid var(--border-default-grey);text-decoration:none;color:inherit;
-  display:flex;flex-direction:column;gap:8px;transition:all .15s;height:100%}
-.tile-action:hover{border-color:var(--border-action-high-blue-france);
-  box-shadow:0 3px 10px rgba(0,0,0,.08)}
-.tile-icon{font-size:1.8rem}
-.tile-title{font-size:.95rem;font-weight:700;color:var(--text-title-blue-france);margin:0}
-.tile-desc{font-size:.8rem;color:#666;margin:0;line-height:1.4}
-.active-badge{display:inline-block;background:var(--background-action-high-blue-france);
-  color:#fff;padding:2px 8px;border-radius:2px;font-size:.7rem;font-weight:700;
-  letter-spacing:.5px;margin-left:6px}
-.empty-state{text-align:center;padding:30px 20px;color:#888}
-.empty-state .icon{font-size:2rem;margin-bottom:8px;display:block}
+  box-shadow:0 1px 3px rgba(0,0,0,.05);transition:all .15s;
+  display:flex;align-items:center;gap:14px;position:relative;overflow:hidden}
+.kpi:hover{box-shadow:0 4px 12px rgba(0,0,0,.08);transform:translateY(-1px)}
+.kpi-icon{font-size:2rem;line-height:1;flex-shrink:0;opacity:.85}
+.kpi-content{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.kpi-value{font-size:1.7rem;font-weight:700;color:var(--text-title-grey);line-height:1}
+.kpi-label{font-size:.8rem;color:#444;margin-top:2px;font-weight:600}
+.kpi-sublabel{font-size:.72rem;color:var(--text-mention-grey);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kpi.kpi-warm{border-left-color:#d64d00}
+.kpi.kpi-warm .kpi-icon{color:#d64d00}
+.kpi.kpi-ok{border-left-color:#18753c}
+.kpi.kpi-ok .kpi-icon{color:#18753c}
+.kpi.kpi-sleep{border-left-color:#919191}
+
+/* Hero CTA : plus expressif */
+.hero-cta{margin:8px 0 28px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.hero-cta .fr-btn--lg{font-weight:700;padding:18px 36px;font-size:1.05rem;
+  border-radius:6px;box-shadow:0 2px 8px rgba(0,0,145,.18)}
+.hero-cta .fr-btn--lg:hover{box-shadow:0 4px 14px rgba(0,0,145,.28)}
+
+/* Card etude : layout enrichi */
+.study-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));
+  gap:16px;margin:14px 0 24px}
+.study-card{background:#fff;border-radius:8px;padding:18px 20px;
+  border:1px solid var(--border-default-grey);
+  border-left:4px solid var(--border-action-high-blue-france);
+  box-shadow:0 1px 3px rgba(0,0,0,.05);transition:all .15s;
+  display:flex;flex-direction:column;gap:8px;position:relative}
+.study-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.08);transform:translateY(-1px)}
+.study-card.is-active{border-left-color:#d64d00;background:linear-gradient(180deg,#fff8f3 0%,#fff 100%)}
+.study-card-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.study-name{font-size:1.1rem;font-weight:700;color:var(--text-title-blue-france);
+  margin:0;line-height:1.25;flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis}
+.study-name-icon{font-size:1.2rem;margin-right:6px;opacity:.85}
+.study-meta{font-size:.8rem;color:#555;display:flex;flex-wrap:wrap;gap:8px 12px;
+  align-items:center;line-height:1.4}
+.study-meta .meta-item{display:inline-flex;align-items:center;gap:4px}
+.study-meta .meta-sep{color:var(--border-default-grey)}
+.study-actions{display:flex;gap:8px;margin-top:auto;padding-top:10px;flex-wrap:wrap;
+  border-top:1px solid var(--background-alt-grey)}
+.study-actions .fr-btn{font-size:.78rem;padding:.35rem .7rem}
+.active-badge{display:inline-flex;align-items:center;gap:4px;
+  background:#d64d00;color:#fff;padding:3px 9px;border-radius:12px;
+  font-size:.68rem;font-weight:700;letter-spacing:.4px;flex-shrink:0}
+.active-badge::before{content:"";width:6px;height:6px;border-radius:50%;
+  background:#fff;display:inline-block;
+  box-shadow:0 0 0 2px rgba(255,255,255,.4);
+  animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+
+/* Section nouvelle etude : plus engageante */
+.new-study{background:linear-gradient(135deg,#f5f5fe 0%,#fff 100%);
+  border:1px solid var(--border-default-grey);border-radius:8px;
+  padding:22px 24px;margin:0 0 32px}
+.new-study-title{font-size:1.05rem;font-weight:700;color:var(--text-title-blue-france);
+  margin:0 0 6px;display:flex;align-items:center;gap:8px}
+.new-study-desc{font-size:.85rem;color:var(--text-mention-grey);margin:0 0 16px}
+.new-study-form{display:flex;gap:8px;flex-wrap:wrap}
+.new-study-form input{flex:1;min-width:240px}
+.new-study-templates{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.tpl-chip{font-size:.78rem;padding:5px 12px;
+  background:#fff;border:1px solid var(--border-default-grey);
+  border-radius:18px;cursor:pointer;transition:all .12s;
+  color:var(--text-default-grey);font-family:inherit}
+.tpl-chip:hover{background:var(--background-action-high-blue-france);
+  color:#fff;border-color:transparent}
+
+/* Empty states plus accueillants */
+.empty-state{text-align:center;padding:36px 20px;color:#666;
+  background:var(--background-alt-grey);border-radius:8px;
+  border:1px dashed var(--border-default-grey)}
+.empty-state .icon{font-size:2.5rem;margin-bottom:10px;display:block;opacity:.7}
+.empty-state p{margin:6px 0}
+
+/* Memoire cards : meilleur look */
 .fr-card__title{font-size:1rem}
+.memo-section{margin:24px 0 0}
+.memo-empty{font-size:.85rem;color:var(--text-mention-grey);
+  background:var(--background-alt-grey);padding:14px 18px;border-radius:6px}
 </style>
 </head>
 <body>
@@ -69,110 +136,120 @@
 <section class="fr-py-6w">
 <div class="fr-container">
 
-  <!-- KPI : 3 indicateurs lisibles (jargon retire) -->
+  {# Sprint UX-3 refonte (2026-06-21) : KPI cards enrichies avec icone +
+     chiffre + label + sublabel. Layout horizontal compact, hover effect. #}
   <div class="kpi-grid">
     <div class="kpi">
-      <div class="kpi-value">{{ studies|length }}</div>
-      <div class="kpi-label">{% if studies|length == 1 %}Étude en cours{% else %}Études en cours{% endif %}</div>
+      <div class="kpi-icon">📁</div>
+      <div class="kpi-content">
+        <div class="kpi-value">{{ studies|length }}</div>
+        <div class="kpi-label">{% if studies|length == 1 %}Étude en cours{% else %}Études en cours{% endif %}</div>
+        {% if active_study %}
+        <div class="kpi-sublabel" title="Étude active : {{ active_study.name }}">
+          active : {{ active_study.name }}
+        </div>
+        {% endif %}
+      </div>
     </div>
     <div class="kpi">
-      <div class="kpi-value">{{ catalog_total or catalog_count }}</div>
-      <div class="kpi-label">{% if (catalog_total or catalog_count) == 1 %}Livrable publié{% else %}Livrables publiés{% endif %}</div>
-    </div>
-    <div class="kpi" style="border-top-color:#d64d00">
-      <div class="kpi-value">
-        {% if session_ready %}<span style="color:#18753c">✓</span>{% else %}<span style="color:#999">💤</span>{% endif %}
+      <div class="kpi-icon">📦</div>
+      <div class="kpi-content">
+        <div class="kpi-value">{{ catalog_total or catalog_count }}</div>
+        <div class="kpi-label">{% if (catalog_total or catalog_count) == 1 %}Livrable publié{% else %}Livrables publiés{% endif %}</div>
+        <div class="kpi-sublabel">cartes · storymaps · PDF · recettes</div>
       </div>
-      <div class="kpi-label">{% if session_ready %}Bureau actif{% else %}Bureau en veille{% endif %}</div>
+    </div>
+    <div class="kpi {% if session_ready %}kpi-ok{% else %}kpi-sleep{% endif %}">
+      <div class="kpi-icon">{% if session_ready %}🖥{% else %}💤{% endif %}</div>
+      <div class="kpi-content">
+        <div class="kpi-value" style="font-size:1.3rem;font-weight:700">
+          {% if session_ready %}Actif{% else %}En veille{% endif %}
+        </div>
+        <div class="kpi-label">Bureau QGIS</div>
+        <div class="kpi-sublabel">
+          {% if session_ready %}Prêt à utiliser{% else %}Se réveille au premier message{% endif %}
+        </div>
+      </div>
     </div>
   </div>
 
-  <!-- UNE entree principale : "Ouvrir mon bureau" si etude active, sinon CTA creation -->
-  <div style="margin:24px 0">
+  {# Hero CTA : action principale toujours visible et expressive #}
+  <div class="hero-cta">
     {% if active_study %}
-    <a href="/desk" class="fr-btn fr-btn--lg" style="font-weight:700;padding:16px 32px;font-size:1.05rem">
+    <a href="/desk" class="fr-btn fr-btn--lg">
       🪟 Continuer mon travail sur « {{ active_study.name }} »
     </a>
     {% elif studies %}
-    <a href="#mes-etudes" class="fr-btn fr-btn--lg" style="font-weight:700;padding:16px 32px;font-size:1.05rem">
+    <a href="#mes-etudes" class="fr-btn fr-btn--lg">
       📂 Choisir une étude ci-dessous
     </a>
     {% else %}
-    <a href="#nouvelle-etude" class="fr-btn fr-btn--lg" style="font-weight:700;padding:16px 32px;font-size:1.05rem">
+    <a href="#nouvelle-etude" class="fr-btn fr-btn--lg">
       ✨ Créer ma première étude
     </a>
     {% endif %}
-    <!-- Acces secondaires regroupes derriere un disclosure -->
-    <details style="display:inline-block;margin-left:12px;font-size:.85rem">
+    <details style="font-size:.85rem">
       <summary style="cursor:pointer;color:var(--text-action-high-blue-france)">
         Plus d'options ▾
       </summary>
-      <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
-        <a href="{{ agent_url }}" target="_blank" class="fr-btn fr-btn--secondary fr-btn--sm">
-          💬 Agent en plein écran
-        </a>
-        <a href="{{ novnc_url }}" target="_blank" class="fr-btn fr-btn--secondary fr-btn--sm">
-          🖥 QGIS Desktop seul
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <a href="{{ agent_url }}" target="_blank" rel="noopener" class="fr-btn fr-btn--secondary fr-btn--sm">
+          💬 Agent IA seul
         </a>
         <a href="#catalogue" class="fr-btn fr-btn--secondary fr-btn--sm">
           📚 Mes livrables
+        </a>
+        <a href="#memo" class="fr-btn fr-btn--secondary fr-btn--sm">
+          🧠 Mémoire de l'agent
         </a>
       </div>
     </details>
   </div>
 
-  <!-- Études -->
-  <p class="chapter-title fr-mt-5w" id="mes-etudes">Mes études</p>
-  <p class="fr-text--sm fr-mb-3w">
-    Chaque étude regroupe un dossier de travail : ta carte, tes données, tes
-    conversations avec l'agent, et les livrables que tu produis. Tu peux
-    travailler sur plusieurs études en parallèle.
+  {# Sprint UX-3 refonte (2026-06-21) : section etudes refondue.
+     Chapter title avec icone, description claire, grid cards modernes. #}
+  <p class="chapter-title" id="mes-etudes">
+    <span class="ch-ico">📂</span>
+    <span>Mes études</span>
+  </p>
+  <p class="chapter-desc">
+    Une étude regroupe ton dossier de travail : carte QGIS, données,
+    conversations avec l'agent, et livrables. Tu peux jongler entre
+    plusieurs études en parallèle.
   </p>
 
   {% if studies %}
   <div class="study-grid">
     {% for s in studies %}
-    <div class="study-card{% if s.id == active_study_id %} fr-card--no-icon{% endif %}"
-         {% if s.id == active_study_id %}style="border-left-color:#d64d00;background:#fff8f7"{% endif %}>
-      <h3 class="study-name">
-        {{ s.name }}
+    <div class="study-card{% if s.id == active_study_id %} is-active{% endif %}">
+      <div class="study-card-header">
+        <h3 class="study-name" title="{{ s.name }}">
+          <span class="study-name-icon">{% if s.id == active_study_id %}🪟{% else %}📁{% endif %}</span>{{ s.name }}
+        </h3>
         {% if s.id == active_study_id %}<span class="active-badge">ACTIVE</span>{% endif %}
-      </h3>
-      {# Sprint UX-3 Commit 3 (2026-06-21) : badge projets de l'etude.
-         project_count est enrichi par /studies (cf. list_studies_endpoint).
-         default_project.label affiche le projet principal de cette etude. #}
-      {% if s.project_count and s.project_count > 0 %}
-      <p class="fr-text--xs" style="color:var(--text-mention-grey);margin:4px 0 8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-        <span title="Projets QGIS dans cette étude">
-          📁 {{ s.project_count }}
-          {% if s.project_count == 1 %}projet{% else %}projets{% endif %}
-        </span>
-        {% if s.default_project %}
-        <span style="color:var(--text-mention-grey)">·</span>
-        <span title="Projet principal ouvert par défaut au lancement du bureau">
-          principal : <strong style="font-weight:600">{{ s.default_project.label }}</strong>
+      </div>
+      <div class="study-meta">
+        {% if s.project_count and s.project_count > 0 %}
+        <span class="meta-item" title="Projets QGIS">
+          📁 {{ s.project_count }}{% if s.project_count == 1 %} projet{% else %} projets{% endif %}
         </span>
         {% endif %}
-      </p>
-      {% endif %}
-      {# Badge profil retire de l'UI 2026-06-07 : profil contextuel,
-         calcule cote serveur, plus expose comme axe de choix user. #}
+        {% if s.default_project %}
+        <span class="meta-sep">·</span>
+        <span class="meta-item" title="Projet principal ouvert par défaut">
+          ⭐ <strong>{{ s.default_project.label }}</strong>
+        </span>
+        {% endif %}
+      </div>
       <div class="study-actions">
         {% if s.id == active_study_id %}
-        {# Sprint UX-1 (2026-06-20) : Le bouton "Ouvrir le bureau" sur la
-           card de l'etude ACTIVE faisait doublon avec le gros CTA principal
-           "Continuer mon travail sur «{nom}»" en haut de page (L89).
-           L'user voit le badge ACTIVE -> il sait que l'action principale
-           est celle du haut. Ici on garde juste les actions secondaires
-           (ZIP, Archiver) + un label informatif. #}
-        <span class="fr-text--sm" style="color:var(--text-mention-grey);font-style:italic;align-self:center">
+        <span class="fr-text--xs" style="color:var(--text-mention-grey);font-style:italic;align-self:center;flex:1">
           ↑ ouverte dans le bureau
         </span>
         {% else %}
-        <!-- Carte non active : "Ouvrir" active + redirige en un seul POST. -->
         <form method="POST" action="/workspace/study/{{ s.id }}/activate?return_to=desk"
-              style="margin:0">
-          <button type="submit" class="fr-btn fr-btn--sm" style="font-weight:700">
+              style="margin:0;flex:1">
+          <button type="submit" class="fr-btn fr-btn--sm" style="font-weight:700;width:100%">
             Ouvrir →
           </button>
         </form>
@@ -192,23 +269,60 @@
   {% else %}
   <div class="empty-state">
     <span class="icon">📂</span>
-    <p>Aucune étude — démarre-en une pour organiser ton travail.</p>
+    <p><strong>Aucune étude pour l'instant.</strong></p>
+    <p style="font-size:.85rem;color:var(--text-mention-grey)">
+      Démarre ta première étude en utilisant le formulaire ci-dessous.
+    </p>
   </div>
   {% endif %}
 
-  <form id="nouvelle-etude" method="POST" action="/workspace/study/new" class="fr-mt-3w"
-        style="display:flex;gap:8px;flex-wrap:wrap">
-    <input name="name" type="text" required placeholder="Nom de la nouvelle étude (ex: Inondation Lavandou)"
-           class="fr-input" style="flex:1;min-width:240px">
-    <!-- Profil agent : retire de l'UI 2026-06-06. Le profil est active
-         contextuellement par l'agent (storymap/geoai/db/...) selon l'action
-         user. Le POST /studies utilise "standard" par defaut cote serveur
-         (form.get("profile", "standard") dans workspace_create_study). -->
-    <button type="submit" class="fr-btn">+ Nouvelle étude</button>
-  </form>
+  {# Sprint UX-3 refonte (2026-06-21) : section 'Nouvelle etude' enrichie.
+     Heading + description + form + chips suggestions thematiques. Les chips
+     pre-remplissent juste le champ name (pas de logique profil cote serveur). #}
+  <div class="new-study" id="nouvelle-etude">
+    <h3 class="new-study-title">
+      <span style="font-size:1.3rem">✨</span>
+      <span>Démarrer une nouvelle étude</span>
+    </h3>
+    <p class="new-study-desc">
+      Choisis un nom descriptif pour repérer facilement ton travail dans
+      la liste. Tu pourras ajouter des données, des conversations agent
+      et des livrables à l'intérieur.
+    </p>
+    <form method="POST" action="/workspace/study/new" class="new-study-form">
+      <input id="new-study-name" name="name" type="text" required
+             placeholder="ex : Risque inondation Le Lavandou"
+             class="fr-input">
+      <button type="submit" class="fr-btn">+ Créer l'étude</button>
+    </form>
+    <div class="new-study-templates">
+      <span style="font-size:.78rem;color:var(--text-mention-grey);align-self:center;margin-right:2px">
+        Idées :
+      </span>
+      <button type="button" class="tpl-chip"
+              onclick="document.getElementById('new-study-name').value='Risque inondation '">
+        🌊 Risque inondation
+      </button>
+      <button type="button" class="tpl-chip"
+              onclick="document.getElementById('new-study-name').value='Cadastre solaire '">
+        ☀ Cadastre solaire
+      </button>
+      <button type="button" class="tpl-chip"
+              onclick="document.getElementById('new-study-name').value='Densité bâti '">
+        🏘 Densité bâti
+      </button>
+      <button type="button" class="tpl-chip"
+              onclick="document.getElementById('new-study-name').value='Détection SAM3 '">
+        🛰 Détection IA (SAM3)
+      </button>
+    </div>
+  </div>
 
-  <!-- Catalogue -->
-  <p class="chapter-title fr-mt-5w" id="catalogue">Mes livrables publiés</p>
+  {# Sprint UX-3 refonte (2026-06-21) : section livrables avec icone chapter #}
+  <p class="chapter-title fr-mt-5w" id="catalogue">
+    <span class="ch-ico">📦</span>
+    <span>Mes livrables publiés</span>
+  </p>
   {% if catalog_items %}
   <p class="fr-text--sm fr-mb-3w">Cartes, rapports et recettes accessibles publiquement (sans authentification).</p>
   {% set study_names = {} %}
@@ -297,12 +411,21 @@
   </div>
   {% endif %}
 
-  <!-- Mémoire (couche 3) -->
-  {% if insights or preferences %}
-  <p class="chapter-title fr-mt-5w">Ce que je sais de toi</p>
-  <p class="fr-text--sm fr-mb-3w">
-    L'agent retient des préférences durables pour t'aider mieux dans le temps. Tu peux les modifier ou les effacer à tout moment.
+  {# Sprint UX-3 refonte (2026-06-21) : section memoire TOUJOURS visible
+     (avant : conditionnee `if insights or preferences` -> user vierge ne
+     voyait pas l'existence de cette feature). Empty state explicite
+     pour expliquer ce que c'est. #}
+  <p class="chapter-title fr-mt-5w memo-section" id="memo">
+    <span class="ch-ico">🧠</span>
+    <span>Ce que l'agent sait de toi</span>
   </p>
+  <p class="chapter-desc">
+    L'agent retient des préférences durables (langue, zones favorites,
+    style de cartes…) et extrait automatiquement des insights de tes
+    conversations. Tu peux les modifier ou les effacer à tout moment
+    depuis le bureau.
+  </p>
+  {% if insights or preferences %}
   <div class="fr-grid-row fr-grid-row--gutters">
     {% if preferences %}
     <div class="fr-col-12 fr-col-md-6">
@@ -322,7 +445,7 @@
     <div class="fr-col-12 fr-col-md-6">
       <div class="fr-card fr-card--no-icon">
         <div class="fr-card__body"><div class="fr-card__content">
-          <h3 class="fr-card__title">🧠 Insights agentiques</h3>
+          <h3 class="fr-card__title">💡 Insights agentiques</h3>
           <ul class="fr-text--sm">
             {% for ins in insights[:10] %}
             <li><strong>{{ ins.key }}</strong> : {{ ins.value }}</li>
@@ -332,6 +455,13 @@
       </div>
     </div>
     {% endif %}
+  </div>
+  {% else %}
+  <div class="memo-empty">
+    <strong>Aucun insight pour le moment.</strong><br>
+    Au fil de tes conversations dans le bureau, l'agent commencera à
+    noter ici ce qu'il apprend de toi (rôles, sujets favoris, contraintes
+    métier…). Tout reste sur ton espace et tu en gardes le contrôle.
   </div>
   {% endif %}
 
