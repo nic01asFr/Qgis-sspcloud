@@ -80,9 +80,12 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 /* Sprint UX-3 fix (2026-06-21) : justify-content:space-between creait un
    gros vide entre 'CEREMA · QGIS' et le bouton 'test ▾' (separateur '›'
    orphelin au milieu). flex-start groupe brand + > + center-content
-   en bloc compact a gauche. Padding reduit 60->20px pour ne pas decaler
-   le contenu. */
-.hdr-center{display:flex;align-items:center;padding:0 20px;
+   en bloc compact a gauche.
+   Fix #2 (2026-06-21 v2) : le toggle-publi (position:absolute, left:14px,
+   w:36px) chevauchait le brand 'CEREMA' a x=20px -> visuellement on
+   voyait 'EMA'. Padding-left bumped 20->60px pour laisser de la place
+   au toggle-publi sans superposition. */
+.hdr-center{display:flex;align-items:center;padding:0 20px 0 60px;
   min-width:0;gap:12px;justify-content:flex-start}
 .hdr-center .brand{display:flex;align-items:baseline;gap:8px;white-space:nowrap}
 .hdr-center .brand .op{font-weight:700;color:#000091;font-size:15px;line-height:1;
