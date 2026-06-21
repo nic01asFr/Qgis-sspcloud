@@ -175,14 +175,25 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .study-dropdown .item .prof{margin-left:auto;font-size:10px;color:var(--text-mention-grey);
   background:var(--background-alt-grey);padding:1px 6px;border-radius:2px}
 .study-dropdown .item.active .prof{background:rgba(0,0,145,.1)}
+/* Sprint UX-3 fix (2026-06-21) : new-form passe en flex column pour avoir
+   input PUIS bouton empile, lisible et plein-largeur les 2. Avant : input
+   width:100% + button width:100% mais le browser les rendait sur la meme
+   ligne dans certains cas (autoflow inline) -> bouton tronque hors du
+   dropdown 360px max-width. */
 .study-dropdown .new-form{padding:10px 12px;background:var(--background-alt-grey);
-  border-top:1px solid var(--border-default-grey)}
-.study-dropdown .new-form input,.study-dropdown .new-form select{width:100%;
-  padding:5px 8px;font-size:11.5px;border:1px solid var(--border-default-grey);
-  border-radius:3px;margin-bottom:4px;font-family:inherit;background:#fff}
-.study-dropdown .new-form button{width:100%;padding:5px;font-size:11.5px;
+  border-top:1px solid var(--border-default-grey);
+  display:flex;flex-direction:column;gap:6px}
+.study-dropdown .new-form input,.study-dropdown .new-form select{
+  width:100%;box-sizing:border-box;
+  padding:6px 8px;font-size:11.5px;border:1px solid var(--border-default-grey);
+  border-radius:3px;margin:0;font-family:inherit;background:#fff}
+.study-dropdown .new-form button{
+  width:100%;box-sizing:border-box;
+  padding:6px;font-size:11.5px;
   background:var(--background-action-high-blue-france);color:#fff;border:none;
   border-radius:3px;cursor:pointer;font-family:inherit;font-weight:500}
+.study-dropdown .new-form button:hover{
+  filter:brightness(1.1)}
 
 .desk-header .spacer{flex:1}
 .desk-header .user-chip{font-size:11.5px;color:var(--text-mention-grey);
