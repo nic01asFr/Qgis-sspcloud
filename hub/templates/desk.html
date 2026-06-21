@@ -1418,7 +1418,11 @@ document.getElementById('toggle-publi')?.addEventListener('click', () => {
 // par defaut. L'user peut ouvrir via le toggle ; sticky preference apres
 // premier opt-in pour garder ouvert si user le souhaite. La decouvrabilite
 // des recipes/publi est assuree par le badge sur le toggle + tooltip.
-const _RESS_PREF_KEY = 'qgis_desk_resources_open';
+// Sprint UX-3 fix (2026-06-21) : key bumped v2 pour invalider les anciens
+// sticky pref ='1' herites du Sprint UX-1 (drawer ouvert par defaut). Sans
+// le bump, les anciens users garderaient le drawer ouvert et couvriraient
+// le canvas alors qu'on a explicitement passe en opt-in.
+const _RESS_PREF_KEY = 'qgis_desk_resources_open_v2';
 const _ressOpenPref = localStorage.getItem(_RESS_PREF_KEY);
 if (_ressOpenPref === '1') {
   // L'user l'avait explicitement ouvert -> respecter
