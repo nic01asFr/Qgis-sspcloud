@@ -363,19 +363,48 @@
 </section>
 </main>
 
+{# Sprint UX-2 (2026-06-21) : footer DSFR harmonise avec chat.html agent.
+   Memes liens, meme structure -> service unifie. #}
 <footer class="fr-footer" role="contentinfo"><div class="fr-container">
 <div class="fr-footer__body">
   <div class="fr-footer__brand fr-enlarge-link"><p class="fr-logo">République<br>Française</p></div>
   <div class="fr-footer__content">
-    <p class="fr-footer__content-desc">CEREMA — Service QGIS Cloud sur SSPCloud</p>
+    <p class="fr-footer__content-desc">
+      QGIS Service · CEREMA. Plateforme d'analyse géospatiale assistée
+      par IA, hébergée sur SSPCloud (INSEE). Outils QGIS Desktop +
+      agent conversationnel + accès aux données IGN, Géorisques, OSM
+      et DVF.
+    </p>
     <ul class="fr-footer__content-list">
-      <li class="fr-footer__content-item"><a class="fr-footer__content-link" href="https://cerema.fr">cerema.fr</a></li>
-      <li class="fr-footer__content-item"><a class="fr-footer__content-link" href="https://datalab.sspcloud.fr">SSPCloud</a></li>
+      <li class="fr-footer__content-item">
+        <a class="fr-footer__content-link" target="_blank" rel="noopener external"
+           href="https://www.cerema.fr">cerema.fr</a>
+      </li>
+      <li class="fr-footer__content-item">
+        <a class="fr-footer__content-link" target="_blank" rel="noopener external"
+           href="https://lab.sspcloud.fr">SSPCloud</a>
+      </li>
+      <li class="fr-footer__content-item">
+        <a class="fr-footer__content-link" target="_blank" rel="noopener external"
+           href="https://github.com/nic01asFr/Qgis-sspcloud">GitHub source</a>
+      </li>
     </ul>
   </div>
 </div>
 <div class="fr-footer__bottom"><ul class="fr-footer__bottom-list">
-  <li class="fr-footer__bottom-item"><span class="fr-footer__bottom-link">Licence ouverte 2.0</span></li>
+  <li class="fr-footer__bottom-item">
+    <a class="fr-footer__bottom-link" href="/desk">Bureau de travail</a>
+  </li>
+  <li class="fr-footer__bottom-item">
+    <a class="fr-footer__bottom-link" href="{{ agent_url }}" target="_blank" rel="noopener">Agent IA seul ↗</a>
+  </li>
+  <li class="fr-footer__bottom-item">
+    <span class="fr-footer__bottom-link">Licence ouverte 2.0</span>
+  </li>
+  <li class="fr-footer__bottom-item">
+    <a class="fr-footer__bottom-link" target="_blank" rel="noopener external"
+       href="https://github.com/nic01asFr/Qgis-sspcloud/issues">Signaler un problème</a>
+  </li>
 </ul></div>
 </div></footer>
 

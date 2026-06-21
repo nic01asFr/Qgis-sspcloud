@@ -333,12 +333,10 @@ body.embed .msg .bubble pre{max-width:100%}
       <p style="font-size:10px;color:#666">QGIS Service</p>
     </div>
   </div>
-  <div class="fr-header__service">
-    {# Sprint UX-1 (2026-06-20) : titre 'Agent IA - Chat' coherent avec
-       l'onglet de navigation 'Agent IA seul'. Avant : 'Agent QGIS - Chat'. #}
-    <a href="/"><p class="fr-header__service-title">Agent IA — Chat</p></a>
-    <p class="fr-header__service-tagline">Analyse géospatiale assistée par IA</p>
-  </div></div>
+  {# Sprint UX-2 (2026-06-21) : retire service_title + tagline = doublon
+     avec l'onglet 'Agent IA seul' actif dans qgis-nav juste en dessous.
+     Economie ~80px de hauteur header + supprime redondance visuelle. #}
+  </div>
 </div></div></div>
 </header>
 
@@ -431,23 +429,38 @@ body.embed .qgis-nav{display:none}
            comme input hidden pour compat JS (changeProfile/profile-select).
            Cf. project_contextual_profiles_and_gpu_indicator. -->
       <input type="hidden" id="profile-select" value="{{ profile_id }}">
+      {# Sprint UX-2 (2026-06-21) : toolbar compactee.
+         Avant : 3 boutons libelles longs (Nouvelle conv / Memoire / Bureau QGIS)
+         qui prenaient trop de largeur sur mobile/tablette.
+         Apres : 2 icon-only buttons + 1 lien externe icone-only. Tooltips
+         conserves pour accessibilite. Le bouton Bureau QGIS reste un lien
+         externe (target=_blank) car le user veut probablement garder le chat
+         ouvert + ouvrir le desk dans nouvel onglet pour comparer. #}
       <div class="spacer"></div>
       <button type="button" class="tool-btn" id="btn-new-conv"
-              onclick="startNewConversation()"
+              onclick="startNewConversation()" aria-label="Nouvelle conversation"
               title="Démarre une nouvelle conversation (la session actuelle est conservée dans l'historique des sessions). Utile si la conversation a accumulé trop d'erreurs ou si tu changes de sujet.">
-        ➕ Nouvelle conv
+        ➕ <span class="tool-btn-label">Nouvelle</span>
       </button>
       <button type="button" class="tool-btn" id="btn-memory"
-              onclick="toggleMemoryDrawer()" title="Voir et éditer la mémoire de l'agent">
-        🧠 Mémoire
+              onclick="toggleMemoryDrawer()" aria-label="Memoire de l'agent"
+              title="Voir et éditer la mémoire de l'agent">
+        🧠 <span class="tool-btn-label">Mémoire</span>
       </button>
-      {# Fix consolidation 2026-06-20 : utiliser hub_url (le hub du user)
-         pour le lien "Bureau QGIS", PAS portal_url. Le portail (nic01asfr)
-         sert uniquement a l'onboarding initial, pas a la navigation
-         courante. L'agent du user nicolaslaval doit pointer vers SON
-         hub /desk, pas vers le portail admin. #}
-      <a href="{{ hub_url ~ '/desk' if hub_url else '/desk' }}" target="_blank">🖥 Bureau QGIS</a>
+      <a href="{{ hub_url ~ '/desk' if hub_url else '/desk' }}" target="_blank"
+         rel="noopener" class="tool-btn-link"
+         title="Ouvrir le Bureau QGIS dans un nouvel onglet (canvas + outils)">
+        🖥 <span class="tool-btn-label">Bureau</span> ↗
+      </a>
     </div>
+    <style>
+    /* Sprint UX-2 (2026-06-21) : labels textuels caches sur petit ecran,
+       garde les icones. Tooltips restent accessibles via aria-label/title. */
+    .chat-toolbar .tool-btn-label{margin-left:4px}
+    @media(max-width:600px){
+      .chat-toolbar .tool-btn-label{display:none}
+    }
+    </style>
     <script>
     function startNewConversation() {
       if (!confirm('Démarrer une nouvelle conversation ?\n\n' +
@@ -555,13 +568,52 @@ body.embed .qgis-nav{display:none}
   </main>
 </div>
 
+{# Sprint UX-2 (2026-06-21) : footer DSFR officiel avec 3 colonnes de
+   liens utiles + bottom-list mentions legales. Avant : 1 ligne minimaliste
+   sans valeur ajoutee. Maintenant : Service / Aide / Source/Donnees +
+   bandeau mentions. #}
 <footer class="fr-footer" role="contentinfo"><div class="fr-container fr-container--fluid">
+  <div class="fr-footer__body">
+    <div class="fr-footer__brand fr-enlarge-link">
+      <p class="fr-logo">République<br>Française</p>
+    </div>
+    <div class="fr-footer__content">
+      <p class="fr-footer__content-desc">
+        QGIS Service · CEREMA. Plateforme d'analyse géospatiale assistée
+        par IA, hébergée sur SSPCloud (INSEE). Outils QGIS Desktop +
+        agent conversationnel + accès aux données IGN, Géorisques, OSM
+        et DVF.
+      </p>
+      <ul class="fr-footer__content-list">
+        <li class="fr-footer__content-item">
+          <a class="fr-footer__content-link" target="_blank" rel="noopener external"
+             href="https://www.cerema.fr">cerema.fr</a>
+        </li>
+        <li class="fr-footer__content-item">
+          <a class="fr-footer__content-link" target="_blank" rel="noopener external"
+             href="https://lab.sspcloud.fr">SSPCloud</a>
+        </li>
+        <li class="fr-footer__content-item">
+          <a class="fr-footer__content-link" target="_blank" rel="noopener external"
+             href="https://github.com/nic01asFr/Qgis-sspcloud">GitHub source</a>
+        </li>
+      </ul>
+    </div>
+  </div>
   <div class="fr-footer__bottom"><ul class="fr-footer__bottom-list">
-    <li class="fr-footer__bottom-item"><span class="fr-footer__bottom-link">CEREMA · QGIS Service · Licence ouverte 2.0</span></li>
-    {# Fix consolidation 2026-06-20 : meme raison que le lien Bureau QGIS,
-       Mon espace doit pointer vers le hub user (qui sert /workspace),
-       PAS vers le portail admin nic01asfr. #}
-    <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="{{ hub_url ~ '/workspace' if hub_url else '/workspace' }}">Mon espace</a></li>
+    <li class="fr-footer__bottom-item">
+      <a class="fr-footer__bottom-link" href="{{ hub_url ~ '/workspace' if hub_url else '/workspace' }}">Mon espace</a>
+    </li>
+    <li class="fr-footer__bottom-item">
+      <a class="fr-footer__bottom-link" href="{{ hub_url ~ '/desk' if hub_url else '/desk' }}">Bureau de travail</a>
+    </li>
+    <li class="fr-footer__bottom-item">
+      <span class="fr-footer__bottom-link">Licence ouverte 2.0</span>
+    </li>
+    <li class="fr-footer__bottom-item">
+      <a class="fr-footer__bottom-link" target="_blank" rel="noopener external"
+         href="https://github.com/nic01asFr/Qgis-sspcloud/issues">Signaler un problème</a>
+    </li>
   </ul></div>
 </div></footer>
 
