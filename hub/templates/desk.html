@@ -227,12 +227,26 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .rtabs .rtab{flex:1;padding:8px 6px;font-size:11px;font-weight:600;
   cursor:pointer;text-align:center;background:transparent;border:none;
   color:var(--text-mention-grey);font-family:inherit;
-  border-bottom:2px solid transparent;
+  border-bottom:2px solid transparent;position:relative;
   transition:background .12s,color .12s,border-color .12s}
 .rtabs .rtab.active{color:var(--text-action-high-blue-france);
   background:#fff;border-bottom-color:var(--border-action-high-blue-france)}
 .rtabs .rtab:hover:not(.active){background:rgba(0,0,145,.05);
   color:var(--text-default-grey)}
+/* Sprint UX-3 fix (2026-06-22) : indicateur visuel de scope sur les
+   onglets ressources. Un petit point colore en haut-droite de l'onglet :
+   - bleu CEREMA : per-projet (le contenu change selon le projet courant)
+   - orange : per-etude (le contenu est partage entre tous les projets
+     de l'etude active)
+   Tooltip explicite via title=, plus l'indicateur visuel discret. */
+.rtabs .rtab[data-scope]::after{
+  content:"";position:absolute;top:6px;right:6px;
+  width:5px;height:5px;border-radius:50%;
+  opacity:.55;transition:opacity .12s}
+.rtabs .rtab[data-scope="project"]::after{
+  background:var(--background-action-high-blue-france)}
+.rtabs .rtab[data-scope="study"]::after{background:#d64d00}
+.rtabs .rtab.active::after{opacity:.95}
 .rpane{display:none;flex:1;overflow:hidden;flex-direction:column}
 .rpane.active{display:flex}
 .publi-list{flex:1;overflow-y:auto;padding:6px 0}
@@ -541,11 +555,45 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       <span class="publi-count" id="publi-count-badge"
             title="{{ catalog_count }} publication(s) sur ce compte (cumul toutes etudes)">{{ catalog_count }}</span>
     </div>
+    {# Sprint UX-3 fix (2026-06-22) : mini legende qui explique les points
+       colores des onglets. Per-projet (bleu) vs Per-etude (orange). #}
+    <div class="rscope-legend">
+      <span class="rscope-item"><span class="dot dot-project"></span>per projet</span>
+      <span class="rscope-item"><span class="dot dot-study"></span>per étude</span>
+    </div>
+    <style>
+    .rscope-legend{display:flex;gap:12px;padding:4px 14px 6px;
+      font-size:10px;color:var(--text-mention-grey);
+      background:#fafafa;border-bottom:1px solid var(--border-default-grey)}
+    .rscope-legend .rscope-item{display:inline-flex;align-items:center;gap:4px}
+    .rscope-legend .dot{width:6px;height:6px;border-radius:50%;display:inline-block;
+      opacity:.75}
+    .rscope-legend .dot-project{background:var(--background-action-high-blue-france)}
+    .rscope-legend .dot-study{background:#d64d00}
+    </style>
+    {# Sprint UX-3 fix (2026-06-22) : onglets renommes pour clarte +
+       tooltips qui explicitent le scope (projet vs etude). 'Publi' devient
+       'Livrables' (plus clair pour user CEREMA). Scope visuel signale via
+       data-scope attribute (CSS petit point colore) :
+       - bleu : per-projet (Couches)
+       - orange : per-etude (Livrables, Fichiers, Recettes) #}
     <div class="rtabs">
-      <button class="rtab active" data-rtab="layers" title="Couches du projet QGIS courant">🗺 Couches</button>
-      <button class="rtab" data-rtab="publi" title="Publications et livrables">📚 Publi</button>
-      <button class="rtab" data-rtab="files" title="Fichiers de l'étude">📁 Fichiers</button>
-      <button class="rtab" data-rtab="recipes" title="Recettes user de cette étude (éditables)">📋 Recettes</button>
+      <button class="rtab active" data-rtab="layers" data-scope="project"
+              title="Couches du projet QGIS courant (specifique au projet ouvert)">
+        🗺 Couches
+      </button>
+      <button class="rtab" data-rtab="publi" data-scope="study"
+              title="Livrables publies par cette etude (storymaps, PDF, recettes)">
+        📚 Livrables
+      </button>
+      <button class="rtab" data-rtab="files" data-scope="study"
+              title="Fichiers de donnees SIG partages au niveau etude (gpkg, tif, geojson)">
+        📁 Fichiers
+      </button>
+      <button class="rtab" data-rtab="recipes" data-scope="study"
+              title="Recettes user reutilisables sur cette etude (editables)">
+        📋 Recettes
+      </button>
     </div>
 
     <!-- Onglet Couches QGIS (chargé via /desk/layers) -->
