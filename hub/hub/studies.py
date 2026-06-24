@@ -1287,6 +1287,36 @@ except Exception as _exc:
     print(f"PROJECT_SAFETY_SETUP_ERR {{_exc}}")
     _bad_handler = None
 
+# Sprint UX-3 lazy migration (2026-06-22) : si le nouveau path projects/{pid}/
+# project.qgz n'existe pas MAIS que le legacy /data/studies/{{sid}}/project.qgz
+# existe (etude creee avant le passage 1:N -> commit 674c153), on copie le
+# legacy au nouveau path. Migration filesystem deferee au 1er activate (la DB
+# row study_projects a ete creee au boot hub, mais la copie effective du .qgz
+# attendait que le pod workspace soit UP pour s'executer).
+# Le legacy est conserve en .migrated.<ts> pour audit.
+import shutil as _sh
+import time as _t
+legacy_qgz = Path(f"/data/studies/{{sid}}/project.qgz")
+if not qgz.exists() and legacy_qgz.exists() and legacy_qgz.is_file():
+    try:
+        sz = legacy_qgz.stat().st_size
+        if sz > 0:
+            qgz.parent.mkdir(parents=True, exist_ok=True)
+            _sh.copy2(str(legacy_qgz), str(qgz))
+            # Renomme le legacy pour eviter qu'un futur code le re-utilise.
+            # On garde le fichier pour rollback / audit, mais hors du chemin
+            # de lecture normal.
+            _archive = legacy_qgz.with_suffix(f".qgz.migrated.{{int(_t.time())}}")
+            try:
+                legacy_qgz.rename(_archive)
+            except Exception:
+                pass
+            print(f"LEGACY_QGZ_MIGRATED from={{legacy_qgz}} to={{qgz}} size={{sz}}")
+        else:
+            print(f"LEGACY_QGZ_EMPTY skip {{legacy_qgz}}")
+    except Exception as exc:
+        print(f"LEGACY_QGZ_MIGRATE_ERR {{exc}}")
+
 if qgz.exists():
     try:
         from qgis.core import QgsProject
