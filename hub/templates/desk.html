@@ -520,11 +520,11 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             </a>
           </div>
         </div>
-        {% if active_study %}
-        <a href="/studies/{{ active_study_id }}/export" class="back-link"
-           title="Télécharger l'étude au format ZIP (projet + données + livrables)"
-           aria-label="Télécharger l'étude au format ZIP">↓ ZIP</a>
-        {% endif %}
+        {# Sprint UX-4 (2026-06-24) : bouton ZIP retire du header
+           (action lourde au poids visuel inadequat). Relocalise dans le
+           drawer Ressources -> onglet 'Exports'. Audit pro consultant
+           UX 2026-06-24 + retour user : 'placer dans le panel de droite
+           au bon endroit'. #}
         <!-- Icone retour ↩ retiree : le brand "CEREMA · QGIS" sert maintenant
              de lien retour vers /workspace (fil d'Ariane). -->
       </div>
@@ -558,8 +558,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     {# Sprint UX-3 fix (2026-06-22) : mini legende qui explique les points
        colores des onglets. Per-projet (bleu) vs Per-etude (orange). #}
     <div class="rscope-legend">
-      <span class="rscope-item"><span class="dot dot-project"></span>per projet</span>
-      <span class="rscope-item"><span class="dot dot-study"></span>per étude</span>
+      <span class="rscope-item"><span class="dot dot-project"></span>par projet</span>
+      <span class="rscope-item"><span class="dot dot-study"></span>par étude</span>
     </div>
     <style>
     .rscope-legend{display:flex;gap:12px;padding:4px 14px 6px;
@@ -577,10 +577,18 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
        data-scope attribute (CSS petit point colore) :
        - bleu : per-projet (Couches)
        - orange : per-etude (Livrables, Fichiers, Recettes) #}
+    {# Sprint UX-4 (2026-06-24) : nouvel onglet 'Exports' (scope etude)
+       qui accueille les actions de production de livrables :
+       - ZIP etude (relocation depuis header desk)
+       - [Futur Sprint Composants-3] : 'Publier Scene Manifest' -> 3 pivots #}
     <div class="rtabs">
       <button class="rtab active" data-rtab="layers" data-scope="project"
               title="Couches du projet QGIS courant (specifique au projet ouvert)">
         🗺 Couches
+      </button>
+      <button class="rtab" data-rtab="exports" data-scope="study"
+              title="Actions d'export de l'etude (ZIP, Scene Manifest, livrables)">
+        📦 Exports
       </button>
       <button class="rtab" data-rtab="publi" data-scope="study"
               title="Livrables publies par cette etude (storymaps, PDF, recettes)">
@@ -602,6 +610,60 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <div class="publi-empty">Chargement…</div>
       </div>
     </div>
+
+    {# Sprint UX-4 (2026-06-24) : onglet 'Exports' - actions de production
+       de livrables au niveau etude. Sprint Composants-3 ajoutera ici les
+       boutons 'Publier Scene Manifest' (3 pivots) + 'Push vers Grist'. #}
+    <div class="rpane" data-rpane="exports">
+      <div class="exports-pane">
+        {% if active_study %}
+        <div class="export-section">
+          <h4 class="export-section-title">📦 Bundle complet</h4>
+          <p class="export-section-desc">
+            Télécharge l'étude entière au format ZIP : projet QGIS, données
+            SIG locales, livrables publiés, recettes. Idéal pour archiver
+            ou partager hors ligne.
+          </p>
+          <a href="/studies/{{ active_study_id }}/export"
+             class="fr-btn fr-btn--sm" style="width:100%;text-align:center;font-weight:700"
+             title="Télécharger l'étude au format ZIP (projet QGIS + données + livrables)">
+            ↓ Télécharger l'étude (ZIP)
+          </a>
+        </div>
+
+        <div class="export-section export-soon">
+          <h4 class="export-section-title">🎨 Scene Manifest <span class="soon-badge">Bientôt</span></h4>
+          <p class="export-section-desc">
+            Publie les couches du projet au format Scene Manifest V0.2
+            (JSON + GPKG + ZIP composite). Permet l'interop avec atlas
+            widget Grist, qgis2grist, ZEBRA review.
+          </p>
+          <button type="button" class="fr-btn fr-btn--sm fr-btn--tertiary"
+                  style="width:100%;text-align:center"
+                  disabled
+                  title="Disponible après Sprint Composants (refonte panel droit + format pivot Scene Manifest V0.2)">
+            Publier Scene Manifest →
+          </button>
+        </div>
+        {% else %}
+        <div class="publi-empty">
+          Active une étude pour accéder aux exports.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    <style>
+    .exports-pane{padding:14px 12px;display:flex;flex-direction:column;gap:16px}
+    .export-section{padding:12px;background:var(--background-alt-grey);
+      border-radius:6px;border-left:3px solid #d64d00}
+    .export-section.export-soon{border-left-color:#919191;opacity:.75}
+    .export-section-title{font-size:12.5px;font-weight:700;margin:0 0 4px;
+      color:var(--text-title-blue-france);display:flex;align-items:center;gap:6px}
+    .export-section-desc{font-size:11px;color:var(--text-mention-grey);
+      margin:0 0 10px;line-height:1.45}
+    .soon-badge{font-size:9.5px;font-weight:600;background:#919191;color:#fff;
+      padding:1px 6px;border-radius:8px;letter-spacing:.3px}
+    </style>
 
     <!-- Onglet Publications (existant) -->
     <div class="rpane" data-rpane="publi">
