@@ -1351,15 +1351,40 @@ if qgz.exists():
 else:
     # Projet vide : on cree un .qgz placeholder pour eviter le Welcome widget
     # QGIS au load. Meme strategie que activate_pod_code legacy.
+    #
+    # Sprint UX-3 fix (2026-06-22) : ajout de iface.addProject() + canvas
+    # refresh manquants. Sans ces appels, write() seul ne ferme pas le
+    # Welcome widget QGIS qui flotte sur le canvas -> user voit 'QGIS sans
+    # projet ouvert' avec la liste des projets recents au lieu d'un canvas
+    # de nouveau projet vide propre. Pattern repris de activate_pod_code
+    # legacy qui avait deja ce fix (Bug B v3 2026-06-02 + complement 2026-06-07).
     try:
         from qgis.core import QgsProject
         QgsProject.instance().clear()
+        qgz.parent.mkdir(parents=True, exist_ok=True)
         QgsProject.instance().setFileName(str(qgz))
         try:
             QgsProject.instance().writeEntry("Paths", "Absolute", False)
         except Exception:
             pass
         wrote = QgsProject.instance().write()
+        # Ferme le Welcome widget + bascule l'UI en mode 'projet ouvert'.
+        # iface.addProject(qgz) charge le projet comme si user faisait
+        # File -> Open Project, ce qui dismiss le Welcome.
+        try:
+            from qgis.utils import iface
+            if iface is not None:
+                try:
+                    iface.addProject(str(qgz))
+                except Exception as _open_exc:
+                    print(f"NEW_PROJECT_ADD_PROJECT_ERR {{_open_exc}}")
+                try:
+                    iface.mapCanvas().zoomToFullExtent()
+                    iface.mapCanvas().refresh()
+                except Exception:
+                    pass
+        except Exception as _iface_exc:
+            print(f"NEW_PROJECT_IFACE_REFRESH_ERR {{_iface_exc}}")
         print(f"PROJECT_CREATED_AND_SAVED path={{qgz}} wrote={{wrote}}")
     except Exception as exc:
         print(f"PROJECT_NEW_ERR {{exc}}")
