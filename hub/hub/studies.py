@@ -153,6 +153,41 @@ async def init_db() -> None:
                 pid TEXT NOT NULL
             )
         """)
+        # Sprint Composants-1 (2026-06-24) : index Scene Manifest par projet.
+        # Pattern recipes_index V1.5 (INSERT-only, versioning SHA, audit trail).
+        # Le contenu JSON du Scene Manifest vit sur le PVC dans
+        # /data/studies/{sid}/projects/{pid}/scene_manifest.json. Cette table
+        # track les metadonnees + chaine de versions (qui a edite quand, et
+        # quel scene_hash issue de la validation Pydantic + canonicalisation
+        # cf. vendor/scene_manifest.py).
+        # Une row par (pid, sha) : INSERT-only -> historique conserve.
+        # Lookup latest via MAX(version_num) WHERE pid=? AND status='active'.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS scene_manifest_index (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                pid TEXT NOT NULL,
+                sid TEXT NOT NULL,
+                owner TEXT NOT NULL,
+                scene_hash TEXT NOT NULL,
+                previous_hash TEXT,
+                version_num INTEGER NOT NULL DEFAULT 1,
+                manifest_version TEXT NOT NULL DEFAULT 'V0.2',
+                n_layers INTEGER NOT NULL DEFAULT 0,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at INTEGER NOT NULL,
+                published_at INTEGER,
+                public_url TEXT
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_scene_manifest_pid
+                ON scene_manifest_index(pid, version_num DESC)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_scene_manifest_owner
+                ON scene_manifest_index(owner, status)
+        """)
         await db.commit()
 
 
@@ -403,6 +438,90 @@ async def recipe_index_mark_published(
             (int(time.time()), public_url, sid, slug, version_num),
         )
         await db.commit()
+
+
+# ── Sprint Composants-1 : CRUD scene_manifest_index ─────────────────────────
+# Pattern strictement parallele aux recipes_index : INSERT-only, audit trail,
+# lookup latest via MAX(version_num). Le contenu JSON Scene Manifest V0.2 vit
+# sur le PVC dans projects/{pid}/scene_manifest.json. Cette table track les
+# metadonnees pour faciliter le versioning et l'audit.
+
+async def scene_manifest_insert(
+    pid: str, sid: str, owner: str, scene_hash: str,
+    n_layers: int = 0, size_bytes: int = 0,
+    previous_hash: str = "",
+    manifest_version: str = "V0.2",
+) -> int:
+    """Insert nouvelle row scene_manifest_index. Auto-increment version_num.
+
+    Pattern recipes_index : pas de UPDATE, INSERT seulement. La row precedente
+    reste en DB (audit), seule la version_num la plus elevee est consideree
+    'active' par scene_manifest_get_latest.
+    """
+    import time as _t
+    async with aiosqlite.connect(_DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT MAX(version_num) FROM scene_manifest_index WHERE pid = ?",
+            (pid,),
+        )
+        row = await cur.fetchone()
+        next_v = (row[0] or 0) + 1
+        cur = await db.execute(
+            """INSERT INTO scene_manifest_index
+               (pid, sid, owner, scene_hash, previous_hash, version_num,
+                manifest_version, n_layers, size_bytes, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)""",
+            (pid, sid, owner, scene_hash, previous_hash or None, next_v,
+             manifest_version, n_layers, size_bytes, int(_t.time())),
+        )
+        await db.commit()
+        return cur.lastrowid or 0
+
+
+async def scene_manifest_get_latest(pid: str) -> dict | None:
+    """Retourne la derniere version active du Scene Manifest pour un projet.
+    None si aucune version enregistree."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """SELECT * FROM scene_manifest_index
+               WHERE pid = ? AND status = 'active'
+               ORDER BY version_num DESC LIMIT 1""",
+            (pid,),
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+
+async def scene_manifest_history(pid: str) -> list[dict]:
+    """Toutes les versions (actives + archivees) pour un projet, plus recent
+    d'abord. Permet l'audit complet ou la restauration manuelle."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """SELECT * FROM scene_manifest_index
+               WHERE pid = ? ORDER BY version_num DESC""",
+            (pid,),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def scene_manifest_archive(pid: str) -> int:
+    """Soft delete : marque toutes les versions du manifest comme archived.
+    Le fichier JSON reste sur PVC pour audit / restauration."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        cur = await db.execute(
+            "UPDATE scene_manifest_index SET status='archived' WHERE pid=?",
+            (pid,),
+        )
+        await db.commit()
+        return cur.rowcount
+
+
+def scene_manifest_path(sid: str, pid: str) -> str:
+    """Chemin canonique du fichier Scene Manifest JSON sur PVC workspace."""
+    return f"/data/studies/{sid}/projects/{pid}/scene_manifest.json"
 
 
 # ── Sprint UX-3 : CRUD study_projects (1 etude -> N projets QGIS) ─────────────
@@ -1408,6 +1527,122 @@ def project_history_path(sid: str, pid: str) -> str:
 
 def project_checkpoints_dir(sid: str, pid: str) -> str:
     return f"/data/studies/{sid}/projects/{pid}/.checkpoints"
+
+
+def build_scene_manifest_from_qgis_pod_code(sid: str, pid: str) -> str:
+    """Code Python a executer cote pod workspace pour generer un Scene Manifest
+    initial a partir des couches QGIS courantes.
+
+    Sprint Composants-1 (2026-06-24) : sync auto QGIS -> StyleDeclarative.
+
+    Strategie initiale (Sprint C-1) : un mapping basique kind=single + color
+    par defaut + opacity 1.0 pour chaque couche QGIS. Les sprints suivants
+    (C-2) exposeront un editeur form pour configurer kind/field/stops.
+
+    Output stdout : marker JSON_MANIFEST suivi du JSON. Le hub recupere via
+    parse stdout (pattern execute_python existant).
+    """
+    return f"""
+from pathlib import Path
+import json, uuid
+sid = {sid!r}
+pid = {pid!r}
+try:
+    from qgis.core import QgsProject, QgsMapLayerType
+    proj = QgsProject.instance()
+    layers = list(proj.mapLayers().values())
+    manifest = {{
+        "manifest_version": "V0.2",
+        "manifest_id": str(uuid.uuid4()),
+        "title": proj.title() or "Scene Manifest",
+        "source": {{
+            "project_qgs": str(proj.fileName() or ""),
+            "study_id": sid,
+            "project_id": pid,
+        }},
+        "layers": [],
+    }}
+    # Defaults StyleDeclarative single par couche (Sprint C-2 ajoutera form
+    # editor pour personnaliser kind/field/stops).
+    DEFAULT_COLORS = [
+        "#1d70b8", "#d64d00", "#18753c", "#e1000f", "#6a6af4",
+        "#a558a0", "#695b00", "#3558a2", "#b34000", "#005e6a",
+    ]
+    for i, layer in enumerate(layers):
+        try:
+            name = layer.name() or f"layer_{{i}}"
+            slug = name.lower().replace(" ", "_").replace("/", "_")
+            geom = "vector"
+            if hasattr(layer, "type"):
+                t = layer.type()
+                if t == QgsMapLayerType.RasterLayer:
+                    geom = "raster"
+                elif t == QgsMapLayerType.VectorLayer:
+                    geom = "vector"
+            color = DEFAULT_COLORS[i % len(DEFAULT_COLORS)]
+            layer_entry = {{
+                "id": slug,
+                "name": name,
+                "geometry_type": geom,
+                "visible": layer.isVisible() if hasattr(layer, "isVisible") else True,
+                "style": {{
+                    "qml_source": None,
+                    "declarative": {{
+                        "kind": "single",
+                        "color": color,
+                        "opacity": 1.0,
+                    }},
+                }},
+            }}
+            manifest["layers"].append(layer_entry)
+        except Exception as _layer_exc:
+            print(f"SCENE_MANIFEST_LAYER_ERR layer={{i}} err={{_layer_exc}}")
+    # Persiste le fichier JSON sur PVC. Le hub valide et indexe ensuite.
+    target = Path(f"/data/studies/{{sid}}/projects/{{pid}}/scene_manifest.json")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    txt = json.dumps(manifest, ensure_ascii=False, indent=2)
+    target.write_text(txt, encoding="utf-8")
+    print(f"SCENE_MANIFEST_BUILT n_layers={{len(manifest['layers'])}} size={{len(txt)}}")
+    print("<<<JSON_MANIFEST>>>" + txt + "<<<END>>>")
+except Exception as exc:
+    print(f"SCENE_MANIFEST_BUILD_ERR {{exc}}")
+"""
+
+
+def read_scene_manifest_pod_code(sid: str, pid: str) -> str:
+    """Lit le fichier scene_manifest.json existant sur PVC, retourne le JSON
+    via marker stdout. Si absent, retourne SCENE_MANIFEST_NOT_FOUND."""
+    return f"""
+from pathlib import Path
+import base64
+sid = {sid!r}
+pid = {pid!r}
+target = Path(f"/data/studies/{{sid}}/projects/{{pid}}/scene_manifest.json")
+if not target.exists():
+    print(f"SCENE_MANIFEST_NOT_FOUND sid={{sid}} pid={{pid}}")
+else:
+    content = target.read_text(encoding="utf-8")
+    b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    print(f"SCENE_MANIFEST_READ_OK b64={{b64}}")
+"""
+
+
+def write_scene_manifest_pod_code(sid: str, pid: str, content: str) -> str:
+    """Ecrit (overwrite) le fichier scene_manifest.json sur PVC. Le hub
+    fait la validation Pydantic + canonicalisation + calcul scene_hash AVANT
+    d'appeler cette fonction. Retourne SHA256 via marker stdout."""
+    return f"""
+from pathlib import Path
+import hashlib
+sid = {sid!r}
+pid = {pid!r}
+content = {content!r}
+target = Path(f"/data/studies/{{sid}}/projects/{{pid}}/scene_manifest.json")
+target.parent.mkdir(parents=True, exist_ok=True)
+target.write_text(content, encoding="utf-8")
+sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
+print(f"SCENE_MANIFEST_WRITE_OK sha={{sha}} size={{len(content)}}")
+"""
 
 
 def purge_pod_layout_code(sid: str) -> str:

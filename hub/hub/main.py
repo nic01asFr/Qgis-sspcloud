@@ -2426,6 +2426,231 @@ async def get_active_project_endpoint(
     return p
 
 
+# ── Sprint Composants-1 (2026-06-24) : endpoints Scene Manifest V0.2 ──────────
+# Pattern parallele aux endpoints recipes V1.5 : GET (read latest) + POST
+# (rebuild from QGIS layers) + PUT (overwrite with new content + validation
+# Pydantic + scene_hash). DELETE = soft archive (status='archived' en DB,
+# fichier PVC conserve pour audit).
+
+@app.get("/studies/{sid}/projects/{pid}/scene_manifest")
+async def get_scene_manifest_endpoint(
+    sid: str, pid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Lit le Scene Manifest courant pour ce projet. Retourne :
+    - 200 + JSON manifest si existe
+    - 200 + null si pas encore initialise (cote PVC)
+    - 404 si etude/projet introuvable
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    p = await studies.get_project(pid, user["username"])
+    if not p or p["sid"] != sid:
+        raise HTTPException(404, "Projet introuvable dans cette étude")
+
+    # Recupere le fichier sur PVC via execute_python (pas d'acces direct
+    # hub -> PVC). Le pod doit etre UP (sinon erreur silencieuse, retourne
+    # latest DB en fallback ou null).
+    try:
+        stdout = await _execute_python_in_workspace(
+            user["username"], studies.read_scene_manifest_pod_code(sid, pid),
+        )
+    except Exception as exc:
+        log.warning("scene_manifest read pod-side : %s", exc)
+        stdout = ""
+
+    import base64
+    if "SCENE_MANIFEST_READ_OK" in stdout:
+        # Format marker stdout : 'SCENE_MANIFEST_READ_OK b64=<base64>'
+        try:
+            b64 = stdout.split("b64=", 1)[1].split()[0].strip()
+            content = base64.b64decode(b64).decode("utf-8")
+            import json as _json
+            data = _json.loads(content)
+            latest = await studies.scene_manifest_get_latest(pid)
+            return {
+                "manifest": data,
+                "version_num": latest.get("version_num") if latest else None,
+                "scene_hash": latest.get("scene_hash") if latest else None,
+                "exists": True,
+            }
+        except Exception as exc:
+            log.warning("scene_manifest parse : %s", exc)
+            return {"manifest": None, "exists": False, "error": str(exc)}
+    # Pas trouve sur PVC
+    return {"manifest": None, "exists": False}
+
+
+@app.post("/studies/{sid}/projects/{pid}/scene_manifest/build")
+async def build_scene_manifest_endpoint(
+    sid: str, pid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Genere un Scene Manifest initial depuis les couches QGIS du projet
+    courant. Sprint C-1 : mapping basique kind=single + color default.
+    Sprint C-2 ajoutera l'editeur pour personnaliser kind/field/stops.
+
+    Output : retourne le manifest genere + index en DB (scene_hash via
+    Pydantic canonicalisation).
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    p = await studies.get_project(pid, user["username"])
+    if not p or p["sid"] != sid:
+        raise HTTPException(404, "Projet introuvable dans cette étude")
+
+    try:
+        stdout = await _execute_python_in_workspace(
+            user["username"],
+            studies.build_scene_manifest_from_qgis_pod_code(sid, pid),
+            timeout=45,
+        )
+    except Exception as exc:
+        log.warning("scene_manifest build pod-side : %s", exc)
+        raise HTTPException(503, f"Workspace indisponible : {exc}")
+
+    # Parse marker stdout : '<<<JSON_MANIFEST>>>{...}<<<END>>>'
+    start = stdout.find("<<<JSON_MANIFEST>>>")
+    end = stdout.find("<<<END>>>")
+    if start < 0 or end < 0:
+        raise HTTPException(500, f"Erreur build scene_manifest : {stdout[:300]}")
+    import json as _json
+    try:
+        manifest_json = stdout[start + len("<<<JSON_MANIFEST>>>"):end]
+        manifest_data = _json.loads(manifest_json)
+    except Exception as exc:
+        raise HTTPException(500, f"Parse manifest invalide : {exc}")
+
+    # Validation Pydantic + scene_hash via vendored SceneManifest.
+    # Si le module impose des champs non remplis par notre build initial,
+    # on log mais on n'echoue pas (Sprint C-1 = mapping minimal).
+    scene_hash = ""
+    n_layers = len(manifest_data.get("layers", []))
+    try:
+        from hub.vendor import scene_manifest as _sm
+        # Sprint C-2 fera la validation stricte. Ici on calcule juste le
+        # scene_hash via la fonction canonicalisation si disponible.
+        if hasattr(_sm, "compute_scene_hash"):
+            scene_hash = _sm.compute_scene_hash(manifest_data)
+        else:
+            # Fallback : hash de la serialization canonique
+            import hashlib
+            canonical = _json.dumps(manifest_data, sort_keys=True, ensure_ascii=False)
+            scene_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    except Exception as exc:
+        log.warning("scene_hash compute : %s (fallback hashlib)", exc)
+        import hashlib
+        canonical = _json.dumps(manifest_data, sort_keys=True, ensure_ascii=False)
+        scene_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    size_bytes = len(manifest_json.encode("utf-8"))
+    previous = await studies.scene_manifest_get_latest(pid)
+    previous_hash = previous.get("scene_hash") if previous else ""
+
+    await studies.scene_manifest_insert(
+        pid=pid, sid=sid, owner=user["username"],
+        scene_hash=scene_hash, n_layers=n_layers, size_bytes=size_bytes,
+        previous_hash=previous_hash,
+    )
+    latest = await studies.scene_manifest_get_latest(pid)
+    return {
+        "manifest": manifest_data,
+        "scene_hash": scene_hash,
+        "version_num": latest.get("version_num") if latest else 1,
+        "n_layers": n_layers,
+        "size_bytes": size_bytes,
+    }
+
+
+@app.put("/studies/{sid}/projects/{pid}/scene_manifest")
+async def put_scene_manifest_endpoint(
+    sid: str, pid: str,
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Overwrite le Scene Manifest avec un nouveau contenu. Le client envoie
+    le JSON complet, le hub valide (Sprint C-2 : Pydantic strict) puis ecrit
+    sur PVC + indexe nouvelle version en DB."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    p = await studies.get_project(pid, user["username"])
+    if not p or p["sid"] != sid:
+        raise HTTPException(404, "Projet introuvable dans cette étude")
+
+    try:
+        manifest_data = await request.json()
+    except Exception:
+        raise HTTPException(400, "Body JSON invalide")
+
+    # Sprint C-2 fera la validation Pydantic stricte avec SceneManifest
+    # depuis vendor. Ici on serialise tel-quel + scene_hash.
+    import json as _json
+    canonical = _json.dumps(manifest_data, sort_keys=True, ensure_ascii=False)
+    try:
+        from hub.vendor import scene_manifest as _sm
+        if hasattr(_sm, "compute_scene_hash"):
+            scene_hash = _sm.compute_scene_hash(manifest_data)
+        else:
+            import hashlib
+            scene_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    except Exception:
+        import hashlib
+        scene_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    pretty = _json.dumps(manifest_data, ensure_ascii=False, indent=2)
+    try:
+        await _execute_python_in_workspace(
+            user["username"],
+            studies.write_scene_manifest_pod_code(sid, pid, pretty),
+        )
+    except Exception as exc:
+        raise HTTPException(503, f"Workspace indisponible : {exc}")
+
+    previous = await studies.scene_manifest_get_latest(pid)
+    previous_hash = previous.get("scene_hash") if previous else ""
+    n_layers = len(manifest_data.get("layers", []))
+    size_bytes = len(pretty.encode("utf-8"))
+    await studies.scene_manifest_insert(
+        pid=pid, sid=sid, owner=user["username"],
+        scene_hash=scene_hash, n_layers=n_layers, size_bytes=size_bytes,
+        previous_hash=previous_hash,
+    )
+    latest = await studies.scene_manifest_get_latest(pid)
+    return {
+        "saved": True,
+        "scene_hash": scene_hash,
+        "version_num": latest.get("version_num") if latest else 1,
+    }
+
+
+@app.get("/studies/{sid}/projects/{pid}/scene_manifest/history")
+async def scene_manifest_history_endpoint(
+    sid: str, pid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Historique des versions du Scene Manifest pour ce projet (audit
+    trail INSERT-only). Retourne toutes les versions DB triees par
+    version_num DESC."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    p = await studies.get_project(pid, user["username"])
+    if not p or p["sid"] != sid:
+        raise HTTPException(404, "Projet introuvable dans cette étude")
+    return await studies.scene_manifest_history(pid)
+
+
 @app.get("/studies/{sid}/publications")
 async def list_study_publications(
     sid: str,
