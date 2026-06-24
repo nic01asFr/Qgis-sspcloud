@@ -399,10 +399,11 @@ async def get_current_user(
     creds: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False)),
 ) -> dict:
     """
-    Triple validation :
+    Quadruple validation (Phase 0ter + fix 2026-06-24) :
     1. Cookie hub_api_key (navigateur après /login?key=...)
-    2. Bearer API key hub (qgis_...)
-    3. Bearer token OIDC SSPCloud
+    2. request.state.oidc_user (cookie oidc_token deja valide par middleware OIDC)
+    3. Bearer API key hub (qgis_...)
+    4. Bearer token OIDC SSPCloud
     """
     # 1. Cookie navigateur (accès web via /login?key=...)
     if request:
@@ -412,7 +413,21 @@ async def get_current_user(
             if user:
                 return user
 
-    # 2. Bearer token (MCP agents ou API key)
+        # 2. (NEW 2026-06-24) Fallback OIDC : si le middleware oidc_auth_middleware
+        # a deja valide le cookie oidc_token et injecte request.state.oidc_user,
+        # alors l'user est legitime. On genere/recupere son api_key automatiquement
+        # pour permettre aux XHR du browser de marcher sans avoir besoin du cookie
+        # hub_api_key (gap rouvert par cookie OIDC cross-subdomain Phase 0ter Step 1).
+        # Ce chemin court-circuite la necessite pour le user de passer par
+        # /login?key=... apres chaque restart du hub.
+        oidc_user = getattr(request.state, "oidc_user", None)
+        if oidc_user:
+            api_key = await create_or_get_api_key(oidc_user)
+            user = await _validate_api_key(api_key)
+            if user:
+                return user
+
+    # 3. Bearer token (MCP agents ou API key)
     if not creds:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
