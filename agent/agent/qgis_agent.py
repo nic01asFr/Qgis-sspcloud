@@ -2510,26 +2510,42 @@ ne vient pas d'un outil cette session, la supprimer.
                 '', full_response, flags=_re_end.IGNORECASE,
             )
 
-        # Post-turn screenshot auto (consolidation 2026-06-21) :
-        # User signale qu'il ne voit pas le canvas QGIS depuis la vue agent
-        # standalone. Avant : qwen3 appelait spontanement get_screenshot en
-        # fin d'action. Apres bascule gemma4 (qwen3 DOWN), gemma4 narre sans
-        # appeler les tools -> plus de visibilite du canvas.
-        # Solution : injecter un get_screenshot post-turn cote code (garanti,
-        # independant du LLM). Le CSS embed (chat.html L201 `body.embed img
-        # {display:none}`) masque automatiquement en mode iframe /desk.
+        # Post-turn screenshot auto (consolidation 2026-06-21) +
+        # Filtrage tools visuels (2026-06-22) :
+        # User signale qu'afficher le canvas est inutile quand l'action ne le
+        # modifie pas (ex: lister/lire/sauvegarder une recette = pas d'effet
+        # visuel sur la carte). On garde le post-turn screenshot UNIQUEMENT
+        # quand un tool ayant modifie le canvas a ete appele dans le turn.
         #
-        # Conditions de skip :
-        # - L'agent a deja appele get_screenshot dans ce turn (eviter doublon)
-        # - Workspace endormi ou erreur MCP (best-effort, ne pas casser le chat)
-        # - Profil non-visuel (db_analyst : pas de canvas a montrer)
+        # Liste blanche des tools 'visuels' : ceux qui changent l'etat
+        # affiche dans QGIS (couches, style, extent, sortie d'image, etc.).
+        # Tout le reste (list/get/save/read metadata) est non-visuel.
+        _VISUAL_TOOLS = {
+            # Chargement de donnees / couches
+            "load_layer", "smart_load", "set_study_zone",
+            "load_vector", "load_raster", "load_wms", "load_wfs",
+            # Modification visuelle
+            "set_style", "apply_style", "set_layer_visibility",
+            "set_layer_order", "remove_layer",
+            # Navigation canvas
+            "zoom_to", "set_extent", "zoom_to_layer", "refresh",
+            # Traitements et resultats visibles
+            "run_processing", "run_recipe",
+            # Export / atlas / mise en page
+            "export_layer", "export_pdf", "export_web_map", "atlas",
+            "save_project", "publish_artifact",
+            # GeoAI
+            "geoai_detect", "geoai_segment",
+        }
         try:
-            already_screenshot = any(
-                tc.get("tool") == "get_screenshot"
-                for tc in (tool_calls_made or [])
-            )
+            tool_names_called = {tc.get("tool") for tc in (tool_calls_made or [])}
+            already_screenshot = "get_screenshot" in tool_names_called
             non_visual_profiles = {"db_analyst"}
+            # On skip aussi si aucun tool visuel n'a ete appele (ex: l'agent
+            # a seulement liste/lu/sauvegarde une recette ou un fichier).
+            any_visual = bool(tool_names_called & _VISUAL_TOOLS)
             if (not already_screenshot
+                    and any_visual
                     and self.profile_id not in non_visual_profiles):
                 shot = await _call_mcp_tool_raw(
                     "get_screenshot", {}, username=self.username,
