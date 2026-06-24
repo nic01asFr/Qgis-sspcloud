@@ -153,6 +153,38 @@ async def init_db() -> None:
                 pid TEXT NOT NULL
             )
         """)
+        # Sprint Composants-1 (2026-06-24) : index des exports generes par
+        # projet (Grist .grist, GPKG scene, ZIP composite, etc.). Pattern
+        # recipes_index/scene_manifest_index : INSERT-only, audit trail.
+        # Permet de tracer qui a genere quoi quand + lookup les latest par
+        # type d'export. Le fichier brut vit sur le PVC dans
+        # /data/studies/{sid}/projects/{pid}/exports/{filename}.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS exports_index (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                pid TEXT NOT NULL,
+                sid TEXT NOT NULL,
+                owner TEXT NOT NULL,
+                export_type TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                scene_hash TEXT,
+                n_tables INTEGER,
+                n_records INTEGER,
+                extra_json TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at INTEGER NOT NULL
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_exports_pid
+                ON exports_index(pid, export_type, created_at DESC)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_exports_owner
+                ON exports_index(owner, status)
+        """)
         # Sprint Composants-1 (2026-06-24) : index Scene Manifest par projet.
         # Pattern recipes_index V1.5 (INSERT-only, versioning SHA, audit trail).
         # Le contenu JSON du Scene Manifest vit sur le PVC dans
@@ -438,6 +470,70 @@ async def recipe_index_mark_published(
             (int(time.time()), public_url, sid, slug, version_num),
         )
         await db.commit()
+
+
+# ── Sprint Composants-1 : CRUD exports_index ─────────────────────────────────
+# Pattern recipes_index : INSERT-only, audit trail. Track les exports generes
+# (Grist .grist, GPKG, ZIP composite, etc.) avec type + metadata + scene_hash
+# pour faire le lien avec les versions de Scene Manifest.
+
+async def exports_insert(
+    pid: str, sid: str, owner: str,
+    export_type: str, filename: str, file_path: str,
+    size_bytes: int = 0,
+    scene_hash: str = "",
+    n_tables: int | None = None,
+    n_records: int | None = None,
+    extra_json: str = "",
+) -> int:
+    """Insert nouvelle row exports_index. INSERT-only (pas d'UPDATE)."""
+    import time as _t
+    async with aiosqlite.connect(_DB_PATH) as db:
+        cur = await db.execute(
+            """INSERT INTO exports_index
+               (pid, sid, owner, export_type, filename, file_path, size_bytes,
+                scene_hash, n_tables, n_records, extra_json, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)""",
+            (pid, sid, owner, export_type, filename, file_path, size_bytes,
+             scene_hash or None, n_tables, n_records,
+             extra_json or None, int(_t.time())),
+        )
+        await db.commit()
+        return cur.lastrowid or 0
+
+
+async def exports_list(pid: str, export_type: str | None = None) -> list[dict]:
+    """Liste les exports d'un projet, plus recents d'abord.
+    Filtre optionnel par type (grist, gpkg, zip_composite)."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if export_type:
+            cur = await db.execute(
+                """SELECT * FROM exports_index
+                   WHERE pid = ? AND export_type = ? AND status = 'active'
+                   ORDER BY created_at DESC""",
+                (pid, export_type),
+            )
+        else:
+            cur = await db.execute(
+                """SELECT * FROM exports_index
+                   WHERE pid = ? AND status = 'active'
+                   ORDER BY created_at DESC""",
+                (pid,),
+            )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def exports_archive(rowid: int) -> int:
+    """Soft delete : status='archived'. Le fichier reste sur PVC."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        cur = await db.execute(
+            "UPDATE exports_index SET status='archived' WHERE rowid=?",
+            (rowid,),
+        )
+        await db.commit()
+        return cur.rowcount
 
 
 # ── Sprint Composants-1 : CRUD scene_manifest_index ─────────────────────────

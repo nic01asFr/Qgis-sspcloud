@@ -2651,6 +2651,183 @@ async def scene_manifest_history_endpoint(
     return await studies.scene_manifest_history(pid)
 
 
+# ── Sprint Composants-1 Phase B (2026-06-24) : export Grist (.grist) ──────────
+# Wrapper hub qui appelle le tool MCP 'export_grist' de BigQgisMCP avec :
+# - output_path force dans projects/{pid}/exports/ (au lieu du /data/ legacy)
+# - scene_manifest_json embarque automatiquement si une version existe
+# Indexe le resultat dans exports_index pour audit trail.
+
+async def _call_mcp_tool_in_workspace(
+    owner: str, tool_name: str, arguments: dict, timeout: int = 120,
+) -> dict:
+    """Helper generique : appelle un tool MCP arbitraire sur le pod workspace.
+    Variant de _execute_python_in_workspace qui n'est pas hardcode sur
+    execute_python. Retourne le payload JSON-RPC result complet."""
+    s = await _get_or_create_session(owner)
+    api_key = await auth.create_or_get_api_key(owner)
+    payload = {
+        "jsonrpc": "2.0", "id": f"hub-mcp-{tool_name}",
+        "method": "tools/call",
+        "params": {"name": tool_name, "arguments": arguments},
+    }
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(
+            _mcp_url(s), json=payload,
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+    import json as _json
+    data = resp.json()
+    content = data.get("result", {}).get("content", [{}])
+    text = content[0].get("text", "") if content else ""
+    # Le wrapper MCP encode souvent le result en JSON dans le 1er content text.
+    try:
+        return _json.loads(text)
+    except Exception:
+        return {"raw_text": text, "_parse_error": True}
+
+
+@app.post("/studies/{sid}/projects/{pid}/export_grist")
+async def export_grist_endpoint(
+    sid: str, pid: str,
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Genere un fichier .grist (SQLite Grist) depuis le projet QGIS actif.
+
+    Wraps BigQgisMCP `export_grist` MCP tool avec :
+    - output_path force dans {sid}/projects/{pid}/exports/{doc_name}.grist
+    - scene_manifest_json embarque si une version Scene Manifest existe
+      (cherche scene_manifest_index latest pour ce pid puis lit le fichier)
+
+    Body (optionnel) : {document_name?, max_features_per_layer?, include_stats?,
+                        detect_relationships?, timezone?, embed_scene_manifest?}
+
+    Indexe le resultat en DB (exports_index) pour audit trail.
+    Retourne le payload BigQgisMCP enrichi d'un download_url interne.
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    p = await studies.get_project(pid, user["username"])
+    if not p or p["sid"] != sid:
+        raise HTTPException(404, "Projet introuvable dans cette étude")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    # 1. Resolve doc_name + output_path
+    import re as _re
+    raw_name = body.get("document_name") or s["name"] or f"export_{pid[:8]}"
+    doc_name = _re.sub(r'[^\w\-]', '_', raw_name).strip('_') or f"export_{pid[:8]}"
+    filename = f"{doc_name}.grist"
+    output_path = f"/data/studies/{sid}/projects/{pid}/exports/{filename}"
+
+    # 2. Embarquer Scene Manifest s'il existe et que le user le veut
+    embed_sm = body.get("embed_scene_manifest", True)
+    scene_manifest_json = ""
+    scene_hash_used = ""
+    if embed_sm:
+        try:
+            sm_latest = await studies.scene_manifest_get_latest(pid)
+            if sm_latest:
+                # Lire le fichier JSON sur PVC via execute_python
+                stdout = await _execute_python_in_workspace(
+                    user["username"],
+                    studies.read_scene_manifest_pod_code(sid, pid),
+                )
+                if "SCENE_MANIFEST_READ_OK" in stdout:
+                    import base64
+                    b64 = stdout.split("b64=", 1)[1].split()[0].strip()
+                    scene_manifest_json = base64.b64decode(b64).decode("utf-8")
+                    scene_hash_used = sm_latest.get("scene_hash", "")
+        except Exception as exc:
+            log.warning("Lecture scene_manifest pour export Grist : %s", exc)
+
+    # 3. Construire les params pour le tool MCP BigQgisMCP
+    mcp_params = {
+        "document_name": doc_name,
+        "output_path": output_path,
+        "max_features_per_layer": int(body.get("max_features_per_layer", 50000)),
+        "include_stats": bool(body.get("include_stats", True)),
+        "detect_relationships": bool(body.get("detect_relationships", True)),
+        "timezone": body.get("timezone", "Europe/Paris"),
+    }
+    if scene_manifest_json:
+        mcp_params["scene_manifest_json"] = scene_manifest_json
+
+    # 4. Appel MCP
+    try:
+        result = await _call_mcp_tool_in_workspace(
+            user["username"], "export_grist", mcp_params, timeout=180,
+        )
+    except Exception as exc:
+        log.error("export_grist MCP call : %s", exc)
+        raise HTTPException(503, f"Workspace indisponible pour l'export : {exc}")
+
+    if not result.get("success"):
+        raise HTTPException(
+            500,
+            f"Echec export_grist : {result.get('error') or result.get('raw_text', 'inconnu')[:300]}",
+        )
+
+    # 5. Indexer en DB
+    import json as _json
+    extra = {
+        "scene_manifest_embedded": result.get("scene_manifest_embedded", False),
+        "pages": result.get("pages", {}),
+        "layers": result.get("layers", {}),
+    }
+    try:
+        await studies.exports_insert(
+            pid=pid, sid=sid, owner=user["username"],
+            export_type="grist",
+            filename=filename,
+            file_path=output_path,
+            size_bytes=int(result.get("size_bytes", 0)),
+            scene_hash=scene_hash_used,
+            n_tables=int(result.get("tables", 0)),
+            n_records=int(result.get("total_records", 0)),
+            extra_json=_json.dumps(extra, ensure_ascii=False),
+        )
+    except Exception as exc:
+        log.warning("exports_index insert : %s", exc)
+
+    # 6. Construire le download_url interne (proxy via /files/{path:path})
+    # Le tool BigQgisMCP retourne un download_url localhost interne au pod.
+    # On le remplace par le proxy hub pour que le browser puisse y acceder.
+    relative = output_path.lstrip("/").removeprefix("data/")
+    download_url = f"/files/{relative}"
+
+    return {
+        **result,
+        "download_url": download_url,
+        "scene_hash": scene_hash_used,
+    }
+
+
+@app.get("/studies/{sid}/projects/{pid}/exports")
+async def list_project_exports_endpoint(
+    sid: str, pid: str,
+    export_type: str | None = None,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Liste les exports generes pour ce projet (audit trail).
+    Query param export_type=grist|gpkg|zip_composite pour filtrer."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    p = await studies.get_project(pid, user["username"])
+    if not p or p["sid"] != sid:
+        raise HTTPException(404, "Projet introuvable dans cette étude")
+    return await studies.exports_list(pid, export_type=export_type)
+
+
 @app.get("/studies/{sid}/publications")
 async def list_study_publications(
     sid: str,

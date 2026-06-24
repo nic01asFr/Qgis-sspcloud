@@ -631,6 +631,83 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           </a>
         </div>
 
+        {# Sprint Composants-1 Phase C (2026-06-24) : section export Grist
+           cablee a /studies/{sid}/projects/{pid}/export_grist (Phase B).
+           Le bouton lance une requete POST, affiche progres pendant
+           generation (peut prendre 10-30s selon nb features), puis
+           propose un lien de telechargement direct. Scene Manifest
+           embarque automatiquement si une version existe en DB. #}
+        {% if active_project %}
+        <div class="export-section">
+          <h4 class="export-section-title">💾 Document Grist (.grist)</h4>
+          <p class="export-section-desc">
+            Génère un document Grist complet (SQLite portable) avec
+            tables des couches QGIS, widgets Map/Chart/Form, et — si une
+            version existe — le Scene Manifest embarqué pour interop
+            cross-runtime (atlas, qgis2grist, ZEBRA).
+          </p>
+          <button type="button" class="fr-btn fr-btn--sm"
+                  id="btn-export-grist"
+                  style="width:100%;text-align:center;font-weight:700"
+                  onclick="exportGristDoc()"
+                  data-active-study-id="{{ active_study_id }}"
+                  data-active-project-pid="{{ active_project.pid }}"
+                  title="Lance la génération du .grist sur le workspace (10-30s)">
+            💾 Générer le doc Grist →
+          </button>
+          <div id="export-grist-status" class="export-status" hidden></div>
+        </div>
+        <script>
+        async function exportGristDoc() {
+          const btn = document.getElementById('btn-export-grist');
+          const sid = btn.dataset.activeStudyId;
+          const pid = btn.dataset.activeProjectPid;
+          const statusEl = document.getElementById('export-grist-status');
+          btn.disabled = true;
+          const originalText = btn.textContent;
+          btn.textContent = '⏳ Génération en cours…';
+          statusEl.hidden = false;
+          statusEl.textContent = 'Génération du document Grist en cours (peut prendre 10-30s)…';
+          statusEl.className = 'export-status export-status--info';
+          try {
+            const resp = await fetch(
+              `/studies/${sid}/projects/${pid}/export_grist`,
+              {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+              }
+            );
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+              throw new Error(data.detail || data.error || `HTTP ${resp.status}`);
+            }
+            const tables = data.tables || 0;
+            const records = data.total_records || 0;
+            const sizeMb = data.size_mb || 0;
+            const smEmbedded = data.scene_manifest_embedded
+              ? ` · Scene Manifest embarqué (${(data.scene_manifest||{}).manifest_version||'V0.2'})`
+              : '';
+            statusEl.className = 'export-status export-status--ok';
+            statusEl.innerHTML = `
+              ✓ Document généré : <strong>${tables} tables · ${records} lignes · ${sizeMb} MB</strong>${smEmbedded}<br>
+              <a href="${data.download_url}" download class="export-status-link">
+                ↓ Télécharger le .grist
+              </a>
+            `;
+            btn.textContent = '✓ Document généré · cliquer pour régénérer';
+            btn.disabled = false;
+          } catch (err) {
+            statusEl.className = 'export-status export-status--err';
+            statusEl.textContent = `Erreur : ${err.message || err}`;
+            btn.textContent = originalText;
+            btn.disabled = false;
+          }
+        }
+        </script>
+        {% endif %}
+
         <div class="export-section export-soon">
           <h4 class="export-section-title">🎨 Scene Manifest <span class="soon-badge">Bientôt</span></h4>
           <p class="export-section-desc">
@@ -641,7 +718,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           <button type="button" class="fr-btn fr-btn--sm fr-btn--tertiary"
                   style="width:100%;text-align:center"
                   disabled
-                  title="Disponible après Sprint Composants (refonte panel droit + format pivot Scene Manifest V0.2)">
+                  title="Disponible après Sprint Composants-3 (export 3 pivots JSON+GPKG+ZIP)">
             Publier Scene Manifest →
           </button>
         </div>
@@ -663,6 +740,15 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       margin:0 0 10px;line-height:1.45}
     .soon-badge{font-size:9.5px;font-weight:600;background:#919191;color:#fff;
       padding:1px 6px;border-radius:8px;letter-spacing:.3px}
+    /* Sprint Composants-1 Phase C : feedback en bas de la section export
+       Grist (genere par exportGristDoc JS) - 3 etats : info/ok/err. */
+    .export-status{margin-top:8px;padding:8px 10px;border-radius:4px;
+      font-size:11px;line-height:1.5}
+    .export-status--info{background:#e9eafe;color:var(--text-action-high-blue-france)}
+    .export-status--ok{background:#dffee0;color:#18753c}
+    .export-status--err{background:#ffe2e2;color:#b34000}
+    .export-status-link{display:inline-block;margin-top:4px;font-weight:700;
+      color:inherit;text-decoration:underline}
     </style>
 
     <!-- Onglet Publications (existant) -->
