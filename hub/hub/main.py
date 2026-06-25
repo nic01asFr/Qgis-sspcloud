@@ -1260,6 +1260,19 @@ async def oauth_metadata():
     })
 
 
+@app.get("/.well-known/oauth-protected-resource")
+async def oauth_protected_resource():
+    """Resource metadata MCP (spec 2025-06-18) — pointe claude.ai vers le
+    serveur d'autorisation. Requise par le connecteur distant pour relier
+    la ressource (/mcp) a son authorization server."""
+    base = _HUB_URL or ""
+    return JSONResponse({
+        "resource":                 f"{base}/mcp",
+        "authorization_servers":    [base],
+        "bearer_methods_supported": ["header"],
+    })
+
+
 @app.get("/authorize", response_class=HTMLResponse)
 async def oauth_authorize(
     request: Request,

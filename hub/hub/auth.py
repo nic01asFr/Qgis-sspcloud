@@ -473,6 +473,20 @@ _OIDC_MIDDLEWARE_PUBLIC = (
     "/health",        # readinessProbe K8s
     "/healthz",       # alias
     "/api/version",   # Phase 1 auto-update (poll public)
+    # OAuth 2.0 / decouverte MCP (connecteur distant claude.ai) — fix 2026-06-25.
+    # claude.ai fait la decouverte et l'echange code->token COTE SERVEUR, sans
+    # cookie navigateur. Sans whitelist, ces routes renvoient 401 "Auth requise"
+    # et le connecteur ne peut pas aboutir. Surs en public :
+    #   - .well-known/* : metadonnees statiques, aucun secret.
+    #   - /oauth/token : auth interne (code a usage unique + PKCE, ou
+    #     client_secret = api_key validee par _validate_api_key).
+    #   - /authorize(+/confirm) : le formulaire de consentement exige la saisie
+    #     de l'api_key, validee avant d'emettre un code.
+    # La garde RGPD reste intacte : /desk, /workspace, /studies... restent gates.
+    "/.well-known/oauth-authorization-server",
+    "/.well-known/oauth-protected-resource",
+    "/authorize",     # couvre aussi /authorize/confirm via le check startswith
+    "/oauth/token",
 )
 
 # Routes inter-pods : Bearer HUB_API_KEY = clé hub partagée entre hub et agent
@@ -589,10 +603,22 @@ async def oidc_auth_middleware(request: "Request", call_next):
         accept = request.headers.get("accept", "")
         if "text/html" in accept:
             return RedirectResponse(_portal_login_redirect_url(request), status_code=302)
+        # Auto-decouverte OAuth (MCP spec 2025-06-18) : sur /mcp, on indique a
+        # claude.ai ou trouver le serveur d'autorisation via WWW-Authenticate.
+        headers = None
+        if path == "/mcp" or path.startswith("/mcp/"):
+            base = os.environ.get("HUB_URL") or (
+                f"https://user-{onyxia}-qgis.user.lab.sspcloud.fr"
+                if (onyxia := os.environ.get("ONYXIA_USER", "")) else ""
+            )
+            if base:
+                rm = f"{base}/.well-known/oauth-protected-resource"
+                headers = {"WWW-Authenticate": f'Bearer resource_metadata="{rm}"'}
         return JSONResponse(
             {"detail": "Auth requise. Va sur le portail pour t'identifier.",
              "portal_url": _portal_login_redirect_url(request)},
             status_code=401,
+            headers=headers,
         )
 
     # 5. Décode JWT + vérifie ownership
