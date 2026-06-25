@@ -3188,6 +3188,303 @@ async def archive_component_endpoint(
     return None
 
 
+# ── Sprint Composants Phase 3 (2026-06-25) : endpoints ASSEMBLAGES ────────────
+# Feature flag ASSEMBLIES_ENABLED. Implémente CRUD + render + publish S3 avec
+# audit_chain transverse obligatoire au publish.
+
+_ASSEMBLIES_ENABLED = os.getenv("ASSEMBLIES_ENABLED", "true").lower() == "true"
+
+
+def _check_assemblies_enabled():
+    if not _ASSEMBLIES_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="Feature ASSEMBLIES_ENABLED désactivée. Set env var "
+                   "ASSEMBLIES_ENABLED=true pour activer.",
+        )
+
+
+@app.get("/studies/{sid}/assemblies")
+async def list_assemblies_endpoint(
+    sid: str, kind: str | None = None,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Liste les assemblages de l'étude (latest version par aid)."""
+    _check_assemblies_enabled()
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    from hub import assemblies as asm_mod
+    return await asm_mod.list_assemblies(sid=sid, kind=kind, owner=user["username"])
+
+
+@app.post("/studies/{sid}/assemblies", status_code=status.HTTP_201_CREATED)
+async def create_assembly_endpoint(
+    sid: str, request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Crée un nouvel assemblage rattaché à l'étude (sid scope)."""
+    _check_assemblies_enabled()
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+
+    from hub.models import Assembly
+    from hub import assemblies as asm_mod
+
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, "Body JSON invalide")
+
+    # Force le sid au scope étude actif
+    payload["sid"] = sid
+    if not payload.get("id"):
+        payload["id"] = studies._new_id()
+
+    try:
+        asm = Assembly.model_validate(payload)
+    except Exception as exc:
+        raise HTTPException(422, f"Validation Pydantic : {exc}")
+
+    # Écrire manifest sur PVC
+    import json as _json
+    content_json = _json.dumps(
+        asm.model_dump(mode="json"), ensure_ascii=False, indent=2,
+    )
+    try:
+        await _execute_python_in_workspace(
+            user["username"],
+            asm_mod.write_assembly_manifest_pod_code(sid, asm.id, content_json),
+        )
+    except Exception as exc:
+        log.warning("write assembly manifest : %s", exc)
+
+    file_path = asm_mod.assembly_manifest_path(sid, asm.id)
+    rowid = await asm_mod.insert_assembly(
+        assembly=asm, owner=user["username"], file_path=file_path,
+    )
+    return {
+        "id": asm.id, "rowid": rowid, "kind": asm.kind, "title": asm.title,
+        "audience": asm.audience,
+        "manifest_url":   f"/studies/{sid}/assemblies/{asm.id}",
+        "render_url":     f"/studies/{sid}/assemblies/{asm.id}/render",
+        "publish_url":    f"/studies/{sid}/assemblies/{asm.id}/publish",
+    }
+
+
+@app.get("/studies/{sid}/assemblies/{aid}")
+async def get_assembly_endpoint(
+    sid: str, aid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Manifest assemblage + metadata DB."""
+    _check_assemblies_enabled()
+    from hub import assemblies as asm_mod
+    latest = await asm_mod.get_assembly_latest(aid)
+    if not latest or latest["sid"] != sid:
+        raise HTTPException(404, "Assemblage introuvable")
+    if latest["owner"] != user["username"]:
+        raise HTTPException(403, "Pas owner (ACL Phase 3 ultérieure)")
+
+    # Lire manifest depuis PVC
+    try:
+        stdout = await _execute_python_in_workspace(
+            user["username"],
+            asm_mod.read_assembly_manifest_pod_code(sid, aid),
+        )
+    except Exception as exc:
+        log.warning("read assembly manifest : %s", exc)
+        stdout = ""
+
+    import base64, json as _json
+    manifest_data = None
+    if "ASSEMBLY_READ_OK" in stdout:
+        try:
+            b64 = stdout.split("b64=", 1)[1].split()[0].strip()
+            manifest_data = _json.loads(base64.b64decode(b64).decode())
+        except Exception as exc:
+            log.warning("parse assembly manifest : %s", exc)
+
+    return {
+        "metadata": dict(latest),
+        "manifest": manifest_data,
+        "exists_on_pvc": manifest_data is not None,
+    }
+
+
+@app.get("/studies/{sid}/assemblies/{aid}/history")
+async def assembly_history_endpoint(
+    sid: str, aid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Audit trail INSERT-only."""
+    _check_assemblies_enabled()
+    from hub import assemblies as asm_mod
+    h = await asm_mod.get_assembly_history(aid)
+    if not h or h[0]["sid"] != sid:
+        raise HTTPException(404, "Assemblage introuvable")
+    return h
+
+
+async def _render_assembly_html(
+    sid: str, aid: str, username: str,
+) -> tuple[str, dict]:
+    """Helper : rend l'HTML de l'assemblage via template Jinja2 + retourne
+    (html_content, audit_chain_dict)."""
+    from hub import assemblies as asm_mod
+    from hub.models import Assembly
+
+    latest = await asm_mod.get_assembly_latest(aid)
+    if not latest or latest["sid"] != sid:
+        raise HTTPException(404, "Assemblage introuvable")
+    if latest["owner"] != username:
+        raise HTTPException(403, "Pas owner")
+
+    # Lire manifest
+    try:
+        stdout = await _execute_python_in_workspace(
+            username, asm_mod.read_assembly_manifest_pod_code(sid, aid),
+        )
+    except Exception as exc:
+        raise HTTPException(503, f"Workspace : {exc}")
+
+    import base64, json as _json
+    if "ASSEMBLY_READ_OK" not in stdout:
+        raise HTTPException(404, "Manifest PVC introuvable")
+    b64 = stdout.split("b64=", 1)[1].split()[0].strip()
+    manifest = _json.loads(base64.b64decode(b64).decode())
+
+    asm = Assembly.model_validate(manifest)
+
+    # Build audit_chain
+    chain = await asm_mod.build_audit_chain(asm, username, asm.audience)
+
+    # Render template selon kind
+    template_map = {
+        "storymap_narrative_dsfr": "maplibre_renderer/storymap_dsfr.html.j2",
+        # Sprint 4 : dashboard, sheet_a4, modal_embed, atlas_immersive
+    }
+    template_name = template_map.get(asm.kind)
+    if not template_name:
+        raise HTTPException(
+            501,
+            f"Kind '{asm.kind}' non supporté Phase 3. Kinds : {list(template_map.keys())}",
+        )
+
+    if not _jinja:
+        raise HTTPException(503, "Jinja2 indisponible")
+    tpl = _jinja.env.get_template(template_name)
+    html = tpl.render(
+        assembly=asm.model_dump(mode="json"),
+        sections=[s.model_dump(mode="json") for s in asm.layout.sections],
+        audit_chain=chain.model_dump(mode="json"),
+        footer=asm.footer.model_dump(mode="json"),
+    )
+    return html, chain.model_dump(mode="json")
+
+
+@app.get("/studies/{sid}/assemblies/{aid}/render", response_class=HTMLResponse)
+async def render_assembly_endpoint(
+    sid: str, aid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Rendu HTML preview (sans persistance ni publish). Recalcule à chaque appel."""
+    _check_assemblies_enabled()
+    html, _chain = await _render_assembly_html(sid, aid, user["username"])
+    return HTMLResponse(content=html)
+
+
+@app.post("/studies/{sid}/assemblies/{aid}/publish")
+async def publish_assembly_endpoint(
+    sid: str, aid: str, request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Publie l'assemblage sur S3 + calcule audit_chain + indexe published_url.
+
+    Body optionnel : {audience?: 'public'|'cerema_internal'|'restricted'|'confidential'}
+    """
+    _check_assemblies_enabled()
+    from hub import assemblies as asm_mod
+    from hub import s3_publication
+
+    # Render + audit_chain
+    html, chain_dict = await _render_assembly_html(sid, aid, user["username"])
+
+    # Persiste rendered HTML sur PVC
+    try:
+        await _execute_python_in_workspace(
+            user["username"],
+            asm_mod.write_assembly_rendered_pod_code(sid, aid, html),
+        )
+    except Exception as exc:
+        log.warning("write assembly rendered : %s", exc)
+
+    # Update audit_chain_json sur la row latest (UPDATE exceptionnel,
+    # cf. assemblies.py docstring)
+    import json as _json
+    async with aiosqlite.connect(studies._DB_PATH) as db:
+        await db.execute(
+            """UPDATE assemblies_index
+               SET audit_chain_json = ?
+               WHERE rowid IN (
+                 SELECT rowid FROM assemblies_index
+                 WHERE aid = ? AND status = 'active'
+                 ORDER BY version_num DESC LIMIT 1
+               )""",
+            (_json.dumps(chain_dict, ensure_ascii=False), aid),
+        )
+        await db.commit()
+
+    # Publish S3 via s3_publication.publish()
+    slug = f"assembly-{aid}"
+    published_url = None
+    try:
+        info = s3_publication.publish(
+            owner=user["username"], kind="assembly", slug=slug,
+            content=html.encode("utf-8"),
+            content_type="text/html; charset=utf-8",
+        )
+        published_url = info.get("public_url") or info.get("hub_url")
+    except Exception as exc:
+        log.error("publish S3 assembly : %s", exc)
+        raise HTTPException(503, f"Publish S3 échec : {exc}")
+
+    # Update published_url en DB
+    if published_url:
+        await asm_mod.update_published_info(aid, published_url)
+
+    return {
+        "id": aid,
+        "published": True,
+        "published_url": published_url,
+        "audit_chain": {
+            "signed_hash": chain_dict.get("signed_hash"),
+            "components_refs": chain_dict.get("components_refs", []),
+            "scene_hashes": chain_dict.get("scene_hashes", []),
+            "recipes_used": chain_dict.get("recipes_used", []),
+        },
+    }
+
+
+@app.delete("/studies/{sid}/assemblies/{aid}", status_code=status.HTTP_204_NO_CONTENT)
+async def archive_assembly_endpoint(
+    sid: str, aid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Soft delete (INSERT row archived)."""
+    _check_assemblies_enabled()
+    from hub import assemblies as asm_mod
+    rowid = await asm_mod.archive_assembly(aid, user["username"])
+    if not rowid:
+        raise HTTPException(404, "Assemblage introuvable ou pas owner")
+    return None
+
+
 @app.get("/studies/{sid}/publications")
 async def list_study_publications(
     sid: str,

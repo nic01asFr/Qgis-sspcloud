@@ -148,6 +148,82 @@ async def get_component_history(sid: str, cid: str) -> dict[str, Any]:
     return await _hub_call("GET", f"/studies/{sid}/components/{cid}/history")
 
 
+# ── Tools CRUD assemblages (Sprint Composants Phase 3) ────────────────────────
+
+async def list_assemblies(
+    sid: str, kind: str | None = None,
+) -> dict[str, Any]:
+    """Liste les assemblages de l'étude (latest version par aid)."""
+    params = {"kind": kind} if kind else None
+    return await _hub_call("GET", f"/studies/{sid}/assemblies", params=params)
+
+
+async def create_assembly(
+    sid: str, manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """Crée un nouvel assemblage rattaché à l'étude.
+
+    sid : 12 hex étude id (force le scope, override payload.sid si présent)
+    manifest : Assembly Pydantic V0.1 payload :
+      - kind : 'storymap_narrative_dsfr' | 'dashboard' | 'sheet_a4' |
+               'modal_embed' | 'atlas_immersive' (Sprint 3 livre seulement
+               'storymap_narrative_dsfr', autres = Sprint 4)
+      - title : str
+      - audience : 'public' | 'cerema_internal' (DEFAULT) | 'restricted' | 'confidential'
+      - layout : {type, sections:[{kind, title?, narrative_md?, components:[{ref}, {inline}]}]}
+      - footer : {sources, audit_trail_ref, disclaimer, cerema_mentions_legales}
+
+    Recommandation : appeler validate_manifest('assembly', payload) AVANT.
+
+    Retourne {id, rowid, kind, title, audience, manifest_url, render_url, publish_url}.
+    """
+    return await _hub_call(
+        "POST", f"/studies/{sid}/assemblies", json_body=manifest,
+    )
+
+
+async def get_assembly(sid: str, aid: str) -> dict[str, Any]:
+    """Retourne manifest + metadata DB de l'assemblage."""
+    return await _hub_call("GET", f"/studies/{sid}/assemblies/{aid}")
+
+
+async def render_assembly(sid: str, aid: str) -> dict[str, Any]:
+    """Rendu HTML preview (recalculé à chaque appel).
+
+    Retourne {html: '...'} ou {error, detail}.
+    L'HTML peut être volumineux — retourné comme string.
+    """
+    return await _hub_call("GET", f"/studies/{sid}/assemblies/{aid}/render")
+
+
+async def publish_assembly(
+    sid: str, aid: str, audience: str | None = None,
+) -> dict[str, Any]:
+    """Publie l'assemblage sur S3 + calcule audit_chain transverse.
+
+    OBLIGATOIRE pour avoir une URL publique partageable. Le hub :
+    1. Recalcule l'audit_chain (scene_hashes + components_refs + recipes_used)
+    2. Génère SHA256 signed_hash canonique anti-tamper
+    3. Rend l'HTML via template Jinja2 (storymap_dsfr.html.j2)
+    4. Push S3 via s3_publication.publish()
+    5. Update assemblies_index.published_url + audit_chain_json
+
+    Retourne {id, published, published_url, audit_chain: {signed_hash,
+              components_refs, scene_hashes, recipes_used}}.
+    """
+    body = {}
+    if audience:
+        body["audience"] = audience
+    return await _hub_call(
+        "POST", f"/studies/{sid}/assemblies/{aid}/publish", json_body=body or None,
+    )
+
+
+async def get_assembly_history(sid: str, aid: str) -> dict[str, Any]:
+    """Historique des versions (audit trail INSERT-only)."""
+    return await _hub_call("GET", f"/studies/{sid}/assemblies/{aid}/history")
+
+
 # ── Catalogue tools natifs (pour exposition MCP côté agent) ───────────────────
 
 NATIVE_TOOLS_V2 = {
@@ -221,5 +297,58 @@ NATIVE_TOOLS_V2 = {
             "Historique des versions du composant (audit trail INSERT-only)."
         ),
         "params": {"sid": "str", "cid": "str"},
+    },
+
+    # CRUD assemblages (Sprint Composants Phase 3)
+    "list_assemblies": {
+        "fn": list_assemblies,
+        "description": "Liste les assemblages de l'étude (latest version par aid).",
+        "params": {"sid": "str", "kind": "str optionnel (filtre)"},
+    },
+    "create_assembly": {
+        "fn": create_assembly,
+        "description": (
+            "Crée un assemblage (storymap_narrative_dsfr Phase 3 livré). "
+            "L'assemblage référence des composants par {ref: cid} dans "
+            "layout.sections[].components. Tu peux appeler create_component "
+            "avant pour créer les composants nécessaires. "
+            "RECOMMANDATION : validate_manifest('assembly', payload) d'abord."
+        ),
+        "params": {
+            "sid": "str étude id",
+            "manifest": "dict Assembly (kind, title, audience, layout, footer)",
+        },
+    },
+    "get_assembly": {
+        "fn": get_assembly,
+        "description": "Retourne manifest + metadata DB de l'assemblage.",
+        "params": {"sid": "str", "aid": "str (12 hex assemblage id)"},
+    },
+    "render_assembly": {
+        "fn": render_assembly,
+        "description": (
+            "Rendu HTML preview de l'assemblage (sans publication S3, "
+            "recalculé à chaque appel). Utile pour valider visuellement "
+            "avant publish_assembly."
+        ),
+        "params": {"sid": "str", "aid": "str"},
+    },
+    "publish_assembly": {
+        "fn": publish_assembly,
+        "description": (
+            "PUBLIE l'assemblage sur S3 avec audit_chain transverse SIGNÉ. "
+            "Génère URL publique partageable + signed_hash SHA256 anti-tamper. "
+            "ATTENTION : pose la classification audience (cerema_internal "
+            "default — JAMAIS public par défaut, anti-fuite RGPD)."
+        ),
+        "params": {
+            "sid": "str", "aid": "str",
+            "audience": "str optionnel ('public'|'cerema_internal'|'restricted'|'confidential')",
+        },
+    },
+    "get_assembly_history": {
+        "fn": get_assembly_history,
+        "description": "Historique des versions assemblage (audit trail).",
+        "params": {"sid": "str", "aid": "str"},
     },
 }

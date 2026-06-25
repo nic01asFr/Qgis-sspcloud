@@ -590,6 +590,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
               title="Composants UI rattachés à l'étude (carte interactive, légende, KPI, narratif…)">
         🎨 Composants
       </button>
+      <button class="rtab" data-rtab="assemblies" data-scope="study"
+              title="Assemblages publishables (storymap DSFR, dashboard, sheet A4)">
+        📄 Assemblages
+      </button>
       <button class="rtab" data-rtab="exports" data-scope="study"
               title="Actions d'export de l'etude (ZIP, Scene Manifest, livrables)">
         📦 Exports
@@ -737,6 +741,156 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       border-radius:8px;font-weight:600}
     .component-class{font-style:italic}
     .component-version{font-variant-numeric:tabular-nums;color:#666}
+    </style>
+
+    {# Sprint Composants Phase 3 (2026-06-25) : onglet "Assemblages" — pages
+       HTML composites publishables sur S3 avec audit_chain transverse.
+
+       Catalogue MVP Phase 3 : storymap_narrative_dsfr.
+       Phase 4 ajoutera : dashboard, sheet_a4, modal_embed, atlas_immersive.
+
+       Workflow : agent IA crée composants → user assemble dans assemblage
+       → render preview → publish S3 avec classification audience explicite. #}
+    <div class="rpane" data-rpane="assemblies">
+      <div class="assemblies-pane">
+        {% if active_study %}
+        <div class="assemblies-header">
+          <p class="assemblies-desc">
+            📄 Assemblages publishables (storymap DSFR, dashboard…). Création via
+            l'agent IA. <strong>audit_chain transverse</strong> calculé automatiquement
+            au <em>publish</em> (signed_hash SHA256 + components_refs + scene_hashes).
+          </p>
+          <button id="btn-refresh-assemblies" class="fr-btn fr-btn--sm fr-btn--tertiary"
+                  onclick="loadAssemblies()" style="font-size:11px">
+            ↻ Rafraîchir
+          </button>
+        </div>
+        <div id="assemblies-list" class="assemblies-list"
+             data-active-study-id="{{ active_study_id }}">
+          <div class="publi-empty">Chargement…</div>
+        </div>
+        {% else %}
+        <div class="publi-empty">
+          Active une étude pour voir ses assemblages.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    <script>
+    async function loadAssemblies() {
+      const list = document.getElementById('assemblies-list');
+      if (!list) return;
+      const sid = list.dataset.activeStudyId;
+      if (!sid) return;
+      list.innerHTML = '<div class="publi-empty">Chargement…</div>';
+      try {
+        const resp = await fetch(`/studies/${sid}/assemblies`, {credentials: 'include'});
+        if (!resp.ok) {
+          if (resp.status === 503) {
+            list.innerHTML = '<div class="publi-empty">Assemblages désactivés (feature flag).</div>';
+            return;
+          }
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        if (!Array.isArray(data) || data.length === 0) {
+          list.innerHTML = `<div class="publi-empty">
+            Aucun assemblage créé pour cette étude.<br>
+            <span style="font-size:10.5px;color:#999">
+              Demande à l'agent IA : « crée une storymap DSFR pour mon étude »
+            </span>
+          </div>`;
+          return;
+        }
+        const KIND_ICONS = {
+          storymap_narrative_dsfr: '📖', dashboard: '📊',
+          sheet_a4: '📄', modal_embed: '🪟', atlas_immersive: '🏛',
+        };
+        const AUDIENCE_LABELS = {
+          public: '🌍 Public', cerema_internal: '🏛 CEREMA',
+          restricted: '🔒 Restreint', confidential: '🤐 Confidentiel',
+        };
+        list.innerHTML = data.map(a => `
+          <div class="assembly-item">
+            <div class="assembly-icon">${KIND_ICONS[a.kind] || '📄'}</div>
+            <div class="assembly-body">
+              <div class="assembly-title">${escapeHtml(a.title || a.aid)}</div>
+              <div class="assembly-meta">
+                <span class="assembly-kind">${escapeHtml(a.kind)}</span>
+                <span class="assembly-audience">${AUDIENCE_LABELS[a.classification] || a.classification}</span>
+                <span class="assembly-version">v${a.version_num}</span>
+                ${a.published_url ? '<span class="assembly-published">✓ publié</span>' : '<span class="assembly-draft">brouillon</span>'}
+              </div>
+            </div>
+            <div class="assembly-actions">
+              <a href="/studies/${sid}/assemblies/${a.aid}/render" target="_blank"
+                 class="fr-btn fr-btn--sm fr-btn--tertiary"
+                 style="font-size:10.5px;padding:4px 8px"
+                 title="Preview HTML">👁</a>
+              ${a.published_url ?
+                `<a href="${escapeHtml(a.published_url)}" target="_blank"
+                    class="fr-btn fr-btn--sm" style="font-size:10.5px;padding:4px 8px"
+                    title="URL publiée S3">🌐</a>` :
+                `<button onclick="publishAssembly('${a.aid}')"
+                    class="fr-btn fr-btn--sm" style="font-size:10.5px;padding:4px 8px"
+                    title="Publier sur S3 avec audit_chain">💾</button>`}
+            </div>
+          </div>
+        `).join('');
+      } catch (e) {
+        list.innerHTML = `<div class="publi-empty">Erreur : ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    async function publishAssembly(aid) {
+      const list = document.getElementById('assemblies-list');
+      const sid = list.dataset.activeStudyId;
+      if (!confirm('Publier cet assemblage sur S3 ?\\nL\\'audience par défaut sera "cerema_internal".\\naudit_chain sera signé SHA256.')) return;
+      try {
+        const resp = await fetch(`/studies/${sid}/assemblies/${aid}/publish`, {
+          method: 'POST', credentials: 'include',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({}),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.published) {
+          throw new Error(data.detail || `HTTP ${resp.status}`);
+        }
+        alert(`✓ Publié : ${data.published_url}\\nsigned_hash: ${data.audit_chain.signed_hash.slice(0,30)}…`);
+        loadAssemblies();
+      } catch (e) {
+        alert(`Erreur publish : ${e.message}`);
+      }
+    }
+    document.querySelectorAll('[data-rtab="assemblies"]').forEach(btn => {
+      btn.addEventListener('click', () => setTimeout(loadAssemblies, 100));
+    });
+    </script>
+    <style>
+    .assemblies-pane{padding:14px 12px;display:flex;flex-direction:column;gap:12px}
+    .assemblies-header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+    .assemblies-desc{font-size:11.5px;color:var(--text-mention-grey);
+      margin:0;line-height:1.45;flex:1}
+    .assemblies-list{display:flex;flex-direction:column;gap:6px}
+    .assembly-item{display:flex;align-items:center;gap:10px;padding:10px;
+      background:var(--background-alt-grey);border-radius:6px;
+      border-left:3px solid #18753c}
+    .assembly-icon{font-size:22px;flex-shrink:0}
+    .assembly-body{flex:1;min-width:0}
+    .assembly-title{font-size:12.5px;font-weight:600;margin:0 0 3px;
+      color:var(--text-title-blue-france);overflow:hidden;
+      text-overflow:ellipsis;white-space:nowrap}
+    .assembly-meta{display:flex;gap:6px;flex-wrap:wrap;font-size:10px;
+      color:var(--text-mention-grey)}
+    .assembly-kind{background:#e8f5e9;color:#18753c;padding:1px 6px;
+      border-radius:8px;font-weight:600}
+    .assembly-audience{font-style:italic}
+    .assembly-version{font-variant-numeric:tabular-nums;color:#666}
+    .assembly-published{background:#18753c;color:#fff;padding:1px 5px;
+      border-radius:3px;font-weight:600}
+    .assembly-draft{background:#ddd;color:#666;padding:1px 5px;
+      border-radius:3px}
+    .assembly-actions{display:flex;gap:4px;flex-shrink:0}
     </style>
 
     {# Sprint Composants Phase 1 (2026-06-25) : refonte UI Exports en

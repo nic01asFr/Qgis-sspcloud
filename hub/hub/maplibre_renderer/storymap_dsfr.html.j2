@@ -1,0 +1,291 @@
+{# Assemblage `storymap_narrative_dsfr` — scroll vertical scrollytelling DSFR.
+
+   Sprint Composants Phase 3 (2026-06-25). Successeur de
+   `hub/hub/storymap_dsfr.py` (legacy Leaflet) — adopte MapLibre comme
+   runtime cible (cf. ~/.wikichat/knowledge/maplibre-threejs-pattern-axis.md).
+
+   Variables Jinja2 :
+   - assembly : dict Assembly Pydantic V0.1
+   - sections : assembly.layout.sections[] avec narrative_md + components refs/inline
+   - rendered_components : dict {cid: html_content} pré-rendu par hub
+                           (iframe-style intégration directe ou inline)
+   - audit_chain : dict AuditChain (signed_hash + components_refs + scene_hashes + sources)
+   - footer : assembly.footer (sources, disclaimer, mentions DSFR)
+
+   Pattern : 1 page HTML standalone, scrollytelling DSFR + composants
+   embeddables soit inline (legend, kpi, narrative_text) soit via iframe
+   (interactive_map, scene_3d) qui chargent leur propre MapLibre.
+#}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>{{ assembly.title|e }}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="{{ (assembly.description or assembly.title)|e }}">
+
+{# DSFR brand minimal CSS (couleurs CEREMA RF) #}
+<style>
+:root{
+  --blue-france:#000091; --red-marianne:#e1000f; --grey-50:#f6f6f6;
+  --grey-200:#e5e5e5; --grey-500:#666; --grey-700:#444; --grey-900:#161616;
+  --text-blue:#000091; --text-action:#0063cb;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;font-family:Marianne,system-ui,-apple-system,sans-serif;
+  color:var(--grey-900);background:#fff;line-height:1.6}
+a{color:var(--text-action);text-decoration:underline}
+a:hover{color:var(--blue-france)}
+
+/* ─── Header DSFR ──────────────────────────────────────────────────── */
+.dsfr-header{background:#fff;border-bottom:1px solid var(--grey-200);
+  padding:14px 0}
+.dsfr-header-inner{max-width:1200px;margin:0 auto;padding:0 24px;
+  display:flex;align-items:center;gap:20px}
+.dsfr-brand{display:flex;align-items:center;gap:12px}
+.dsfr-marianne{font-weight:700;font-size:11px;line-height:1.2;
+  text-transform:uppercase;color:var(--grey-900)}
+.dsfr-operator{font-weight:700;font-size:13px;color:var(--blue-france);
+  padding-left:14px;border-left:1px solid var(--grey-200)}
+.dsfr-context{flex:1;text-align:right;font-size:11px;color:var(--grey-500)}
+
+/* ─── Hero ─────────────────────────────────────────────────────────── */
+.story-hero{background:linear-gradient(180deg,#f0f3f9 0%,#fff 100%);
+  padding:60px 24px 50px;text-align:center}
+.story-hero-inner{max-width:880px;margin:0 auto}
+.story-hero-eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:1px;
+  color:var(--blue-france);font-weight:700;margin-bottom:14px}
+.story-hero-title{font-size:36px;font-weight:700;line-height:1.2;margin:0 0 14px;
+  color:var(--grey-900)}
+.story-hero-desc{font-size:16px;color:var(--grey-700);max-width:680px;
+  margin:0 auto;line-height:1.55}
+.story-hero-audience{display:inline-block;margin-top:18px;padding:5px 12px;
+  font-size:11px;font-weight:600;background:#eaeefa;color:var(--blue-france);
+  border-radius:20px;letter-spacing:.3px}
+
+/* ─── Sections ─────────────────────────────────────────────────────── */
+.story-section{padding:50px 24px;border-bottom:1px solid var(--grey-200)}
+.story-section:last-of-type{border-bottom:0}
+.story-section-inner{max-width:880px;margin:0 auto}
+.story-section-title{font-size:24px;font-weight:700;color:var(--blue-france);
+  margin:0 0 14px}
+.story-section-narrative{font-size:15.5px;line-height:1.7;color:var(--grey-900);
+  margin:0 0 28px}
+.story-section-narrative p{margin:0 0 1em}
+.story-section-narrative h2{font-size:20px;margin:1.4em 0 .6em;
+  color:var(--blue-france)}
+.story-section-narrative h3{font-size:16px;margin:1.2em 0 .5em}
+.story-section-narrative blockquote{border-left:3px solid var(--blue-france);
+  padding:8px 16px;background:var(--grey-50);margin:1em 0;color:var(--grey-700);
+  font-style:italic}
+.story-section-narrative ul,.story-section-narrative ol{margin:0 0 1em;padding-left:1.5em}
+.story-section-narrative li{margin:.2em 0}
+.story-section-narrative a{color:var(--text-action)}
+.story-section-narrative code{background:var(--grey-200);padding:1px 5px;
+  border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:.92em}
+
+/* ─── Composants embeddés ──────────────────────────────────────────── */
+.story-components{display:grid;gap:20px;margin:24px 0}
+.story-component{background:#fff;border-radius:8px;overflow:hidden;
+  box-shadow:0 2px 10px rgba(0,0,0,0.06);border:1px solid var(--grey-200)}
+.story-component--map{height:520px}
+.story-component--full{height:600px}
+.story-component-iframe{width:100%;height:100%;border:0;display:block}
+
+/* ─── Audit chain footer ───────────────────────────────────────────── */
+.audit-chain-block{background:var(--grey-50);padding:28px 24px;
+  border-top:2px solid var(--blue-france)}
+.audit-chain-inner{max-width:880px;margin:0 auto}
+.audit-chain-title{font-size:13px;text-transform:uppercase;letter-spacing:1px;
+  font-weight:700;margin:0 0 12px;color:var(--blue-france)}
+.audit-chain-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:12px;margin-bottom:14px}
+.audit-chain-item{background:#fff;padding:10px 12px;border-radius:4px;
+  border-left:3px solid var(--blue-france);font-size:12px}
+.audit-chain-item-label{font-size:10px;text-transform:uppercase;
+  letter-spacing:.4px;color:var(--grey-500);margin-bottom:3px}
+.audit-chain-item-value{color:var(--grey-900);font-weight:600;
+  word-break:break-all;font-variant-numeric:tabular-nums}
+.audit-chain-item-value code{font-family:'JetBrains Mono',monospace;font-size:11px}
+.audit-chain-meta{font-size:11px;color:var(--grey-500);margin-top:10px;
+  line-height:1.55}
+
+/* ─── Footer DSFR sources ──────────────────────────────────────────── */
+.dsfr-footer{background:var(--grey-50);padding:36px 24px 24px;
+  border-top:1px solid var(--grey-200)}
+.dsfr-footer-inner{max-width:1200px;margin:0 auto;display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:30px}
+.dsfr-footer-col{font-size:12px}
+.dsfr-footer-col h3{font-size:13px;font-weight:700;color:var(--blue-france);
+  margin:0 0 8px;text-transform:uppercase;letter-spacing:.3px}
+.dsfr-footer-col ul{list-style:none;padding:0;margin:0}
+.dsfr-footer-col li{padding:3px 0;color:var(--grey-700)}
+.dsfr-footer-disclaimer{max-width:1200px;margin:24px auto 0;padding:14px 24px;
+  font-size:11px;color:var(--grey-500);font-style:italic;border-top:1px solid var(--grey-200)}
+
+@media (max-width: 768px) {
+  .story-hero-title{font-size:26px}
+  .story-section{padding:36px 18px}
+}
+</style>
+
+{# Marked.js pour rendre narrative_md inline (sections markdown) #}
+<script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
+</head>
+<body>
+
+<header class="dsfr-header">
+  <div class="dsfr-header-inner">
+    <div class="dsfr-brand">
+      <span class="dsfr-marianne">République<br>Française</span>
+      <span class="dsfr-operator">CEREMA · QGIS Service</span>
+    </div>
+    <div class="dsfr-context">
+      Audience : <strong>{{ assembly.audience|e }}</strong>
+      {% if audit_chain.signed_hash %}
+        · <code style="font-size:10px">{{ audit_chain.signed_hash[:23] }}…</code>
+      {% endif %}
+    </div>
+  </div>
+</header>
+
+<section class="story-hero">
+  <div class="story-hero-inner">
+    <p class="story-hero-eyebrow">{{ assembly.kind|replace('_', ' ')|e }}</p>
+    <h1 class="story-hero-title">{{ assembly.title|e }}</h1>
+    {% if assembly.description %}
+    <p class="story-hero-desc">{{ assembly.description|e }}</p>
+    {% endif %}
+    <span class="story-hero-audience">{{ assembly.audience|e }}</span>
+  </div>
+</section>
+
+{% for section in sections %}
+<section class="story-section" data-section-kind="{{ section.kind|e }}">
+  <div class="story-section-inner">
+    {% if section.title %}
+    <h2 class="story-section-title">{{ section.title|e }}</h2>
+    {% endif %}
+    {% if section.narrative_md %}
+    <div class="story-section-narrative" data-md="{{ section.narrative_md|e }}"></div>
+    {% endif %}
+    {% if section.components %}
+    <div class="story-components">
+      {% for comp_entry in section.components %}
+        {% set cid = comp_entry.ref %}
+        {% if cid %}
+        <div class="story-component story-component--full">
+          <iframe class="story-component-iframe" loading="lazy"
+                  src="/studies/{{ assembly.sid }}/components/{{ cid }}/render"
+                  title="Composant {{ cid }}"></iframe>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endfor %}
+
+{% if audit_chain %}
+<section class="audit-chain-block" id="audit-chain">
+  <div class="audit-chain-inner">
+    <h2 class="audit-chain-title">🔗 Chaîne d'audit</h2>
+    <div class="audit-chain-grid">
+      <div class="audit-chain-item">
+        <div class="audit-chain-item-label">Signed Hash (SHA256)</div>
+        <div class="audit-chain-item-value">
+          <code>{{ audit_chain.signed_hash[:30]|e }}…</code>
+        </div>
+      </div>
+      <div class="audit-chain-item">
+        <div class="audit-chain-item-label">Composants référencés</div>
+        <div class="audit-chain-item-value">{{ audit_chain.components_refs|length }}</div>
+      </div>
+      <div class="audit-chain-item">
+        <div class="audit-chain-item-label">Scene Manifests</div>
+        <div class="audit-chain-item-value">{{ audit_chain.scene_hashes|length }}</div>
+      </div>
+      <div class="audit-chain-item">
+        <div class="audit-chain-item-label">Recipes utilisées</div>
+        <div class="audit-chain-item-value">
+          {% if audit_chain.recipes_used %}
+            {{ audit_chain.recipes_used|join(' · ') }}
+          {% else %}—{% endif %}
+        </div>
+      </div>
+    </div>
+    <p class="audit-chain-meta">
+      Cette publication a été générée à partir de {{ audit_chain.components_refs|length }}
+      composant{{ 's' if audit_chain.components_refs|length > 1 else '' }} et
+      {{ audit_chain.scene_hashes|length }} Scene Manifest{{ 's' if audit_chain.scene_hashes|length > 1 else '' }}.
+      Le <code>signed_hash</code> SHA256 canonique permet de vérifier l'intégrité
+      de la chaîne d'audit. Owner : <strong>{{ audit_chain.owner|e }}</strong>,
+      généré le {{ audit_chain.created_at|e if audit_chain.created_at is string else audit_chain.created_at.isoformat() }}.
+    </p>
+  </div>
+</section>
+{% endif %}
+
+<footer class="dsfr-footer">
+  <div class="dsfr-footer-inner">
+    {% if footer.sources %}
+    <div class="dsfr-footer-col">
+      <h3>Sources</h3>
+      <ul>
+        {% for src in footer.sources %}
+        <li>
+          {% if src.url %}
+          <a href="{{ src.url|e }}" target="_blank" rel="noopener">{{ src.corpus|e }}</a>
+          {% else %}{{ src.corpus|e }}{% endif %}
+          {% if src.millesime %} <span style="color:#999">({{ src.millesime|e }})</span>{% endif %}
+          {% if src.authority %} — {{ src.authority|e }}{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    <div class="dsfr-footer-col">
+      <h3>Méthodologie</h3>
+      <ul>
+        <li>Audience publication : <strong>{{ assembly.audience|e }}</strong></li>
+        {% if audit_chain.recipes_used %}
+        <li>Recipes : {{ audit_chain.recipes_used|join(', ')|e }}</li>
+        {% endif %}
+        <li>Plateforme : <strong>QGIS Service CEREMA / SSPCloud</strong></li>
+        {% if audit_chain.signed_hash %}
+        <li><code style="font-size:10px">{{ audit_chain.signed_hash[:24]|e }}…</code></li>
+        {% endif %}
+      </ul>
+    </div>
+    {% if footer.cerema_mentions_legales %}
+    <div class="dsfr-footer-col">
+      <h3>CEREMA</h3>
+      <ul>
+        <li><a href="https://www.cerema.fr/" target="_blank" rel="noopener">cerema.fr</a></li>
+        <li>Centre d'études et d'expertise sur les risques, l'environnement, la mobilité et l'aménagement</li>
+        <li>Établissement public</li>
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+  {% if footer.disclaimer %}
+  <p class="dsfr-footer-disclaimer">
+    ⚠ {{ footer.disclaimer|e }}
+  </p>
+  {% endif %}
+</footer>
+
+<script>
+// Rendre les blocs narrative_md en Markdown sanitized
+document.querySelectorAll('[data-md]').forEach(el => {
+  const md = el.getAttribute('data-md');
+  if (!md) return;
+  marked.setOptions({ gfm: true, breaks: true });
+  el.innerHTML = DOMPurify.sanitize(marked.parse(md));
+  el.removeAttribute('data-md');
+});
+</script>
+</body>
+</html>
