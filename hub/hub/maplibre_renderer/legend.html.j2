@@ -1,0 +1,61 @@
+{# Composant legend — Légende HTML SVG depuis Scene Manifest subset.
+
+   Sprint Composants Phase 2 (2026-06-25).
+
+   Variables Jinja2 attendues :
+   - component : dict Component
+   - legend_entries : list of {label, color, kind?, value?} extraits du
+                      Scene Manifest style.stops (categorized/graduated)
+                      ou de component.params.entries (manuel)
+
+   Pas de runtime JS — pur HTML statique. Embeddable iframe/inline.
+#}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>{{ component.title|e }}</title>
+<style>
+body{margin:0;padding:14px 16px;font-family:Marianne,system-ui,sans-serif;
+  background:#fff;color:#161616}
+.legend-title{font-size:13.5px;font-weight:700;margin:0 0 6px;color:#000091}
+.legend-desc{font-size:11px;color:#666;margin:0 0 10px;line-height:1.4}
+.legend-list{list-style:none;padding:0;margin:0}
+.legend-item{display:flex;align-items:center;gap:8px;padding:4px 0;
+  font-size:12px;color:#161616}
+.legend-swatch{flex-shrink:0;width:18px;height:14px;border-radius:2px;
+  border:1px solid rgba(0,0,0,0.15);display:inline-block}
+.legend-swatch--line{height:3px;border-radius:0}
+.legend-swatch--point{width:14px;height:14px;border-radius:50%}
+.legend-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.legend-value{font-size:10.5px;color:#999;font-variant-numeric:tabular-nums;
+  margin-left:4px;flex-shrink:0}
+.legend-empty{font-size:11px;color:#999;font-style:italic;padding:8px 0}
+</style>
+</head>
+<body>
+<h1 class="legend-title">{{ component.title|e }}</h1>
+{% if component.description %}
+<p class="legend-desc">{{ component.description|e }}</p>
+{% endif %}
+
+{% if legend_entries %}
+<ul class="legend-list">
+  {% for e in legend_entries %}
+  <li class="legend-item">
+    <span class="legend-swatch
+      {% if e.shape == 'line' %}legend-swatch--line{% elif e.shape == 'point' %}legend-swatch--point{% endif %}"
+      style="background-color:{{ e.color|e }}"></span>
+    <span class="legend-label">{{ e.label|e }}</span>
+    {% if e.value is not none %}
+    <span class="legend-value">{{ e.value }}</span>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="legend-empty">Aucune entrée de légende.</p>
+{% endif %}
+</body>
+</html>

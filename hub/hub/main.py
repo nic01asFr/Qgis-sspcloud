@@ -2868,6 +2868,326 @@ async def list_project_exports_endpoint(
     return await studies.exports_list(pid, export_type=export_type)
 
 
+# ── Sprint Composants Phase 2 (2026-06-25) : endpoints COMPOSANTS + SCHEMA ────
+# Feature flag COMPONENTS_ENABLED (default false en prod, true en dev).
+# Quand false : retourne 503 sur tous les /components/* endpoints.
+# Activé via env var sur le pod hub. Sprint 3 ajoutera ASSEMBLIES_ENABLED.
+
+_COMPONENTS_ENABLED = os.getenv("COMPONENTS_ENABLED", "true").lower() == "true"
+
+
+def _check_components_enabled():
+    if not _COMPONENTS_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="Feature COMPONENTS_ENABLED désactivée. Set env var "
+                   "COMPONENTS_ENABLED=true pour activer.",
+        )
+
+
+# ── Schema introspection (méta-cognition agent IA P0) ────────────────────────
+
+@app.get("/schema/{entity_type}")
+async def schema_describe_endpoint(
+    entity_type: str,
+    kind: str | None = None,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Retourne JSON Schema Pydantic + exemple minimal valide pour
+    entity_type (component, assembly, audit_chain, ...).
+
+    Permet à l'agent IA d'inspecter la structure attendue avant
+    d'appeler create_component / create_assembly.
+    """
+    from hub import schema_introspect as si
+    return si.describe_entity_schema(entity_type, kind=kind)
+
+
+@app.get("/schema/{entity_type}/kinds")
+async def schema_kinds_endpoint(
+    entity_type: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Liste les `kind` possibles pour un entity_type (anti-hallucination LLM).
+
+    Ex: /schema/component/kinds → {kinds: ['interactive_map', 'scene_3d', ...]}
+    """
+    from hub import schema_introspect as si
+    return si.list_entity_kinds(entity_type)
+
+
+@app.post("/schema/{entity_type}/validate")
+async def schema_validate_endpoint(
+    entity_type: str,
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Dry-run validation Pydantic. Retourne erreurs structurées exploitables
+    par l'agent IA pour corriger sa payload AVANT le create_*."""
+    from hub import schema_introspect as si
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, "Body JSON invalide")
+    return si.validate_manifest(entity_type, payload)
+
+
+# ── Components CRUD (Sprint Composants Phase 2) ──────────────────────────────
+
+@app.get("/studies/{sid}/components")
+async def list_components_endpoint(
+    sid: str,
+    kind: str | None = None,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Liste les composants de l'étude (latest version par cid)."""
+    _check_components_enabled()
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    from hub import components as comp_mod
+    return await comp_mod.list_components(sid=sid, kind=kind, owner=user["username"])
+
+
+@app.post("/studies/{sid}/components", status_code=status.HTTP_201_CREATED)
+async def create_component_endpoint(
+    sid: str,
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Crée un nouveau composant rattaché à l'étude.
+
+    Body : Component manifest JSON (validé Pydantic V0.1). L'id est
+    auto-généré si absent (12 hex uuid4 tronqué).
+    """
+    _check_components_enabled()
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+
+    from hub.models import Component
+    from hub import components as comp_mod
+
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, "Body JSON invalide")
+
+    # Auto-génération id si absent
+    if not payload.get("id"):
+        payload["id"] = studies._new_id()
+
+    try:
+        comp = Component.model_validate(payload)
+    except Exception as exc:
+        raise HTTPException(422, f"Validation Pydantic : {exc}")
+
+    # Écrire manifest sur PVC
+    import json as _json
+    content_json = _json.dumps(
+        comp.model_dump(mode="json"), ensure_ascii=False, indent=2,
+    )
+    try:
+        stdout = await _execute_python_in_workspace(
+            user["username"],
+            comp_mod.write_component_manifest_pod_code(sid, comp.id, content_json),
+        )
+    except Exception as exc:
+        log.warning("write component manifest pod-side : %s", exc)
+        stdout = ""
+
+    # Indexer en DB
+    file_path = comp_mod.component_manifest_path(sid, comp.id)
+    size_bytes = len(content_json.encode("utf-8"))
+    rowid = await comp_mod.insert_component(
+        component=comp, owner=user["username"], sid=sid,
+        file_path=file_path, size_bytes=size_bytes,
+    )
+
+    return {
+        "id": comp.id,
+        "rowid": rowid,
+        "kind": comp.kind,
+        "title": comp.title,
+        "classification": comp.classification,
+        "manifest_url": f"/studies/{sid}/components/{comp.id}",
+        "render_url":   f"/studies/{sid}/components/{comp.id}/render",
+    }
+
+
+@app.get("/studies/{sid}/components/{cid}")
+async def get_component_endpoint(
+    sid: str, cid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Retourne le manifest latest du composant (depuis PVC + métadonnées DB)."""
+    _check_components_enabled()
+    from hub import components as comp_mod
+    latest = await comp_mod.get_component_latest(cid)
+    if not latest or latest["sid"] != sid:
+        raise HTTPException(404, "Composant introuvable dans cette étude")
+    if latest["owner"] != user["username"]:
+        # TODO Sprint Composants Phase 3 : ACL classification (public visible
+        # par tous, cerema_internal par CEREMA, restricted par invités…)
+        raise HTTPException(403, "Pas owner — ACL non implémentée (Phase 3)")
+
+    # Lire le contenu manifest depuis PVC
+    try:
+        stdout = await _execute_python_in_workspace(
+            user["username"],
+            comp_mod.read_component_manifest_pod_code(sid, cid),
+        )
+    except Exception as exc:
+        log.warning("read component manifest pod : %s", exc)
+        stdout = ""
+
+    import base64, json as _json
+    manifest_data = None
+    if "COMPONENT_READ_OK" in stdout:
+        try:
+            b64 = stdout.split("b64=", 1)[1].split()[0].strip()
+            manifest_data = _json.loads(base64.b64decode(b64).decode())
+        except Exception as exc:
+            log.warning("parse component manifest : %s", exc)
+
+    return {
+        "metadata": dict(latest),
+        "manifest": manifest_data,
+        "exists_on_pvc": manifest_data is not None,
+    }
+
+
+@app.get("/studies/{sid}/components/{cid}/history")
+async def component_history_endpoint(
+    sid: str, cid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Historique des versions du composant (audit trail INSERT-only)."""
+    _check_components_enabled()
+    from hub import components as comp_mod
+    history = await comp_mod.get_component_history(cid)
+    if not history:
+        raise HTTPException(404, "Composant introuvable")
+    if history[0]["sid"] != sid:
+        raise HTTPException(404, "Composant pas dans cette étude")
+    return history
+
+
+@app.get("/studies/{sid}/components/{cid}/render", response_class=HTMLResponse)
+async def render_component_endpoint(
+    sid: str, cid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Rendu HTML du composant via template Jinja2 maplibre_renderer.
+
+    Retourne une page HTML standalone (iframe-embeddable).
+    """
+    _check_components_enabled()
+    if not _jinja:
+        raise HTTPException(503, "Templates Jinja2 non disponibles")
+    from hub import components as comp_mod
+    from hub import maplibre_style_mapper as msm
+
+    latest = await comp_mod.get_component_latest(cid)
+    if not latest or latest["sid"] != sid:
+        raise HTTPException(404, "Composant introuvable")
+
+    # Lire manifest depuis PVC
+    try:
+        stdout = await _execute_python_in_workspace(
+            user["username"],
+            comp_mod.read_component_manifest_pod_code(sid, cid),
+        )
+    except Exception as exc:
+        log.error("render: read manifest failed : %s", exc)
+        raise HTTPException(503, "Workspace indisponible")
+
+    import base64, json as _json
+    if "COMPONENT_READ_OK" not in stdout:
+        raise HTTPException(404, "Manifest PVC introuvable")
+    try:
+        b64 = stdout.split("b64=", 1)[1].split()[0].strip()
+        manifest = _json.loads(base64.b64decode(b64).decode())
+    except Exception as exc:
+        raise HTTPException(500, f"Parse manifest : {exc}")
+
+    kind = manifest.get("kind", "interactive_map")
+    template_map = {
+        "interactive_map": "maplibre_renderer/interactive_map.html.j2",
+        "legend":          "maplibre_renderer/legend.html.j2",
+        "kpi_badge":       "maplibre_renderer/kpi_badge.html.j2",
+        "narrative_text":  "maplibre_renderer/narrative_text.html.j2",
+    }
+    template_name = template_map.get(kind)
+    if not template_name:
+        raise HTTPException(
+            501,
+            f"Kind '{kind}' non supporté par le renderer Phase 2. "
+            f"Kinds dispo : {list(template_map.keys())}",
+        )
+
+    # Préparer context selon kind
+    ctx: dict = {"component": manifest}
+    params = manifest.get("params", {})
+
+    if kind == "interactive_map":
+        # Chercher Scene Manifest du projet pour générer maplibre_layers
+        source = manifest.get("source", {})
+        pid = source.get("pid")
+        sm_data = None
+        if pid:
+            sm_latest = await studies.scene_manifest_get_latest(pid)
+            if sm_latest:
+                try:
+                    sm_stdout = await _execute_python_in_workspace(
+                        user["username"],
+                        studies.read_scene_manifest_pod_code(sid, pid),
+                    )
+                    if "SCENE_MANIFEST_READ_OK" in sm_stdout:
+                        sm_b64 = sm_stdout.split("b64=", 1)[1].split()[0].strip()
+                        sm_data = _json.loads(base64.b64decode(sm_b64).decode())
+                except Exception as exc:
+                    log.warning("read scene_manifest for render: %s", exc)
+        if sm_data:
+            ctx["maplibre_layers"] = msm.manifest_to_maplibre_layers(sm_data)
+        else:
+            ctx["maplibre_layers"] = []
+        ctx["data_inline"] = params.get("data_inline")
+        ctx["data_url"] = source.get("data_url", "")
+        ctx["basemap_url"] = params.get("basemap_url")
+
+    elif kind == "legend":
+        ctx["legend_entries"] = params.get("entries", [])
+
+    elif kind == "kpi_badge":
+        ctx["kpi"] = params.get("kpi", {
+            "value": "—", "label": manifest.get("title", "KPI"),
+        })
+
+    elif kind == "narrative_text":
+        ctx["markdown_content"] = params.get("markdown", "")
+
+    return _jinja.TemplateResponse(template_name, {"request": {}, **ctx})
+
+
+@app.delete("/studies/{sid}/components/{cid}", status_code=status.HTTP_204_NO_CONTENT)
+async def archive_component_endpoint(
+    sid: str, cid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Soft delete : status='archived'. INSERT new row archived (audit OK)."""
+    _check_components_enabled()
+    from hub import components as comp_mod
+    rowid = await comp_mod.archive_component(cid, user["username"])
+    if not rowid:
+        raise HTTPException(404, "Composant introuvable ou pas owner")
+    return None
+
+
 @app.get("/studies/{sid}/publications")
 async def list_study_publications(
     sid: str,

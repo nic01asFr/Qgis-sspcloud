@@ -1,0 +1,63 @@
+{# Composant kpi_badge — Indicateur clé HTML statique.
+
+   Sprint Composants Phase 2 (2026-06-25).
+
+   Variables Jinja2 attendues :
+   - component : dict Component
+   - kpi : dict {value, unit?, label, trend?, color?, source?}
+
+   Pas de runtime JS — pur HTML statique DSFR. Embeddable inline/iframe.
+   Format CEREMA cohérent storymap DSFR audit/livrables V1.5.
+#}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>{{ component.title|e }}</title>
+<style>
+body{margin:0;padding:0;font-family:Marianne,system-ui,sans-serif;
+  background:transparent;color:#161616}
+.kpi-card{padding:18px 20px;background:#fff;border-left:4px solid
+  {{ kpi.color or '#000091' }};border-radius:4px;box-shadow:0 2px 6px rgba(0,0,0,0.06);
+  display:flex;flex-direction:column;gap:6px}
+.kpi-label{font-size:11px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.5px;color:#666;margin:0}
+.kpi-value-wrap{display:flex;align-items:baseline;gap:6px}
+.kpi-value{font-size:32px;font-weight:700;line-height:1;
+  color:{{ kpi.color or '#000091' }};font-variant-numeric:tabular-nums;margin:0}
+.kpi-unit{font-size:14px;font-weight:500;color:#666}
+.kpi-trend{font-size:11px;color:{{ kpi.trend_color or '#666' }};
+  display:flex;align-items:center;gap:3px;margin-top:2px}
+.kpi-trend--up{color:#18753c}
+.kpi-trend--down{color:#b34000}
+.kpi-trend--stable{color:#666}
+.kpi-source{font-size:10px;color:#999;margin:6px 0 0;font-style:italic}
+.kpi-source a{color:inherit;text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="kpi-card">
+  <p class="kpi-label">{{ kpi.label|e }}</p>
+  <div class="kpi-value-wrap">
+    <span class="kpi-value">{{ kpi.value }}</span>
+    {% if kpi.unit %}<span class="kpi-unit">{{ kpi.unit|e }}</span>{% endif %}
+  </div>
+  {% if kpi.trend %}
+  <p class="kpi-trend kpi-trend--{{ kpi.trend_kind or 'stable' }}">
+    {% if kpi.trend_kind == 'up' %}↗{% elif kpi.trend_kind == 'down' %}↘{% else %}→{% endif %}
+    {{ kpi.trend|e }}
+  </p>
+  {% endif %}
+  {% if kpi.source %}
+  <p class="kpi-source">
+    Source :
+    {% if kpi.source_url %}
+    <a href="{{ kpi.source_url|e }}" target="_blank" rel="noopener">{{ kpi.source|e }}</a>
+    {% else %}
+    {{ kpi.source|e }}
+    {% endif %}
+  </p>
+  {% endif %}
+</div>
+</body>
+</html>

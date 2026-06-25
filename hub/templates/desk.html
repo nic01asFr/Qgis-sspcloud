@@ -586,6 +586,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
               title="Couches du projet QGIS courant (specifique au projet ouvert)">
         🗺 Couches
       </button>
+      <button class="rtab" data-rtab="components" data-scope="study"
+              title="Composants UI rattachés à l'étude (carte interactive, légende, KPI, narratif…)">
+        🎨 Composants
+      </button>
       <button class="rtab" data-rtab="exports" data-scope="study"
               title="Actions d'export de l'etude (ZIP, Scene Manifest, livrables)">
         📦 Exports
@@ -610,6 +614,130 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <div class="publi-empty">Chargement…</div>
       </div>
     </div>
+
+    {# Sprint Composants Phase 2 (2026-06-25) : onglet "Composants" — unités
+       UI paramétrables rattachées à l'étude. Catalogue MVP 4 kinds livrés :
+       interactive_map (MapLibre), legend (HTML SVG), kpi_badge (HTML),
+       narrative_text (Marked.js).
+
+       Décision verrouillée : audit_chain n'est PAS un composant — c'est un
+       attribut transverse obligatoire sur les ASSEMBLAGES publiés (Sprint 3).
+
+       Création principalement via l'agent IA (chat /chat) qui a accès aux
+       tools natifs MCP :
+         - describe_entity_schema, validate_manifest, list_entity_kinds
+         - create_component, list_components, get_component
+       Cf. agent/agent/native_tools_v2.py + KB axe qgis-sspcloud-composants. #}
+    <div class="rpane" data-rpane="components">
+      <div class="components-pane">
+        {% if active_study %}
+        <div class="components-header">
+          <p class="components-desc">
+            🎨 Composants UI rattachés à l'étude « {{ active_study.name }} ».
+            Création via l'agent IA (chat). Catalogue MVP :
+            <em>interactive_map · legend · kpi_badge · narrative_text</em>.
+          </p>
+          <button id="btn-refresh-components" class="fr-btn fr-btn--sm fr-btn--tertiary"
+                  onclick="loadComponents()" style="font-size:11px">
+            ↻ Rafraîchir
+          </button>
+        </div>
+        <div id="components-list" class="components-list"
+             data-active-study-id="{{ active_study_id }}">
+          <div class="publi-empty">Chargement…</div>
+        </div>
+        {% else %}
+        <div class="publi-empty">
+          Active une étude pour voir ses composants.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    <script>
+    async function loadComponents() {
+      const list = document.getElementById('components-list');
+      if (!list) return;
+      const sid = list.dataset.activeStudyId;
+      if (!sid) return;
+      list.innerHTML = '<div class="publi-empty">Chargement…</div>';
+      try {
+        const resp = await fetch(`/studies/${sid}/components`, {credentials: 'include'});
+        if (!resp.ok) {
+          if (resp.status === 503) {
+            list.innerHTML = '<div class="publi-empty">Composants désactivés (feature flag).</div>';
+            return;
+          }
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        if (!Array.isArray(data) || data.length === 0) {
+          list.innerHTML = `<div class="publi-empty">
+            Aucun composant créé pour cette étude.<br>
+            <span style="font-size:10.5px;color:#999">
+              Demande à l'agent IA : « crée une carte interactive de la zone d'étude »
+            </span>
+          </div>`;
+          return;
+        }
+        const KIND_ICONS = {
+          interactive_map: '🗺', scene_3d: '🏛', chart: '📊',
+          kpi_badge: '🔢', legend: '📋', narrative_text: '📝',
+          data_table: '📋', media_embed: '🎞', iframe_grist: '📈',
+        };
+        list.innerHTML = data.map(c => `
+          <div class="component-item">
+            <div class="component-icon">${KIND_ICONS[c.kind] || '🎨'}</div>
+            <div class="component-body">
+              <div class="component-title">${escapeHtml(c.title || c.cid)}</div>
+              <div class="component-meta">
+                <span class="component-kind">${escapeHtml(c.kind)}</span>
+                <span class="component-class">${escapeHtml(c.classification || 'cerema_internal')}</span>
+                <span class="component-version">v${c.version_num}</span>
+              </div>
+            </div>
+            <a href="/studies/${sid}/components/${c.cid}/render"
+               target="_blank" class="fr-btn fr-btn--sm fr-btn--tertiary"
+               style="font-size:10.5px;padding:4px 8px"
+               title="Aperçu HTML du composant">
+              👁 Voir
+            </a>
+          </div>
+        `).join('');
+      } catch (e) {
+        list.innerHTML = `<div class="publi-empty">Erreur : ${escapeHtml(e.message)}</div>`;
+      }
+    }
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = String(s);
+      return div.innerHTML;
+    }
+    // Auto-load when components tab clicked
+    document.querySelectorAll('[data-rtab="components"]').forEach(btn => {
+      btn.addEventListener('click', () => setTimeout(loadComponents, 100));
+    });
+    </script>
+    <style>
+    .components-pane{padding:14px 12px;display:flex;flex-direction:column;gap:12px}
+    .components-header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+    .components-desc{font-size:11.5px;color:var(--text-mention-grey);
+      margin:0;line-height:1.45;flex:1}
+    .components-list{display:flex;flex-direction:column;gap:6px}
+    .component-item{display:flex;align-items:center;gap:10px;padding:10px;
+      background:var(--background-alt-grey);border-radius:6px;
+      border-left:3px solid #000091}
+    .component-icon{font-size:20px;flex-shrink:0}
+    .component-body{flex:1;min-width:0}
+    .component-title{font-size:12.5px;font-weight:600;margin:0 0 3px;
+      color:var(--text-title-blue-france);overflow:hidden;
+      text-overflow:ellipsis;white-space:nowrap}
+    .component-meta{display:flex;gap:6px;flex-wrap:wrap;
+      font-size:10px;color:var(--text-mention-grey)}
+    .component-kind{background:#e3eaf5;color:#000091;padding:1px 6px;
+      border-radius:8px;font-weight:600}
+    .component-class{font-style:italic}
+    .component-version{font-variant-numeric:tabular-nums;color:#666}
+    </style>
 
     {# Sprint Composants Phase 1 (2026-06-25) : refonte UI Exports en
        2 sous-zones distinctes ÉTUDE / PROJET pour clarifier le scope.

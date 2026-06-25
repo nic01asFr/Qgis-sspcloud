@@ -727,6 +727,14 @@ _OIDC_MIDDLEWARE_INTER_POD = (
     # /projects/active est top-level -> whitelist explicite. Permet a l'agent
     # (Bearer HUB_API_KEY) d'appeler /projects/active dans _resolve_active_project.
     "/projects",
+    # Sprint Composants Phase 2 (2026-06-25) : endpoints schema introspection
+    # pour l'agent IA meta-cognitif (describe_entity_schema, validate_manifest,
+    # list_entity_kinds). Permet a l'agent de connaitre les Pydantic schemas
+    # AVANT d'appeler create_component / create_assembly (anti-hallucination,
+    # cf. verdict evaluateur D).
+    # /studies/{sid}/components/* et /studies/{sid}/projects/{pid}/components/*
+    # sont deja couverts via /studies prefix.
+    "/schema",
 )
 
 
