@@ -487,6 +487,7 @@ _OIDC_MIDDLEWARE_PUBLIC = (
     "/.well-known/oauth-protected-resource",
     "/authorize",     # couvre aussi /authorize/confirm via le check startswith
     "/oauth/token",
+    "/oauth/register",  # Dynamic Client Registration (RFC 7591) - claude.ai
 )
 
 # Routes inter-pods : Bearer HUB_API_KEY = clé hub partagée entre hub et agent

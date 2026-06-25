@@ -1253,11 +1253,38 @@ async def oauth_metadata():
         "issuer":                            base,
         "authorization_endpoint":            f"{base}/authorize",
         "token_endpoint":                    f"{base}/oauth/token",
+        "registration_endpoint":             f"{base}/oauth/register",
         "grant_types_supported":             ["authorization_code", "client_credentials"],
         "response_types_supported":          ["code"],
         "code_challenge_methods_supported":  ["S256"],
         "token_endpoint_auth_methods_supported": ["client_secret_post", "none"],
     })
+
+
+@app.post("/oauth/register")
+async def oauth_register(request: Request):
+    """Dynamic Client Registration (RFC 7591) — exige par le connecteur MCP
+    distant de claude.ai / Claude Desktop. Sans ce endpoint, claude.ai echoue
+    avec `registration_endpoint_missing`.
+
+    Enregistrement permissif : l'authentification reelle repose sur PKCE +
+    l'api_key hub (cf. /oauth/token), pas sur un client_secret enregistre.
+    On accepte donc toute demande et on renvoie un client_id genere. Les
+    redirect_uris sont echoes tels quels (claude.ai verifie la coherence)."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    client_id = f"mcp-{secrets.token_hex(8)}"
+    return JSONResponse({
+        "client_id":                  client_id,
+        "client_id_issued_at":        int(time.time()),
+        "redirect_uris":              body.get("redirect_uris", []),
+        "token_endpoint_auth_method": "none",
+        "grant_types":                ["authorization_code"],
+        "response_types":             ["code"],
+        "client_name":                body.get("client_name", "Claude MCP"),
+    }, status_code=201)
 
 
 @app.get("/.well-known/oauth-protected-resource")

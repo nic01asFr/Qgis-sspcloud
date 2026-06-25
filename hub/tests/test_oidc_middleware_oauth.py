@@ -65,6 +65,11 @@ def test_oauth_token_public():
     assert _run("/oauth/token") is _SENTINEL
 
 
+def test_oauth_register_public():
+    # Dynamic Client Registration (RFC 7591) appele par claude.ai sans cookie
+    assert _run("/oauth/register") is _SENTINEL
+
+
 def test_authorize_public():
     assert _run("/authorize") is _SENTINEL
 
