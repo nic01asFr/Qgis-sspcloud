@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import os
 import secrets
@@ -199,6 +200,35 @@ async def init_apikeys_db() -> None:
                     expires_at INTEGER DEFAULT NULL
                 )
             """)
+            # Cles scopees (agents configures / publies) — additif, n'altere PAS
+            # api_keys. Une cle scopee porte un scope (etude/projet/persona/tools/
+            # data/mode/actor) au lieu de l'acces supervision total de la cle nue.
+            # Le scope est resolu cote serveur (cle = bearer opaque) -> ajustable/
+            # revocable sans re-emettre. sid/pid = 12-hex (seam Composants).
+            # PAS de UNIQUE(username,study,project) : plusieurs agents publies
+            # (personas/tools distincts) peuvent cibler le meme projet.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS scoped_keys (
+                    id          TEXT PRIMARY KEY,
+                    parent_key  TEXT NOT NULL,
+                    username    TEXT NOT NULL,
+                    study_id    TEXT NOT NULL,
+                    project_id  TEXT,
+                    persona     TEXT,
+                    tools_json  TEXT NOT NULL DEFAULT '"all"',
+                    data_scope  TEXT NOT NULL DEFAULT 'project',
+                    mode        TEXT NOT NULL DEFAULT 'scoped',
+                    actor       TEXT NOT NULL DEFAULT 'owner',
+                    label       TEXT,
+                    created_at  INTEGER NOT NULL,
+                    expires_at  INTEGER,
+                    revoked_at  INTEGER
+                )
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_scoped_active "
+                "ON scoped_keys(username, study_id) WHERE revoked_at IS NULL"
+            )
             await db.commit()
     except Exception as exc:
         log.error(
@@ -351,6 +381,154 @@ async def _validate_api_key(key: str) -> dict | None:
             "source": "apikey",
         }
     return None
+
+
+# ── Cles scopees (agents configures / publies) ────────────────────────────────
+# Etape 1 (additive) : couche de donnees uniquement. Rien dans get_current_user
+# ni le middleware ne consomme encore ces cles -> zero impact sur l'existant.
+# Le cablage (accept-path middleware + scope dans get_current_user + enforcement
+# au proxy /mcp) viendra dans une etape ulterieure, une fois cette base validee.
+
+_SCOPED_PREFIX = "qgisk_"
+_SCOPED_TOOLS_ALL = "all"
+
+
+async def create_scoped_key(
+    username: str,
+    study_id: str,
+    project_id: str | None = None,
+    persona: str | None = None,
+    tools: list[str] | str = _SCOPED_TOOLS_ALL,
+    data_scope: str = "project",
+    mode: str = "scoped",
+    actor: str = "owner",
+    label: str | None = None,
+    expires_at: int | None = None,
+) -> str:
+    """Emet une cle scopee pour un agent configure/publie. Retourne le bearer.
+
+    `tools` : liste blanche de noms de tools, ou "all". `parent_key` trace la
+    cle superviseur dont elle derive (pour audit / revocation en cascade).
+    """
+    key = f"{_SCOPED_PREFIX}{username}_{secrets.token_hex(16)}"
+    tools_json = json.dumps(
+        tools if isinstance(tools, list) else _SCOPED_TOOLS_ALL,
+        ensure_ascii=False,
+    )
+    parent_key = await create_or_get_api_key(username)
+    now = int(time.time())
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO scoped_keys (id, parent_key, username, study_id, "
+            "project_id, persona, tools_json, data_scope, mode, actor, label, "
+            "created_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (key, parent_key, username, study_id, project_id, persona,
+             tools_json, data_scope, mode, actor, label, now, expires_at),
+        )
+        await db.commit()
+    log.info(
+        "Cle scopee creee pour %s (study=%s project=%s mode=%s actor=%s)",
+        username, study_id, project_id, mode, actor,
+    )
+    return key
+
+
+async def _validate_scoped_key(key: str) -> dict | None:
+    """Valide une cle scopee. Retourne {username, role, source, scope} ou None.
+
+    Le `scope` est la lentille resolue cote serveur : sid/pid/persona/tools/
+    data/mode/actor. None si cle inconnue, revoquee ou expiree.
+    """
+    if not key or not key.startswith(_SCOPED_PREFIX):
+        return None
+    if not _DB_PATH.exists():
+        return None
+    try:
+        async with aiosqlite.connect(_DB_PATH) as db:
+            row = await (await db.execute(
+                "SELECT username, study_id, project_id, persona, tools_json, "
+                "data_scope, mode, actor, expires_at, revoked_at "
+                "FROM scoped_keys WHERE id = ?", (key,),
+            )).fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    (username, study_id, project_id, persona, tools_json, data_scope,
+     mode, actor, expires_at, revoked_at) = row
+    if revoked_at:
+        return None
+    if expires_at and time.time() > expires_at:
+        return None
+    try:
+        tools = json.loads(tools_json) if tools_json else _SCOPED_TOOLS_ALL
+    except Exception:
+        tools = _SCOPED_TOOLS_ALL
+    return {
+        "username": username,
+        "role": "admin" if username in _ADMIN_USERS else "user",
+        "source": "scoped",
+        "scope": {
+            "owner":   username,
+            "sid":     study_id,
+            "pid":     project_id,
+            "persona": persona,
+            "tools":   tools,        # "all" | ["tool_a", ...]
+            "data":    data_scope,   # all | study | project
+            "mode":    mode,         # supervisor | scoped
+            "actor":   actor,        # owner | delegate
+        },
+    }
+
+
+async def revoke_scoped_key(key: str) -> None:
+    """Revoque une cle scopee (soft delete : revoked_at). Idempotent."""
+    if not _DB_PATH.exists():
+        return
+    try:
+        async with aiosqlite.connect(_DB_PATH) as db:
+            await db.execute(
+                "UPDATE scoped_keys SET revoked_at = ? "
+                "WHERE id = ? AND revoked_at IS NULL",
+                (int(time.time()), key),
+            )
+            await db.commit()
+    except Exception as exc:
+        log.warning("revoke_scoped_key echec: %s", exc)
+
+
+async def list_scoped_keys(
+    username: str, include_revoked: bool = False
+) -> list[dict]:
+    """Liste les cles scopees d'un user (sans exposer la valeur de la cle)."""
+    if not _DB_PATH.exists():
+        return []
+    query = (
+        "SELECT id, study_id, project_id, persona, tools_json, data_scope, "
+        "mode, actor, label, created_at, expires_at, revoked_at "
+        "FROM scoped_keys WHERE username = ?"
+    )
+    if not include_revoked:
+        query += " AND revoked_at IS NULL"
+    query += " ORDER BY created_at DESC"
+    try:
+        async with aiosqlite.connect(_DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await (await db.execute(query, (username,))).fetchall()
+    except Exception:
+        return []
+    out = []
+    for r in rows:
+        d = dict(r)
+        # Ne jamais exposer l'id (= le bearer) en clair dans un listing.
+        d["id_masked"] = (d.pop("id", "")[:14] + "…")
+        try:
+            d["tools"] = json.loads(d.pop("tools_json", '"all"'))
+        except Exception:
+            d["tools"] = _SCOPED_TOOLS_ALL
+        out.append(d)
+    return out
 
 
 # ── Validation OIDC SSPCloud ───────────────────────────────────────────────────
