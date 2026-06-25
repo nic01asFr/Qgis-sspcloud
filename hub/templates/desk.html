@@ -611,52 +611,149 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       </div>
     </div>
 
-    {# Sprint UX-4 (2026-06-24) : onglet 'Exports' - actions de production
-       de livrables au niveau etude. Sprint Composants-3 ajoutera ici les
-       boutons 'Publier Scene Manifest' (3 pivots) + 'Push vers Grist'. #}
+    {# Sprint Composants Phase 1 (2026-06-25) : refonte UI Exports en
+       2 sous-zones distinctes ÉTUDE / PROJET pour clarifier le scope.
+
+       NIVEAU ÉTUDE = ce qui agrège tous les projets de l'étude :
+         - Bundle ZIP complet (projets + données + livrables + recettes)
+         - [Futur Sprint 3] Storymap narrative DSFR
+         - [Futur Sprint 4] Mégabundle ZIP composite
+
+       NIVEAU PROJET = ce qui porte sur le projet actif uniquement :
+         - Document Grist (.grist) avec Scene Manifest embarqué
+         - [Futur Sprint 4] GPKG étendu V0.2
+         - [Futur Sprint 4] ZIP composite (JSON + GPKG + assets)
+         - [Futur Sprint 4] WebMap autonome (HTML MapLibre)
+         - [Futur Sprint 4] Snapshot PNG/PDF
+
+       Note : `audit_chain` n'est PAS un export — c'est un attribut
+       transverse OBLIGATOIRE sur tout assemblage publié (Sprint 3).
+       Donc PAS dans cette section. #}
     <div class="rpane" data-rpane="exports">
       <div class="exports-pane">
         {% if active_study %}
-        <div class="export-section">
-          <h4 class="export-section-title">📦 Bundle complet</h4>
-          <p class="export-section-desc">
-            Télécharge l'étude entière au format ZIP : projet QGIS, données
-            SIG locales, livrables publiés, recettes. Idéal pour archiver
-            ou partager hors ligne.
-          </p>
-          <a href="/studies/{{ active_study_id }}/export"
-             class="fr-btn fr-btn--sm" style="width:100%;text-align:center;font-weight:700"
-             title="Télécharger l'étude au format ZIP (projet QGIS + données + livrables)">
-            ↓ Télécharger l'étude (ZIP)
-          </a>
+
+        {# ═══ NIVEAU ÉTUDE ═══════════════════════════════════════════ #}
+        <div class="exports-zone">
+          <div class="exports-zone-header">
+            <span class="exports-zone-icon">🏷</span>
+            <div class="exports-zone-titles">
+              <h3 class="exports-zone-label">Niveau étude</h3>
+              <p class="exports-zone-context">« {{ active_study.name }} »</p>
+            </div>
+          </div>
+
+          <div class="export-section">
+            <h4 class="export-section-title">📦 Bundle complet</h4>
+            <p class="export-section-desc">
+              Télécharge l'étude entière au format ZIP : tous les projets
+              QGIS, données SIG locales, livrables publiés, recettes.
+              Idéal pour archiver ou partager hors ligne.
+            </p>
+            <a href="/studies/{{ active_study_id }}/export"
+               class="fr-btn fr-btn--sm" style="width:100%;text-align:center;font-weight:700"
+               title="Télécharger l'étude au format ZIP">
+              ↓ Télécharger l'étude (ZIP)
+            </a>
+          </div>
+
+          <div class="export-section export-soon">
+            <h4 class="export-section-title">📖 Storymap narrative DSFR <span class="soon-badge">Bientôt</span></h4>
+            <p class="export-section-desc">
+              Page HTML narrative (scroll vertical scrollytelling DSFR)
+              qui orchestre les composants des projets de l'étude.
+              Publication S3 avec audit_chain + classification audience.
+            </p>
+            <button type="button" class="fr-btn fr-btn--sm fr-btn--tertiary"
+                    style="width:100%;text-align:center" disabled
+                    title="Disponible après Sprint Composants Phase 3 (assemblages)">
+              Générer storymap →
+            </button>
+          </div>
         </div>
 
-        {# Sprint Composants-1 Phase C (2026-06-24) : section export Grist
-           cablee a /studies/{sid}/projects/{pid}/export_grist (Phase B).
-           Le bouton lance une requete POST, affiche progres pendant
-           generation (peut prendre 10-30s selon nb features), puis
-           propose un lien de telechargement direct. Scene Manifest
-           embarque automatiquement si une version existe en DB. #}
+        {# ═══ NIVEAU PROJET ══════════════════════════════════════════ #}
         {% if active_project %}
-        <div class="export-section">
-          <h4 class="export-section-title">💾 Document Grist (.grist)</h4>
-          <p class="export-section-desc">
-            Génère un document Grist complet (SQLite portable) avec
-            tables des couches QGIS, widgets Map/Chart/Form, et — si une
-            version existe — le Scene Manifest embarqué pour interop
-            cross-runtime (atlas, qgis2grist, ZEBRA).
-          </p>
-          <button type="button" class="fr-btn fr-btn--sm"
-                  id="btn-export-grist"
-                  style="width:100%;text-align:center;font-weight:700"
-                  onclick="exportGristDoc()"
-                  data-active-study-id="{{ active_study_id }}"
-                  data-active-project-pid="{{ active_project.pid }}"
-                  title="Lance la génération du .grist sur le workspace (10-30s)">
-            💾 Générer le doc Grist →
-          </button>
-          <div id="export-grist-status" class="export-status" hidden></div>
+        <div class="exports-zone exports-zone--project">
+          <div class="exports-zone-header">
+            <span class="exports-zone-icon">🏷</span>
+            <div class="exports-zone-titles">
+              <h3 class="exports-zone-label">Niveau projet</h3>
+              <p class="exports-zone-context">
+                « {{ active_project.label or active_project.pid[:8] }} »
+                {% if projects_in_active_study and projects_in_active_study|length > 1 %}
+                <span class="exports-zone-hint">
+                  ({{ projects_in_active_study|length }} projets dans l'étude
+                  — change de projet actif pour exporter les autres)
+                </span>
+                {% endif %}
+              </p>
+            </div>
+          </div>
+
+          {# Sprint Composants-1 Phase C (2026-06-24) : export Grist livré. #}
+          <div class="export-section">
+            <h4 class="export-section-title">💾 Document Grist (.grist)</h4>
+            <p class="export-section-desc">
+              Génère un document Grist complet (SQLite portable) avec
+              tables des couches QGIS, widgets Map/Chart/Form, et — si une
+              version existe — le Scene Manifest embarqué pour interop
+              cross-runtime (atlas, qgis2grist, ZEBRA).
+            </p>
+            <button type="button" class="fr-btn fr-btn--sm"
+                    id="btn-export-grist"
+                    style="width:100%;text-align:center;font-weight:700"
+                    onclick="exportGristDoc()"
+                    data-active-study-id="{{ active_study_id }}"
+                    data-active-project-pid="{{ active_project.pid }}"
+                    title="Lance la génération du .grist sur le workspace (10-30s)">
+              💾 Générer le doc Grist →
+            </button>
+            <div id="export-grist-status" class="export-status" hidden></div>
+          </div>
+
+          <div class="export-section export-soon">
+            <h4 class="export-section-title">🎨 Scene Manifest (.json) <span class="soon-badge">Bientôt</span></h4>
+            <p class="export-section-desc">
+              Exporte le contrat de style declarative V0.2 du projet seul
+              (couches + symbology + provenance). Format JSON pivot
+              consommable par MapLibre, QGIS re-import, atlas widget Grist.
+            </p>
+            <button type="button" class="fr-btn fr-btn--sm fr-btn--tertiary"
+                    style="width:100%;text-align:center" disabled
+                    title="Disponible après Sprint Composants Phase 4">
+              Télécharger Scene Manifest →
+            </button>
+          </div>
+
+          <div class="export-section export-soon">
+            <h4 class="export-section-title">📦 GPKG étendu V0.2 <span class="soon-badge">Bientôt</span></h4>
+            <p class="export-section-desc">
+              GeoPackage binaire portable avec couches + style + provenance
+              embarqués (tables _meta_scene + scene_relations + scene_provenance).
+              Pivot QGIS re-import + R + Python.
+            </p>
+            <button type="button" class="fr-btn fr-btn--sm fr-btn--tertiary"
+                    style="width:100%;text-align:center" disabled
+                    title="Disponible après Sprint Composants Phase 4">
+              Générer GPKG étendu →
+            </button>
+          </div>
         </div>
+        {% else %}
+        <div class="exports-zone exports-zone--project exports-zone--empty">
+          <div class="exports-zone-header">
+            <span class="exports-zone-icon">🏷</span>
+            <div class="exports-zone-titles">
+              <h3 class="exports-zone-label">Niveau projet</h3>
+              <p class="exports-zone-context exports-zone-context--hint">
+                Active un projet pour accéder à ses exports
+              </p>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
         <script>
         async function exportGristDoc() {
           const btn = document.getElementById('btn-export-grist');
@@ -706,22 +803,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           }
         }
         </script>
-        {% endif %}
 
-        <div class="export-section export-soon">
-          <h4 class="export-section-title">🎨 Scene Manifest <span class="soon-badge">Bientôt</span></h4>
-          <p class="export-section-desc">
-            Publie les couches du projet au format Scene Manifest V0.2
-            (JSON + GPKG + ZIP composite). Permet l'interop avec atlas
-            widget Grist, qgis2grist, ZEBRA review.
-          </p>
-          <button type="button" class="fr-btn fr-btn--sm fr-btn--tertiary"
-                  style="width:100%;text-align:center"
-                  disabled
-                  title="Disponible après Sprint Composants-3 (export 3 pivots JSON+GPKG+ZIP)">
-            Publier Scene Manifest →
-          </button>
-        </div>
         {% else %}
         <div class="publi-empty">
           Active une étude pour accéder aux exports.
@@ -730,7 +812,28 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       </div>
     </div>
     <style>
-    .exports-pane{padding:14px 12px;display:flex;flex-direction:column;gap:16px}
+    .exports-pane{padding:14px 12px;display:flex;flex-direction:column;gap:20px}
+
+    /* Sprint Composants Phase 1 (2026-06-25) : zones distinctes
+       étude / projet pour clarifier le scope de chaque export. */
+    .exports-zone{display:flex;flex-direction:column;gap:12px;
+      padding-bottom:14px;border-bottom:1px dashed var(--border-default-grey)}
+    .exports-zone:last-child{border-bottom:0}
+    .exports-zone--project{padding-top:6px}
+    .exports-zone--empty .exports-zone-context--hint{font-style:italic;
+      color:var(--text-mention-grey)}
+    .exports-zone-header{display:flex;align-items:flex-start;gap:8px;
+      padding:6px 4px}
+    .exports-zone-icon{font-size:15px;line-height:1}
+    .exports-zone-titles{flex:1;min-width:0}
+    .exports-zone-label{font-size:11.5px;font-weight:700;margin:0 0 2px;
+      text-transform:uppercase;letter-spacing:.5px;
+      color:var(--text-title-blue-france)}
+    .exports-zone-context{font-size:11.5px;color:var(--text-default-grey);
+      margin:0;font-weight:600}
+    .exports-zone-hint{display:block;font-size:10px;font-weight:400;
+      color:var(--text-mention-grey);margin-top:2px;font-style:italic}
+
     .export-section{padding:12px;background:var(--background-alt-grey);
       border-radius:6px;border-left:3px solid #d64d00}
     .export-section.export-soon{border-left-color:#919191;opacity:.75}
