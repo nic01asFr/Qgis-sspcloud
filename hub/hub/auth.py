@@ -531,6 +531,24 @@ async def list_scoped_keys(
     return out
 
 
+async def _bearer_scope(request: "Request") -> dict | None:
+    """Si le header Authorization porte une cle scopee valide, retourne son
+    scope ({sid, pid, tools, data, mode, persona, actor}), sinon None.
+
+    Utilise par le middleware pour poser request.state.scope sur les routes
+    inter-pod (dont /mcp) quand l'appelant presente une cle scopee plutot que
+    la cle superviseur. Cle superviseur / OIDC -> None (= acces total).
+    """
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header.removeprefix("Bearer ").strip()
+    if not token.startswith(_SCOPED_PREFIX):
+        return None
+    user = await _validate_scoped_key(token)
+    return user["scope"] if user else None
+
+
 # ── Validation OIDC SSPCloud ───────────────────────────────────────────────────
 
 def _validate_oidc_token(token: str) -> dict:
@@ -610,6 +628,17 @@ async def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
     token = creds.credentials
+    # Cle scopee (agent configure/publie) — prefixe qgisk_ (distinct de qgis_).
+    # Retourne {username, role, source:"scoped", scope:{...}} ; le scope est
+    # ensuite lu par le proxy /mcp pour le filtrage tools + injection sid/pid.
+    if token.startswith(_SCOPED_PREFIX):
+        user = await _validate_scoped_key(token)
+        if user:
+            return user
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Clé scopée invalide, révoquée ou expirée",
+        )
     if token.startswith("qgis_"):
         user = await _validate_api_key(token)
         if user:
@@ -770,6 +799,16 @@ async def oidc_auth_middleware(request: "Request", call_next):
     # 3. Routes inter-pod avec Bearer HUB_API_KEY
     if any(path == p or path.startswith(p + "/") for p in _OIDC_MIDDLEWARE_INTER_POD):
         if await _is_inter_pod_authorized(request):
+            return await call_next(request)
+        # 3bis. Cle scopee (agent configure/publie) : authentifie + porte un
+        # scope. On pose request.state.scope pour que le proxy /mcp applique le
+        # filtrage tools + injection sid/pid (etape ulterieure). Tant qu'aucun
+        # endpoint de mint n'existe, aucune cle scopee n'est emise -> chemin
+        # inerte en prod. La cle superviseur passe deja via _is_inter_pod ci-dessus
+        # (== HUB_API_KEY en hub mono-user) -> request.state.scope reste None = total.
+        scoped = await _bearer_scope(request)
+        if scoped:
+            request.state.scope = scoped
             return await call_next(request)
         # Sinon on tombe sur le check OIDC ci-dessous (fallback UI)
 

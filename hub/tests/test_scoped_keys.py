@@ -16,7 +16,32 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+import pytest  # noqa: E402
+from fastapi.security import HTTPAuthorizationCredentials  # noqa: E402
+
 from hub import auth  # noqa: E402
+
+
+class _FakeURL:
+    def __init__(self, path: str):
+        self.path = path
+
+
+class _FakeReq:
+    """Request minimal pour exercer le middleware sur le chemin scope."""
+
+    def __init__(self, path, headers=None, cookies=None):
+        self.url = _FakeURL(path)
+        self.headers = headers or {}
+        self.cookies = cookies or {}
+        self.state = type("S", (), {})()
+
+
+_SENT = object()
+
+
+async def _call_next(_req):
+    return _SENT
 
 
 def _setup(tmp_path):
@@ -106,3 +131,57 @@ def test_multiple_agents_same_project(tmp_path):
     assert k1 != k2
     assert asyncio.run(auth._validate_scoped_key(k1))["scope"]["persona"] == "a"
     assert asyncio.run(auth._validate_scoped_key(k2))["scope"]["persona"] == "b"
+
+
+# ── Etape 2 : resolution auth (get_current_user + middleware) ──────────────────
+
+def test_bearer_scope_helper(tmp_path):
+    _setup(tmp_path)
+    key = asyncio.run(auth.create_scoped_key("alice", "d8a0b9718857"))
+    req = _FakeReq("/mcp", headers={"authorization": f"Bearer {key}"})
+    scope = asyncio.run(auth._bearer_scope(req))
+    assert scope and scope["sid"] == "d8a0b9718857"
+    # bearer non-scope (cle superviseur) -> None
+    req2 = _FakeReq("/mcp", headers={"authorization": "Bearer qgis_alice_xxx"})
+    assert asyncio.run(auth._bearer_scope(req2)) is None
+    # pas de header -> None
+    assert asyncio.run(auth._bearer_scope(_FakeReq("/mcp"))) is None
+
+
+def test_get_current_user_scoped_key(tmp_path):
+    _setup(tmp_path)
+    key = asyncio.run(auth.create_scoped_key("bob", "aaaaaaaaaaaa", persona="x"))
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=key)
+    user = asyncio.run(auth.get_current_user(request=None, creds=creds))
+    assert user["username"] == "bob"
+    assert user["source"] == "scoped"
+    assert user["scope"]["persona"] == "x"
+
+
+def test_get_current_user_invalid_scoped_key_401(tmp_path):
+    _setup(tmp_path)
+    creds = HTTPAuthorizationCredentials(
+        scheme="Bearer", credentials="qgisk_bob_deadbeefdeadbeef")
+    with pytest.raises(Exception):  # HTTPException 401
+        asyncio.run(auth.get_current_user(request=None, creds=creds))
+
+
+def test_middleware_accepts_scoped_key_on_mcp(tmp_path):
+    _setup(tmp_path)
+    key = asyncio.run(auth.create_scoped_key(
+        "alice", "d8a0b9718857", project_id="0780d1d825f3", tools=["run_recipe"]))
+    req = _FakeReq("/mcp", headers={"authorization": f"Bearer {key}"})
+    res = asyncio.run(auth.oidc_auth_middleware(req, _call_next))
+    assert res is _SENT                              # passthrough autorise
+    assert getattr(req.state, "scope", None) is not None
+    assert req.state.scope["sid"] == "d8a0b9718857"
+    assert req.state.scope["pid"] == "0780d1d825f3"
+    assert req.state.scope["tools"] == ["run_recipe"]
+
+
+def test_middleware_rejects_invalid_scoped_key_on_mcp(tmp_path):
+    _setup(tmp_path)
+    req = _FakeReq("/mcp", headers={"authorization": "Bearer qgisk_x_unknown"})
+    res = asyncio.run(auth.oidc_auth_middleware(req, _call_next))
+    assert res is not _SENT                          # pas de passthrough
+    assert getattr(res, "status_code", None) == 401
