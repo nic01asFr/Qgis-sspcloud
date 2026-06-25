@@ -4097,9 +4097,12 @@ async def mcp_auto_session(
     user: dict = Depends(auth.get_current_user),
 ):
     username = user["username"]
+    # Cle scopee -> filtrage tools applique au proxy. None (cle superviseur /
+    # OIDC) = acces total, aucune interception.
+    scope = user.get("scope")
     session = await _get_or_create_session(username)
     target_url = _mcp_url(session, path)
-    return await _proxy_request(request, target_url, session["id"])
+    return await _proxy_request(request, target_url, session["id"], scope=scope)
 
 
 # ── API Key — émission clé stable pour Claude Desktop ────────────────────────
@@ -4632,12 +4635,114 @@ def _session_view(s: dict) -> dict:
     }
 
 
-async def _proxy_request(request: Request, target_url: str, session_id: str) -> Response:
-    """Proxy HTTP vers un pod de session (JSON ou SSE stream)."""
+# ── Enforcement scope (cles scopees) au proxy MCP ─────────────────────────────
+# Quand une cle scopee porte une whitelist de tools, le hub filtre le flux MCP
+# JSON-RPC : retire les tools hors whitelist de `tools/list` et rejette les
+# `tools/call` vers un tool non autorise. Pour `tools:all` / cle superviseur
+# (scope None ou mode supervisor) -> aucune interception, zero overhead.
+# NB: l'injection sid/pid (binding etude/projet) n'est PAS faite ici — elle
+# depend du schema des tools (lesquels acceptent sid/pid) et sera coordonnee
+# avec Composants (native_tools_v2 / describe_entity_schema) en etape ulterieure.
+
+def _scope_tools_whitelist(scope: dict | None) -> list | None:
+    """Whitelist de tools si la cle est scopee ET restreinte, sinon None
+    (None = pas de filtrage : superviseur ou tools == "all")."""
+    if not scope or scope.get("mode") == "supervisor":
+        return None
+    tools = scope.get("tools")
+    return tools if isinstance(tools, list) else None
+
+
+def _jsonrpc_obj(body: bytes) -> dict | None:
+    """Parse un corps JSON-RPC objet unique. None si invalide/batch."""
+    try:
+        obj = json.loads(body)
+    except Exception:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _tool_call_denied(obj: dict, whitelist: list) -> JSONResponse | None:
+    """Reponse d'erreur JSON-RPC (HTTP 200) si tools/call vers un tool hors
+    whitelist, sinon None (autorise)."""
+    name = (obj.get("params") or {}).get("name")
+    if name is not None and name not in whitelist:
+        return JSONResponse(
+            {
+                "jsonrpc": "2.0",
+                "id": obj.get("id"),
+                "error": {
+                    "code": -32601,
+                    "message": (
+                        f"Tool '{name}' non autorise pour cet agent "
+                        f"(scope restreint a {len(whitelist)} tools)."
+                    ),
+                },
+            },
+            status_code=200,
+        )
+    return None
+
+
+def _filter_tools_list_payload(raw: bytes, content_type: str, whitelist: list) -> bytes:
+    """Retire les tools hors whitelist d'une reponse tools/list (JSON ou SSE)."""
+    wl = set(whitelist)
+
+    def _filt(obj):
+        try:
+            tools = (obj.get("result") or {}).get("tools")
+            if isinstance(tools, list):
+                obj["result"]["tools"] = [t for t in tools if t.get("name") in wl]
+        except Exception:
+            pass
+        return obj
+
+    text = raw.decode("utf-8", "replace")
+    if "text/event-stream" in (content_type or ""):
+        out = []
+        for line in text.split("\n"):
+            if line.startswith("data:"):
+                payload = line[5:].strip()
+                try:
+                    out.append("data: " + json.dumps(_filt(json.loads(payload))))
+                except Exception:
+                    out.append(line)
+            else:
+                out.append(line)
+        return "\n".join(out).encode("utf-8")
+    try:
+        return json.dumps(_filt(json.loads(text))).encode("utf-8")
+    except Exception:
+        return raw
+
+
+async def _proxy_request(
+    request: Request, target_url: str, session_id: str, scope: dict | None = None,
+) -> Response:
+    """Proxy HTTP vers un pod de session (JSON ou SSE stream).
+
+    `scope` (cle scopee) optionnel : si une whitelist de tools s'applique, le
+    flux MCP est filtre (gate tools/call + filtrage tools/list). Sinon le proxy
+    reste transparent (comportement historique).
+    """
     _skip_headers = {"host", "connection", "transfer-encoding", "te", "trailers", "upgrade"}
     headers = {k: v for k, v in request.headers.items() if k.lower() not in _skip_headers}
     body = await request.body()
     params = dict(request.query_params)
+
+    # Enforcement scope : cote requete (gate tools/call) + flag filtrage reponse.
+    whitelist = _scope_tools_whitelist(scope)
+    _filter_tools_list = False
+    if whitelist is not None and body:
+        obj = _jsonrpc_obj(body)
+        if obj is not None:
+            method = obj.get("method")
+            if method == "tools/call":
+                denied = _tool_call_denied(obj, whitelist)
+                if denied is not None:
+                    return denied
+            elif method == "tools/list":
+                _filter_tools_list = True
 
     client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=10.0))
     try:
@@ -4657,6 +4762,23 @@ async def _proxy_request(request: Request, target_url: str, session_id: str) -> 
     content_type = resp.headers.get("content-type", "application/json")
     _skip_resp = {"content-encoding", "transfer-encoding", "content-length", "connection"}
     resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in _skip_resp}
+
+    # Filtrage tools/list : reponse courte -> on bufferise, filtre, renvoie en
+    # one-shot (pas de stream). Tout autre flux reste streame (zero overhead).
+    if _filter_tools_list and whitelist is not None:
+        try:
+            raw = await resp.aread()
+        finally:
+            await resp.aclose()
+            await client.aclose()
+            await sessions.touch_session(session_id)
+        filtered = _filter_tools_list_payload(raw, content_type, whitelist)
+        return Response(
+            content=filtered,
+            status_code=resp.status_code,
+            media_type=content_type,
+            headers=resp_headers,
+        )
 
     async def stream_and_close():
         try:
