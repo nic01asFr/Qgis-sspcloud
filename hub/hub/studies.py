@@ -220,7 +220,223 @@ async def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_scene_manifest_owner
                 ON scene_manifest_index(owner, status)
         """)
+
+        # ─── Sprint Composants Phase 0 (2026-06-25) ──────────────────────
+        # Hardening uniforme + nouvelles strates COMPOSANTS et ASSEMBLAGES.
+        # Décision verrouillée (8 verdicts évaluateurs) :
+        #   1. INSERT-only audit trail (déjà appliqué aux tables existantes)
+        #   2. provenance_json sur recipes/scene_manifest/exports (additif)
+        #   3. classification audience sur scene_manifest/exports (additif)
+        #   4. UNIQUE rétroactif (entity_id, version_num) pour race-safe
+        #   5. table tombstones GDPR right-to-erasure
+        #   6. table components_index (Sprint 2)
+        #   7. table assemblies_index (Sprint 3)
+        # Capitalisation :
+        #   ~/.wikichat/knowledge/audit-trail-axis.md
+        #   ~/.wikichat/knowledge/qgis-sspcloud-composants-axis.md
+
+        # 1. ALTER additifs sur tables existantes (idempotents via try/except).
+        # SQLite n'a pas ALTER ... IF NOT EXISTS sur les colonnes → on tente
+        # et ignore le "duplicate column name" en cas de re-run init_db.
+        for alter_sql in [
+            # recipes_index : provenance_json
+            "ALTER TABLE recipes_index ADD COLUMN provenance_json TEXT",
+            # scene_manifest_index : provenance_json + classification
+            "ALTER TABLE scene_manifest_index ADD COLUMN provenance_json TEXT",
+            ("ALTER TABLE scene_manifest_index ADD COLUMN classification "
+             "TEXT NOT NULL DEFAULT 'cerema_internal'"),
+            # exports_index : provenance_json + classification
+            "ALTER TABLE exports_index ADD COLUMN provenance_json TEXT",
+            ("ALTER TABLE exports_index ADD COLUMN classification "
+             "TEXT NOT NULL DEFAULT 'cerema_internal'"),
+        ]:
+            try:
+                await db.execute(alter_sql)
+            except Exception as exc:
+                msg = str(exc).lower()
+                if "duplicate column" not in msg and "already exists" not in msg:
+                    raise  # vraie erreur, on ne masque pas
+
+        # 2. UNIQUE INDEX rétroactif (race-safe insertion versions).
+        # Pour recipes_index : UNIQUE(sid, slug, version_num) — match
+        # pattern V1.5 INSERT-only (sid+slug = composition d'unicité d'une
+        # recette dans son étude). Pour scene_manifest_index : UNIQUE(pid,
+        # version_num). exports_index n'a pas de version_num (1 insert =
+        # 1 row d'export), on s'appuie sur rowid AUTOINCREMENT.
+        await db.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_recipes_version
+                ON recipes_index(sid, slug, version_num)
+        """)
+        await db.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_scene_manifest_version
+                ON scene_manifest_index(pid, version_num)
+        """)
+
+        # 3. Tombstones GDPR — right-to-erasure. INSERT-only audit garde
+        # l'enveloppe (entity_id, owner, hash) pour audit, mais le contenu
+        # PVC est purgé via entity_purge_content().
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS tombstones (
+                rowid           INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_type     TEXT NOT NULL,
+                entity_id       TEXT NOT NULL,
+                original_owner  TEXT NOT NULL,
+                content_hash    TEXT NOT NULL,
+                purged_at       INTEGER NOT NULL,
+                purge_reason    TEXT,
+                UNIQUE(entity_type, entity_id, purged_at)
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tombstones_owner
+                ON tombstones(original_owner, purged_at DESC)
+        """)
+
+        # 4. components_index — table strate COMPOSANTS (Sprint 2 will use).
+        # Pattern recipes_index : INSERT-only, version_num + previous_hash
+        # chaînage, UNIQUE(cid, version_num) race-safe.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS components_index (
+                rowid             INTEGER PRIMARY KEY AUTOINCREMENT,
+                cid               TEXT NOT NULL,
+                sid               TEXT NOT NULL,
+                owner             TEXT NOT NULL,
+                kind              TEXT NOT NULL,
+                title             TEXT NOT NULL,
+                content_hash      TEXT NOT NULL,
+                previous_hash     TEXT,
+                version_num       INTEGER NOT NULL DEFAULT 1,
+                component_version TEXT NOT NULL DEFAULT 'V0.1',
+                classification    TEXT NOT NULL DEFAULT 'cerema_internal',
+                provenance_json   TEXT,
+                file_path         TEXT,
+                size_bytes        INTEGER NOT NULL DEFAULT 0,
+                status            TEXT NOT NULL DEFAULT 'active',
+                created_at        INTEGER NOT NULL,
+                UNIQUE(cid, version_num)
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_components_lookup
+                ON components_index(cid, status, version_num DESC)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_components_study
+                ON components_index(sid, status, kind)
+        """)
+
+        # 5. assemblies_index — table strate ASSEMBLAGES (Sprint 3 will use).
+        # audit_chain_json est OBLIGATOIRE à publish (snapshot signed_hash).
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS assemblies_index (
+                rowid             INTEGER PRIMARY KEY AUTOINCREMENT,
+                aid               TEXT NOT NULL,
+                sid               TEXT NOT NULL,
+                owner             TEXT NOT NULL,
+                kind              TEXT NOT NULL,
+                title             TEXT NOT NULL,
+                content_hash      TEXT NOT NULL,
+                previous_hash     TEXT,
+                version_num       INTEGER NOT NULL DEFAULT 1,
+                assembly_version  TEXT NOT NULL DEFAULT 'V0.1',
+                classification    TEXT NOT NULL DEFAULT 'cerema_internal',
+                audit_chain_json  TEXT,
+                provenance_json   TEXT,
+                rendered_path     TEXT,
+                published_url     TEXT,
+                published_at      INTEGER,
+                status            TEXT NOT NULL DEFAULT 'active',
+                created_at        INTEGER NOT NULL,
+                UNIQUE(aid, version_num)
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_assemblies_lookup
+                ON assemblies_index(aid, status, version_num DESC)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_assemblies_study
+                ON assemblies_index(sid, status, kind)
+        """)
+
         await db.commit()
+
+
+# ─── Sprint Composants Phase 0 : helper GDPR ────────────────────────────────
+
+async def entity_purge_content(
+    entity_type: str,
+    entity_id: str,
+    purge_reason: str = "user_request",
+) -> int:
+    """GDPR right-to-erasure. Purge le contenu PVC mais conserve l'enveloppe
+    audit (rowid, owner, content_hash) dans `tombstones` pour traçabilité.
+
+    Stratégie :
+    1. UPDATE entity table : status='purged', content/manifest_json='', etc.
+       (selon entity_type, géré côté CRUD spécifique au moment de l'appel)
+    2. INSERT tombstones row avec content_hash original
+
+    Cette fonction enregistre uniquement le tombstone. La purge PVC effective
+    (suppression fichier) doit être faite par le CRUD spécifique de l'entity
+    avant d'appeler cette fonction.
+
+    Args:
+        entity_type: 'component', 'assembly', 'recipe', 'scene_manifest', ...
+        entity_id:   ID 12 hex de l'entité
+        purge_reason: 'user_request', 'gdpr_request', 'admin_purge', ...
+
+    Returns:
+        rowid du tombstone créé (0 si erreur)
+    """
+    # Lookup content_hash original depuis la table appropriée
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        content_hash = ""
+        original_owner = ""
+
+        # Table mapping (entity_type, id_column, hash_column)
+        # Schemas réels :
+        #   recipes_index           : id=slug,     hash=sha
+        #   scene_manifest_index    : id=pid,      hash=scene_hash
+        #   exports_index           : id=filename, hash=scene_hash
+        #   components_index (S2)   : id=cid,      hash=content_hash
+        #   assemblies_index (S3)   : id=aid,      hash=content_hash
+        table_map = {
+            "component":      ("components_index",      "cid",      "content_hash"),
+            "assembly":       ("assemblies_index",      "aid",      "content_hash"),
+            "recipe":         ("recipes_index",         "slug",     "sha"),
+            "scene_manifest": ("scene_manifest_index",  "pid",      "scene_hash"),
+            "export":         ("exports_index",         "filename", "scene_hash"),
+        }
+        if entity_type not in table_map:
+            return 0
+        table_name, id_col, hash_col = table_map[entity_type]
+
+        try:
+            cur = await db.execute(
+                f"SELECT {hash_col} AS h, owner FROM {table_name} "
+                f"WHERE {id_col} = ? ORDER BY rowid DESC LIMIT 1",
+                (entity_id,),
+            )
+            row = await cur.fetchone()
+            if row:
+                content_hash = row["h"] or ""
+                original_owner = row["owner"] or ""
+        except Exception:
+            pass
+
+        # Insert tombstone (INSERT-only audit)
+        cur = await db.execute(
+            """INSERT INTO tombstones
+               (entity_type, entity_id, original_owner, content_hash,
+                purged_at, purge_reason)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (entity_type, entity_id, original_owner, content_hash,
+             int(time.time()), purge_reason),
+        )
+        await db.commit()
+        return cur.lastrowid or 0
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
