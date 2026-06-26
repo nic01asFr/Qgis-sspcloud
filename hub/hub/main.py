@@ -1801,22 +1801,12 @@ async def hub_home(request: Request):
     """
     if "kube-probe" in request.headers.get("user-agent", "").lower():
         return Response(content="ok", media_type="text/plain", status_code=200)
-    try:
-        # Si pas de cookie auth, redirect simple vers /workspace (sans toucher
-        # studies pour eviter latence sur les readiness probes anonymes).
-        cookie_key = request.cookies.get("hub_api_key", "")
-        if not cookie_key.startswith("qgis_"):
-            return RedirectResponse("/workspace", status_code=302)
-        # User authentifie : on regarde s'il a une etude active.
-        if _STUDIES_AVAILABLE:
-            try:
-                active_sid = await studies.get_active_study_id(_ONYXIA_USER)
-                if active_sid:
-                    return RedirectResponse("/desk", status_code=302)
-            except Exception:
-                pass
-    except Exception:
-        pass
+    # UX wish 2026-06-26 (user feedback Sprint Composants) :
+    # toujours rediriger vers /workspace (vue d'ensemble des etudes +
+    # accueil) plutot que /desk (vue bureau d'une etude active). Permet
+    # a l'user de choisir activement son etude au lieu d'etre projete
+    # dans la derniere active. /workspace gere lui-meme l'auto-wake
+    # workspace QGIS (cf. desk_page + nouveau auto-wake).
     return RedirectResponse("/workspace", status_code=302)
     username = user["username"]
     all_sessions = await sessions.list_sessions(username)
@@ -3492,6 +3482,7 @@ async def publish_assembly_endpoint(
 
     # 2. Update audit_chain_json sur la row latest
     try:
+        import aiosqlite  # scope local — pas dans imports top-level main.py
         async with aiosqlite.connect(studies._DB_PATH) as db:
             await db.execute(
                 """UPDATE assemblies_index
@@ -5182,9 +5173,40 @@ async def _proxy_request(
 
 @app.get("/desk", response_class=HTMLResponse)
 async def desk_page(request: Request):
-    """Bureau de travail unifié : sidebar études | canvas QGIS noVNC | chat agent."""
+    """Bureau de travail unifié : sidebar études | canvas QGIS noVNC | chat agent.
+
+    UX wish 2026-06-26 (user feedback Sprint Composants) : déclenche
+    automatiquement le wake du workspace QGIS au chargement de /desk.
+    L'iframe noVNC du bureau dépend du workspace pod : si endormi
+    (scale-to-zero), l'iframe affiche "no available server" pendant
+    plusieurs secondes. En lançant /workspace/wake en background dès le
+    GET /desk, le workspace est en cours de réveil quand l'user voit la
+    page → soit déjà ready, soit prêt en quelques secondes au lieu de
+    30-60s sans pre-wake.
+    """
     if not _jinja:
         raise HTTPException(503, "Templates non disponibles")
+
+    # Auto-wake workspace en background — best-effort, ignore les erreurs.
+    # Self-call HTTP vers /workspace/wake (qui gere deja le lock + scale + DB
+    # active_study). Fire-and-forget, ne bloque pas le rendu de /desk.
+    try:
+        api_key_local = await auth.create_or_get_api_key(_ONYXIA_USER)
+        async def _auto_wake_bg():
+            try:
+                async with httpx.AsyncClient(timeout=30, base_url=_SELF_URL) as c:
+                    await c.post(
+                        "/workspace/wake",
+                        headers={"Authorization": f"Bearer {api_key_local}"},
+                    )
+            except Exception as exc:
+                log.warning("auto-wake on /desk : %s", exc)
+        task = asyncio.create_task(_auto_wake_bg())
+        _background_anchors.add(task)
+        task.add_done_callback(_background_anchors.discard)
+    except Exception:
+        pass  # never block /desk rendering
+
     ctx = await _desk_context()
     return _jinja.TemplateResponse(request, "desk.html", ctx)
 

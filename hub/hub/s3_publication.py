@@ -37,20 +37,34 @@ from typing import Any
 
 log = logging.getLogger("hub.s3_publication")
 
-_KINDS = {"storymap", "flux", "recipe", "dataset", "pdf"}
+_KINDS = {
+    "storymap", "flux", "recipe", "dataset", "pdf",
+    # Sprint Composants Phase 3 (2026-06-26) : strate ASSEMBLAGES.
+    # Un assembly publie = un livrable HTML composite (storymap_dsfr,
+    # dashboard, sheet_a4, modal_embed, atlas_immersive). Distinct du
+    # legacy "storymap" qui est storymap_dsfr.py Leaflet.
+    "assembly",
+    # Sprint Composants Phase 3 : strate COMPOSANTS (composant publishable
+    # standalone, ex: interactive_map iframe-embeddable site tiers).
+    "component",
+}
 _KIND_EXT = {
-    "storymap": "html",
-    "flux":     "qgz",
-    "recipe":   "yaml",
-    "dataset":  "gpkg",
-    "pdf":      "pdf",
+    "storymap":  "html",
+    "flux":      "qgz",
+    "recipe":    "yaml",
+    "dataset":   "gpkg",
+    "pdf":       "pdf",
+    "assembly":  "html",
+    "component": "html",
 }
 _KIND_CONTENT_TYPE = {
-    "storymap": "text/html; charset=utf-8",
-    "flux":     "application/octet-stream",
-    "recipe":   "application/x-yaml; charset=utf-8",
-    "dataset":  "application/geopackage+sqlite3",
-    "pdf":      "application/pdf",
+    "storymap":  "text/html; charset=utf-8",
+    "flux":      "application/octet-stream",
+    "recipe":    "application/x-yaml; charset=utf-8",
+    "dataset":   "application/geopackage+sqlite3",
+    "pdf":       "application/pdf",
+    "assembly":  "text/html; charset=utf-8",
+    "component": "text/html; charset=utf-8",
 }
 
 # Chemin du secret passerelle (creds long-lived service-side)
