@@ -1161,6 +1161,12 @@ class QGISAgent:
     Orchestre LLM SSPCloud + outils MCP + mémoire long-terme.
     """
 
+    # Sprint Composants Phase 3b (2026-06-26) : cache TTL L2 artifacts
+    # (components/assemblies par sid). TTL court car le contexte évolue à
+    # chaque turn ; invalidation forcée par _ARTIFACT_MUTATING_TOOLS si le
+    # turn précédent a muté l'état hub.
+    _ARTIFACTS_CACHE_TTL_S = 15.0
+
     def __init__(self, username: str, session_id: str, profile_id: str = "standard"):
         self.username   = username
         self.session_id = session_id
@@ -1171,6 +1177,11 @@ class QGISAgent:
         # (ex: zone="Marseille") qui contredisent une bbox plus precise deja
         # active dans le projet QGIS courant. Cf. _zone_context_warning.
         self._project_state: dict | None = None
+        # Sprint Composants Phase 3b : cache L2c artifacts (components/assemblies)
+        self._artifacts_cache: dict | None = None
+        self._artifacts_cache_sid: str | None = None
+        self._artifacts_cache_at: float = 0.0
+        self._artifacts_force_refresh: bool = False
 
     async def _get_tools(self) -> list[dict]:
         if self._tools_cache is None:
@@ -1284,6 +1295,41 @@ class QGISAgent:
         except Exception as exc:
             log.warning("Fetch active study failed: %s", exc)
             return None, None
+
+    async def _fetch_study_artifacts_summary(self, sid: str | None) -> dict | None:
+        """Sprint Composants Phase 3b — L2c enrichi : composants + assemblages
+        de l'étude active.
+
+        Cache TTL court (15s) + invalidation forcée si le turn précédent a
+        appelé un tool natif V1.5 mutant (cf. _ARTIFACT_MUTATING_TOOLS).
+        Fail-safe : retourne None si hub injoignable, l'agent reste
+        opérationnel sans cette section.
+        """
+        if not sid or not (_HUB_URL and _HUB_KEY):
+            return None
+
+        now = asyncio.get_event_loop().time()
+        cache_valid = (
+            self._artifacts_cache is not None
+            and self._artifacts_cache_sid == sid
+            and not self._artifacts_force_refresh
+            and (now - self._artifacts_cache_at) < self._ARTIFACTS_CACHE_TTL_S
+        )
+        if cache_valid:
+            return self._artifacts_cache
+
+        from agent import hub_artifacts as _ha
+        raw = await _ha.fetch_study_artifacts(_HUB_URL, _HUB_KEY, sid)
+        if raw is None:
+            # Garde le stale plutôt que None hard (graceful degradation)
+            return self._artifacts_cache
+
+        summary = _ha.summarize_artifacts(raw)
+        self._artifacts_cache = summary
+        self._artifacts_cache_sid = sid
+        self._artifacts_cache_at = now
+        self._artifacts_force_refresh = False
+        return summary
 
     async def _autosave_active_study(self) -> None:
         """
@@ -1508,6 +1554,41 @@ class QGISAgent:
    pas encore activée sur ce workspace, voici le chemin du fichier dans
    l'étude que tu peux télécharger depuis le panneau Fichiers du desk".
    PAS de lien `/files/...` qui échoue.
+
+2quinquies. 🧩 **SPRINT COMPOSANTS V1.5 — workflow HTML interactif** :
+
+   Si tu as les tools natifs V1.5 (`describe_entity_schema`, `validate_manifest`,
+   `create_component`, `create_assembly`, `publish_assembly`) dans ta liste,
+   tu peux produire des storymaps HTML INTERACTIVES (MapLibre + DSFR) avec
+   audit_chain signé SHA256, alternative à `publish_artifact` legacy.
+
+   Stratification 3 strates :
+   - DONNÉES : layers QGIS (via set_study_zone + smart_load)
+   - COMPOSANTS : unités UI (`narrative_text`, `interactive_map`, `kpi_badge`,
+     `legend`) via `create_component(sid, manifest)`
+   - ASSEMBLAGES : pages HTML composites (`storymap_narrative_dsfr`,
+     `dashboard`, `sheet_a4`) via `create_assembly` puis `publish_assembly`
+
+   Workflow obligatoire AVANT tout `create_*` :
+   1. `list_entity_kinds("component")` ou `list_entity_kinds("assembly")` →
+      enum stable, anti-hallucination
+   2. `describe_entity_schema("component", kind="narrative_text")` → schema
+      Pydantic + exemple minimal valide
+   3. `validate_manifest("component", payload)` → dry-run, fix_hint
+      exploitable. Re-valide jusqu'à `valid=true`.
+   4. `create_component(sid, manifest)` → reçoit `{id, manifest_url, render_url}`
+   5. Une fois 2-4 composants créés, `create_assembly` qui les référence via
+      `layout.sections[].components = [{"ref": "<cid>"}, ...]`
+   6. `render_assembly(sid, aid)` → preview HTML pour validation visuelle
+   7. `publish_assembly(sid, aid)` → URL S3 publique + `audit_chain.signed_hash`
+
+   ⚠️ **JAMAIS `audience: "public"`** sans confirmation EXPLICITE user
+   (anti-fuite RGPD). Default `cerema_internal`.
+
+   ⚠️ **Section L2c artifacts dans le contexte L2** : si elle indique
+   « Composants déjà créés sur cette étude : X » ou « Assemblages : Y
+   (draft=N) », CONSULTE-LA AVANT de proposer un livrable. Si un draft
+   existe → propose `publish_assembly` plutôt que recréer.
 
 3. 🪤 **Pièges PyQGIS** — si `execute_python` est inévitable :
    - **JAMAIS** `int(feat["champ"])` direct (QVariant trap) →
@@ -1799,9 +1880,17 @@ ne vient pas d'un outil cette session, la supprimer.
         )
 
         active_study, active_treats = await active_study_task
+        # Sprint Composants Phase 3b : déclenche le fetch L2c artifacts dès
+        # qu'on a le sid (lancé en parallèle de project_state, masqué par sa
+        # latence MCP plus longue → 0 latence ajoutée typique).
+        sid_for_artifacts = active_study.get("id") if active_study else None
+        artifacts_task = asyncio.create_task(
+            self._fetch_study_artifacts_summary(sid_for_artifacts)
+        )
         project_state = await project_state_task
         # Stocke pour le tool loop (cf. _zone_context_warning ci-dessous)
         self._project_state = project_state
+        study_artifacts = await artifacts_task
         enrich_results = await enrich_task if enrich_task else []
 
         # Couches 2 + 3 assemblées dans memory.build_context_summary
@@ -1810,6 +1899,7 @@ ne vient pas d'un outil cette session, la supprimer.
             active_study=active_study,
             active_study_treatments=active_treats,
             project_state=project_state,
+            study_artifacts=study_artifacts,
         )
 
         # Contexte enrichi spécifique à la requête (si applicable)
@@ -2099,6 +2189,12 @@ ne vient pas d'un outil cette session, la supprimer.
                 # ce que `attachRollbackButtons` côté JS attend.
                 current_ckpt_id: str | None = None
                 current_ckpt_study: str | None = None
+                # Sprint Composants Phase 3b : invalidation cache L2c
+                # artifacts si tool natif V1.5 mutant. Le prochain
+                # _fetch_study_artifacts_summary refera un fetch frais
+                # même si TTL pas expiré.
+                if fn_name in _ARTIFACT_MUTATING_TOOLS:
+                    self._artifacts_force_refresh = True
                 if fn_name in _MUTATING_TOOLS and _HUB_URL and _HUB_KEY:
                     try:
                         ckpt_id = uuid.uuid4().hex[:12]

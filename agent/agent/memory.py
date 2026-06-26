@@ -718,6 +718,7 @@ async def build_context_summary(
     active_study: dict | None = None,
     active_study_treatments: list[dict] | None = None,
     project_state: dict | None = None,
+    study_artifacts: dict | None = None,
 ) -> str:
     """
     Phase 4 : construit un résumé en 3 couches pour l'system prompt LLM.
@@ -729,6 +730,11 @@ async def build_context_summary(
     project_state : dict retourné par MCP `get_project_info` — contient les
     couches actuellement chargées dans QgsProject. L'agent peut ainsi ÉVITER
     de recharger une couche déjà présente et orienter ses traitements.
+
+    study_artifacts : dict retourné par hub_artifacts.summarize_artifacts —
+    Sprint Composants Phase 3b. Compteurs + recent components/assemblies
+    de l'étude active pour que l'agent voie ce qui existe déjà et propose
+    la next-action contextuelle (pas de recréation à chaque turn).
     """
     # ── Couche 3 (user permanent) ─────────────────────────────────────────
     # Le markdown structuré est le PILIER (pattern CLAUDE.md / ChatGPT memory).
@@ -872,10 +878,59 @@ async def build_context_summary(
                 )
                 layer2.append(f"Derniers traitements : {last_str}")
 
+    # ── Couche 2c (Sprint Composants V1.5 — composants/assemblages) ───────
+    # Append à layer2 pour cohérence visuelle dans la section "Étude en cours".
+    if study_artifacts:
+        from agent.hub_artifacts import fmt_age, build_next_action_hints
+        c = study_artifacts.get("components") or {}
+        a = study_artifacts.get("assemblies") or {}
+
+        if c.get("total", 0) > 0:
+            bk = c.get("by_kind") or {}
+            kinds_str = ", ".join(f"{k}={v}" for k, v in bk.items())
+            layer2.append(
+                f"Composants V1.5 déjà créés sur cette étude : {c['total']} "
+                f"({kinds_str})"
+            )
+            for it in (c.get("recent") or [])[:3]:
+                age = fmt_age(it.get("age_s"))
+                cid_short = (it.get("cid") or "")[:8]
+                layer2.append(
+                    f"  • {it.get('kind','?')} « {it.get('title','?')} » "
+                    f"[cid={cid_short}, v{it.get('version', 1)}, {age}]"
+                )
+
+        if a.get("total", 0) > 0:
+            bs = a.get("by_status") or {}
+            status_str = ", ".join(f"{k}={v}" for k, v in bs.items())
+            layer2.append(f"Assemblages V1.5 : {a['total']} ({status_str})")
+            for it in (a.get("recent") or [])[:3]:
+                age = fmt_age(it.get("age_s"))
+                aid_short = (it.get("aid") or "")[:8]
+                pub_age = it.get("published_age_s")
+                state = (
+                    f"PUBLIÉ il y a {fmt_age(pub_age)}"
+                    if it.get("published_url") else "DRAFT"
+                )
+                layer2.append(
+                    f"  • {it.get('kind','?')} « {it.get('title','?')} » "
+                    f"[aid={aid_short}, {it.get('n_refs', 0)} refs, {age}, {state}]"
+                )
+
+        # Hints next-action déterministes (règles, pas LLM)
+        hints = build_next_action_hints(study_artifacts)
+    else:
+        hints = []
+
     # ── Assemblage 3 couches ──────────────────────────────────────────────
     parts = []
     if layer2:
         parts.append("=== Étude en cours ===\n" + "\n".join(f"- {x}" for x in layer2))
+    if hints:
+        parts.append(
+            "=== Suggestions next-action (déterministes, non-LLM) ===\n"
+            + "\n".join(f"- {h}" for h in hints)
+        )
     if layer3:
         parts.append("=== Contexte utilisateur (mémoire long terme) ===\n"
                      + "\n".join(f"- {x}" for x in layer3))
