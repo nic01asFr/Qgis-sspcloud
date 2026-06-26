@@ -3190,9 +3190,26 @@ async def render_component_endpoint(
 
     # Sprint Composants Phase 2 fix : utiliser Environment Jinja2 direct
     # au lieu de Jinja2Templates.TemplateResponse (qui exige Request object).
-    tpl = _maplibre_jinja.get_template(template_name.replace("maplibre_renderer/", ""))
-    html = tpl.render(**ctx)
-    return HTMLResponse(content=html)
+    try:
+        tpl_short = template_name.replace("maplibre_renderer/", "")
+        tpl = _maplibre_jinja.get_template(tpl_short)
+        html = tpl.render(**ctx)
+        return HTMLResponse(content=html)
+    except Exception as exc:
+        import traceback as _tb
+        log.error("render_component %s/%s/%s : %s", sid, cid, kind, exc)
+        tb_str = _tb.format_exc()
+        # Renvoyer l'erreur structurée pour debug (temporaire Phase 2)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_class": type(exc).__name__,
+                "error_message": str(exc)[:300],
+                "template_tried": tpl_short,
+                "ctx_keys": list(ctx.keys()),
+                "traceback_tail": tb_str.splitlines()[-5:] if tb_str else [],
+            },
+        )
 
 
 @app.delete("/studies/{sid}/components/{cid}", status_code=status.HTTP_204_NO_CONTENT)
@@ -3399,14 +3416,29 @@ async def _render_assembly_html(
 
     if not _maplibre_jinja:
         raise HTTPException(503, "Maplibre Jinja2 indisponible")
-    tpl = _maplibre_jinja.get_template(template_name.replace("maplibre_renderer/", ""))
-    html = tpl.render(
-        assembly=asm.model_dump(mode="json"),
-        sections=[s.model_dump(mode="json") for s in asm.layout.sections],
-        audit_chain=chain.model_dump(mode="json"),
-        footer=asm.footer.model_dump(mode="json"),
-    )
-    return html, chain.model_dump(mode="json")
+    try:
+        tpl_short = template_name.replace("maplibre_renderer/", "")
+        tpl = _maplibre_jinja.get_template(tpl_short)
+        html = tpl.render(
+            assembly=asm.model_dump(mode="json"),
+            sections=[s.model_dump(mode="json") for s in asm.layout.sections],
+            audit_chain=chain.model_dump(mode="json"),
+            footer=asm.footer.model_dump(mode="json"),
+        )
+        return html, chain.model_dump(mode="json")
+    except Exception as exc:
+        import traceback as _tb
+        log.error("render_assembly %s/%s : %s", sid, aid, exc)
+        tb_str = _tb.format_exc()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_class": type(exc).__name__,
+                "error_message": str(exc)[:300],
+                "template_tried": tpl_short,
+                "traceback_tail": tb_str.splitlines()[-5:] if tb_str else [],
+            },
+        )
 
 
 @app.get("/studies/{sid}/assemblies/{aid}/render", response_class=HTMLResponse)
