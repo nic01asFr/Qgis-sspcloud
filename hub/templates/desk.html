@@ -221,12 +221,23 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .publi-drawer-header .publi-count{font-size:10px;color:var(--text-mention-grey);
   background:#fff;padding:1px 7px;border-radius:10px;
   border:1px solid var(--border-default-grey);font-weight:600;flex-shrink:0}
-/* Onglets internes du panel Ressources (couches / publi / fichiers) */
-.rtabs{display:flex;border-bottom:1px solid var(--border-default-grey);
-  background:#fafafa;flex-shrink:0}
-.rtabs .rtab{flex:1;padding:8px 6px;font-size:11px;font-weight:600;
+/* Onglets internes du panel Ressources.
+   Sprint Composants Phase 1+2+3 (2026-06-25) : 7 onglets dans drawer etroit
+   (Couches/Composants/Assemblages/Exports/Livrables/Fichiers/Recettes).
+   Fix overflow horizontal :
+   - flex-wrap sur 2 lignes pour eviter le clipping
+   - flex:0 0 calc(50% - 0px) -> 2 colonnes egales par defaut
+   - padding/font reduits pour densite
+   - scroll horizontal en fallback si la largeur drawer < 280px (tres etroit) */
+.rtabs{display:flex;flex-wrap:wrap;border-bottom:1px solid var(--border-default-grey);
+  background:#fafafa;flex-shrink:0;overflow-x:auto;
+  scrollbar-width:thin;scrollbar-color:var(--border-default-grey) transparent}
+.rtabs::-webkit-scrollbar{height:4px}
+.rtabs::-webkit-scrollbar-thumb{background:var(--border-default-grey);border-radius:2px}
+.rtabs .rtab{flex:1 1 calc(33.333% - 0px);min-width:75px;
+  padding:7px 4px;font-size:10.5px;font-weight:600;line-height:1.25;
   cursor:pointer;text-align:center;background:transparent;border:none;
-  color:var(--text-mention-grey);font-family:inherit;
+  color:var(--text-mention-grey);font-family:inherit;white-space:nowrap;
   border-bottom:2px solid transparent;position:relative;
   transition:background .12s,color .12s,border-color .12s}
 .rtabs .rtab.active{color:var(--text-action-high-blue-france);
