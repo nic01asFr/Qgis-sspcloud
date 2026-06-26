@@ -352,3 +352,331 @@ NATIVE_TOOLS_V2 = {
         "params": {"sid": "str", "aid": "str"},
     },
 }
+
+
+# ── Format OpenAI function calling pour exposition au LLM ─────────────────────
+# Sprint Composants Phase 3b (2026-06-26) : refactor format.
+# Le catalogue NATIVE_TOOLS_V2 ci-dessus garde {fn, description, params}
+# pour le dispatch interne (lookup par nom + appel direct du callable async).
+# Le LLM, lui, doit recevoir un JSONSchema strict pour comprendre les types
+# de chaque argument et les champs required. D'où ce 2e export.
+
+# JSONSchemas réutilisés (sid = 12 hex étude id, partagé par tous les CRUD).
+_SID_SCHEMA = {
+    "type": "string",
+    "pattern": r"^[0-9a-f]{12}$",
+    "description": "Identifiant 12 hex de l'étude (autorésolu via /studies/active si absent).",
+}
+_CID_SCHEMA = {
+    "type": "string",
+    "pattern": r"^[0-9a-f]{12}$",
+    "description": "Identifiant 12 hex du composant.",
+}
+_AID_SCHEMA = {
+    "type": "string",
+    "pattern": r"^[0-9a-f]{12}$",
+    "description": "Identifiant 12 hex de l'assemblage.",
+}
+
+NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
+    # ── Méta-cognitifs P0 ───────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "describe_entity_schema",
+            "description": (
+                "ANTI-HALLUCINATION : retourne le JSON Schema Pydantic + un exemple "
+                "minimal valide d'une entité Sprint Composants V1.5 (component, "
+                "assembly, audit_chain, classification...). Appelle CE TOOL AVANT "
+                "de construire ta payload pour create_component / create_assembly. "
+                "Évite les boucles d'erreurs de validation."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_type": {
+                        "type": "string",
+                        "enum": ["component", "assembly", "audit_chain",
+                                 "classification", "component_source",
+                                 "component_rendering", "assembly_layout",
+                                 "assembly_section", "assembly_footer"],
+                        "description": "Type d'entité Pydantic à décrire.",
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": (
+                            "Optionnel : filtre par kind (ex: 'interactive_map' "
+                            "pour component, 'storymap_narrative_dsfr' pour assembly)."
+                        ),
+                    },
+                },
+                "required": ["entity_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_entity_kinds",
+            "description": (
+                "ANTI-HALLUCINATION : liste les `kind` autorisés (enum stable). "
+                "Évite d'inventer un kind inexistant. Pour component : "
+                "interactive_map, scene_3d, chart, kpi_badge, legend, "
+                "narrative_text, data_table, media_embed, iframe_grist. "
+                "Pour assembly : storymap_narrative_dsfr, dashboard, sheet_a4, "
+                "modal_embed, atlas_immersive."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_type": {
+                        "type": "string",
+                        "enum": ["component", "assembly", "classification"],
+                    },
+                },
+                "required": ["entity_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_manifest",
+            "description": (
+                "ÉCONOMIE TOUR LLM : dry-run validation Pydantic. Retourne "
+                "{valid: bool, errors: [{loc, msg, type, fix_hint}]}. Appelle "
+                "ce tool AVANT create_component / create_assembly, corrige "
+                "selon fix_hint, re-valide jusqu'à valid=true."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_type": {
+                        "type": "string",
+                        "enum": ["component", "assembly"],
+                    },
+                    "payload": {
+                        "type": "object",
+                        "description": (
+                            "Manifest candidat (Component ou Assembly Pydantic). "
+                            "Doit avoir kind, title, source/layout, rendering/audience, etc."
+                        ),
+                    },
+                },
+                "required": ["entity_type", "payload"],
+            },
+        },
+    },
+
+    # ── CRUD Composants ─────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "list_components",
+            "description": (
+                "Liste les composants de l'étude active (latest version par cid). "
+                "Utile pour voir ce qui existe déjà avant d'en créer un nouveau "
+                "(évite duplicate)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sid": _SID_SCHEMA,
+                    "kind": {
+                        "type": "string",
+                        "description": (
+                            "Optionnel : filtre par kind (ex: 'narrative_text')."
+                        ),
+                    },
+                },
+                "required": ["sid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_component",
+            "description": (
+                "Crée un composant Sprint Composants V1.5 rattaché à l'étude. "
+                "Le manifest est validé Pydantic côté hub + persisté DB + PVC. "
+                "RECOMMANDATION : appelle validate_manifest('component', payload) "
+                "d'abord. Retourne {id, manifest_url, render_url}."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sid": _SID_SCHEMA,
+                    "manifest": {
+                        "type": "object",
+                        "description": (
+                            "Component Pydantic V0.1. Champs OBLIGATOIRES : "
+                            "kind (enum), title (str), source (dict scope+sid+pid?), "
+                            "rendering (dict runtime+container_size+theme). "
+                            "Champs OPTIONNELS : classification (default cerema_internal "
+                            "anti-RGPD), params (dict kind-spécifique)."
+                        ),
+                    },
+                },
+                "required": ["sid", "manifest"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_component",
+            "description": "Retourne manifest + metadata DB du composant.",
+            "parameters": {
+                "type": "object",
+                "properties": {"sid": _SID_SCHEMA, "cid": _CID_SCHEMA},
+                "required": ["sid", "cid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_component_history",
+            "description": (
+                "Historique des versions du composant (audit trail INSERT-only)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"sid": _SID_SCHEMA, "cid": _CID_SCHEMA},
+                "required": ["sid", "cid"],
+            },
+        },
+    },
+
+    # ── CRUD Assemblages ────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "list_assemblies",
+            "description": (
+                "Liste les assemblages de l'étude (latest version par aid). "
+                "Utile pour voir s'il existe déjà un draft à compléter."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sid": _SID_SCHEMA,
+                    "kind": {
+                        "type": "string",
+                        "description": "Optionnel : filtre par kind.",
+                    },
+                },
+                "required": ["sid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_assembly",
+            "description": (
+                "Crée un assemblage HTML composite (storymap_narrative_dsfr, "
+                "dashboard, sheet_a4...). L'assemblage référence des composants "
+                "par {ref: cid} dans layout.sections[].components. Tu peux "
+                "appeler create_component avant pour créer les composants. "
+                "RECOMMANDATION : valide d'abord."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sid": _SID_SCHEMA,
+                    "manifest": {
+                        "type": "object",
+                        "description": (
+                            "Assembly Pydantic V0.1. Champs OBLIGATOIRES : "
+                            "kind, title, audience (default cerema_internal), "
+                            "layout (type+sections). Champs RECOMMANDÉS : footer "
+                            "(sources+disclaimer+cerema_mentions_legales)."
+                        ),
+                    },
+                },
+                "required": ["sid", "manifest"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_assembly",
+            "description": "Retourne manifest + metadata DB de l'assemblage.",
+            "parameters": {
+                "type": "object",
+                "properties": {"sid": _SID_SCHEMA, "aid": _AID_SCHEMA},
+                "required": ["sid", "aid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "render_assembly",
+            "description": (
+                "Rendu HTML preview de l'assemblage (recalculé à chaque appel, "
+                "sans publication S3). Utile pour valider visuellement avant "
+                "publish_assembly. Retourne {html: '<DOCTYPE...'} ou {error}."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"sid": _SID_SCHEMA, "aid": _AID_SCHEMA},
+                "required": ["sid", "aid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "publish_assembly",
+            "description": (
+                "PUBLIE l'assemblage sur S3 avec audit_chain transverse SIGNÉ "
+                "SHA256 anti-tamper. Génère URL publique partageable. ATTENTION : "
+                "audience cerema_internal default - JAMAIS public par défaut "
+                "(anti-fuite RGPD). Retourne {published_url, audit_chain: "
+                "{signed_hash, components_refs}}."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sid": _SID_SCHEMA,
+                    "aid": _AID_SCHEMA,
+                    "audience": {
+                        "type": "string",
+                        "enum": ["public", "cerema_internal", "restricted", "confidential"],
+                        "description": (
+                            "Optionnel - override audience. JAMAIS 'public' "
+                            "sans confirmation explicite user."
+                        ),
+                    },
+                },
+                "required": ["sid", "aid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_assembly_history",
+            "description": "Historique des versions assemblage (audit trail).",
+            "parameters": {
+                "type": "object",
+                "properties": {"sid": _SID_SCHEMA, "aid": _AID_SCHEMA},
+                "required": ["sid", "aid"],
+            },
+        },
+    },
+]
+
+
+# Tools qui mutent l'état côté hub composants/assemblages. Trigger
+# d'invalidation du cache L2 artifacts (cf. _ARTIFACT_MUTATING_TOOLS dans
+# qgis_agent.py).
+NATIVE_TOOLS_V2_MUTATING: frozenset[str] = frozenset({
+    "create_component",
+    "create_assembly",
+    "publish_assembly",
+})

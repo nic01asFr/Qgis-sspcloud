@@ -23,8 +23,13 @@ from typing import AsyncGenerator
 import httpx
 
 from agent import memory
+from agent import native_tools_v2
 
 log = logging.getLogger("agent.qgis_agent")
+
+# Sprint Composants Phase 3b (2026-06-26) : tools natifs V1.5 mutants
+# côté hub. Trigger d'invalidation du cache L2 artifacts (cf. C2).
+_ARTIFACT_MUTATING_TOOLS: frozenset[str] = native_tools_v2.NATIVE_TOOLS_V2_MUTATING
 
 # ── Config SSPCloud LLM ────────────────────────────────────────────────────────
 _LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://llm.lab.sspcloud.fr/api")
@@ -738,6 +743,40 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
         except Exception as e:
             return json.dumps({"error": f"memory_search fail: {e}"})
 
+    # Sprint Composants Phase 3b (2026-06-26) : dispatch tools natifs V1.5.
+    # Les 13 tools (3 méta-cognitifs + 4 CRUD components + 6 CRUD assemblies)
+    # sont dispatchés vers les fonctions Python locales du module
+    # native_tools_v2. Elles appellent elles-mêmes le hub REST via _hub_call
+    # (avec HUB_API_KEY Bearer). Pattern identique à _NATIVE_RECIPE_TOOLS.
+    if tool_name in native_tools_v2.NATIVE_TOOLS_V2:
+        try:
+            fn = native_tools_v2.NATIVE_TOOLS_V2[tool_name]["fn"]
+            # Auto-résolution du sid si requis et absent (cf. patterns
+            # _resolve_active_sid utilisé par les recipe tools)
+            if "sid" in arguments and arguments["sid"] in (None, "", "active"):
+                arguments["sid"] = await _resolve_active_sid(username) or ""
+            # Appel async direct. Les handlers retournent dict[str, Any]
+            # avec soit le résultat hub, soit {"error": ..., "detail": ...}.
+            result = await fn(**arguments)
+            return json.dumps(result, ensure_ascii=False)
+        except TypeError as exc:
+            # Argument manquant / type invalide → fix_hint exploitable LLM
+            return json.dumps({
+                "error": "type_invalid",
+                "detail": str(exc)[:300],
+                "fix_hint": (
+                    "Vérifie les arguments requis du tool — appelle "
+                    "describe_entity_schema() pour voir la structure exacte."
+                ),
+                "tool": tool_name,
+            })
+        except Exception as exc:
+            return json.dumps({
+                "error": "native_tools_v2_failed",
+                "detail": str(exc)[:300],
+                "tool": tool_name,
+            })
+
     if not _HUB_URL or not _HUB_KEY:
         return json.dumps({"error": "Hub non configuré"})
 
@@ -1147,6 +1186,29 @@ class QGISAgent:
             whitelist = _get_profile_tools_whitelist(self.profile_id)
             if whitelist is None or "save_recipe" in whitelist:
                 self._tools_cache.extend(_NATIVE_RECIPE_TOOLS)
+            # Sprint Composants Phase 3b (2026-06-26) : 13 tools natifs V1.5.
+            # Format OpenAI function calling avec JSONSchema strict (cf.
+            # native_tools_v2.NATIVE_TOOLS_V2_OPENAI). Dispatch dans
+            # _call_mcp_tool_raw via lookup native_tools_v2.NATIVE_TOOLS_V2.
+            # Filtrage : si whitelist=None (profile=all) ou si au moins un
+            # tool v2 est dans la whitelist du profil, on expose les 13.
+            # (Granularité par tool gérée côté hub par check whitelist).
+            v15_in_whitelist = (
+                whitelist is None
+                or any(t.get("function", {}).get("name") in whitelist
+                       for t in native_tools_v2.NATIVE_TOOLS_V2_OPENAI)
+            )
+            if v15_in_whitelist:
+                if whitelist is None:
+                    # Profile permissif (all) : expose les 13 tools v2
+                    self._tools_cache.extend(native_tools_v2.NATIVE_TOOLS_V2_OPENAI)
+                else:
+                    # Profile restrictif : ne garder que ceux explicitement
+                    # listés dans la whitelist YAML
+                    self._tools_cache.extend([
+                        t for t in native_tools_v2.NATIVE_TOOLS_V2_OPENAI
+                        if t.get("function", {}).get("name") in whitelist
+                    ])
         return self._tools_cache
 
     async def set_profile(self, new_profile_id: str) -> None:
