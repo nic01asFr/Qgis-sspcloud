@@ -1085,6 +1085,20 @@ _AGENT_URL = (
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 _jinja = Jinja2Templates(directory=str(_TEMPLATES_DIR)) if _TEMPLATES_DIR.is_dir() else None
 
+# Sprint Composants Phase 2+3 (2026-06-25) : Environment Jinja2 dédié au
+# renderer maplibre (templates standalone HTML). Permet d'utiliser
+# .get_template().render() en bypass de _jinja.TemplateResponse qui exige
+# un Request object FastAPI (incompatible avec le pattern render hub-side).
+import jinja2 as _jinja2_lib
+_HUB_HUB_DIR = Path(__file__).parent
+_maplibre_jinja = _jinja2_lib.Environment(
+    loader=_jinja2_lib.FileSystemLoader([
+        str(_HUB_HUB_DIR / "maplibre_renderer"),
+        str(_HUB_HUB_DIR),
+    ]),
+    autoescape=False,  # composants/assemblages gèrent leur propre escape via |e
+) if _HUB_HUB_DIR.is_dir() else None
+
 PROFILE_LABELS = {
     "standard": "Standard", "geoai_analyst": "IA Vision",
     "risk_analyst": "Risques", "db_analyst": "Données / DB",
@@ -3130,6 +3144,9 @@ async def render_component_endpoint(
             f"Kinds dispo : {list(template_map.keys())}",
         )
 
+    if not _maplibre_jinja:
+        raise HTTPException(503, "Maplibre Jinja2 indisponible")
+
     # Préparer context selon kind
     ctx: dict = {"component": manifest}
     params = manifest.get("params", {})
@@ -3171,7 +3188,11 @@ async def render_component_endpoint(
     elif kind == "narrative_text":
         ctx["markdown_content"] = params.get("markdown", "")
 
-    return _jinja.TemplateResponse(template_name, {"request": {}, **ctx})
+    # Sprint Composants Phase 2 fix : utiliser Environment Jinja2 direct
+    # au lieu de Jinja2Templates.TemplateResponse (qui exige Request object).
+    tpl = _maplibre_jinja.get_template(template_name.replace("maplibre_renderer/", ""))
+    html = tpl.render(**ctx)
+    return HTMLResponse(content=html)
 
 
 @app.delete("/studies/{sid}/components/{cid}", status_code=status.HTTP_204_NO_CONTENT)
@@ -3376,9 +3397,9 @@ async def _render_assembly_html(
             f"Kind '{asm.kind}' non supporté Phase 3. Kinds : {list(template_map.keys())}",
         )
 
-    if not _jinja:
-        raise HTTPException(503, "Jinja2 indisponible")
-    tpl = _jinja.env.get_template(template_name)
+    if not _maplibre_jinja:
+        raise HTTPException(503, "Maplibre Jinja2 indisponible")
+    tpl = _maplibre_jinja.get_template(template_name.replace("maplibre_renderer/", ""))
     html = tpl.render(
         assembly=asm.model_dump(mode="json"),
         sections=[s.model_dump(mode="json") for s in asm.layout.sections],
