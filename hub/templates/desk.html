@@ -657,6 +657,22 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             ↻ Rafraîchir
           </button>
         </div>
+        {# Sprint Composants Phase 3b (2026-06-26) : quick-actions UI bridge.
+           Prompts pré-formulés cliquables → copy clipboard pour coller dans
+           le chat agent. Permet à l'user de déclencher le workflow V1.5 sans
+           se souvenir de la formulation exacte. #}
+        <div class="quick-actions-block" data-target="components">
+          <div class="quick-actions-title">✨ Demander à l'agent V1.5 :</div>
+          <button class="quick-action-btn" data-prompt="Liste les kinds de composants disponibles via list_entity_kinds('component') et propose-moi 3 composants pertinents pour mon étude actuelle.">
+            🔍 Lister les kinds disponibles
+          </button>
+          <button class="quick-action-btn" data-prompt="Crée un composant narrative_text avec un titre court et un markdown d'introduction de 3 paragraphes pour mon étude actuelle. Utilise validate_manifest avant create_component.">
+            📝 Créer un texte d'introduction
+          </button>
+          <button class="quick-action-btn" data-prompt="Crée un composant kpi_badge avec un chiffre-clé pertinent extrait de la zone d'étude active (population, surface, ou autre indicateur métier). Valide d'abord le manifest.">
+            🔢 Créer un KPI badge
+          </button>
+        </div>
         <div id="components-list" class="components-list"
              data-active-study-id="{{ active_study_id }}">
           <div class="publi-empty">Chargement…</div>
@@ -752,7 +768,71 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       border-radius:8px;font-weight:600}
     .component-class{font-style:italic}
     .component-version{font-variant-numeric:tabular-nums;color:#666}
+
+    /* Sprint Composants Phase 3b — quick-actions UI bridge */
+    .quick-actions-block{display:flex;flex-direction:column;gap:5px;
+      padding:8px 10px;background:#eef3f9;border-radius:6px;
+      border:1px dashed #91b0d6}
+    .quick-actions-title{font-size:10.5px;color:#000091;font-weight:600;
+      margin-bottom:2px}
+    .quick-action-btn{font-size:11px;padding:6px 10px;text-align:left;
+      background:#fff;border:1px solid #c8d4e6;border-radius:4px;
+      cursor:pointer;color:#161616;line-height:1.35;
+      transition:background 0.15s,border-color 0.15s}
+    .quick-action-btn:hover{background:#f0f5fc;border-color:#000091}
+    .quick-action-btn:active{background:#e0eaf8}
+    .quick-action-btn.copied{background:#d1f0d8;border-color:#1f8d4d}
+    /* Toast confirm copy */
+    .quick-action-toast{position:fixed;bottom:24px;left:50%;
+      transform:translateX(-50%);padding:9px 16px;background:#1f8d4d;
+      color:#fff;border-radius:4px;font-size:12px;
+      box-shadow:0 2px 8px rgba(0,0,0,.25);z-index:9999;
+      opacity:0;pointer-events:none;transition:opacity 0.25s}
+    .quick-action-toast.visible{opacity:1}
     </style>
+    <script>
+    /* Sprint Composants Phase 3b — handler global quick-actions.
+       Click sur un .quick-action-btn → copie le prompt dans le clipboard +
+       affiche un toast confirm + highlight visuel 2s. User colle ensuite
+       dans le chat agent. Solution simple (vs postMessage cross-iframe). */
+    (function(){
+      let toast = null;
+      function showToast(msg){
+        if (!toast) {
+          toast = document.createElement('div');
+          toast.className = 'quick-action-toast';
+          document.body.appendChild(toast);
+        }
+        toast.textContent = msg;
+        toast.classList.add('visible');
+        clearTimeout(toast._hideTimer);
+        toast._hideTimer = setTimeout(() => {
+          toast.classList.remove('visible');
+        }, 2400);
+      }
+      document.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.quick-action-btn');
+        if (!btn) return;
+        const prompt = btn.dataset.prompt || '';
+        if (!prompt) return;
+        try {
+          await navigator.clipboard.writeText(prompt);
+          btn.classList.add('copied');
+          setTimeout(() => btn.classList.remove('copied'), 1800);
+          showToast('✅ Prompt copié — colle-le dans le chat (Ctrl+V)');
+        } catch (err) {
+          /* Fallback ancien navigateur — select + execCommand */
+          const ta = document.createElement('textarea');
+          ta.value = prompt;
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); } catch (e2) {}
+          document.body.removeChild(ta);
+          showToast('✅ Prompt copié');
+        }
+      });
+    })();
+    </script>
 
     {# Sprint Composants Phase 3 (2026-06-25) : onglet "Assemblages" — pages
        HTML composites publishables sur S3 avec audit_chain transverse.
@@ -774,6 +854,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           <button id="btn-refresh-assemblies" class="fr-btn fr-btn--sm fr-btn--tertiary"
                   onclick="loadAssemblies()" style="font-size:11px">
             ↻ Rafraîchir
+          </button>
+        </div>
+        {# Sprint Composants Phase 3b (2026-06-26) : quick-actions UI bridge. #}
+        <div class="quick-actions-block" data-target="assemblies">
+          <div class="quick-actions-title">✨ Demander à l'agent V1.5 :</div>
+          <button class="quick-action-btn" data-prompt="Liste mes composants V1.5 via list_components puis assemble-les dans un storymap_narrative_dsfr avec audience cerema_internal (audit_chain automatique). Valide d'abord le manifest assembly.">
+            🎨 Assembler une storymap avec mes composants
+          </button>
+          <button class="quick-action-btn" data-prompt="Render preview du dernier assemblage que j'ai créé via render_assembly (HTML preview sans publication, pour validation visuelle).">
+            👁 Render preview du dernier assemblage
+          </button>
+          <button class="quick-action-btn" data-prompt="Publie mon dernier assemblage draft via publish_assembly avec audience cerema_internal (génère URL S3 + audit_chain signed_hash SHA256 anti-tamper). Confirme l'audience cerema_internal AVANT publish.">
+            🚀 Publier mon dernier draft (URL S3 + audit_chain)
           </button>
         </div>
         <div id="assemblies-list" class="assemblies-list"
