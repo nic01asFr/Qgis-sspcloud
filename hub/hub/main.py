@@ -3468,58 +3468,89 @@ async def publish_assembly_endpoint(
     # Render + audit_chain
     html, chain_dict = await _render_assembly_html(sid, aid, user["username"])
 
-    # Persiste rendered HTML sur PVC
+    # Sprint Composants Phase 3 fix (2026-06-26) : wrap toutes les étapes
+    # post-render dans try/except avec traceback structurée. La signature
+    # s3_publication.publish() retourne info["url"] (pas info["public_url"]).
+    import base64 as _base64, json as _json
+    import traceback as _tb
+
+    audit_chain_written = False
+    published_url = None
+    write_pvc_error = None
+    db_update_error = None
+    s3_publish_error = None
+
+    # 1. Persiste rendered HTML sur PVC (best-effort)
     try:
         await _execute_python_in_workspace(
             user["username"],
             asm_mod.write_assembly_rendered_pod_code(sid, aid, html),
         )
     except Exception as exc:
+        write_pvc_error = str(exc)[:200]
         log.warning("write assembly rendered : %s", exc)
 
-    # Update audit_chain_json sur la row latest (UPDATE exceptionnel,
-    # cf. assemblies.py docstring)
-    import json as _json
-    async with aiosqlite.connect(studies._DB_PATH) as db:
-        await db.execute(
-            """UPDATE assemblies_index
-               SET audit_chain_json = ?
-               WHERE rowid IN (
-                 SELECT rowid FROM assemblies_index
-                 WHERE aid = ? AND status = 'active'
-                 ORDER BY version_num DESC LIMIT 1
-               )""",
-            (_json.dumps(chain_dict, ensure_ascii=False), aid),
-        )
-        await db.commit()
+    # 2. Update audit_chain_json sur la row latest
+    try:
+        async with aiosqlite.connect(studies._DB_PATH) as db:
+            await db.execute(
+                """UPDATE assemblies_index
+                   SET audit_chain_json = ?
+                   WHERE rowid IN (
+                     SELECT rowid FROM assemblies_index
+                     WHERE aid = ? AND status = 'active'
+                     ORDER BY version_num DESC LIMIT 1
+                   )""",
+                (_json.dumps(chain_dict, ensure_ascii=False), aid),
+            )
+            await db.commit()
+        audit_chain_written = True
+    except Exception as exc:
+        db_update_error = str(exc)[:200]
+        log.error("update audit_chain_json : %s", exc)
 
-    # Publish S3 via s3_publication.publish()
+    # 3. Publish S3 via s3_publication.publish()
     slug = f"assembly-{aid}"
-    published_url = None
     try:
         info = s3_publication.publish(
             owner=user["username"], kind="assembly", slug=slug,
             content=html.encode("utf-8"),
             content_type="text/html; charset=utf-8",
+            study_id=sid,
         )
-        published_url = info.get("public_url") or info.get("hub_url")
+        # signature correcte : info["url"] (cf. s3_publication.py:202)
+        published_url = info.get("url")
     except Exception as exc:
+        s3_publish_error = str(exc)[:200]
         log.error("publish S3 assembly : %s", exc)
-        raise HTTPException(503, f"Publish S3 échec : {exc}")
 
-    # Update published_url en DB
+    # 4. Update published_url en DB (si S3 a marché)
     if published_url:
-        await asm_mod.update_published_info(aid, published_url)
+        try:
+            await asm_mod.update_published_info(aid, published_url)
+        except Exception as exc:
+            log.error("update_published_info : %s", exc)
 
+    # Renvoie résultat structuré (toujours 200, état détaillé dans body)
     return {
         "id": aid,
-        "published": True,
+        "published": published_url is not None,
         "published_url": published_url,
         "audit_chain": {
             "signed_hash": chain_dict.get("signed_hash"),
             "components_refs": chain_dict.get("components_refs", []),
             "scene_hashes": chain_dict.get("scene_hashes", []),
             "recipes_used": chain_dict.get("recipes_used", []),
+        },
+        "diagnostics": {
+            "audit_chain_written_to_db": audit_chain_written,
+            "rendered_html_written_pvc": write_pvc_error is None,
+            "rendered_html_size_bytes": len(html.encode("utf-8")),
+            "errors": {
+                "write_pvc": write_pvc_error,
+                "db_update": db_update_error,
+                "s3_publish": s3_publish_error,
+            },
         },
     }
 
