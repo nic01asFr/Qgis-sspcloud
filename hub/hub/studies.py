@@ -430,6 +430,55 @@ async def init_db() -> None:
                 ON assemblies_index(sid, status, kind)
         """)
 
+        # Migration 2026-06-27 : URL MinIO -> URL Hub /published.
+        # Bug MinIO SSPCloud : ACL canned 'public-read' ne fonctionne plus.
+        # Les anciens published_url (avant fix f11da9d) etaient en URL S3
+        # directe minio.lab.sspcloud.fr qui retournent 403.
+        # On rewrite vers l'URL hub qui sert via /published/{owner}/{kind}/{slug}
+        # (lecture S3 cote serveur). Idempotent : ne touche que les URL minio.
+        import os as _os
+        hub_url_env = _os.getenv("HUB_URL", "")
+        if hub_url_env:
+            hub_url_env = hub_url_env.rstrip("/")
+            try:
+                # Pattern S3 :
+                #   https://minio.lab.sspcloud.fr/<owner>/qgis-workspace/published/<owner>/<kind>/<slug>
+                # → /published/<owner>/<kind>/<slug>
+                # SQLite REPLACE() ne fait que du literal — on fait via SELECT+UPDATE
+                cur = await db.execute(
+                    "SELECT aid, published_url FROM assemblies_index "
+                    "WHERE published_url LIKE 'https://minio%'"
+                )
+                rows = await cur.fetchall()
+                migrated = 0
+                for aid, old_url in rows:
+                    # Extract owner/kind/slug from URL S3
+                    import re as _re
+                    m = _re.match(
+                        r"^https?://minio[^/]+/[^/]+/qgis-workspace/published/([^/]+)/([^/]+)/([^?]+)$",
+                        old_url or "",
+                    )
+                    if not m:
+                        continue
+                    owner, kind, slug = m.group(1), m.group(2), m.group(3)
+                    new_url = f"{hub_url_env}/published/{owner}/{kind}/{slug}"
+                    await db.execute(
+                        "UPDATE assemblies_index SET published_url = ? WHERE aid = ?",
+                        (new_url, aid),
+                    )
+                    migrated += 1
+                if migrated:
+                    import logging as _logging
+                    _logging.getLogger("hub.studies").info(
+                        "Migration 2026-06-27 : %d published_url MinIO -> Hub",
+                        migrated,
+                    )
+            except Exception as exc:
+                import logging as _logging
+                _logging.getLogger("hub.studies").warning(
+                    "Migration MinIO->Hub skippee : %s", exc,
+                )
+
         await db.commit()
 
 
