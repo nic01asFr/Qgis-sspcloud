@@ -109,6 +109,44 @@ async def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_recipes_owner
                 ON recipes_index(owner, status)
         """)
+        # Sprint Composants Phase 3c (2026-06-27) : meta-agent analyseur recipes.
+        # Index DB des RecipeAnalysis (params + quality checks). Pattern V1.5 :
+        # INSERT-only, lookup latest via MAX(rowid). Cache key composite
+        # (slug, source, content_hash[:12]). Re-trigger quand content_hash change.
+        # JSON complet sur PVC (file_path). Le breakdown structuré reste exploitable
+        # côté hub via la column json_blob (compressed analysis).
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS recipe_analyses_index (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                slug TEXT NOT NULL,
+                source TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                sid TEXT,
+                owner TEXT,
+                analyzer_model TEXT NOT NULL,
+                analyzer_version INTEGER NOT NULL DEFAULT 1,
+                analyzed_at INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                overall_score REAL,
+                cost_level TEXT,
+                n_params INTEGER DEFAULT 0,
+                n_warnings INTEGER DEFAULT 0,
+                n_errors INTEGER DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'success',
+                error_detail TEXT,
+                human_validated INTEGER DEFAULT 0,
+                human_validator TEXT,
+                human_validated_at INTEGER
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_recipe_analyses_lookup
+                ON recipe_analyses_index(slug, source, content_hash, rowid DESC)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_recipe_analyses_admin
+                ON recipe_analyses_index(human_validated, overall_score, analyzed_at DESC)
+        """)
         # Sprint UX-3 (2026-06-21) : modele etude->projet 1:N.
         # Une etude (container thematique) peut contenir N projets QGIS.
         # Chaque projet a son propre .qgz + history.jsonl + .checkpoints/.
@@ -686,6 +724,120 @@ async def recipe_index_mark_published(
             (int(time.time()), public_url, sid, slug, version_num),
         )
         await db.commit()
+
+
+# ── Sprint Composants Phase 3c : CRUD recipe_analyses_index ──────────────────
+# Pattern V1.5 INSERT-only audit trail. Cache key composite
+# (slug, source, content_hash). Le contenu Pydantic complet est sur PVC, l'index
+# DB garde le metadata + breakdown statistique pour les queries admin (review,
+# filter par human_validated, sort par overall_score).
+
+async def recipe_analyses_insert(
+    slug: str, source: str, content_hash: str,
+    analyzer_model: str, file_path: str,
+    overall_score: float, cost_level: str,
+    n_params: int = 0, n_warnings: int = 0, n_errors: int = 0,
+    status: str = "success", error_detail: str | None = None,
+    sid: str | None = None, owner: str | None = None,
+    analyzer_version: int = 1,
+) -> int:
+    """Insert nouvelle row recipe_analyses_index. INSERT-only (pas d'UPDATE)."""
+    import time as _t
+    async with aiosqlite.connect(_DB_PATH) as db:
+        cur = await db.execute(
+            """INSERT INTO recipe_analyses_index
+               (slug, source, content_hash, sid, owner, analyzer_model,
+                analyzer_version, analyzed_at, file_path, overall_score,
+                cost_level, n_params, n_warnings, n_errors, status, error_detail)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (slug, source, content_hash, sid, owner, analyzer_model,
+             analyzer_version, int(_t.time()), file_path, overall_score,
+             cost_level, n_params, n_warnings, n_errors, status, error_detail),
+        )
+        await db.commit()
+        return cur.lastrowid or 0
+
+
+async def recipe_analyses_get_latest(
+    slug: str, source: str, content_hash: str | None = None,
+) -> dict | None:
+    """Retourne le dernier RecipeAnalysis matching (slug, source, [hash]).
+
+    Si content_hash fourni : exact match (cache lookup). Sinon : dernière
+    analyse connue toutes versions (admin review).
+    Retourne None si aucun.
+    """
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if content_hash:
+            cur = await db.execute(
+                """SELECT * FROM recipe_analyses_index
+                   WHERE slug = ? AND source = ? AND content_hash = ?
+                   ORDER BY rowid DESC LIMIT 1""",
+                (slug, source, content_hash),
+            )
+        else:
+            cur = await db.execute(
+                """SELECT * FROM recipe_analyses_index
+                   WHERE slug = ? AND source = ?
+                   ORDER BY rowid DESC LIMIT 1""",
+                (slug, source),
+            )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+
+async def recipe_analyses_history(
+    slug: str, source: str, limit: int = 20,
+) -> list[dict]:
+    """Historique des analyses (versions par content_hash)."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """SELECT * FROM recipe_analyses_index
+               WHERE slug = ? AND source = ?
+               ORDER BY rowid DESC LIMIT ?""",
+            (slug, source, limit),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def recipe_analyses_review_pending(limit: int = 50) -> list[dict]:
+    """Admin review : retourne les analyses non human-validated.
+
+    Trié par overall_score croissant (les pires en premier) puis date.
+    Utile pour UI desk panel "Recipes Quality Review" (Phase 3c-2 V2).
+    """
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """SELECT * FROM recipe_analyses_index
+               WHERE human_validated = 0 AND status = 'success'
+               ORDER BY overall_score ASC, analyzed_at DESC
+               LIMIT ?""",
+            (limit,),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def recipe_analyses_mark_validated(
+    rowid: int, validator: str, notes: str | None = None,
+) -> bool:
+    """Admin valide manuellement une analyse (V2 UI review)."""
+    import time as _t
+    async with aiosqlite.connect(_DB_PATH) as db:
+        cur = await db.execute(
+            """UPDATE recipe_analyses_index
+               SET human_validated = 1,
+                   human_validator = ?,
+                   human_validated_at = ?
+               WHERE rowid = ?""",
+            (validator, int(_t.time()), rowid),
+        )
+        await db.commit()
+        return cur.rowcount > 0
 
 
 # ── Sprint Composants-1 : CRUD exports_index ─────────────────────────────────

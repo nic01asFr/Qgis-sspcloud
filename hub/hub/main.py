@@ -2938,6 +2938,230 @@ async def schema_validate_endpoint(
 
 # ── Components CRUD (Sprint Composants Phase 2) ──────────────────────────────
 
+# ── Sprint Composants Phase 3c (2026-06-27) : meta-agent analyseur recipes ───
+# Endpoints REST pour le cache RecipeAnalysis (DB index + PVC JSON).
+# Pattern : (slug, source, content_hash[:12]) cache key. Lookup hub-side,
+# enrichissement LLM côté agent (via tool natif analyze_recipe). Trigger
+# automatique au PUT recipe via webhook fire-and-forget vers l'agent.
+
+
+@app.get("/schema/recipe/{slug}/analysis")
+async def get_recipe_analysis_endpoint(
+    slug: str,
+    source: str = "auto",
+    content_hash: str | None = None,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Lookup cache RecipeAnalysis (Phase 3c).
+
+    source : "user" | "system" | "auto" (auto cherche user d'abord, fallback system)
+    content_hash : optionnel — si fourni, exact match (cache lookup tool natif).
+                   Sinon, dernière analyse connue (admin review).
+
+    Retourne :
+    - {found: false, ...} si miss → l'agent doit déclencher l'analyse
+    - {found: true, analysis: RecipeAnalysis} si HIT
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+
+    from hub import recipe_analyzer_cache as cache_mod
+
+    # Recherche selon source
+    sources_to_try = (
+        ["user", "system"] if source == "auto"
+        else ["user"] if source == "user"
+        else ["system"]
+    )
+
+    found_meta = None
+    for src in sources_to_try:
+        meta = await studies.recipe_analyses_get_latest(slug, src, content_hash)
+        if meta:
+            found_meta = meta
+            break
+
+    if not found_meta:
+        return {
+            "found": False,
+            "slug": slug,
+            "source_requested": source,
+            "content_hash_requested": content_hash,
+        }
+
+    # Lire le JSON complet depuis PVC
+    file_path = found_meta.get("file_path", "")
+    try:
+        stdout = await _execute_python_in_workspace(
+            user["username"],
+            cache_mod.read_recipe_analysis_pod_code(file_path),
+        )
+        analysis_json = cache_mod.parse_read_marker(stdout)
+    except Exception as exc:
+        log.warning("read recipe analysis PVC failed: %s", exc)
+        analysis_json = None
+
+    return {
+        "found": True,
+        "metadata": found_meta,
+        "analysis": analysis_json,
+        "pvc_read_status": "ok" if analysis_json else "failed",
+    }
+
+
+@app.post("/schema/recipe/{slug}/analysis")
+async def post_recipe_analysis_endpoint(
+    slug: str,
+    payload: dict,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Persiste une RecipeAnalysis (DB index + PVC JSON).
+
+    Appelé par l'agent (tool natif analyze_recipe) après que le LLM
+    profile_analyzer a produit une analyse. Body = RecipeAnalysis serialisé.
+
+    Source détectée depuis le payload (analysis.source).
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+
+    from hub import recipe_analyzer_cache as cache_mod
+    from hub.models import RecipeAnalysis
+    from pydantic import ValidationError
+    import json as _json
+
+    # Validation Pydantic stricte
+    try:
+        analysis = RecipeAnalysis.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            422,
+            {
+                "error": "RecipeAnalysis validation failed",
+                "detail": exc.errors()[:10],
+            },
+        )
+
+    # Vérifier cohérence slug URL vs payload
+    if analysis.slug != slug:
+        raise HTTPException(400, f"slug mismatch: url={slug} vs payload={analysis.slug}")
+
+    # Path PVC selon source
+    if analysis.source == "user":
+        # Pour user recipes, on a besoin du sid de l'étude active
+        active_sid = await studies.get_active_study_id(user["username"])
+        if not active_sid:
+            raise HTTPException(400, "User recipe analysis : aucune étude active")
+        file_path = cache_mod.user_recipe_analysis_path(active_sid, slug)
+    else:
+        file_path = cache_mod.system_recipe_analysis_path(
+            slug, analysis.content_hash,
+        )
+
+    # Sérialiser JSON
+    analysis_json = analysis.model_dump_json(indent=2)
+
+    # Persist PVC
+    try:
+        stdout = await _execute_python_in_workspace(
+            user["username"],
+            cache_mod.write_recipe_analysis_pod_code(file_path, analysis_json),
+        )
+        if "RECIPE_ANALYSIS_WRITE_OK" not in stdout:
+            raise RuntimeError(f"PVC write KO: {stdout[:200]}")
+    except Exception as exc:
+        raise HTTPException(503, f"PVC write failed: {exc}")
+
+    # Compter warnings/errors pour breakdown DB
+    n_warnings = sum(1 for c in analysis.quality_checks if c.severity == "warning")
+    n_errors = sum(1 for c in analysis.quality_checks if c.severity == "error")
+
+    # Insert DB
+    active_sid = await studies.get_active_study_id(user["username"]) if analysis.source == "user" else None
+    rowid = await studies.recipe_analyses_insert(
+        slug=analysis.slug,
+        source=analysis.source,
+        content_hash=analysis.content_hash,
+        analyzer_model=analysis.analyzer_model,
+        file_path=file_path,
+        overall_score=analysis.overall_score,
+        cost_level=analysis.cost_level,
+        n_params=len(analysis.params_analysis),
+        n_warnings=n_warnings,
+        n_errors=n_errors,
+        status=analysis.status,
+        error_detail=analysis.error_detail,
+        sid=active_sid,
+        owner=user["username"],
+        analyzer_version=analysis.analyzer_version,
+    )
+
+    return {
+        "ok": True,
+        "rowid": rowid,
+        "slug": slug,
+        "source": analysis.source,
+        "content_hash": analysis.content_hash,
+        "file_path": file_path,
+        "overall_score": analysis.overall_score,
+        "n_params": len(analysis.params_analysis),
+        "n_warnings": n_warnings,
+        "n_errors": n_errors,
+    }
+
+
+@app.get("/schema/recipe/{slug}/analysis/history")
+async def get_recipe_analysis_history_endpoint(
+    slug: str,
+    source: str = "user",
+    limit: int = 20,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Historique des versions d'analyse (par content_hash)."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    if source not in ("user", "system"):
+        raise HTTPException(400, "source doit être 'user' ou 'system'")
+    history = await studies.recipe_analyses_history(slug, source, limit)
+    return {"slug": slug, "source": source, "count": len(history), "history": history}
+
+
+@app.get("/admin/recipe-analyses/review")
+async def admin_recipe_analyses_review_endpoint(
+    limit: int = 50,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Admin review : analyses non-validées trié par score croissant.
+
+    Endpoint admin (V2 UI desk panel "Recipes Quality Review").
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    pending = await studies.recipe_analyses_review_pending(limit)
+    return {"count": len(pending), "pending_review": pending}
+
+
+@app.post("/admin/recipe-analyses/{rowid}/validate")
+async def admin_validate_recipe_analysis_endpoint(
+    rowid: int,
+    payload: dict | None = None,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Admin marque une analyse comme human_validated.
+
+    Body optionnel : {"notes": "fix_hint #2 appliqué le 2026-06-30"}
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    notes = (payload or {}).get("notes")
+    ok = await studies.recipe_analyses_mark_validated(
+        rowid=rowid, validator=user["username"], notes=notes,
+    )
+    if not ok:
+        raise HTTPException(404, f"Analysis rowid={rowid} introuvable")
+    return {"ok": True, "rowid": rowid, "validator": user["username"]}
+
+
 @app.get("/studies/{sid}/components")
 async def list_components_endpoint(
     sid: str,

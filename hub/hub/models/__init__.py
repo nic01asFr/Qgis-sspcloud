@@ -38,6 +38,14 @@ from hub.models.assembly import (
     AssemblySection,
     AssemblyFooter,
 )
+from hub.models.recipe_analysis import (
+    RecipeAnalysis,
+    ParamEnrichment,
+    QualityCheck,
+    QualityCategory,
+    compute_content_hash,
+    empty_analysis,
+)
 
 __all__ = [
     "Classification",
@@ -54,4 +62,11 @@ __all__ = [
     "AssemblyLayout",
     "AssemblySection",
     "AssemblyFooter",
+    # Sprint Composants Phase 3c (2026-06-27) : meta-agent analyseur recipes
+    "RecipeAnalysis",
+    "ParamEnrichment",
+    "QualityCheck",
+    "QualityCategory",
+    "compute_content_hash",
+    "empty_analysis",
 ]
