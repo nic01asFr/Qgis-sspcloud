@@ -176,9 +176,17 @@ a:hover{color:var(--blue-france)}
         {% set cid = comp_entry.ref %}
         {% if cid %}
         <div class="story-component story-component--full">
-          <iframe class="story-component-iframe" loading="lazy"
-                  src="/studies/{{ assembly.sid }}/components/{{ cid }}/render"
-                  title="Composant {{ cid }}"></iframe>
+          {# Bug fix 2026-06-27 : composants pre-rendus cote hub (inline) au
+             lieu d'iframe src relatif qui retournait 404 hors contexte hub.
+             Cf. main.py _render_assembly_html rendered_components dict. #}
+          {% if rendered_components and cid in rendered_components %}
+            {{ rendered_components[cid] | safe }}
+          {% else %}
+            <div style="padding:24px;color:#888;font-style:italic;
+                        background:#f9f9f9;border-radius:6px;text-align:center">
+              Composant {{ cid[:8] }} indisponible.
+            </div>
+          {% endif %}
         </div>
         {% endif %}
       {% endfor %}

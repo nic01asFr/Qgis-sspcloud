@@ -4021,12 +4021,93 @@ async def _render_assembly_html(
 
     if not _maplibre_jinja:
         raise HTTPException(503, "Maplibre Jinja2 indisponible")
+
+    # Bug fix 2026-06-27 : pre-rendre les composants cote hub pour eviter
+    # les iframe avec src relatif `/studies/.../render` qui retournent 404
+    # quand la storymap est servie via S3 ou tier sans le contexte hub.
+    # Le template lit dict `rendered_components[cid] = html_content`
+    # et inline le HTML au lieu de l'iframe.
+    from hub import components as comp_mod
+    rendered_components: dict[str, str] = {}
+    for section in asm.layout.sections:
+        for comp_entry in (section.components or []):
+            cid = (comp_entry.dict() if hasattr(comp_entry, 'dict') else comp_entry).get("ref") if isinstance(comp_entry, dict) or hasattr(comp_entry, 'dict') else None
+            if not cid or cid in rendered_components:
+                continue
+            try:
+                # Pre-render via mock request to render_component endpoint
+                # (DRY : reutilise la logique de render_component_endpoint).
+                # On lit le manifest + rend selon kind.
+                comp_meta = await comp_mod.get_component_latest(cid)
+                if not comp_meta:
+                    rendered_components[cid] = f'<div style="padding:20px;color:#666;font-style:italic">Composant {cid[:8]} introuvable.</div>'
+                    continue
+                # Lire manifest PVC
+                code = comp_mod.read_component_manifest_pod_code(sid, cid)
+                stdout = await _execute_python_in_workspace(username, code)
+                if "COMPONENT_READ_OK" not in stdout:
+                    rendered_components[cid] = f'<div style="padding:20px;color:#666;font-style:italic">Composant {cid[:8]} indisponible.</div>'
+                    continue
+                import base64 as _b64
+                b64_data = stdout.split("b64=", 1)[1].split()[0].strip()
+                comp_manifest = _json.loads(_b64.b64decode(b64_data).decode())
+                # Render direct via _render_component_inline helper
+                kind = comp_manifest.get("kind", "unknown")
+                params = comp_manifest.get("params", {})
+                if kind == "narrative_text":
+                    md = params.get("markdown", "")
+                    # Rendu minimal markdown -> HTML (titres + paragraphes)
+                    import html as _h
+                    lines = md.split("\n")
+                    rendered = []
+                    for ln in lines:
+                        s = ln.strip()
+                        if s.startswith("### "): rendered.append(f"<h3>{_h.escape(s[4:])}</h3>")
+                        elif s.startswith("## "): rendered.append(f"<h2>{_h.escape(s[3:])}</h2>")
+                        elif s.startswith("# "): rendered.append(f"<h1>{_h.escape(s[2:])}</h1>")
+                        elif s: rendered.append(f"<p>{_h.escape(s)}</p>")
+                    rendered_components[cid] = f'<div style="padding:24px;background:#fff;border-radius:6px;line-height:1.7">{"".join(rendered)}</div>'
+                elif kind == "kpi_badge":
+                    value = params.get("value", "?")
+                    label = params.get("label", "")
+                    unit = params.get("unit", "")
+                    rendered_components[cid] = (
+                        f'<div style="padding:32px;text-align:center;background:linear-gradient(135deg,#000091,#0063cb);'
+                        f'color:#fff;border-radius:8px">'
+                        f'<div style="font-size:48px;font-weight:700;line-height:1">{_h.escape(str(value))}{_h.escape(unit)}</div>'
+                        f'<div style="font-size:14px;opacity:.85;margin-top:8px;text-transform:uppercase;letter-spacing:.5px">{_h.escape(label)}</div>'
+                        f'</div>'
+                    )
+                elif kind == "legend":
+                    items = params.get("items", [])
+                    items_html = "".join([
+                        f'<div style="display:flex;align-items:center;gap:8px;padding:4px 0">'
+                        f'<span style="width:16px;height:16px;background:{it.get("color","#999")};border-radius:3px"></span>'
+                        f'<span>{_h.escape(it.get("label","?"))}</span></div>'
+                        for it in items
+                    ])
+                    rendered_components[cid] = f'<div style="padding:20px;background:#fff;border:1px solid #e5e5e5;border-radius:6px">{items_html}</div>'
+                else:
+                    # Fallback : si type non gere inline (interactive_map, scene_3d),
+                    # afficher placeholder + lien vers preview
+                    rendered_components[cid] = (
+                        f'<div style="padding:24px;text-align:center;background:#f4f6fa;border-radius:6px;color:#666">'
+                        f'<p style="margin:0 0 8px;font-weight:600">Composant {_h.escape(kind)}</p>'
+                        f'<p style="margin:0;font-size:13px">'
+                        f'<a href="/studies/{sid}/components/{cid}/render" target="_blank">Voir l\'aperçu interactif</a>'
+                        f'</p></div>'
+                    )
+            except Exception as exc:
+                log.warning("pre-render component %s : %s", cid, exc)
+                rendered_components[cid] = f'<div style="padding:20px;color:#888;font-style:italic">Composant indisponible ({type(exc).__name__}).</div>'
+
     try:
         tpl_short = template_name.replace("maplibre_renderer/", "")
         tpl = _maplibre_jinja.get_template(tpl_short)
         html = tpl.render(
             assembly=asm.model_dump(mode="json"),
             sections=[s.model_dump(mode="json") for s in asm.layout.sections],
+            rendered_components=rendered_components,
             audit_chain=chain.model_dump(mode="json"),
             footer=asm.footer.model_dump(mode="json"),
         )

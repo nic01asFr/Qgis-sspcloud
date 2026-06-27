@@ -814,6 +814,12 @@ _OIDC_MIDDLEWARE_PUBLIC = (
     "/authorize",     # couvre aussi /authorize/confirm via le check startswith
     "/oauth/token",
     "/oauth/register",  # Dynamic Client Registration (RFC 7591) - claude.ai
+    # Bug fix 2026-06-27 : MinIO SSPCloud n'accepte plus ACL canned public-read
+    # sur objets uploades (AccessDenied 403). Le hub sert via /published/...
+    # apres lecture S3 cote serveur. Cet endpoint est PUBLIC par design
+    # (assemblages publishables avec audience), accessible aux collegues
+    # CEREMA via SSO ET aux tiers via lien direct. Pas d'OIDC requis.
+    "/published",
 )
 
 # Routes inter-pods : Bearer HUB_API_KEY = clé hub partagée entre hub et agent
@@ -859,13 +865,8 @@ _OIDC_MIDDLEWARE_INTER_POD = (
     # /internal/profiles/{id}/full : agent recupere agent_system_prompt
     # complet (filtre dans /profiles/{id} public).
     "/internal",
-    # Bug fix 2026-06-27 : MinIO SSPCloud n'accepte plus ACL canned public-read
-    # sur objets uploades (AccessDenied 403). Le hub sert via /published/...
-    # apres lecture S3 cote serveur. Cet endpoint est PUBLIC par design
-    # (assemblages publishables via publish_assembly avec audience=...) et
-    # ne doit pas require OIDC auth pour les visiteurs externes (collegues
-    # CEREMA via SSO Onyxia OK, mais surtout pour partage tiers internet).
-    "/published",
+    # NB : /published a ete deplace dans _OIDC_MIDDLEWARE_PUBLIC (vraie
+    # whitelist anonyme). Inter-pod ne suffit pas pour acces tiers internet.
 )
 
 
