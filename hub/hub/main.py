@@ -4878,6 +4878,14 @@ async def serve_published(
         raise HTTPException(503, "Publication S3 indisponible (module non chargé)")
 
     safe_slug = slug.replace("..", "").replace("/", "_").replace("\\", "_")
+    # Bug fix 2026-06-27 : stripper l'extension du slug si presente
+    # (s3_key() ajoute l'extension selon le kind). L'URL retournee par
+    # publish_assembly_endpoint n'en met pas, mais des URL externes
+    # (clic user sur lien .html) en mettent. Resilience : accepter les 2.
+    for _ext in (".html", ".pdf", ".yaml", ".json", ".gpkg", ".qgz", ".zip"):
+        if safe_slug.endswith(_ext):
+            safe_slug = safe_slug[:-len(_ext)]
+            break
     if not safe_slug:
         raise HTTPException(400, "Slug invalide")
 
