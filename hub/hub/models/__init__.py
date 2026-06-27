@@ -46,6 +46,13 @@ from hub.models.recipe_analysis import (
     compute_content_hash,
     empty_analysis,
 )
+from hub.models.agent_config_analysis import (
+    AgentConfigAnalysis,
+    ConfigParamEnrichment,
+    ConfigQualityCheck,
+    AgentConfigQualityCategory,
+    compute_config_hash,
+)
 
 __all__ = [
     "Classification",
@@ -69,4 +76,10 @@ __all__ = [
     "QualityCategory",
     "compute_content_hash",
     "empty_analysis",
+    # Sprint Composants Phase 4a (2026-06-27) : meta-agent analyseur config agent
+    "AgentConfigAnalysis",
+    "ConfigParamEnrichment",
+    "ConfigQualityCheck",
+    "AgentConfigQualityCategory",
+    "compute_config_hash",
 ]

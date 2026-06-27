@@ -1518,8 +1518,8 @@ async def get_profile_full_internal(
     """
     if not _PROFILES_AVAILABLE:
         raise HTTPException(404, "Système de profils non disponible")
-    # Whitelist profils internes exposables
-    _INTERNAL_PROFILES = {"recipe_analyzer"}
+    # Whitelist profils internes exposables (V2 : étendre liste si nouveau meta-agent)
+    _INTERNAL_PROFILES = {"recipe_analyzer", "agent_config_analyzer"}
     if profile_id not in _INTERNAL_PROFILES:
         raise HTTPException(
             403,
@@ -2968,6 +2968,366 @@ async def schema_validate_endpoint(
 
 
 # ── Components CRUD (Sprint Composants Phase 2) ──────────────────────────────
+
+# ── Sprint Composants Phase 4a (2026-06-27) : agents partagés ────────────────
+# Pattern publication agents = scoped_keys + colonnes publication (audience,
+# published_url, published_at, audit_chain_json). Réutilise infra V1.5
+# Passerelle-Archi (table scoped_keys + helpers create/validate/revoke).
+#
+# Workflow :
+#  1. POST /studies/{sid}/scoped-keys → mint clé qgisk_<user>_<hex>
+#  2. POST /schema/agent-config/analyze → meta-agent analyse pré-mint
+#  3. POST /studies/{sid}/scoped-keys/{kid}/publish → audit_chain + URL widget S3
+#  4. GET /studies/{sid}/scoped-keys → liste owned + publiés
+#  5. DELETE /studies/{sid}/scoped-keys/{kid} → soft revoke
+
+
+@app.post("/studies/{sid}/scoped-keys")
+async def mint_scoped_key_endpoint(
+    sid: str,
+    payload: dict,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Mint une scope key pour un agent partagé.
+
+    Payload : {profile, audience, expires_at, data_scope, tools_whitelist,
+               project_id, label}
+
+    Retourne {key_id, masked_key, ...metadata}. La clé brute N'EST pas
+    retournée 2 fois — l'user doit la copier ici ou utiliser la liste
+    qui ne montre que masked.
+
+    NB : la clé brute est exceptionnellement renvoyée DANS CE response
+    (et seulement ici) pour copy-clipboard immédiat. Documenter UX :
+    "Copiez maintenant, vous ne verrez plus la clé en clair".
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    # Verifier que l'étude appartient au user
+    study = await studies.get_study(sid, user["username"])
+    if not study:
+        raise HTTPException(404, "Étude introuvable ou pas owner")
+    # Defaults
+    profile = payload.get("profile", "storymap_creator_v15")
+    audience = payload.get("audience", "cerema_internal")
+    expires_at = payload.get("expires_at")
+    data_scope = payload.get("data_scope", "project")
+    tools = payload.get("tools_whitelist", "all")
+    project_id = payload.get("project_id")
+    label = payload.get("label", f"Agent partagé {sid[:6]}")
+    # Mint via auth helper existant
+    key = await auth.create_scoped_key(
+        username=user["username"],
+        study_id=sid,
+        project_id=project_id,
+        persona=profile,
+        tools=tools,
+        data_scope=data_scope,
+        mode="scoped",
+        actor="delegate",  # publié = délégué
+        label=label,
+        expires_at=expires_at,
+    )
+    # Update audience (pas dans helper existant)
+    import aiosqlite
+    async with aiosqlite.connect(auth._DB_PATH) as db:
+        await db.execute(
+            "UPDATE scoped_keys SET audience = ? WHERE id = ?",
+            (audience, key),
+        )
+        await db.commit()
+    return {
+        "key": key,  # bearer brut — copier maintenant
+        "key_masked": key[:14] + "…",
+        "sid": sid,
+        "project_id": project_id,
+        "profile": profile,
+        "audience": audience,
+        "expires_at": expires_at,
+        "data_scope": data_scope,
+        "label": label,
+        "warning_copy_now": "Cette clé ne sera plus affichée en clair. Copiez-la maintenant.",
+    }
+
+
+@app.get("/studies/{sid}/scoped-keys")
+async def list_scoped_keys_endpoint(
+    sid: str,
+    include_revoked: bool = False,
+    only_published: bool = False,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Liste les agents partagés de l'utilisateur pour cette étude."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    if only_published:
+        all_keys = await auth.list_scoped_keys_published(user["username"])
+    else:
+        all_keys = await auth.list_scoped_keys(user["username"], include_revoked)
+    # Filter sid
+    filtered = [k for k in all_keys if k.get("study_id") == sid]
+    return {"sid": sid, "count": len(filtered), "agents": filtered}
+
+
+@app.post("/studies/{sid}/scoped-keys/{kid}/publish")
+async def publish_agent_endpoint(
+    sid: str,
+    kid: str,
+    payload: dict | None = None,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Publie un agent partagé : calcule audit_chain + génère URL widget.
+
+    Workflow :
+    1. Vérifier que kid appartient au user
+    2. Récupérer metadata (profile, audience, scope)
+    3. Résoudre composants/recipes/assemblies visibles depuis sid
+    4. Calculer audit_chain.signed_hash SHA256
+    5. Générer URL widget (https://hub.../agent-share/{key_short})
+    6. UPDATE scoped_keys (published_url, published_at, audit_chain_json)
+
+    NB : pas d'upload S3 du widget — il est servi dynamiquement par
+    l'endpoint /agent-share/{key_short} qui appelle /chat avec scope.
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    if not kid.startswith(auth._SCOPED_PREFIX):
+        raise HTTPException(400, "key_id doit commencer par 'qgisk_'")
+    # Récupérer meta
+    meta = await auth.get_scoped_key_meta(kid)
+    if not meta or meta.get("username") != user["username"]:
+        raise HTTPException(404, "Agent partagé introuvable ou pas owner")
+    if meta.get("revoked_at"):
+        raise HTTPException(400, "Cet agent a été révoqué")
+    if meta.get("study_id") != sid:
+        raise HTTPException(400, f"key_id étude {meta.get('study_id')} != URL sid {sid}")
+
+    audience = (payload or {}).get("audience") or meta.get("audience", "cerema_internal")
+    # Résoudre contexte étude
+    components_visible: list[str] = []
+    recipes_visible: list[str] = []
+    assemblies_visible: list[str] = []
+    has_restricted = False
+    try:
+        from hub import components as comp_mod
+        from hub import assemblies as asm_mod
+        comps = await comp_mod.list_components(sid=sid, owner=user["username"])
+        components_visible = [c["cid"] for c in comps if c.get("cid")]
+        for c in comps:
+            if c.get("classification") in ("restricted", "confidential"):
+                has_restricted = True
+        asms = await asm_mod.list_assemblies(sid=sid, owner=user["username"])
+        assemblies_visible = [a["aid"] for a in asms if a.get("aid")]
+    except Exception as exc:
+        log.warning("publish_agent : resolve context failed: %s", exc)
+    try:
+        recipes_list = await studies.recipe_index_list(sid)
+        recipes_visible = [r["slug"] for r in recipes_list if r.get("slug")]
+    except Exception:
+        pass
+
+    # Audit chain agent
+    import json as _json
+    import hashlib as _hash
+    audit_chain = {
+        "key_id_masked": kid[:14] + "…",
+        "sid": sid,
+        "pid": meta.get("project_id"),
+        "owner": user["username"],
+        "profile": meta.get("persona"),
+        "audience": audience,
+        "data_scope": meta.get("data_scope"),
+        "tools_whitelist": meta.get("tools"),
+        "components_visible": components_visible,
+        "recipes_visible": recipes_visible,
+        "assemblies_visible": assemblies_visible,
+        "expires_at": meta.get("expires_at"),
+        "created_at": meta.get("created_at"),
+        "published_at": int(time.time()),
+        "has_restricted_components": has_restricted,
+    }
+    canonical = _json.dumps(audit_chain, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    audit_chain["signed_hash"] = "sha256:" + _hash.sha256(canonical.encode("utf-8")).hexdigest()
+
+    # URL widget : page d'atterrissage côté hub (sert /chat-embed avec Bearer)
+    key_short = kid.replace(auth._SCOPED_PREFIX, "")[:12]
+    # Use _HUB_URL (peut être hub user-X) → endpoint /agent-share/{key_short}
+    published_url = f"{_HUB_URL.rstrip('/')}/agent-share/{key_short}" if _HUB_URL else f"/agent-share/{key_short}"
+
+    ok = await auth.update_scoped_key_publication(
+        key_id=kid,
+        published_url=published_url,
+        audit_chain_json=_json.dumps(audit_chain, ensure_ascii=False),
+        audience=audience,
+    )
+    if not ok:
+        raise HTTPException(503, "UPDATE scoped_keys publication échec")
+
+    return {
+        "key_id_masked": kid[:14] + "…",
+        "published": True,
+        "published_url": published_url,
+        "audience": audience,
+        "audit_chain": {
+            "signed_hash": audit_chain["signed_hash"],
+            "components_visible_count": len(components_visible),
+            "recipes_visible_count": len(recipes_visible),
+            "assemblies_visible_count": len(assemblies_visible),
+            "has_restricted_components": has_restricted,
+        },
+    }
+
+
+@app.delete("/studies/{sid}/scoped-keys/{kid}", status_code=204)
+async def revoke_agent_endpoint(
+    sid: str,
+    kid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Révoque un agent partagé (soft delete : revoked_at)."""
+    if not kid.startswith(auth._SCOPED_PREFIX):
+        raise HTTPException(400, "key_id doit commencer par 'qgisk_'")
+    meta = await auth.get_scoped_key_meta(kid)
+    if not meta or meta.get("username") != user["username"]:
+        raise HTTPException(404, "Agent partagé introuvable ou pas owner")
+    if meta.get("study_id") != sid:
+        raise HTTPException(400, "Étude ne correspond pas")
+    await auth.revoke_scoped_key(kid)
+    return None
+
+
+# ── Sprint Composants Phase 4a : meta-agent analyseur config ─────────────────
+
+
+@app.get("/schema/agent-config/analysis")
+async def get_agent_config_analysis_endpoint(
+    sid: str,
+    config_hash: str | None = None,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Lookup cache AgentConfigAnalysis pour une étude.
+
+    Si config_hash fourni : exact match. Sinon : dernière analyse connue.
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    meta = await studies.agent_analyses_get_latest(sid, config_hash)
+    if not meta:
+        return {"found": False, "sid": sid, "config_hash_requested": config_hash}
+
+    # Lire JSON complet PVC (via _execute_python_in_workspace)
+    file_path = meta.get("file_path", "")
+    analysis_json = None
+    try:
+        code = f"""
+import base64, json
+from pathlib import Path
+p = Path({file_path!r})
+if not p.exists():
+    print('AGENT_ANALYSIS_NOT_FOUND')
+else:
+    data = p.read_bytes()
+    b64 = base64.b64encode(data).decode()
+    print(f'AGENT_ANALYSIS_READ_OK b64={{b64}}')
+"""
+        stdout = await _execute_python_in_workspace(user["username"], code)
+        for line in stdout.splitlines():
+            if line.startswith("AGENT_ANALYSIS_READ_OK b64="):
+                import base64 as _b64, json as _json
+                b64 = line[len("AGENT_ANALYSIS_READ_OK b64="):].strip()
+                analysis_json = _json.loads(_b64.b64decode(b64).decode("utf-8"))
+                break
+    except Exception as exc:
+        log.warning("agent analysis read PVC: %s", exc)
+
+    return {
+        "found": True,
+        "metadata": meta,
+        "analysis": analysis_json,
+    }
+
+
+@app.post("/schema/agent-config/analysis")
+async def post_agent_config_analysis_endpoint(
+    payload: dict,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Persiste un AgentConfigAnalysis (DB + PVC). Appelé par l'agent
+    (tool natif analyze_agent_config) après LLM call.
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    from hub.models import AgentConfigAnalysis
+    from pydantic import ValidationError
+    import json as _json
+
+    try:
+        analysis = AgentConfigAnalysis.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            422,
+            {"error": "AgentConfigAnalysis validation failed",
+             "detail": exc.errors()[:10]},
+        )
+
+    # Path PVC
+    file_path = (
+        f"/data/studies/{analysis.sid}/agents/"
+        f"analysis_{analysis.short_hash()}.json"
+    )
+    analysis_json = analysis.model_dump_json(indent=2)
+
+    # Persist PVC
+    try:
+        code = f"""
+from pathlib import Path
+p = Path({file_path!r})
+p.parent.mkdir(parents=True, exist_ok=True)
+p.write_text({analysis_json!r}, encoding='utf-8')
+print(f'AGENT_ANALYSIS_WRITE_OK path={{p}}')
+"""
+        stdout = await _execute_python_in_workspace(user["username"], code)
+        if "AGENT_ANALYSIS_WRITE_OK" not in stdout:
+            raise RuntimeError(f"PVC write KO: {stdout[:200]}")
+    except Exception as exc:
+        raise HTTPException(503, f"PVC write failed: {exc}")
+
+    # Count warnings/errors
+    n_w = sum(1 for c in analysis.quality_checks if c.severity == "warning")
+    n_e = sum(1 for c in analysis.quality_checks if c.severity == "error")
+
+    rowid = await studies.agent_analyses_insert(
+        sid=analysis.sid,
+        config_hash=analysis.config_hash,
+        owner=user["username"],
+        profile=analysis.profile,
+        audience=analysis.audience,
+        analyzer_model=analysis.analyzer_model,
+        file_path=file_path,
+        overall_score=analysis.overall_score,
+        n_params=len(analysis.params_analysis),
+        n_warnings=n_w,
+        n_errors=n_e,
+        status=analysis.status,
+        error_detail=analysis.error_detail,
+        analyzer_version=analysis.analyzer_version,
+    )
+
+    return {
+        "ok": True,
+        "rowid": rowid,
+        "sid": analysis.sid,
+        "config_hash": analysis.config_hash,
+        "file_path": file_path,
+        "overall_score": analysis.overall_score,
+        "n_warnings": n_w,
+        "n_errors": n_e,
+    }
+
+
+# Ajouter recipe_analyzer + agent_config_analyzer à la whitelist internal profiles
+# (déjà fait pour recipe_analyzer dans Phase 3c hotfix).
+
 
 # ── Sprint Composants Phase 3c (2026-06-27) : meta-agent analyseur recipes ───
 # Endpoints REST pour le cache RecipeAnalysis (DB index + PVC JSON).

@@ -147,6 +147,39 @@ async def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_recipe_analyses_admin
                 ON recipe_analyses_index(human_validated, overall_score, analyzed_at DESC)
         """)
+        # Sprint Composants Phase 4a (2026-06-27) : meta-agent analyseur
+        # config d'agent partagé. Pattern strict recipe_analyses_index :
+        # INSERT-only, cache key (sid, config_hash[:12]). Le contenu Pydantic
+        # complet sur PVC, l'index DB garde metadata + breakdown.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS agent_analyses_index (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                sid TEXT NOT NULL,
+                config_hash TEXT NOT NULL,
+                owner TEXT NOT NULL,
+                profile TEXT NOT NULL,
+                audience TEXT NOT NULL,
+                analyzer_model TEXT NOT NULL,
+                analyzer_version INTEGER NOT NULL DEFAULT 1,
+                analyzed_at INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                overall_score REAL,
+                n_params INTEGER DEFAULT 0,
+                n_warnings INTEGER DEFAULT 0,
+                n_errors INTEGER DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'success',
+                error_detail TEXT,
+                human_validated INTEGER DEFAULT 0
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_agent_analyses_lookup
+                ON agent_analyses_index(sid, config_hash, rowid DESC)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_agent_analyses_owner
+                ON agent_analyses_index(owner, analyzed_at DESC)
+        """)
         # Sprint UX-3 (2026-06-21) : modele etude->projet 1:N.
         # Une etude (container thematique) peut contenir N projets QGIS.
         # Chaque projet a son propre .qgz + history.jsonl + .checkpoints/.
@@ -838,6 +871,64 @@ async def recipe_analyses_mark_validated(
         )
         await db.commit()
         return cur.rowcount > 0
+
+
+# ── Sprint Composants Phase 4a : CRUD agent_analyses_index ───────────────────
+# Pattern strict recipe_analyses_index : INSERT-only audit trail. Cache key
+# (sid, config_hash). Le contenu Pydantic complet sur PVC, l'index DB garde
+# metadata + breakdown statistique pour queries admin.
+
+async def agent_analyses_insert(
+    sid: str, config_hash: str, owner: str, profile: str, audience: str,
+    analyzer_model: str, file_path: str,
+    overall_score: float,
+    n_params: int = 0, n_warnings: int = 0, n_errors: int = 0,
+    status: str = "success", error_detail: str | None = None,
+    analyzer_version: int = 1,
+) -> int:
+    """Insert nouvelle row agent_analyses_index. INSERT-only."""
+    import time as _t
+    async with aiosqlite.connect(_DB_PATH) as db:
+        cur = await db.execute(
+            """INSERT INTO agent_analyses_index
+               (sid, config_hash, owner, profile, audience, analyzer_model,
+                analyzer_version, analyzed_at, file_path, overall_score,
+                n_params, n_warnings, n_errors, status, error_detail)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (sid, config_hash, owner, profile, audience, analyzer_model,
+             analyzer_version, int(_t.time()), file_path, overall_score,
+             n_params, n_warnings, n_errors, status, error_detail),
+        )
+        await db.commit()
+        return cur.lastrowid or 0
+
+
+async def agent_analyses_get_latest(
+    sid: str, config_hash: str | None = None,
+) -> dict | None:
+    """Retourne la derniere analyse matching (sid, [config_hash]).
+
+    Si config_hash fourni : exact match (cache lookup). Sinon : derniere
+    analyse connue pour cette etude (admin review).
+    """
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if config_hash:
+            cur = await db.execute(
+                """SELECT * FROM agent_analyses_index
+                   WHERE sid = ? AND config_hash = ?
+                   ORDER BY rowid DESC LIMIT 1""",
+                (sid, config_hash),
+            )
+        else:
+            cur = await db.execute(
+                """SELECT * FROM agent_analyses_index
+                   WHERE sid = ?
+                   ORDER BY rowid DESC LIMIT 1""",
+                (sid,),
+            )
+        row = await cur.fetchone()
+        return dict(row) if row else None
 
 
 # ── Sprint Composants-1 : CRUD exports_index ─────────────────────────────────

@@ -222,12 +222,33 @@ async def init_apikeys_db() -> None:
                     label       TEXT,
                     created_at  INTEGER NOT NULL,
                     expires_at  INTEGER,
-                    revoked_at  INTEGER
+                    revoked_at  INTEGER,
+                    -- Sprint Composants Phase 4a (2026-06-27) : publication
+                    audience          TEXT DEFAULT 'cerema_internal',
+                    published_url     TEXT,
+                    published_at      INTEGER,
+                    audit_chain_json  TEXT
                 )
             """)
+            # Phase 4a migration retroactive (ALTER si table preexistante)
+            for _alter in (
+                "ALTER TABLE scoped_keys ADD COLUMN audience TEXT DEFAULT 'cerema_internal'",
+                "ALTER TABLE scoped_keys ADD COLUMN published_url TEXT",
+                "ALTER TABLE scoped_keys ADD COLUMN published_at INTEGER",
+                "ALTER TABLE scoped_keys ADD COLUMN audit_chain_json TEXT",
+            ):
+                try:
+                    await db.execute(_alter)
+                except Exception:
+                    pass  # column existe deja (idempotent)
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_scoped_active "
                 "ON scoped_keys(username, study_id) WHERE revoked_at IS NULL"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_scoped_published "
+                "ON scoped_keys(username, published_at DESC) "
+                "WHERE published_url IS NOT NULL AND revoked_at IS NULL"
             )
             await db.commit()
     except Exception as exc:
@@ -529,6 +550,104 @@ async def list_scoped_keys(
             d["tools"] = _SCOPED_TOOLS_ALL
         out.append(d)
     return out
+
+
+# ── Sprint Composants Phase 4a (2026-06-27) : publication scoped_keys ────────
+
+
+async def get_scoped_key_meta(key_id: str) -> dict | None:
+    """Retourne metadata d'une scoped_key (sans la cle elle-meme exposee).
+
+    Inclut les colonnes publication (audience, published_url, published_at,
+    audit_chain_json) pour l'UI desk et les tools natifs Phase 4a.
+    """
+    if not _DB_PATH.exists():
+        return None
+    try:
+        async with aiosqlite.connect(_DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            row = await (await db.execute(
+                "SELECT id, parent_key, username, study_id, project_id, "
+                "persona, tools_json, data_scope, mode, actor, label, "
+                "created_at, expires_at, revoked_at, "
+                "audience, published_url, published_at, audit_chain_json "
+                "FROM scoped_keys WHERE id = ?", (key_id,),
+            )).fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            d["id_masked"] = d.pop("id", "")[:14] + "…"
+            try:
+                d["tools"] = json.loads(d.pop("tools_json", '"all"'))
+            except Exception:
+                d["tools"] = _SCOPED_TOOLS_ALL
+            return d
+    except Exception as exc:
+        log.warning("get_scoped_key_meta echec: %s", exc)
+        return None
+
+
+async def update_scoped_key_publication(
+    key_id: str,
+    published_url: str,
+    audit_chain_json: str,
+    audience: str = "cerema_internal",
+) -> bool:
+    """UPDATE colonnes publication apres publish_agent.
+
+    Cf. publish_assembly pattern V1.5 : INSERT+UPDATE pour publication info.
+    """
+    if not _DB_PATH.exists():
+        return False
+    try:
+        async with aiosqlite.connect(_DB_PATH) as db:
+            cur = await db.execute(
+                "UPDATE scoped_keys SET "
+                "published_url = ?, published_at = ?, "
+                "audit_chain_json = ?, audience = ? "
+                "WHERE id = ? AND revoked_at IS NULL",
+                (published_url, int(time.time()), audit_chain_json,
+                 audience, key_id),
+            )
+            await db.commit()
+            return (cur.rowcount or 0) > 0
+    except Exception as exc:
+        log.warning("update_scoped_key_publication echec: %s", exc)
+        return False
+
+
+async def list_scoped_keys_published(username: str) -> list[dict]:
+    """Liste les agents partages publies (published_url IS NOT NULL) actifs.
+
+    Trie par published_at DESC. Inclut audience + audit_chain_json metadata.
+    Pour UI desk 8e onglet "Mes agents partages".
+    """
+    if not _DB_PATH.exists():
+        return []
+    try:
+        async with aiosqlite.connect(_DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await (await db.execute(
+                "SELECT id, study_id, project_id, persona, tools_json, "
+                "data_scope, mode, actor, label, created_at, expires_at, "
+                "audience, published_url, published_at, audit_chain_json "
+                "FROM scoped_keys WHERE username = ? AND revoked_at IS NULL "
+                "AND published_url IS NOT NULL ORDER BY published_at DESC",
+                (username,),
+            )).fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                d["id_masked"] = d.pop("id", "")[:14] + "…"
+                try:
+                    d["tools"] = json.loads(d.pop("tools_json", '"all"'))
+                except Exception:
+                    d["tools"] = _SCOPED_TOOLS_ALL
+                out.append(d)
+            return out
+    except Exception as exc:
+        log.warning("list_scoped_keys_published echec: %s", exc)
+        return []
 
 
 async def _bearer_scope(request: "Request") -> dict | None:
