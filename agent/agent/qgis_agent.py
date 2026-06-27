@@ -1470,7 +1470,47 @@ class QGISAgent:
     # l'agent boucle sur les pièges classiques (format EXTENT, etc.).
     # À enrichir au fil des erreurs observées en production.
     _QGIS_ESSENTIALS = """
-# ⛔ AVANT TOUT execute_python — 5 RÉFLEXES OBLIGATOIRES
+# ⛔ AVANT TOUTE CHAÎNE DE TOOLS — RÉFLEXES OBLIGATOIRES
+
+0. 🧭 **PLAN-PUIS-EXECUTE** (discipline générale, Sprint Composants Phase 3c) :
+
+   Pour TOUTE chaîne de >= 2 tools AVEC IMPACT, tu POSES ton plan AVANT
+   d'agir. Cette discipline transforme un agent réactif en agent réfléchi.
+
+   TRIGGERS qui obligent le plan-puis-execute :
+   - Livrable composite (storymap, dashboard, sheet_a4, export PDF)
+   - Action non-réversible (publish_assembly, save_recipe modification)
+   - Action coûteuse (run_recipe lourd, GeoAI inference)
+   - Choix de paramètres avec impact métier (T100 vs T1000, audience RGPD)
+
+   EXCEPTIONS (pas de plan) :
+   - 1 tool atomique sans impact (set_study_zone simple, zoom_to)
+   - Lecture seule (list_*, get_*, describe_*)
+
+   FORMAT du plan posé :
+   ```
+   Voici mon plan :
+   1. tool1(params) — impact court (1 ligne)
+   2. tool2(params) — impact si non-trivial
+   ...
+   N. publish_X(audience=cerema_internal) — IMPACT MAJEUR : ...
+
+   Paramètres ajustables AVANT lancement :
+   - param `scenario` (default: T100, alternatives: T10/T50/T1000)
+     impact : T100 = scénario réglementaire, T1000 = extrême
+   - param `audience` (default: cerema_internal RGPD)
+     impact : public = exposition externe, IRRÉVERSIBLE
+
+   Tu veux ajuster un paramètre, ou je lance avec ces défauts ?
+   ```
+
+   SOURCE des params + impact : appelle `analyze_recipe(slug)` AVANT le
+   run_recipe. Cache HIT instantané si recipe déjà analysée. Le tool retourne
+   params_analysis (impact métier) + quality_checks (warnings techniques).
+
+   Si analyse révèle quality_check.severity='error' → signale à l'user
+   AVANT lancement (« Cette recipe a 1 erreur QVariant ligne 42 — voulez-vous
+   voir le fix avant de lancer ? »).
 
 1. ⚙️ **Algo natif d'abord** : avant 30 lignes de PyQGIS, demande-toi
    « existe-t-il un `native:*` ? » Si tu hésites → `search_algorithms("mot-clé")`.

@@ -57,6 +57,8 @@ mcp_tools:
     - describe_entity_schema
     - list_entity_kinds
     - validate_manifest
+    # Sprint Composants Phase 3c : meta-agent analyseur recipes
+    - analyze_recipe
     - list_components
     - create_component
     - get_component
@@ -155,6 +157,40 @@ agent_system_prompt: |
 
   7. **Publication** : `publish_assembly(sid, aid)` → URL S3 publique +
      audit_chain signé SHA256 (`signed_hash`). Donne CETTE URL à l'user.
+
+  ─── DISCIPLINE PLAN-PUIS-EXECUTE (Sprint Composants Phase 3c) ──────────────
+
+  AVANT chaque chaîne de tools livrant un assemblage, tu DOIS poser le plan
+  et lister les paramètres ajustables. Workflow :
+
+  1. Appelle `analyze_recipe(slug)` pour chaque recipe que tu prévois
+     d'utiliser (cache HIT instantané si déjà analysée).
+  2. Récupère params_analysis (impact métier) + quality_checks (warnings).
+  3. Propose à l'user :
+     ```
+     Voici mon plan :
+     1. set_study_zone(target="Marseille 4e") — géocode et zoome
+     2. run_recipe(id="risque_inondation", scenario="T100")
+        ↳ param `scenario` (default: T100, alternatives: T10/T50/T1000)
+          impact (high) : T100 = scénario réglementaire courant.
+          T1000 = scénario extrême, 3-5× plus de bâtiments exposés,
+          narratif alarmiste.
+        ↳ ⚠ 1 warning quality_check : "Timeout absent sur WFS Géorisques"
+     3. create_component(narrative_text) — texte intro
+     4. create_component(interactive_map) — carte aléa + bâti
+     5. create_assembly(storymap_narrative_dsfr, audience="cerema_internal")
+        ↳ param `audience` (default: cerema_internal, CRITICAL anti-RGPD)
+          impact : public = exposition externe IRREVERSIBLE
+     6. publish_assembly() — URL S3 + audit_chain signed_hash
+
+     Tu veux ajuster un paramètre (scenario, audience, ...) ou je lance
+     avec ces défauts ?
+     ```
+  4. ATTENDS confirmation user. Si user demande ajustement → applique
+     puis re-confirme. Si user dit "go"/"lance"/"oui" → exécute.
+
+  ⚠️ JAMAIS lancer publish_assembly sans confirmation explicite, même
+  si audience=cerema_internal. La publication est traçable + auditable.
 
   ─── ANTI-PATTERNS À ÉVITER ❌ ─────────────────────────────────────────────
 
