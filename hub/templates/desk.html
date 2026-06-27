@@ -602,22 +602,20 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
        quand filter=project, masque les rtab data-scope="study" et vice versa */
     .rtabs[data-scope-filter="project"] .rtab[data-scope="study"]{display:none}
     .rtabs[data-scope-filter="study"] .rtab[data-scope="project"]{display:none}
-    /* Sections groupées (cycle de vie) */
+    /* Sprint Composants C10 v2 (2026-06-27) : sections décoratives non-collapsibles.
+       L'organisation par cycle de vie reste visible (titres + icônes) mais
+       chaque onglet est directement cliquable sans friction. */
     .rgroup{border-bottom:1px solid var(--border-default-grey)}
     .rgroup:last-child{border-bottom:none}
-    .rgroup-header{display:flex;align-items:center;gap:8px;
-      padding:8px 12px;background:#fafafa;cursor:pointer;
-      font-size:10.5px;font-weight:600;color:#000091;
-      text-transform:uppercase;letter-spacing:.3px;
-      user-select:none;transition:background .15s}
-    .rgroup-header:hover{background:#f3f3f3}
-    .rgroup-header .rgroup-icon{font-size:14px;line-height:1}
+    .rgroup-header{display:flex;align-items:center;gap:6px;
+      padding:6px 12px 4px;
+      font-size:10px;font-weight:600;color:#666;
+      text-transform:uppercase;letter-spacing:.4px;
+      user-select:none;background:transparent}
+    .rgroup-header .rgroup-icon{font-size:11px;line-height:1;opacity:.7}
     .rgroup-header .rgroup-title{flex:1}
-    .rgroup-header .rgroup-chevron{font-size:9px;opacity:.6;
-      transition:transform .2s}
-    .rgroup.collapsed .rgroup-chevron{transform:rotate(-90deg)}
-    .rgroup-body{padding:4px 0;transition:max-height .25s ease}
-    .rgroup.collapsed .rgroup-body{max-height:0;overflow:hidden;padding:0}
+    .rgroup-header .rgroup-chevron{display:none} /* plus de chevron */
+    .rgroup-body{padding:0 0 4px}
     .rgroup-body .rtab{width:100%;justify-content:flex-start}
     </style>
     {# Sprint UX-3 fix (2026-06-22) : onglets renommes pour clarte +
@@ -2034,19 +2032,11 @@ const _DESK_RGROUP_KEY = (group) => `desk.rgroup.${group}.collapsed`;
     });
   }
 
-  // ── Sections collapsibles persistantes ─────────────────────────────────
-  document.querySelectorAll('.rgroup').forEach(group => {
-    const gid = group.dataset.group;
-    if (!gid) return;
-    const savedCollapsed = localStorage.getItem(_DESK_RGROUP_KEY(gid)) === '1';
-    group.classList.toggle('collapsed', savedCollapsed);
-    const header = group.querySelector('.rgroup-header');
-    if (header) {
-      header.addEventListener('click', () => {
-        const isCollapsed = group.classList.toggle('collapsed');
-        localStorage.setItem(_DESK_RGROUP_KEY(gid), isCollapsed ? '1' : '0');
-      });
-    }
+  // Sprint Composants C10 v2 (2026-06-27) : sections décoratives non-collapsibles.
+  // Cleanup localStorage anciennes valeurs collapse pour eviter friction
+  // residuelle de tests precedents.
+  ['sources', 'fabriquer', 'artefacts', 'diffuser'].forEach(gid => {
+    localStorage.removeItem(_DESK_RGROUP_KEY(gid));
   });
 })();
 
