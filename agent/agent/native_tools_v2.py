@@ -313,8 +313,11 @@ async def _call_llm_analyzer(
         or ""
     )
 
-    # Charger system_prompt du profile recipe_analyzer depuis le hub
-    profile_r = await _hub_call("GET", "/profiles/recipe_analyzer")
+    # Charger system_prompt du profile recipe_analyzer via l'endpoint
+    # interne inter-pod (Bearer HUB_API_KEY) qui n'exclut PAS le prompt.
+    # Le endpoint /profiles/{id} public filtre agent_system_prompt pour
+    # sécurité.
+    profile_r = await _hub_call("GET", "/internal/profiles/recipe_analyzer/full")
     if "error" in profile_r:
         return {
             "status": "failed",

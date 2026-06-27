@@ -1501,6 +1501,37 @@ async def get_profile(profile_id: str, user: dict = Depends(auth.get_current_use
     return {k: v for k, v in p.items() if k != "agent_system_prompt"}
 
 
+@app.get("/internal/profiles/{profile_id}/full")
+async def get_profile_full_internal(
+    profile_id: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Sprint Composants Phase 3c (2026-06-27) : retourne le profil COMPLET
+    incluant agent_system_prompt.
+
+    Réservé inter-pod (Bearer HUB_API_KEY) — utilisé par l'agent pour le
+    meta-agent recipe_analyzer (_call_llm_analyzer). Le middleware OIDC
+    inter-pod whitelist /internal/* prefix.
+
+    Sécurité : whitelist seulement les profils internes (recipe_analyzer,
+    component_analyzer V2, ...) pour limiter l'exposition.
+    """
+    if not _PROFILES_AVAILABLE:
+        raise HTTPException(404, "Système de profils non disponible")
+    # Whitelist profils internes exposables
+    _INTERNAL_PROFILES = {"recipe_analyzer"}
+    if profile_id not in _INTERNAL_PROFILES:
+        raise HTTPException(
+            403,
+            f"Profil '{profile_id}' non exposable en /internal "
+            f"(whitelist : {sorted(_INTERNAL_PROFILES)})",
+        )
+    p = profile_manager.get_profile(profile_id)
+    if p.get("id") != profile_id:
+        raise HTTPException(404, f"Profil '{profile_id}' introuvable")
+    return p  # Tout y compris agent_system_prompt
+
+
 @app.post("/profiles/reload")
 async def reload_profiles(user: dict = Depends(auth.get_current_user)):
     """Force le rechargement des profils YAML (hot reload)."""

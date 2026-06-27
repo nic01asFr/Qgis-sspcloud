@@ -735,6 +735,11 @@ _OIDC_MIDDLEWARE_INTER_POD = (
     # /studies/{sid}/components/* et /studies/{sid}/projects/{pid}/components/*
     # sont deja couverts via /studies prefix.
     "/schema",
+    # Sprint Composants Phase 3c (2026-06-27) : endpoints internes inter-pod
+    # pour le meta-agent recipe_analyzer.
+    # /internal/profiles/{id}/full : agent recupere agent_system_prompt
+    # complet (filtre dans /profiles/{id} public).
+    "/internal",
 )
 
 
