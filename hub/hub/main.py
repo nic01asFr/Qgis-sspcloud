@@ -4054,28 +4054,56 @@ async def _render_assembly_html(
                 # Render direct via _render_component_inline helper
                 kind = comp_manifest.get("kind", "unknown")
                 params = comp_manifest.get("params", {})
+                import html as _h
                 if kind == "narrative_text":
-                    md = params.get("markdown", "")
-                    # Rendu minimal markdown -> HTML (titres + paragraphes)
-                    import html as _h
+                    # Bug fix 2026-06-27 : l'agent stocke le markdown soit dans
+                    # params.content soit params.markdown selon ses humeurs.
+                    # On accepte les 2 + fallback sur tout champ string trouve.
+                    md = (params.get("content") or params.get("markdown")
+                          or params.get("text") or params.get("body") or "")
                     lines = md.split("\n")
                     rendered = []
+                    in_para = []
+                    def _flush_para():
+                        if in_para:
+                            rendered.append(f'<p>{_h.escape(" ".join(in_para))}</p>')
+                            in_para.clear()
                     for ln in lines:
                         s = ln.strip()
-                        if s.startswith("### "): rendered.append(f"<h3>{_h.escape(s[4:])}</h3>")
-                        elif s.startswith("## "): rendered.append(f"<h2>{_h.escape(s[3:])}</h2>")
-                        elif s.startswith("# "): rendered.append(f"<h1>{_h.escape(s[2:])}</h1>")
-                        elif s: rendered.append(f"<p>{_h.escape(s)}</p>")
-                    rendered_components[cid] = f'<div style="padding:24px;background:#fff;border-radius:6px;line-height:1.7">{"".join(rendered)}</div>'
+                        if s.startswith("### "):
+                            _flush_para()
+                            rendered.append(f"<h3>{_h.escape(s[4:])}</h3>")
+                        elif s.startswith("## "):
+                            _flush_para()
+                            rendered.append(f"<h2 style='color:#000091'>{_h.escape(s[3:])}</h2>")
+                        elif s.startswith("# "):
+                            _flush_para()
+                            rendered.append(f"<h1 style='color:#000091'>{_h.escape(s[2:])}</h1>")
+                        elif not s:
+                            _flush_para()
+                        else:
+                            in_para.append(s)
+                    _flush_para()
+                    rendered_components[cid] = f'<div style="padding:28px 32px;background:#fff;border-radius:6px;line-height:1.7;font-size:15px;color:#161616">{"".join(rendered)}</div>'
                 elif kind == "kpi_badge":
+                    # Bug fix 2026-06-27 : l'agent peut utiliser value/label/unit
+                    # OU value/label/icon. Accepte les 2 patterns.
                     value = params.get("value", "?")
                     label = params.get("label", "")
-                    unit = params.get("unit", "")
+                    suffix = params.get("unit") or ""  # icon n'est pas un suffix textuel
+                    icon = params.get("icon", "")  # ex: "alert-circle" (peut être ignore en V1)
+                    color_token = params.get("color", "")
+                    # Gradient personnalisable via color token (default blue CEREMA)
+                    gradient = (
+                        "linear-gradient(135deg,#e1000f,#aa0000)" if color_token == "marianne-red"
+                        else "linear-gradient(135deg,#1f8d4d,#0a5d2e)" if color_token == "success-green"
+                        else "linear-gradient(135deg,#000091,#0063cb)"  # default blue CEREMA
+                    )
                     rendered_components[cid] = (
-                        f'<div style="padding:32px;text-align:center;background:linear-gradient(135deg,#000091,#0063cb);'
-                        f'color:#fff;border-radius:8px">'
-                        f'<div style="font-size:48px;font-weight:700;line-height:1">{_h.escape(str(value))}{_h.escape(unit)}</div>'
-                        f'<div style="font-size:14px;opacity:.85;margin-top:8px;text-transform:uppercase;letter-spacing:.5px">{_h.escape(label)}</div>'
+                        f'<div style="padding:40px 32px;text-align:center;background:{gradient};'
+                        f'color:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,145,0.15)">'
+                        f'<div style="font-size:56px;font-weight:700;line-height:1;letter-spacing:-1px">{_h.escape(str(value))}{_h.escape(suffix)}</div>'
+                        f'<div style="font-size:14px;opacity:.92;margin-top:12px;text-transform:uppercase;letter-spacing:1px;font-weight:600">{_h.escape(label)}</div>'
                         f'</div>'
                     )
                 elif kind == "legend":
