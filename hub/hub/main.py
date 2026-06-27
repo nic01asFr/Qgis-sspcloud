@@ -4124,8 +4124,16 @@ async def publish_assembly_endpoint(
             content_type="text/html; charset=utf-8",
             study_id=sid,
         )
-        # signature correcte : info["url"] (cf. s3_publication.py:202)
-        published_url = info.get("url")
+        # Bug fix 2026-06-27 : MinIO SSPCloud n'accepte plus l'ACL canned
+        # public-read sur les objets uploades (retourne AccessDenied 403).
+        # On retourne donc l'URL via le hub /published/{owner}/{kind}/{slug}
+        # qui sert le contenu apres lecture S3 (auth Bearer/cookie OK ou
+        # endpoint publique whitelist OIDC).
+        hub_base = (_HUB_URL or _SELF_URL or "").rstrip("/")
+        published_url = (
+            f"{hub_base}/published/{user['username']}/assembly/{slug}"
+            if hub_base else info.get("url")
+        )
     except Exception as exc:
         s3_publish_error = str(exc)[:200]
         log.error("publish S3 assembly : %s", exc)

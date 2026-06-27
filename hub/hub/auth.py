@@ -859,6 +859,13 @@ _OIDC_MIDDLEWARE_INTER_POD = (
     # /internal/profiles/{id}/full : agent recupere agent_system_prompt
     # complet (filtre dans /profiles/{id} public).
     "/internal",
+    # Bug fix 2026-06-27 : MinIO SSPCloud n'accepte plus ACL canned public-read
+    # sur objets uploades (AccessDenied 403). Le hub sert via /published/...
+    # apres lecture S3 cote serveur. Cet endpoint est PUBLIC par design
+    # (assemblages publishables via publish_assembly avec audience=...) et
+    # ne doit pas require OIDC auth pour les visiteurs externes (collegues
+    # CEREMA via SSO Onyxia OK, mais surtout pour partage tiers internet).
+    "/published",
 )
 
 
