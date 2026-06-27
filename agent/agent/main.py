@@ -427,6 +427,67 @@ async def api_reload_llm_key(request: Request):
     return {"ok": True, "has_key": bool(new_key)}
 
 
+@app.post("/internal/analyze-recipe")
+async def internal_analyze_recipe(request: Request):
+    """Sprint Composants Phase 3c (2026-06-27) : endpoint interne pour le
+    trigger fire-and-forget depuis le hub au PUT /desk/recipes/{slug}.
+
+    Le hub appelle cet endpoint avec {"slug": "...", "source": "user"|"system"}
+    et un Bearer hub_api_key. L'agent orchestre :
+    1. Appel native_tools_v2.analyze_recipe(slug, source) qui :
+       - Récupère YAML
+       - Cache lookup hub (idempotent : si HIT, no-op LLM)
+       - Si MISS, appel LLM profile_analyzer + POST cache
+    2. Retourne immediately (le hub ne wait pas)
+
+    Auth : Bearer HUB_API_KEY (shared secret hub/agent inter-pod).
+
+    Best-effort : si LLM down, on log et retourne 503 silencieusement.
+    Le content_hash invariant garantit que le prochain trigger (au PUT
+    suivant) ré-essaiera l'analyse.
+    """
+    # Auth check (Bearer HUB_API_KEY)
+    expected = os.getenv("HUB_API_KEY", "")
+    if not expected:
+        raise HTTPException(503, "HUB_API_KEY non configure cote agent")
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(403, "Authorization Bearer requis")
+    token = auth_header[7:].strip()
+    if token != expected:
+        raise HTTPException(403, "Token invalide")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    slug = (body.get("slug") or "").strip() if isinstance(body, dict) else ""
+    source = (body.get("source") or "auto").strip() if isinstance(body, dict) else "auto"
+    if not slug:
+        raise HTTPException(400, "slug requis")
+
+    # Trigger async (réponse immédiate, l'agent travaille en background)
+    from agent import native_tools_v2 as nt2
+    asyncio.create_task(_run_analyze_recipe_bg(nt2, slug, source))
+
+    return {"ok": True, "slug": slug, "source": source, "status": "scheduled"}
+
+
+async def _run_analyze_recipe_bg(nt2_mod, slug: str, source: str) -> None:
+    """Background runner pour analyze_recipe — fire-and-forget."""
+    try:
+        result = await nt2_mod.analyze_recipe(slug=slug, source=source)
+        if "error" in result:
+            log.warning("analyze_recipe bg failed slug=%s: %s", slug, result.get("error"))
+        else:
+            log.info(
+                "analyze_recipe bg done slug=%s cache_status=%s",
+                slug, result.get("cache_status"),
+            )
+    except Exception as exc:
+        log.warning("analyze_recipe bg exception slug=%s: %s", slug, exc)
+
+
 @app.post("/api/reload-hub-key")
 async def api_reload_hub_key(request: Request):
     """Webhook interne : rotation de HUB_API_KEY (Mini-Phase 0bis Bug 5.9).

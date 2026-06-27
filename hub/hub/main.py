@@ -5925,12 +5925,57 @@ async def desk_recipe_save(slug: str, payload: dict):
         previous_sha=previous["sha"] if previous else "",
     )
     latest = await studies.recipe_index_get_latest(active_sid, slug)
+
+    # Sprint Composants Phase 3c (2026-06-27) : trigger fire-and-forget
+    # de l'analyse meta-agent. L'agent recipe_analyzer (LLM) génère un
+    # RecipeAnalysis async, persisté côté hub. Au prochain analyze_recipe
+    # tool call, cache HIT instantané.
+    #
+    # Best-effort : si l'agent IA est down, ne bloque pas le save user.
+    # Le content_hash changera au prochain save → re-trigger auto.
+    try:
+        task = asyncio.create_task(
+            _trigger_recipe_analysis_async(slug=slug, source="user")
+        )
+        _background_anchors.add(task)
+        task.add_done_callback(_background_anchors.discard)
+    except Exception as exc:
+        log.warning("trigger recipe analysis async failed: %s", exc)
+
     return {
         "slug": slug,
         "sha": sha,
         "version_num": latest["version_num"] if latest else 1,
         "format": fmt,
     }
+
+
+async def _trigger_recipe_analysis_async(
+    slug: str, source: str = "user",
+) -> None:
+    """Sprint Composants Phase 3c : fire-and-forget vers l'agent IA pour
+    analyser une recipe.
+
+    L'agent IA expose un endpoint interne POST /internal/analyze-recipe
+    (à créer) qui orchestre le tool natif analyze_recipe.
+
+    Best-effort : si agent down, on log et abandonne. content_hash change
+    au prochain save → retry auto.
+    """
+    if not _AGENT_URL:
+        log.debug("AGENT_URL non configuré, skip trigger recipe analysis")
+        return
+    api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+    try:
+        async with httpx.AsyncClient(timeout=60, base_url=_AGENT_URL) as c:
+            await c.post(
+                "/internal/analyze-recipe",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"slug": slug, "source": source},
+            )
+        log.info("triggered async recipe analysis : slug=%s source=%s", slug, source)
+    except Exception as exc:
+        log.warning("trigger recipe analysis failed slug=%s : %s", slug, exc)
 
 
 @app.delete("/desk/recipes/{slug}", status_code=status.HTTP_204_NO_CONTENT)

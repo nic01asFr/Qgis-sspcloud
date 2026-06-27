@@ -74,8 +74,12 @@ _MODEL_BY_PROFILE = {
 # jours -> rotations SSPCloud frequentes, rollback manuel kubectl set env
 # devenait friction operationnelle).
 _MODEL_FALLBACKS = {
-    "default":       ["qwen3-6-35b-moe", "gemma4-26b-moe"],
-    "geoai_analyst": ["gemma4-26b-moe", "qwen3-vl"],  # qwen3-vl fallback vision
+    "default":         ["qwen3-6-35b-moe", "gemma4-26b-moe"],
+    "geoai_analyst":   ["gemma4-26b-moe", "qwen3-vl"],  # qwen3-vl fallback vision
+    # Sprint Composants Phase 3c (2026-06-27) : meta-agent analyseur recipes.
+    # qwen3 preferred = function calling natif strict (JSON Pydantic).
+    # gemma4 fallback = stable + narratif court (impact_description).
+    "recipe_analyzer": ["qwen3-6-35b-moe", "gemma4-26b-moe"],
 }
 
 # Cache du modele resolu, TTL court (5 min). Permet de re-tester un modele

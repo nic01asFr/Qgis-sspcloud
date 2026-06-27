@@ -224,6 +224,234 @@ async def get_assembly_history(sid: str, aid: str) -> dict[str, Any]:
     return await _hub_call("GET", f"/studies/{sid}/assemblies/{aid}/history")
 
 
+# ── Sprint Composants Phase 3c : meta-agent analyseur recipes ────────────────
+
+
+async def _fetch_recipe_yaml(slug: str, source: str = "auto") -> tuple[str, str, str]:
+    """Récupère le contenu YAML brut d'une recipe + son hash + source effective.
+
+    Retourne (content, content_hash, effective_source).
+    Si recipe introuvable, raise RuntimeError.
+
+    Pattern :
+    - source="auto" : essaie user d'abord (/desk/recipes/{slug}), fallback system
+    - source="user" : recipes user-scoped (PVC user)
+    - source="system" : recipes système BigQgisMCP (/app/recipes via run_recipe)
+    """
+    import hashlib
+
+    if source in ("auto", "user"):
+        # Try user recipe via hub endpoint /desk/recipes/{slug}
+        r = await _hub_call("GET", f"/desk/recipes/{slug}")
+        if "error" not in r and r.get("content"):
+            content = r["content"]
+            return content, hashlib.sha256(content.encode("utf-8")).hexdigest(), "user"
+        if source == "user":
+            raise RuntimeError(f"User recipe '{slug}' introuvable")
+
+    if source in ("auto", "system"):
+        # Try system recipe via BigQgisMCP MCP tool list_recipes
+        # Pattern : appel /mcp tools/call avec name="get_recipe", arguments={"id": slug}
+        if not _HUB_URL or not _HUB_API_KEY:
+            raise RuntimeError("HUB_URL/HUB_API_KEY non configurés pour MCP call")
+        try:
+            async with httpx.AsyncClient(timeout=10) as c:
+                resp = await c.post(
+                    f"{_HUB_URL}/mcp",
+                    headers={
+                        "Authorization": f"Bearer {_HUB_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "fetch-recipe",
+                        "method": "tools/call",
+                        "params": {
+                            "name": "get_recipe",
+                            "arguments": {"id": slug},
+                        },
+                    },
+                )
+                data = resp.json()
+                # MCP retourne {"result": {"content": [{"type": "text", "text": "..."}]}}
+                content_list = (data.get("result") or {}).get("content") or []
+                if content_list and isinstance(content_list, list):
+                    text = content_list[0].get("text", "")
+                    if text and not text.startswith("Recipe not found"):
+                        return text, hashlib.sha256(text.encode("utf-8")).hexdigest(), "system"
+        except Exception as exc:
+            log.warning("MCP get_recipe('%s') failed: %s", slug, exc)
+
+    raise RuntimeError(f"Recipe '{slug}' introuvable (source={source})")
+
+
+async def _call_llm_analyzer(
+    yaml_content: str, slug: str, source: str, content_hash: str,
+) -> dict[str, Any]:
+    """Appel LLM avec profile recipe_analyzer pour produire RecipeAnalysis JSON.
+
+    Pattern :
+    - Modèle preferred = qwen3-6-35b-moe (function calling natif strict)
+    - Fallback gemma4-26b-moe via try/except
+    - Charge le profile_analyzer system_prompt depuis /profiles/recipe_analyzer
+    - Envoie YAML brut comme user message + meta info (slug, source, hash)
+    - Force JSON output strict
+    - Parse + valide Pydantic côté caller (POST cache fait validation)
+
+    Si LLM échoue 2 modèles : retourne dict empty_analysis status='failed'.
+    """
+    import json as _json
+    import os
+    from datetime import datetime
+
+    llm_base_url = os.getenv("LLM_BASE_URL", "https://llm.lab.sspcloud.fr/api")
+    # Resolve LLM key via env / fallback
+    api_key = (
+        os.getenv("LLM_API_KEY")
+        or os.getenv("ONYXIA_LLM_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
+        or ""
+    )
+
+    # Charger system_prompt du profile recipe_analyzer depuis le hub
+    profile_r = await _hub_call("GET", "/profiles/recipe_analyzer")
+    if "error" in profile_r:
+        return {
+            "status": "failed",
+            "error_detail": f"profile recipe_analyzer indisponible: {profile_r.get('error')}",
+        }
+    system_prompt = profile_r.get("agent_system_prompt", "")
+    if not system_prompt:
+        return {"status": "failed", "error_detail": "profile recipe_analyzer sans agent_system_prompt"}
+
+    user_message = (
+        f"Analyse la recipe suivante.\n\n"
+        f"slug: {slug}\n"
+        f"source: {source}\n"
+        f"content_hash: {content_hash}\n"
+        f"analyzed_at: {datetime.utcnow().isoformat()}Z\n\n"
+        f"=== CONTENU YAML ===\n{yaml_content}\n"
+        f"=== FIN ===\n\n"
+        f"Produis le JSON RecipeAnalysis strict (rien d'autre)."
+    )
+
+    models_to_try = ["qwen3-6-35b-moe", "gemma4-26b-moe"]
+    last_error = None
+    for model in models_to_try:
+        try:
+            async with httpx.AsyncClient(timeout=120) as c:
+                resp = await c.post(
+                    f"{llm_base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_message},
+                        ],
+                        "response_format": {"type": "json_object"},
+                        "temperature": 0.2,
+                        "max_tokens": 4000,
+                    },
+                )
+                if resp.status_code != 200:
+                    last_error = f"{model} HTTP {resp.status_code}: {resp.text[:200]}"
+                    log.warning("LLM analyzer %s failed: %s", model, last_error)
+                    continue
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"]
+                # Parse JSON
+                try:
+                    analysis_dict = _json.loads(content)
+                except _json.JSONDecodeError as je:
+                    last_error = f"{model} JSON invalide: {je}"
+                    log.warning(last_error)
+                    continue
+                # Inject analyzer_model dans le dict si manquant (le LLM a tendance à mettre génériquement)
+                analysis_dict["analyzer_model"] = model
+                analysis_dict["status"] = "success"
+                return analysis_dict
+        except Exception as exc:
+            last_error = f"{model} exception: {exc}"
+            log.warning(last_error)
+            continue
+
+    return {
+        "status": "failed",
+        "error_detail": f"Tous modèles ont échoué: {last_error}",
+    }
+
+
+async def analyze_recipe(
+    slug: str, source: str = "auto",
+) -> dict[str, Any]:
+    """Tool natif : retourne RecipeAnalysis (cache HIT ou nouvelle analyse).
+
+    Workflow :
+    1. Récupère YAML brut de la recipe + content_hash
+    2. Cache lookup hub GET /schema/recipe/{slug}/analysis
+    3. Si HIT (même content_hash) : retourne immédiat
+    4. Si MISS : appel LLM via _call_llm_analyzer (qwen3 + fallback gemma4)
+    5. POST cache hub → DB + PVC persistance
+    6. Retourne analysis dict
+
+    L'agent principal (Marie persona) consomme ce dict :
+    - params_analysis pour la discipline plan-puis-execute
+    - quality_checks pour informer des warnings éventuels
+    - overall_score pour pondérer la confiance
+    """
+    # 1. Récupérer YAML + hash
+    try:
+        yaml_content, content_hash, effective_source = await _fetch_recipe_yaml(slug, source)
+    except Exception as exc:
+        return {"error": "recipe_not_found", "detail": str(exc), "slug": slug}
+
+    # 2. Cache lookup
+    cache_r = await _hub_call(
+        "GET", f"/schema/recipe/{slug}/analysis",
+        params={"source": effective_source, "content_hash": content_hash},
+    )
+    if cache_r.get("found") and cache_r.get("analysis"):
+        log.info("analyze_recipe cache HIT slug=%s source=%s", slug, effective_source)
+        return {
+            "cache_status": "hit",
+            "analysis": cache_r["analysis"],
+            "metadata": cache_r.get("metadata"),
+        }
+
+    # 3. Cache MISS → appel LLM
+    log.info("analyze_recipe cache MISS slug=%s source=%s, calling LLM", slug, effective_source)
+    analysis = await _call_llm_analyzer(yaml_content, slug, effective_source, content_hash)
+
+    # Forcer les champs critiques (anti-hallucination LLM)
+    analysis["slug"] = slug
+    analysis["source"] = effective_source
+    analysis["content_hash"] = content_hash
+
+    # 4. POST cache (même si status=failed, on persiste pour éviter re-call)
+    post_r = await _hub_call(
+        "POST", f"/schema/recipe/{slug}/analysis",
+        json_body=analysis,
+    )
+
+    if "error" in post_r:
+        log.warning("POST cache analysis failed: %s", post_r)
+        return {
+            "cache_status": "miss_persist_failed",
+            "analysis": analysis,
+            "persist_error": post_r.get("error"),
+        }
+
+    return {
+        "cache_status": "miss_analyzed",
+        "analysis": analysis,
+        "persisted_rowid": post_r.get("rowid"),
+    }
+
+
 # ── Catalogue tools natifs (pour exposition MCP côté agent) ───────────────────
 
 NATIVE_TOOLS_V2 = {
@@ -350,6 +578,21 @@ NATIVE_TOOLS_V2 = {
         "fn": get_assembly_history,
         "description": "Historique des versions assemblage (audit trail).",
         "params": {"sid": "str", "aid": "str"},
+    },
+    # Sprint Composants Phase 3c (2026-06-27) : meta-agent analyseur recipes
+    "analyze_recipe": {
+        "fn": analyze_recipe,
+        "description": (
+            "Analyse une recipe (user ou système BigQgisMCP) et retourne "
+            "RecipeAnalysis : params + impact métier + quality_checks. "
+            "Cache HIT instant si déjà analysée, sinon trigger LLM (~10s). "
+            "DISCIPLINE PLAN-PUIS-EXECUTE : appelle ce tool AVANT run_recipe "
+            "pour proposer params + impact à l'user."
+        ),
+        "params": {
+            "slug": "str (identifiant recipe)",
+            "source": "str optionnel ('user'|'system'|'auto' default)",
+        },
     },
 }
 
@@ -666,6 +909,41 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {"sid": _SID_SCHEMA, "aid": _AID_SCHEMA},
                 "required": ["sid", "aid"],
+            },
+        },
+    },
+    # Sprint Composants Phase 3c (2026-06-27) : meta-agent analyseur recipes
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_recipe",
+            "description": (
+                "DISCIPLINE PLAN-PUIS-EXECUTE : analyse une recipe AVANT de "
+                "la lancer pour comprendre ses params + impact métier + "
+                "quality_checks. Cache HIT instant si déjà analysée, sinon "
+                "trigger LLM (~10s). Workflow recommandé : "
+                "(1) analyze_recipe(slug) (2) propose params + impact à "
+                "l'user (3) attendre confirmation/ajustement (4) run_recipe. "
+                "Sécurise les choix params (T100 vs T1000, audience cerema vs "
+                "public, etc.) et détecte les warnings techniques."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {
+                        "type": "string",
+                        "description": "Identifiant de la recipe (ex: 'risque_inondation').",
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": ["user", "system", "auto"],
+                        "description": (
+                            "Source recipe. 'auto' essaie user d'abord, "
+                            "fallback system. Recommandé : 'auto'."
+                        ),
+                    },
+                },
+                "required": ["slug"],
             },
         },
     },
