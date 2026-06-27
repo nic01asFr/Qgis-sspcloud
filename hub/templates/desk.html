@@ -698,7 +698,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       <div class="liv-create-row">
         <div class="liv-create-title">✨ Demander à l'assistant V1.5 :</div>
         <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35;width:100%"
-                data-prompt="Crée moi un nouveau livrable pour cette étude. Propose-moi un plan avec analyze_agent_config si besoin de partager via agent, ou avec validate_manifest pour une storymap V1.5.">
+                data-prompt="J'aimerais créer un nouveau livrable pour cette étude. Quels types sont possibles (storymap interactive, rapport, jeu de données partageable, etc.) ? Propose-moi le plus adapté à ce que j'ai déjà.">
           🎨 Créer un nouveau livrable
         </button>
       </div>
@@ -768,14 +768,14 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
            se souvenir de la formulation exacte. #}
         <div class="quick-actions-block" data-target="components">
           <div class="quick-actions-title">✨ Demander à l'agent V1.5 :</div>
-          <button class="quick-action-btn" data-prompt="Liste les kinds de composants disponibles via list_entity_kinds('component') et propose-moi 3 composants pertinents pour mon étude actuelle.">
-            🔍 Lister les kinds disponibles
+          <button class="quick-action-btn" data-prompt="Quels types de briques visuelles je peux créer pour ma future storymap (cartes, textes, indicateurs, etc.) ? Propose-moi 3 idées pertinentes pour mon étude actuelle.">
+            💡 Quelles briques je peux créer ?
           </button>
-          <button class="quick-action-btn" data-prompt="Crée un composant narrative_text avec un titre court et un markdown d'introduction de 3 paragraphes pour mon étude actuelle. Utilise validate_manifest avant create_component.">
+          <button class="quick-action-btn" data-prompt="Crée-moi un texte d'introduction (court, accessible) pour ma future storymap : titre + 3 paragraphes contextualisant mon étude.">
             📝 Créer un texte d'introduction
           </button>
-          <button class="quick-action-btn" data-prompt="Crée un composant kpi_badge avec un chiffre-clé pertinent extrait de la zone d'étude active (population, surface, ou autre indicateur métier). Valide d'abord le manifest.">
-            🔢 Créer un KPI badge
+          <button class="quick-action-btn" data-prompt="Crée-moi un indicateur visuel (chiffre-clé en avant) qui met en valeur une donnée importante de ma zone d'étude (population exposée, surface, etc.).">
+            🔢 Créer un indicateur visuel
           </button>
         </div>
         <div id="components-list" class="components-list"
@@ -964,14 +964,14 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         {# Sprint Composants Phase 3b (2026-06-26) : quick-actions UI bridge. #}
         <div class="quick-actions-block" data-target="assemblies">
           <div class="quick-actions-title">✨ Demander à l'agent V1.5 :</div>
-          <button class="quick-action-btn" data-prompt="Liste mes composants V1.5 via list_components puis assemble-les dans un storymap_narrative_dsfr avec audience cerema_internal (audit_chain automatique). Valide d'abord le manifest assembly.">
-            🎨 Assembler une storymap avec mes composants
+          <button class="quick-action-btn" data-prompt="Assemble mes briques visuelles en storymap CEREMA prête à partager (style DSFR officiel). Confirme avec moi le titre et l'audience avant de créer.">
+            🎨 Assembler une storymap avec mes briques
           </button>
-          <button class="quick-action-btn" data-prompt="Render preview du dernier assemblage que j'ai créé via render_assembly (HTML preview sans publication, pour validation visuelle).">
-            👁 Render preview du dernier assemblage
+          <button class="quick-action-btn" data-prompt="Montre-moi un aperçu visuel de ma dernière storymap (sans la publier — juste pour vérifier le rendu).">
+            👁 Aperçu de ma dernière storymap
           </button>
-          <button class="quick-action-btn" data-prompt="Publie mon dernier assemblage draft via publish_assembly avec audience cerema_internal (génère URL S3 + audit_chain signed_hash SHA256 anti-tamper). Confirme l'audience cerema_internal AVANT publish.">
-            🚀 Publier mon dernier draft (URL S3 + audit_chain)
+          <button class="quick-action-btn" data-prompt="Publie ma dernière storymap pour qu'elle soit accessible (lien partageable, accès réservé collègues CEREMA par défaut). Confirme l'audience avant publication.">
+            🚀 Publier (lien partageable collègues CEREMA)
           </button>
         </div>
         <div id="assemblies-list" class="assemblies-list"
@@ -1430,16 +1430,16 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             ✨ Demander à l'assistant V1.5 :
           </div>
           <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35"
-                  data-prompt="Liste mes agents partagés actuels via list_agents puis aide-moi à comprendre où en est cette étude.">
-            📋 Lister mes agents partagés actuels
+                  data-prompt="Montre-moi mes assistants partagés actuels pour cette étude, et fais le point sur où on en est.">
+            📋 Mes assistants partagés actuels
           </button>
           <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35;margin-top:5px"
-                  data-prompt="Crée moi un agent partagé pour diffuser cette étude à mes collègues CEREMA Direction territoriale. Appelle analyze_agent_config d'abord pour proposer un plan avec params + impact métier + warnings.">
-            🤖 Configurer un nouvel agent partagé
+                  data-prompt="Je voudrais partager cette étude avec mes collègues CEREMA via un assistant qu'ils peuvent consulter directement. Propose-moi une configuration adaptée et préviens-moi des points d'attention (confidentialité, audience).">
+            🤖 Créer un assistant pour mes collègues
           </button>
           <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35;margin-top:5px"
-                  data-prompt="Analyse une config d'agent partagé pour cette étude avec audience=cerema_internal et profile=storymap_creator_v15 via analyze_agent_config, et montre-moi les warnings éventuels.">
-            🔍 Analyser une config avant de publier
+                  data-prompt="Vérifie qu'un assistant partagé visible par mes collègues CEREMA serait bien configuré pour cette étude. Signale-moi les éventuels points d'attention (confidentialité, accès, etc.).">
+            🔍 Vérifier la configuration avant partage
           </button>
         </div>
         <div id="agents-list" class="agents-list" data-active-study-id="{{ active_study_id }}" style="display:flex;flex-direction:column;gap:6px">
@@ -2197,7 +2197,7 @@ async function loadLivrables() {
         actions: isPub
           ? [{label:'👁 Voir',  href: a.published_url, target:'_blank'}]
           : [{label:'👁 Preview', href:`/studies/${sid}/assemblies/${a.aid}/render`, target:'_blank'},
-             {label:'🚀 Publier', prompt:`Publie l'assemblage ${a.aid} via publish_assembly avec audience cerema_internal.`}],
+             {label:'🚀 Publier', prompt:`Publie cette storymap (« ${a.title || a.aid} ») avec accès réservé à mes collègues CEREMA. Confirme avec moi l'audience avant publication.`}],
       });
     });
 
