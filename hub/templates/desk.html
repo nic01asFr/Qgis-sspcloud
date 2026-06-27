@@ -1307,50 +1307,6 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <div class="publi-empty">Chargement…</div>
       </div>
     </div>
-  </aside>
-
-  <!-- V1.5 Sprint 1 : Modal éditeur YAML recettes user (overlay full-screen) -->
-  <div id="recipe-editor-overlay" style="
-       display:none; position:fixed; inset:0; z-index:9999;
-       background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
-    <div style="background:white; width:80%; max-width:900px; max-height:90vh;
-                display:flex; flex-direction:column; border-radius:6px;
-                box-shadow:0 8px 32px rgba(0,0,0,0.4);">
-      <div style="padding:12px 16px; border-bottom:1px solid #ddd;
-                  display:flex; align-items:center; gap:12px;">
-        <strong style="flex:1;" id="recipe-editor-title">Recette : —</strong>
-        <span id="recipe-editor-meta" style="font-size:11px; color:#666;"></span>
-        <button onclick="closeRecipeEditor()"
-                style="border:0; background:#eee; padding:4px 10px; border-radius:4px;
-                       cursor:pointer;">✕ Fermer</button>
-      </div>
-      <div style="padding:12px 16px; display:flex; gap:8px; flex-wrap:wrap;">
-        <input id="recipe-editor-slug" type="text" placeholder="slug (ex: ma_recette)"
-               style="flex:1; min-width:180px; padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
-        <input id="recipe-editor-name" type="text" placeholder="Nom affiché"
-               style="flex:1; min-width:180px; padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
-        <select id="recipe-editor-format"
-                style="padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
-          <option value="yaml">YAML</option>
-          <option value="json">JSON</option>
-        </select>
-      </div>
-      <textarea id="recipe-editor-content" spellcheck="false"
-                style="flex:1; min-height:400px; margin:0 16px; padding:10px;
-                       font-family:'Courier New', monospace; font-size:12px;
-                       border:1px solid #ccc; border-radius:4px;
-                       white-space:pre; overflow:auto;"></textarea>
-      <div id="recipe-editor-status" style="padding:4px 16px; min-height:20px; font-size:11px;"></div>
-      <div style="padding:12px 16px; border-top:1px solid #ddd; display:flex; gap:8px; justify-content:flex-end;">
-        <button onclick="closeRecipeEditor()" class="fr-btn fr-btn--secondary fr-btn--sm">
-          Annuler
-        </button>
-        <button id="recipe-editor-save" onclick="saveRecipeFromEditor()"
-                class="fr-btn fr-btn--sm">
-          💾 Sauvegarder
-        </button>
-      </div>
-    </div>
 
     {# Sprint Composants Phase 4a (2026-06-27) : onglet "Mes agents partagés"
        - READ-ONLY : liste des agents publiés + URL widget + badges audience
@@ -1450,6 +1406,51 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       btn.addEventListener('click', () => setTimeout(loadAgents, 100));
     });
     </script>
+  </aside>
+
+  <!-- V1.5 Sprint 1 : Modal éditeur YAML recettes user (overlay full-screen) -->
+  <div id="recipe-editor-overlay" style="
+       display:none; position:fixed; inset:0; z-index:9999;
+       background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+    <div style="background:white; width:80%; max-width:900px; max-height:90vh;
+                display:flex; flex-direction:column; border-radius:6px;
+                box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+      <div style="padding:12px 16px; border-bottom:1px solid #ddd;
+                  display:flex; align-items:center; gap:12px;">
+        <strong style="flex:1;" id="recipe-editor-title">Recette : —</strong>
+        <span id="recipe-editor-meta" style="font-size:11px; color:#666;"></span>
+        <button onclick="closeRecipeEditor()"
+                style="border:0; background:#eee; padding:4px 10px; border-radius:4px;
+                       cursor:pointer;">✕ Fermer</button>
+      </div>
+      <div style="padding:12px 16px; display:flex; gap:8px; flex-wrap:wrap;">
+        <input id="recipe-editor-slug" type="text" placeholder="slug (ex: ma_recette)"
+               style="flex:1; min-width:180px; padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+        <input id="recipe-editor-name" type="text" placeholder="Nom affiché"
+               style="flex:1; min-width:180px; padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+        <select id="recipe-editor-format"
+                style="padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+          <option value="yaml">YAML</option>
+          <option value="json">JSON</option>
+        </select>
+      </div>
+      <textarea id="recipe-editor-content" spellcheck="false"
+                style="flex:1; min-height:400px; margin:0 16px; padding:10px;
+                       font-family:'Courier New', monospace; font-size:12px;
+                       border:1px solid #ccc; border-radius:4px;
+                       white-space:pre; overflow:auto;"></textarea>
+      <div id="recipe-editor-status" style="padding:4px 16px; min-height:20px; font-size:11px;"></div>
+      <div style="padding:12px 16px; border-top:1px solid #ddd; display:flex; gap:8px; justify-content:flex-end;">
+        <button onclick="closeRecipeEditor()" class="fr-btn fr-btn--secondary fr-btn--sm">
+          Annuler
+        </button>
+        <button id="recipe-editor-save" onclick="saveRecipeFromEditor()"
+                class="fr-btn fr-btn--sm">
+          💾 Sauvegarder
+        </button>
+      </div>
+    </div>
+
   </div>
 
   <div class="handle h1" data-target="publi"></div>
