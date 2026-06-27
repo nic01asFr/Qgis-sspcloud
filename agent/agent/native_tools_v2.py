@@ -434,6 +434,366 @@ async def _call_llm_analyzer(
     }
 
 
+# ── Sprint Composants Phase 4a : meta-agent analyseur config agent ───────────
+
+
+async def _call_llm_agent_config_analyzer(
+    config: dict[str, Any], sid: str, owner: str,
+    components_in_study: int, recipes_in_study: int,
+    assemblies_in_study: int, has_restricted: bool,
+    config_hash: str,
+) -> dict[str, Any]:
+    """Appel LLM avec profile agent_config_analyzer pour produire
+    AgentConfigAnalysis JSON.
+
+    Modèles : qwen3-6-35b-moe preferred + fallback gemma4-26b-moe.
+    Force JSON output strict via response_format=json_object.
+    Si tous modèles échouent : retourne dict status='failed'.
+    """
+    import json as _json
+    import os
+    from datetime import datetime
+
+    llm_base_url = os.getenv("LLM_BASE_URL", "https://llm.lab.sspcloud.fr/api")
+    api_key = (
+        os.getenv("LLM_API_KEY")
+        or os.getenv("ONYXIA_LLM_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
+        or ""
+    )
+
+    # Charger system_prompt du profile agent_config_analyzer
+    profile_r = await _hub_call("GET", "/internal/profiles/agent_config_analyzer/full")
+    if "error" in profile_r:
+        return {
+            "status": "failed",
+            "error_detail": f"profile agent_config_analyzer indisponible: {profile_r.get('error')}",
+        }
+    system_prompt = profile_r.get("agent_system_prompt", "")
+    if not system_prompt:
+        return {"status": "failed", "error_detail": "profile sans agent_system_prompt"}
+
+    user_message = (
+        f"Analyse la configuration d'agent partagé suivante.\n\n"
+        f"=== CONFIG PROPOSÉE ===\n"
+        f"sid: {sid}\n"
+        f"config_hash: {config_hash}\n"
+        f"profile: {config.get('profile', '?')}\n"
+        f"audience: {config.get('audience', 'cerema_internal')}\n"
+        f"expires_at: {config.get('expires_at')}\n"
+        f"data_scope: {config.get('data_scope', 'project')}\n"
+        f"tools_whitelist: {config.get('tools_whitelist', 'all')}\n"
+        f"project_id: {config.get('project_id')}\n"
+        f"label: {config.get('label')}\n\n"
+        f"=== CONTEXTE ÉTUDE ===\n"
+        f"components_in_study: {components_in_study}\n"
+        f"recipes_in_study: {recipes_in_study}\n"
+        f"assemblies_in_study: {assemblies_in_study}\n"
+        f"has_restricted_components: {has_restricted}\n"
+        f"owner: {owner}\n"
+        f"analyzed_at: {datetime.utcnow().isoformat()}Z\n\n"
+        f"Produis le JSON AgentConfigAnalysis strict (rien d'autre)."
+    )
+
+    def _pad_short_strings_agent(d: dict) -> dict:
+        """Pad les champs string trop courts (cf. _pad_short_strings recipes)."""
+        _PAD = " (information à compléter par l'agent enrichisseur dans une prochaine itération)"
+
+        def _ensure_len(s, min_l):
+            if not isinstance(s, str) or len(s) >= min_l:
+                return s
+            return (s + _PAD)[:max(min_l, 50)]
+
+        if "usage_inferred" in d:
+            d["usage_inferred"] = _ensure_len(d["usage_inferred"], 30)
+        for p in d.get("params_analysis", []) or []:
+            if "description_short" in p:
+                p["description_short"] = _ensure_len(p["description_short"], 10)
+            if "impact_description" in p:
+                p["impact_description"] = _ensure_len(p["impact_description"], 50)
+        for q in d.get("quality_checks", []) or []:
+            if "title" in q:
+                q["title"] = _ensure_len(q["title"], 10)
+            if "description" in q:
+                q["description"] = _ensure_len(q["description"], 30)
+            if "fix_hint" in q:
+                q["fix_hint"] = _ensure_len(q["fix_hint"], 20)
+        return d
+
+    models_to_try = ["qwen3-6-35b-moe", "gemma4-26b-moe"]
+    last_error = None
+    for model in models_to_try:
+        try:
+            async with httpx.AsyncClient(timeout=120) as c:
+                resp = await c.post(
+                    f"{llm_base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_message},
+                        ],
+                        "response_format": {"type": "json_object"},
+                        "temperature": 0.2,
+                        "max_tokens": 4000,
+                    },
+                )
+                if resp.status_code != 200:
+                    last_error = f"{model} HTTP {resp.status_code}: {resp.text[:200]}"
+                    log.warning("LLM agent_config_analyzer %s failed: %s", model, last_error)
+                    continue
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"]
+                try:
+                    analysis_dict = _json.loads(content)
+                except _json.JSONDecodeError as je:
+                    last_error = f"{model} JSON invalide: {je}"
+                    log.warning(last_error)
+                    continue
+                analysis_dict["analyzer_model"] = model
+                analysis_dict["status"] = "success"
+                # Anti-hallucination : forcer les champs critiques avec valeurs maîtrisées
+                analysis_dict["sid"] = sid
+                analysis_dict["config_hash"] = config_hash
+                analysis_dict["components_in_study"] = components_in_study
+                analysis_dict["recipes_in_study"] = recipes_in_study
+                analysis_dict["assemblies_in_study"] = assemblies_in_study
+                analysis_dict["has_restricted_components"] = has_restricted
+                # Force aussi la config dans le retour pour cohérence
+                for k in ("profile", "audience", "expires_at", "data_scope",
+                          "tools_whitelist", "project_id", "label"):
+                    if k in config:
+                        analysis_dict[k] = config[k]
+                analysis_dict = _pad_short_strings_agent(analysis_dict)
+                return analysis_dict
+        except Exception as exc:
+            last_error = f"{model} exception: {exc}"
+            log.warning(last_error)
+            continue
+
+    return {
+        "status": "failed",
+        "error_detail": f"Tous modèles ont échoué: {last_error}",
+    }
+
+
+async def _fetch_study_context_for_agent(sid: str) -> dict[str, int | bool]:
+    """Compte components/recipes/assemblies de l'étude + flag restricted.
+
+    Utilisé par analyze_agent_config pour fournir le contexte au LLM.
+    """
+    components_in_study = 0
+    recipes_in_study = 0
+    assemblies_in_study = 0
+    has_restricted = False
+
+    try:
+        comps_r = await _hub_call("GET", f"/studies/{sid}/components")
+        if isinstance(comps_r, list):
+            components_in_study = len(comps_r)
+            for c in comps_r:
+                if c.get("classification") in ("restricted", "confidential"):
+                    has_restricted = True
+        elif isinstance(comps_r, dict) and not comps_r.get("error"):
+            # Some endpoints wrap in object; handle gracefully
+            items = comps_r.get("items") or []
+            components_in_study = len(items)
+    except Exception as exc:
+        log.warning("_fetch_study_context_for_agent components: %s", exc)
+
+    try:
+        asms_r = await _hub_call("GET", f"/studies/{sid}/assemblies")
+        if isinstance(asms_r, list):
+            assemblies_in_study = len(asms_r)
+        elif isinstance(asms_r, dict) and not asms_r.get("error"):
+            items = asms_r.get("items") or []
+            assemblies_in_study = len(items)
+    except Exception as exc:
+        log.warning("_fetch_study_context_for_agent assemblies: %s", exc)
+
+    try:
+        recipes_r = await _hub_call("GET", "/desk/recipes")
+        if isinstance(recipes_r, dict) and not recipes_r.get("error"):
+            recipes_in_study = recipes_r.get("count", 0)
+    except Exception as exc:
+        log.warning("_fetch_study_context_for_agent recipes: %s", exc)
+
+    return {
+        "components_in_study": components_in_study,
+        "recipes_in_study": recipes_in_study,
+        "assemblies_in_study": assemblies_in_study,
+        "has_restricted": has_restricted,
+    }
+
+
+async def list_agents(sid: str) -> dict[str, Any]:
+    """Liste les agents partagés de l'étude.
+
+    Retourne {sid, count, agents: [{label, profile, audience, published_url,
+    audit_chain.signed_hash, expires_at, ...}]}.
+    """
+    return await _hub_call(
+        "GET", f"/studies/{sid}/scoped-keys",
+        params={"only_published": "false"},
+    )
+
+
+async def analyze_agent_config(
+    sid: str,
+    profile: str = "storymap_creator_v15",
+    audience: str = "cerema_internal",
+    expires_at: int | None = None,
+    data_scope: str = "project",
+    tools_whitelist: list[str] | str = "all",
+    project_id: str | None = None,
+    label: str | None = None,
+) -> dict[str, Any]:
+    """Analyse pré-mint d'une config d'agent partagé.
+
+    Workflow :
+    1. Fetch contexte étude (components/recipes/assemblies counts)
+    2. Compute config_hash SHA256 canonical
+    3. Cache lookup hub
+    4. Si MISS : appel LLM via profile agent_config_analyzer + fallback
+    5. POST cache → DB + PVC
+    6. Retourne dict {cache_status, analysis}
+
+    L'assistant principal consomme params_analysis + quality_checks pour
+    proposer plan + impact à l'user (discipline plan-puis-execute Phase 3c).
+    """
+    import hashlib
+    import json as _json
+
+    # 1. Contexte étude
+    ctx = await _fetch_study_context_for_agent(sid)
+
+    # 2. Config hash canonical
+    canonical = _json.dumps({
+        "sid": sid,
+        "profile": profile,
+        "audience": audience,
+        "expires_at": expires_at,
+        "data_scope": data_scope,
+        "tools_whitelist": tools_whitelist if isinstance(tools_whitelist, str)
+                           else sorted(tools_whitelist),
+        "project_id": project_id,
+        "label": label,
+    }, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    config_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    # 3. Cache lookup
+    cache_r = await _hub_call(
+        "GET", "/schema/agent-config/analysis",
+        params={"sid": sid, "config_hash": config_hash},
+    )
+    if cache_r.get("found") and cache_r.get("analysis"):
+        log.info("analyze_agent_config cache HIT sid=%s hash=%s",
+                 sid, config_hash[:12])
+        return {
+            "cache_status": "hit",
+            "analysis": cache_r["analysis"],
+            "context_inferred": ctx,
+        }
+
+    # 4. Cache MISS → LLM
+    log.info("analyze_agent_config cache MISS sid=%s, calling LLM", sid)
+    config = {
+        "profile": profile, "audience": audience,
+        "expires_at": expires_at, "data_scope": data_scope,
+        "tools_whitelist": tools_whitelist,
+        "project_id": project_id, "label": label,
+    }
+    analysis = await _call_llm_agent_config_analyzer(
+        config=config, sid=sid, owner="",
+        components_in_study=ctx["components_in_study"],
+        recipes_in_study=ctx["recipes_in_study"],
+        assemblies_in_study=ctx["assemblies_in_study"],
+        has_restricted=ctx["has_restricted"],
+        config_hash=config_hash,
+    )
+
+    # 5. POST cache (même si failed, persiste pour éviter re-call)
+    post_r = await _hub_call(
+        "POST", "/schema/agent-config/analysis",
+        json_body=analysis,
+    )
+
+    if "error" in post_r:
+        log.warning("POST cache agent_config_analysis failed: %s", post_r)
+        return {
+            "cache_status": "miss_persist_failed",
+            "analysis": analysis,
+            "context_inferred": ctx,
+            "persist_error": post_r.get("error"),
+        }
+
+    return {
+        "cache_status": "miss_analyzed",
+        "analysis": analysis,
+        "context_inferred": ctx,
+        "persisted_rowid": post_r.get("rowid"),
+    }
+
+
+async def create_agent(
+    sid: str,
+    profile: str = "storymap_creator_v15",
+    audience: str = "cerema_internal",
+    expires_at: int | None = None,
+    data_scope: str = "project",
+    tools_whitelist: list[str] | str = "all",
+    project_id: str | None = None,
+    label: str | None = None,
+) -> dict[str, Any]:
+    """Mint un agent partagé (clé scopée qgisk_).
+
+    L'assistant DOIT avoir appelé analyze_agent_config AVANT pour proposer
+    le plan + obtenir confirmation user. Cf. discipline plan-puis-execute.
+
+    Retourne {key, key_masked, ..., warning_copy_now}.
+    """
+    payload = {
+        "profile": profile, "audience": audience,
+        "expires_at": expires_at, "data_scope": data_scope,
+        "tools_whitelist": tools_whitelist,
+        "project_id": project_id, "label": label,
+    }
+    return await _hub_call(
+        "POST", f"/studies/{sid}/scoped-keys",
+        json_body=payload,
+    )
+
+
+async def publish_agent(
+    sid: str,
+    key_id: str,
+    audience: str | None = None,
+) -> dict[str, Any]:
+    """Publie un agent partagé : audit_chain + URL widget.
+
+    L'agent doit appeler create_agent d'abord pour obtenir key_id.
+    Retourne {published_url, audit_chain: {signed_hash, ...}}.
+    """
+    body: dict[str, Any] = {}
+    if audience:
+        body["audience"] = audience
+    return await _hub_call(
+        "POST", f"/studies/{sid}/scoped-keys/{key_id}/publish",
+        json_body=body or None,
+    )
+
+
+async def revoke_agent(sid: str, key_id: str) -> dict[str, Any]:
+    """Révoque un agent partagé (soft delete)."""
+    return await _hub_call(
+        "DELETE", f"/studies/{sid}/scoped-keys/{key_id}",
+    )
+
+
 async def analyze_recipe(
     slug: str, source: str = "auto",
 ) -> dict[str, Any]:
@@ -642,6 +1002,65 @@ NATIVE_TOOLS_V2 = {
             "slug": "str (identifiant recipe)",
             "source": "str optionnel ('user'|'system'|'auto' default)",
         },
+    },
+    # Sprint Composants Phase 4a (2026-06-27) : agents partagés
+    "list_agents": {
+        "fn": list_agents,
+        "description": "Liste les agents partagés de l'étude (incluant non-publiés).",
+        "params": {"sid": "str étude id"},
+    },
+    "analyze_agent_config": {
+        "fn": analyze_agent_config,
+        "description": (
+            "DISCIPLINE PLAN-PUIS-EXECUTE : analyse une config d'agent partagé "
+            "AVANT mint pour comprendre params + impact métier/RGPD + quality "
+            "checks. Cache HIT instant si déjà analysée. Recommandé : appelle "
+            "ce tool, propose plan à l'user, attends confirmation, puis "
+            "create_agent + publish_agent."
+        ),
+        "params": {
+            "sid": "str étude id",
+            "profile": "str (storymap_creator_v15 défaut)",
+            "audience": "str (cerema_internal défaut, JAMAIS public sans confirmation user)",
+            "expires_at": "int unix timestamp optionnel (None = jamais)",
+            "data_scope": "str (project|study|all, project défaut)",
+            "tools_whitelist": "list|'all'",
+            "project_id": "str optionnel",
+            "label": "str optionnel (auto-généré sinon)",
+        },
+    },
+    "create_agent": {
+        "fn": create_agent,
+        "description": (
+            "Mint un agent partagé (clé scopée qgisk_). Appelle "
+            "analyze_agent_config AVANT pour valider config. Retourne "
+            "{key, key_masked, ...} — la clé brute n'est retournée qu'une "
+            "seule fois, copier maintenant."
+        ),
+        "params": {
+            "sid": "str", "profile": "str", "audience": "str",
+            "expires_at": "int|None", "data_scope": "str",
+            "tools_whitelist": "list|'all'",
+            "project_id": "str|None", "label": "str|None",
+        },
+    },
+    "publish_agent": {
+        "fn": publish_agent,
+        "description": (
+            "Publie un agent partagé : calcule audit_chain transverse SIGNÉ "
+            "SHA256 + génère URL widget. Doit avoir appelé create_agent "
+            "d'abord pour obtenir key_id. Retourne {published_url, "
+            "audit_chain: {signed_hash, ...}}."
+        ),
+        "params": {
+            "sid": "str", "key_id": "str (qgisk_...)",
+            "audience": "str optionnel (override)",
+        },
+    },
+    "revoke_agent": {
+        "fn": revoke_agent,
+        "description": "Révoque un agent partagé (soft delete, irréversible).",
+        "params": {"sid": "str", "key_id": "str"},
     },
 }
 
@@ -961,6 +1380,137 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
             },
         },
     },
+    # Sprint Composants Phase 4a (2026-06-27) : agents partagés
+    {
+        "type": "function",
+        "function": {
+            "name": "list_agents",
+            "description": (
+                "Liste les agents partagés de l'étude (clés scopées avec "
+                "métadonnées publication). Utile pour voir ce qui existe "
+                "avant de configurer un nouveau."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"sid": _SID_SCHEMA},
+                "required": ["sid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_agent_config",
+            "description": (
+                "DISCIPLINE PLAN-PUIS-EXECUTE : analyse une config d'agent "
+                "partagé AVANT mint. Retourne params + impact métier/RGPD + "
+                "quality_checks (profile_coherence, audience_safety, "
+                "scope_appropriateness, tools_minimum, expiration_strategy). "
+                "Cache HIT instant si déjà analysée. Recommandé : appelle ce "
+                "tool, propose plan à l'user, attends confirmation, puis "
+                "create_agent + publish_agent."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sid": _SID_SCHEMA,
+                    "profile": {
+                        "type": "string",
+                        "description": "Profile identité de l'agent partagé (storymap_creator_v15 défaut).",
+                    },
+                    "audience": {
+                        "type": "string",
+                        "enum": ["public", "cerema_internal", "restricted", "confidential"],
+                        "description": "Audience cible. JAMAIS 'public' sans confirmation explicite user (RGPD).",
+                    },
+                    "expires_at": {
+                        "type": ["integer", "null"],
+                        "description": "Unix timestamp expiration ou null = jamais.",
+                    },
+                    "data_scope": {
+                        "type": "string",
+                        "enum": ["all", "study", "project"],
+                    },
+                    "tools_whitelist": {
+                        "description": "Liste de tools autorisés ou 'all' (hérite profile).",
+                    },
+                    "project_id": {"type": ["string", "null"]},
+                    "label": {"type": ["string", "null"]},
+                },
+                "required": ["sid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_agent",
+            "description": (
+                "Mint un agent partagé. Retourne {key, key_masked, ...} — "
+                "la clé brute est retournée UNE SEULE FOIS. RECOMMANDÉ : "
+                "appelle analyze_agent_config d'abord pour valider config + "
+                "obtenir confirmation user (discipline plan-puis-execute)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sid": _SID_SCHEMA,
+                    "profile": {"type": "string"},
+                    "audience": {
+                        "type": "string",
+                        "enum": ["public", "cerema_internal", "restricted", "confidential"],
+                    },
+                    "expires_at": {"type": ["integer", "null"]},
+                    "data_scope": {"type": "string", "enum": ["all", "study", "project"]},
+                    "tools_whitelist": {},
+                    "project_id": {"type": ["string", "null"]},
+                    "label": {"type": ["string", "null"]},
+                },
+                "required": ["sid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "publish_agent",
+            "description": (
+                "Publie un agent partagé : audit_chain transverse SIGNÉ SHA256 "
+                "anti-tamper + URL widget. Doit avoir create_agent d'abord."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sid": _SID_SCHEMA,
+                    "key_id": {
+                        "type": "string",
+                        "description": "qgisk_<user>_<hex32> retourné par create_agent.",
+                    },
+                    "audience": {
+                        "type": "string",
+                        "enum": ["public", "cerema_internal", "restricted", "confidential"],
+                        "description": "Override audience optionnel.",
+                    },
+                },
+                "required": ["sid", "key_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "revoke_agent",
+            "description": "Révoque un agent partagé (soft delete, irréversible).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sid": _SID_SCHEMA,
+                    "key_id": {"type": "string"},
+                },
+                "required": ["sid", "key_id"],
+            },
+        },
+    },
     # Sprint Composants Phase 3c (2026-06-27) : meta-agent analyseur recipes
     {
         "type": "function",
@@ -1006,4 +1556,8 @@ NATIVE_TOOLS_V2_MUTATING: frozenset[str] = frozenset({
     "create_component",
     "create_assembly",
     "publish_assembly",
+    # Sprint Composants Phase 4a (2026-06-27) : agents partagés
+    "create_agent",
+    "publish_agent",
+    "revoke_agent",
 })
