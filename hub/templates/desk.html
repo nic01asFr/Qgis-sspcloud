@@ -583,51 +583,153 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
        qui accueille les actions de production de livrables :
        - ZIP etude (relocation depuis header desk)
        - [Futur Sprint Composants-3] : 'Publier Scene Manifest' -> 3 pivots #}
-    {# Sprint Composants C10 v3 (2026-06-27) : retour grid 3 colonnes
-       compact, mais ORDRE des onglets revu selon cycle de vie naturel :
-       1. Sources (Couches, Fichiers)
-       2. Fabriquer (Recettes)
-       3. Artefacts (Composants, Assemblages, Exports)
-       4. Diffuser (Livrables, Agents)
-       Pas de wrapper de sections, pas de filtre, pas de badge.
-       Le point coloré data-scope (CSS ::after) reste comme indicateur subtil. #}
+    {# Sprint Composants C11 (2026-06-27) : 3 onglets ideal, 3 questions naturelles.
+       - 📁 Sources : ce avec quoi je travaille (Couches + Fichiers + Recettes)
+       - 📚 Livrables : ce que je produis (Assemblages + Publications + Composants sous-menu)
+       - 🤖 Partages : ce que je partage live (Agents partages)
+       Les anciens panes (composants, assemblies, exports, publi) restent
+       au DOM (caches) pour compatibilite des loaders JS qui les referencent.
+       Les onglets visibles pointent vers des nouveaux meta-panes. #}
     <div class="rtabs">
-      <button class="rtab active" data-rtab="layers" data-scope="project"
-              title="Couches du projet QGIS courant (par projet)">
-        🗺 Couches
+      <button class="rtab active" data-rtab="sources"
+              title="Sources : ce avec quoi je travaille (couches + fichiers + recettes)">
+        📁 Sources
       </button>
-      <button class="rtab" data-rtab="files" data-scope="study"
-              title="Fichiers de données SIG de l'étude (par étude)">
-        📁 Fichiers
-      </button>
-      <button class="rtab" data-rtab="recipes" data-scope="study"
-              title="Recettes user réutilisables (par étude)">
-        📋 Recettes
-      </button>
-      <button class="rtab" data-rtab="components" data-scope="study"
-              title="Composants UI rattachés à l'étude (par étude)">
-        🎨 Composants
-      </button>
-      <button class="rtab" data-rtab="assemblies" data-scope="study"
-              title="Assemblages publishables (storymap DSFR…) (par étude)">
-        📄 Assemblages
-      </button>
-      <button class="rtab" data-rtab="exports" data-scope="study"
-              title="Exports techniques (Grist, GPKG, ZIP) (par étude)">
-        📦 Exports
-      </button>
-      <button class="rtab" data-rtab="publi" data-scope="study"
-              title="Livrables publiés sur S3 (par étude)">
+      <button class="rtab" data-rtab="livrables"
+              title="Livrables : ce que je produis (assemblages + publications + composants)">
         📚 Livrables
       </button>
-      <button class="rtab" data-rtab="agents" data-scope="study"
-              title="Agents partagés (assistants IA configurables)">
-        🤖 Agents
+      <button class="rtab" data-rtab="partages"
+              title="Partages : assistants IA configurables que je partage en live">
+        🤖 Partages
       </button>
     </div>
 
+    {# ═══════════════════════════════════════════════════════════════════
+       Sprint Composants C11 (2026-06-27) : 3 META-panneaux principaux.
+       Chacun compose des données venant des endpoints existants (couches,
+       fichiers, recettes, assemblies, catalog, components, scoped-keys).
+       Les anciens panes restent au DOM mais avec data-rpane="layers", etc.
+       servent désormais à charger les données via les loaders existants
+       (loadResourceLayers, loadComponents, etc.) sans changement.
+       ════════════════════════════════════════════════════════════════════ #}
+
+    <!-- ═══ Onglet 1/3 : SOURCES ═══════════════════════════════════════ -->
+    <div class="rpane active" data-rpane="sources">
+      <style>
+      .src-section{padding:10px 14px 8px;
+        border-bottom:1px solid var(--border-default-grey)}
+      .src-section:last-child{border-bottom:none}
+      .src-section-header{display:flex;align-items:center;gap:6px;
+        font-size:11px;font-weight:700;color:#000091;
+        text-transform:uppercase;letter-spacing:.3px;margin-bottom:6px}
+      .src-section-content{font-size:12px}
+      .src-action{display:block;padding:8px 14px;background:#f4f6fa;
+        text-align:center;font-weight:700;font-size:11px;color:#000091;
+        border-top:1px solid var(--border-default-grey);text-decoration:none}
+      .src-action:hover{background:#e3eaf5}
+      </style>
+      <div class="src-section">
+        <div class="src-section-header">🗺 Couches QGIS du projet</div>
+        <div class="src-section-content" id="src-layers-content">
+          <div class="publi-empty">Chargement…</div>
+        </div>
+      </div>
+      <div class="src-section">
+        <div class="src-section-header">📁 Fichiers de l'étude</div>
+        <div class="src-section-content" id="src-files-content">
+          <div class="publi-empty">Chargement…</div>
+        </div>
+      </div>
+      <div class="src-section">
+        <div class="src-section-header">📋 Recettes</div>
+        <div class="src-section-content" id="src-recipes-content">
+          <div class="publi-empty">Chargement…</div>
+        </div>
+      </div>
+      {% if active_study %}
+      <a href="/studies/{{ active_study_id }}/export"
+         class="src-action" title="Télécharger l'étude (ZIP)">
+        ↓ Télécharger l'étude (ZIP)
+      </a>
+      {% endif %}
+    </div>
+
+    <!-- ═══ Onglet 2/3 : LIVRABLES (vue unifiée) ════════════════════════ -->
+    <div class="rpane" data-rpane="livrables">
+      <style>
+      .liv-list{padding:8px 10px;display:flex;flex-direction:column;gap:8px;
+        flex:1;overflow-y:auto}
+      .liv-card{background:#fff;border:1px solid var(--border-default-grey);
+        border-left:3px solid #ccc;border-radius:4px;padding:9px 11px;
+        font-size:12px;display:flex;flex-direction:column;gap:5px}
+      .liv-card.is-published{border-left-color:#1f8d4d}
+      .liv-card.is-draft{border-left-color:#d64d00}
+      .liv-card-header{display:flex;align-items:center;gap:8px}
+      .liv-card-icon{font-size:18px}
+      .liv-card-title{flex:1;font-weight:700;color:var(--text-title-grey);
+        overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .liv-card-state{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600}
+      .liv-card-state.published{background:#d1f0d8;color:#1f8d4d}
+      .liv-card-state.draft{background:#ffe7d6;color:#d64d00}
+      .liv-card-meta{font-size:10px;color:var(--text-mention-grey);
+        display:flex;gap:6px;flex-wrap:wrap}
+      .liv-card-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:3px}
+      .liv-card-actions a, .liv-card-actions button{
+        font-size:10.5px;padding:3px 8px;background:#f4f6fa;border:1px solid #d0d6e0;
+        border-radius:3px;cursor:pointer;color:#161616;text-decoration:none}
+      .liv-card-actions a:hover, .liv-card-actions button:hover{
+        background:#e3eaf5;border-color:#000091}
+      .liv-card-toggle{font-size:10px;color:#666;cursor:pointer;
+        user-select:none}
+      .liv-card-children{padding:6px 0 0 18px;border-left:2px solid #eee;
+        margin-top:3px;font-size:10.5px;display:none}
+      .liv-card-children.expanded{display:block}
+      .liv-child{padding:3px 0;color:#444}
+      .liv-empty{text-align:center;padding:20px 14px;color:#888;font-size:11.5px}
+      .liv-create-row{padding:10px 14px;border-top:1px solid var(--border-default-grey);
+        background:#eef3f9}
+      .liv-create-title{font-size:10.5px;color:#000091;font-weight:600;margin-bottom:6px}
+      </style>
+      {% if active_study %}
+      <div class="liv-list" id="liv-list">
+        <div class="publi-empty">Chargement…</div>
+      </div>
+      <div class="liv-create-row">
+        <div class="liv-create-title">✨ Demander à l'assistant V1.5 :</div>
+        <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35;width:100%"
+                data-prompt="Crée moi un nouveau livrable pour cette étude. Propose-moi un plan avec analyze_agent_config si besoin de partager via agent, ou avec validate_manifest pour une storymap V1.5.">
+          🎨 Créer un nouveau livrable
+        </button>
+      </div>
+      {% else %}
+      <div class="liv-empty">Active une étude pour voir ses livrables.</div>
+      {% endif %}
+    </div>
+
+    <!-- ═══ Onglet 3/3 : PARTAGES (Agents) ═════════════════════════════ -->
+    <div class="rpane" data-rpane="partages">
+      <!-- Reutilise le contenu existant agents (pane original cache) -->
+      <div id="partages-content">
+        <div class="publi-empty">Chargement…</div>
+      </div>
+    </div>
+
+    {# ═══════════════════════════════════════════════════════════════════
+       Anciens panes (caches, conserves pour compat des loaders JS).
+       Les loaders existants targetent toujours leurs IDs/classes.
+       Tableau de mapping :
+         - rpane=layers → ancien onglet Couches (loadResourceLayers cible #resources-layers-list)
+         - rpane=files → loadResourceFiles cible #resources-files-list
+         - rpane=recipes → loadResourceRecipes cible #resources-recipes-list
+         - rpane=components → loadComponents cible #components-list
+         - rpane=assemblies → loadAssemblies cible #assemblies-list
+         - rpane=exports → ZIP étude bouton statique (déplacé dans Sources)
+         - rpane=publi → catalog_items Jinja statique (utilisé par Livrables loader)
+         - rpane=agents → loadAgents cible #agents-list (déplacé dans Partages)
+       ════════════════════════════════════════════════════════════════════ #}
     <!-- Onglet Couches QGIS (chargé via /desk/layers) -->
-    <div class="rpane active" data-rpane="layers">
+    <div class="rpane" data-rpane="layers" style="display:none">
       <div class="publi-list" id="resources-layers-list">
         <div class="publi-empty">Chargement…</div>
       </div>
@@ -1931,14 +2033,19 @@ let _resFilesLoaded = false;
 //
 // Mapping onglet drawer (data-rtab) → kind UI_CONTEXT_KINDS côté backend agent :
 const _RTAB_UI_CONTEXT_KIND = {
-  layers:     'qgis_canvas',       // proxy : couches actives = ce qui est dans canvas
+  // Sprint Composants C11 (2026-06-27) : 3 nouveaux meta-onglets
+  sources:    'study_overview',     // sources = entrées de l'étude
+  livrables:  'assemblies_panel',   // livrables = vue assemblies + publi
+  partages:   'agents_panel',       // partages = agents
+  // Legacy keys (compat retro JS si un loader referencait)
+  layers:     'qgis_canvas',
   components: 'components_panel',
   assemblies: 'assemblies_panel',
   agents:     'agents_panel',
   recipes:    'recipes_panel',
   exports:    'exports_panel',
   files:      'files_panel',
-  publi:      'study_overview',    // livrables = vue d'ensemble étude
+  publi:      'study_overview',
 };
 
 // Debounce 200ms : si user clique 3× rapidement, on n'envoie qu'1 signal final.
@@ -1968,6 +2075,17 @@ function _signalUiContext(kind) {
   }, 200);
 }
 
+/* Sprint Composants C11 (2026-06-27) : 3 onglets ideal.
+   - data-rtab="sources" -> rpane visible "sources" + lazy load 3 sections
+   - data-rtab="livrables" -> rpane visible "livrables" + lazy load fusion
+   - data-rtab="partages" -> rpane visible "partages" + lazy load agents
+   Les anciennes valeurs data-rtab (layers, files, recipes, components,
+   assemblies, exports, publi, agents) restent pour la compat retro JS mais
+   ne sont plus utilisees par les boutons visibles. */
+let _liv_loaded = false;
+let _src_loaded = false;
+let _par_loaded = false;
+
 document.querySelectorAll('.rtab').forEach(t => {
   t.addEventListener('click', () => {
     document.querySelectorAll('.rtab').forEach(x => x.classList.toggle('active', x === t));
@@ -1975,17 +2093,199 @@ document.querySelectorAll('.rtab').forEach(t => {
     document.querySelectorAll('.rpane').forEach(p =>
       p.classList.toggle('active', p.dataset.rpane === target)
     );
-    if (target === 'layers' && !_resLayersLoaded) {
-      loadResourceLayers();
-      _resLayersLoaded = true;
-    } else if (target === 'files' && !_resFilesLoaded) {
-      loadResourceFiles();
-      _resFilesLoaded = true;
+    // Sprint Composants C11 : lazy load des 3 meta-panes
+    if (target === 'sources' && !_src_loaded) {
+      loadSources();
+      _src_loaded = true;
+    } else if (target === 'livrables' && !_liv_loaded) {
+      loadLivrables();
+      _liv_loaded = true;
+    } else if (target === 'partages' && !_par_loaded) {
+      loadPartages();
+      _par_loaded = true;
     }
     // Sprint Composants Phase 4a : signaler le contexte UI à l'assistant
     const uiKind = _RTAB_UI_CONTEXT_KIND[target];
     if (uiKind) _signalUiContext(uiKind);
   });
+});
+
+/* ── Loaders meta-panes C11 ─────────────────────────────────────────────── */
+
+async function loadSources() {
+  // Charge les 3 sources en parallèle puis transfère le HTML rendu
+  // dans les 3 sections empilées du meta-pane Sources.
+  if (!_resLayersLoaded) { try { await loadResourceLayers(); } catch{} _resLayersLoaded = true; }
+  if (!_resFilesLoaded)  { try { await loadResourceFiles();  } catch{} _resFilesLoaded = true; }
+  try { await loadResourceRecipes(); } catch{}
+  // Move HTML des anciens panes vers les nouvelles sections (référence directe)
+  const srcLayers = document.getElementById('src-layers-content');
+  const srcFiles  = document.getElementById('src-files-content');
+  const srcRecipes = document.getElementById('src-recipes-content');
+  const lyEl = document.getElementById('resources-layers-list');
+  const fiEl = document.getElementById('resources-files-list');
+  const reEl = document.getElementById('resources-recipes-list');
+  if (srcLayers && lyEl)   srcLayers.innerHTML  = lyEl.outerHTML;
+  if (srcFiles  && fiEl)   srcFiles.innerHTML   = fiEl.outerHTML;
+  if (srcRecipes && reEl)  srcRecipes.innerHTML = reEl.outerHTML;
+}
+
+async function loadPartages() {
+  // Reutilise loadAgents() existant qui rend dans #agents-list
+  if (typeof loadAgents === 'function') {
+    await loadAgents();
+  }
+  // Move HTML depuis ancien pane agents vers le meta-pane Partages
+  const agPane = document.querySelector('[data-rpane="agents"]');
+  const target = document.getElementById('partages-content');
+  if (agPane && target) {
+    target.innerHTML = agPane.querySelector('.agents-pane')?.outerHTML
+                       || agPane.innerHTML;
+  }
+}
+
+async function loadLivrables() {
+  const target = document.getElementById('liv-list');
+  if (!target) return;
+  const sid = '{{ active_study_id }}';
+  if (!sid) {
+    target.innerHTML = '<div class="liv-empty">Aucune étude active.</div>';
+    return;
+  }
+  target.innerHTML = '<div class="publi-empty">Chargement…</div>';
+  try {
+    // Fetch en parallele : assemblies V1.5 + publications catalog + composants
+    const [asmRes, catRes, compRes] = await Promise.all([
+      fetch(`/studies/${sid}/assemblies`, {credentials: 'include'}),
+      fetch(`/desk/catalog`, {credentials: 'include'}),
+      fetch(`/studies/${sid}/components`, {credentials: 'include'}),
+    ]);
+    const assemblies = asmRes.ok ? await asmRes.json() : [];
+    const catalog    = catRes.ok ? await catRes.json() : {items:[]};
+    const components = compRes.ok ? await compRes.json() : [];
+
+    const compsBySid = {};
+    (Array.isArray(components) ? components : []).forEach(c => {
+      compsBySid[c.cid] = c;
+    });
+
+    // Build cards :
+    //  1. Tous les assemblies (drafts + publies)
+    //  2. Catalog items dont le slug NE correspond PAS à un assembly publie
+    //     (= publications legacy publish_artifact uniquement)
+    const cards = [];
+    const asmAids = new Set();
+    (Array.isArray(assemblies) ? assemblies : []).forEach(a => {
+      asmAids.add(a.aid);
+      const isPub = !!a.published_url;
+      // Extract components_refs depuis audit_chain_json
+      let comps = [];
+      try {
+        const ac = a.audit_chain_json ? JSON.parse(a.audit_chain_json) : {};
+        comps = (ac.components_refs || []).map(cid => compsBySid[cid] || {cid});
+      } catch{}
+      cards.push({
+        type: 'assembly',
+        icon: '📄',
+        title: a.title || a.aid,
+        kind: a.kind,
+        state: isPub ? 'published' : 'draft',
+        published_url: a.published_url,
+        published_at: a.published_at,
+        children: comps,
+        ref: a.aid,
+        actions: isPub
+          ? [{label:'👁 Voir',  href: a.published_url, target:'_blank'}]
+          : [{label:'👁 Preview', href:`/studies/${sid}/assemblies/${a.aid}/render`, target:'_blank'},
+             {label:'🚀 Publier', prompt:`Publie l'assemblage ${a.aid} via publish_assembly avec audience cerema_internal.`}],
+      });
+    });
+
+    // Catalog items legacy (kind != 'assembly') — uniques (slug)
+    (catalog.items || []).forEach(it => {
+      if (it.kind === 'assembly') return;
+      cards.push({
+        type: 'catalog',
+        icon: it.kind === 'storymap' ? '📖'
+            : it.kind === 'flux'     ? '🌐'
+            : it.kind === 'recipe'   ? '📋'
+            : it.kind === 'pdf'      ? '📄'
+            : it.kind === 'dataset'  ? '📊'
+            : '📦',
+        title: it.slug,
+        kind: it.kind,
+        state: 'published',
+        published_url: it.hub_url || it.url,
+        size_kb: it.size_kb,
+        children: [],
+        ref: it.slug,
+        actions: [{label:'👁 Voir', href: it.hub_url || it.url, target:'_blank'}],
+      });
+    });
+
+    if (cards.length === 0) {
+      target.innerHTML = `<div class="liv-empty">
+        Aucun livrable pour cette étude.<br>
+        <span style="font-size:10.5px;color:#999">
+          Crée une storymap, un dashboard ou un dataset via l'assistant.
+        </span>
+      </div>`;
+      return;
+    }
+
+    const KIND_LABEL = {
+      storymap_narrative_dsfr: 'Storymap DSFR',
+      dashboard: 'Dashboard',
+      sheet_a4: 'Sheet A4',
+      storymap: 'Storymap (legacy)',
+      pdf: 'PDF',
+      flux: 'Flux WMS',
+      recipe: 'Recette publiée',
+      dataset: 'Dataset',
+    };
+
+    target.innerHTML = cards.map((c, idx) => {
+      const stateLabel = c.state === 'published' ? '✅ publié' : '🟡 draft';
+      const meta = [
+        KIND_LABEL[c.kind] || c.kind,
+        c.size_kb ? `${c.size_kb} ko` : '',
+        c.children.length ? `${c.children.length} composant${c.children.length>1?'s':''}` : '',
+      ].filter(Boolean).join(' · ');
+      const childrenHtml = c.children.length ? `
+        <div class="liv-card-toggle" onclick="document.getElementById('liv-children-${idx}').classList.toggle('expanded')">
+          ▶ Voir les composants (${c.children.length})
+        </div>
+        <div class="liv-card-children" id="liv-children-${idx}">
+          ${c.children.map(comp => `
+            <div class="liv-child">${comp.kind ? '🎨 ' + escapeHtml(comp.kind) + ' — ' : ''}${escapeHtml(comp.title || comp.cid || '?')}</div>
+          `).join('')}
+        </div>
+      ` : '';
+      const actionsHtml = c.actions.map(a => {
+        if (a.href) return `<a href="${a.href}" target="${a.target||'_self'}">${a.label}</a>`;
+        if (a.prompt) return `<button class="quick-action-btn" data-prompt="${escapeHtml(a.prompt)}">${a.label}</button>`;
+        return '';
+      }).join('');
+      return `<div class="liv-card is-${c.state}">
+        <div class="liv-card-header">
+          <span class="liv-card-icon">${c.icon}</span>
+          <span class="liv-card-title">${escapeHtml(c.title)}</span>
+          <span class="liv-card-state ${c.state}">${stateLabel}</span>
+        </div>
+        <div class="liv-card-meta">${meta}</div>
+        ${childrenHtml}
+        <div class="liv-card-actions">${actionsHtml}</div>
+      </div>`;
+    }).join('');
+
+  } catch (e) {
+    target.innerHTML = `<div class="liv-empty">Erreur : ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// Auto-load Sources au premier affichage (onglet actif par défaut)
+window.addEventListener('DOMContentLoaded', () => {
+  if (!_src_loaded) { loadSources(); _src_loaded = true; }
 });
 
 // Helper fetch avec timeout (AbortController). Sans cela, /desk/layers ou
