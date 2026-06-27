@@ -2144,6 +2144,22 @@ async function loadPartages() {
   }
 }
 
+/* Bug fix 2026-06-27 : MinIO SSPCloud ACL public-read KO -> les URL S3
+   stockees dans DB (published_url) retournent 403. On rewrite cote front
+   vers /published/{owner}/assembly/{slug} qui passe par le hub. */
+function _rewriteS3UrlToHub(url, fallbackSlug) {
+  if (!url) return '#';
+  // Pattern S3 SSPCloud :
+  //   https://minio.lab.sspcloud.fr/<owner>/qgis-workspace/published/<owner>/<kind>/<slug>
+  const m = url.match(/^https?:\/\/minio[^\/]+\/[^\/]+\/qgis-workspace\/published\/([^\/]+)\/([^\/]+)\/([^?]+)/);
+  if (m) {
+    const [_, owner, kind, slug] = m;
+    return `${window.location.origin}/published/${owner}/${kind}/${slug}`;
+  }
+  // Pas une URL S3 -> retourne telle quelle (ex: deja URL hub, ou autre)
+  return url;
+}
+
 async function loadLivrables() {
   const target = document.getElementById('liv-list');
   if (!target) return;
@@ -2195,7 +2211,7 @@ async function loadLivrables() {
         children: comps,
         ref: a.aid,
         actions: isPub
-          ? [{label:'👁 Voir',  href: a.published_url, target:'_blank'}]
+          ? [{label:'👁 Voir',  href: _rewriteS3UrlToHub(a.published_url, a.aid), target:'_blank'}]
           : [{label:'👁 Preview', href:`/studies/${sid}/assemblies/${a.aid}/render`, target:'_blank'},
              {label:'🚀 Publier', prompt:`Publie cette storymap (« ${a.title || a.aid} ») avec accès réservé à mes collègues CEREMA. Confirme avec moi l'audience avant publication.`}],
       });
@@ -2219,7 +2235,7 @@ async function loadLivrables() {
         size_kb: it.size_kb,
         children: [],
         ref: it.slug,
-        actions: [{label:'👁 Voir', href: it.hub_url || it.url, target:'_blank'}],
+        actions: [{label:'👁 Voir', href: _rewriteS3UrlToHub(it.hub_url || it.url, it.slug), target:'_blank'}],
       });
     });
 
