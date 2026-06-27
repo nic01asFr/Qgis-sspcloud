@@ -621,6 +621,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
               title="Recettes user reutilisables sur cette etude (editables)">
         📋 Recettes
       </button>
+      <button class="rtab" data-rtab="agents" data-scope="study"
+              title="Mes agents partagés (Sprint Composants Phase 4a)">
+        🤖 Agents
+      </button>
     </div>
 
     <!-- Onglet Couches QGIS (chargé via /desk/layers) -->
@@ -1347,6 +1351,105 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         </button>
       </div>
     </div>
+
+    {# Sprint Composants Phase 4a (2026-06-27) : onglet "Mes agents partagés"
+       - READ-ONLY : liste des agents publiés + URL widget + badges audience
+       - Configuration via l'assistant (chat) — pas de modal sélecteur manuel
+       - Pattern Geomind : meta-récursion (assistant crée des assistants) #}
+    <div class="rpane" data-rpane="agents">
+      <div class="agents-pane" style="padding:14px 12px;display:flex;flex-direction:column;gap:12px">
+        {% if active_study %}
+        <div class="agents-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <p class="agents-desc" style="font-size:11.5px;color:var(--text-mention-grey);margin:0;line-height:1.45;flex:1">
+            🤖 Agents partagés (assistants IA configurables) que tu publies pour diffusion.
+            Chaque agent = profile + audience + scope étude + clé scopée révocable.
+            <strong>Configuration via l'assistant</strong> (chat) — pose ton plan, valide, mint + publie.
+          </p>
+          <button id="btn-refresh-agents" class="fr-btn fr-btn--sm fr-btn--tertiary"
+                  onclick="loadAgents()" style="font-size:11px">↻ Rafraîchir</button>
+        </div>
+        <div class="quick-actions-block" data-target="agents" style="background:#eef3f9;border:1px dashed #91b0d6;border-radius:6px;padding:8px 10px">
+          <div style="font-size:10.5px;color:#000091;font-weight:600;margin-bottom:5px">
+            ✨ Demander à l'assistant V1.5 :
+          </div>
+          <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35"
+                  data-prompt="Liste mes agents partagés actuels via list_agents puis aide-moi à comprendre où en est cette étude.">
+            📋 Lister mes agents partagés actuels
+          </button>
+          <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35;margin-top:5px"
+                  data-prompt="Crée moi un agent partagé pour diffuser cette étude à mes collègues CEREMA Direction territoriale. Appelle analyze_agent_config d'abord pour proposer un plan avec params + impact métier + warnings.">
+            🤖 Configurer un nouvel agent partagé
+          </button>
+          <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35;margin-top:5px"
+                  data-prompt="Analyse une config d'agent partagé pour cette étude avec audience=cerema_internal et profile=storymap_creator_v15 via analyze_agent_config, et montre-moi les warnings éventuels.">
+            🔍 Analyser une config avant de publier
+          </button>
+        </div>
+        <div id="agents-list" class="agents-list" data-active-study-id="{{ active_study_id }}" style="display:flex;flex-direction:column;gap:6px">
+          <div class="publi-empty">Chargement…</div>
+        </div>
+        {% else %}
+        <div class="publi-empty">Active une étude pour gérer ses agents partagés.</div>
+        {% endif %}
+      </div>
+    </div>
+    <script>
+    async function loadAgents() {
+      const list = document.getElementById('agents-list');
+      if (!list) return;
+      const sid = list.dataset.activeStudyId;
+      if (!sid) return;
+      list.innerHTML = '<div class="publi-empty">Chargement…</div>';
+      try {
+        const resp = await fetch(`/studies/${sid}/scoped-keys?only_published=false`, {credentials: 'include'});
+        if (!resp.ok) {
+          if (resp.status === 503) {
+            list.innerHTML = '<div class="publi-empty">Agents partagés désactivés (feature flag).</div>';
+            return;
+          }
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        const data = await resp.json();
+        const agents = data.agents || [];
+        if (agents.length === 0) {
+          list.innerHTML = `<div class="publi-empty">
+            Aucun agent partagé pour cette étude.<br>
+            <span style="font-size:10.5px;color:#999">Configure-en un via l'assistant : « crée moi un agent partagé »</span>
+          </div>`;
+          return;
+        }
+        const AUDIENCE_BADGE = {
+          public: {color: '#fff', bg: '#b34000', label: '🌍 public'},
+          cerema_internal: {color: '#fff', bg: '#000091', label: '🏛 CEREMA'},
+          restricted: {color: '#fff', bg: '#6e445a', label: '🔒 restreint'},
+          confidential: {color: '#fff', bg: '#000', label: '🚫 confidentiel'},
+        };
+        list.innerHTML = agents.map(a => {
+          const aud = AUDIENCE_BADGE[a.audience] || {color: '#161616', bg: '#ccc', label: a.audience};
+          const pub = a.published_url
+            ? `<a href="${a.published_url}" target="_blank" class="fr-btn fr-btn--sm fr-btn--tertiary" style="font-size:10.5px;padding:4px 8px" title="URL widget de l'agent partagé">👁 URL</a>`
+            : '<span style="font-size:10px;color:#999;font-style:italic">draft (non publié)</span>';
+          return `<div class="agent-item" style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--background-alt-grey);border-radius:6px;border-left:3px solid ${aud.bg}">
+            <div style="font-size:20px">🤖</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:12.5px;font-weight:600;color:var(--text-title-blue-france);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(a.label || a.id_masked)}</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:10px;color:var(--text-mention-grey);margin-top:3px">
+                <span style="background:${aud.bg};color:${aud.color};padding:1px 6px;border-radius:8px;font-weight:600">${aud.label}</span>
+                <span style="background:#e3eaf5;color:#000091;padding:1px 6px;border-radius:8px">${escapeHtml(a.persona || '?')}</span>
+                <span style="font-variant-numeric:tabular-nums;color:#666">${escapeHtml(a.id_masked)}</span>
+              </div>
+            </div>
+            ${pub}
+          </div>`;
+        }).join('');
+      } catch (e) {
+        list.innerHTML = `<div class="publi-empty">Erreur : ${escapeHtml(e.message)}</div>`;
+      }
+    }
+    document.querySelectorAll('[data-rtab="agents"]').forEach(btn => {
+      btn.addEventListener('click', () => setTimeout(loadAgents, 100));
+    });
+    </script>
   </div>
 
   <div class="handle h1" data-target="publi"></div>
@@ -1792,6 +1895,51 @@ function setActiveRender(kind, id, title) {
 // au premier affichage.
 let _resLayersLoaded = false;
 let _resFilesLoaded = false;
+
+// Sprint Composants Phase 4a (2026-06-27) : signaux contextuels UI vers
+// l'assistant conversationnel. La navigation panneaux POST vers l'endpoint
+// agent /context/render avec un kind correspondant. L'assistant adapte son
+// L2 contexte SANS basculer son profile (cf. KB agents-publishing-pattern §1).
+//
+// Mapping onglet drawer (data-rtab) → kind UI_CONTEXT_KINDS côté backend agent :
+const _RTAB_UI_CONTEXT_KIND = {
+  layers:     'qgis_canvas',       // proxy : couches actives = ce qui est dans canvas
+  components: 'components_panel',
+  assemblies: 'assemblies_panel',
+  agents:     'agents_panel',
+  recipes:    'recipes_panel',
+  exports:    'exports_panel',
+  files:      'files_panel',
+  publi:      'study_overview',    // livrables = vue d'ensemble étude
+};
+
+// Debounce 200ms : si user clique 3× rapidement, on n'envoie qu'1 signal final.
+// Évite flood inutile (le coût backend est faible mais on respecte le pattern).
+let _uiContextDebounceTimer = null;
+function _signalUiContext(kind) {
+  if (!kind) return;
+  clearTimeout(_uiContextDebounceTimer);
+  _uiContextDebounceTimer = setTimeout(async () => {
+    // session_id : on récupère via le sessionStorage si présent, sinon agent_session
+    const sid = (window.sessionStorage && sessionStorage.getItem('agent_session_id'))
+                || (window.__AGENT_SESSION_ID__ || '');
+    if (!sid) return;  // pas de session = pas de signal
+    try {
+      // Endpoint agent IA (cross-origin via ingress) avec credentials
+      const agentBase = window.__AGENT_URL__ || '';
+      if (!agentBase) return;
+      await fetch(`${agentBase}/context/render/${sid}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({kind: kind, id: null, title: null}),
+      });
+    } catch (e) {
+      // Best-effort : pas de blocage UX si signal échoue
+    }
+  }, 200);
+}
+
 document.querySelectorAll('.rtab').forEach(t => {
   t.addEventListener('click', () => {
     document.querySelectorAll('.rtab').forEach(x => x.classList.toggle('active', x === t));
@@ -1806,6 +1954,9 @@ document.querySelectorAll('.rtab').forEach(t => {
       loadResourceFiles();
       _resFilesLoaded = true;
     }
+    // Sprint Composants Phase 4a : signaler le contexte UI à l'assistant
+    const uiKind = _RTAB_UI_CONTEXT_KIND[target];
+    if (uiKind) _signalUiContext(uiKind);
   });
 });
 
@@ -2205,6 +2356,14 @@ async function wakeWorkspace() {
 // ── Loader agent IA : spinner + auto-retry toutes les 5s ─────────────────────
 (function() {
   const agentUrl = '{{ agent_url }}';
+  // Sprint Composants Phase 4a : expose globalement pour _signalUiContext
+  window.__AGENT_URL__ = agentUrl;
+  // session_id : essaie sessionStorage puis fallback uuid simple
+  if (!window.sessionStorage.getItem('agent_session_id')) {
+    const uuid = 'desk_' + Math.random().toString(36).slice(2, 14);
+    sessionStorage.setItem('agent_session_id', uuid);
+  }
+  window.__AGENT_SESSION_ID__ = sessionStorage.getItem('agent_session_id');
   if (!agentUrl) return;
   const loader = document.getElementById('agent-loader');
   const iframe = document.querySelector('.right-pane[data-pane="chat"] iframe');

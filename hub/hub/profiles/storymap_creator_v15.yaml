@@ -59,6 +59,12 @@ mcp_tools:
     - validate_manifest
     # Sprint Composants Phase 3c : meta-agent analyseur recipes
     - analyze_recipe
+    # Sprint Composants Phase 4a : meta-agent + tools agents partagés
+    - analyze_agent_config
+    - list_agents
+    - create_agent
+    - publish_agent
+    - revoke_agent
     - list_components
     - create_component
     - get_component

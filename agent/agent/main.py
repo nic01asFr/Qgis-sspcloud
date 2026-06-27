@@ -63,7 +63,24 @@ _RENDER_KIND_PROFILE: dict[str, str] = {
     "flux":       "map_composer",
     "dataset":    "db_analyst",
     "pdf":        "storymap_creator",
+    # Sprint Composants Phase 4a (2026-06-27) : edition agents partages
+    "agent":      "storymap_creator_v15",
 }
+
+# Sprint Composants Phase 4a : kinds de navigation panneaux (PAS bascule profile,
+# juste injection L2 contexte). Distinct de _RENDER_KIND_PROFILE qui bascule la
+# persona (= livrable édité). Cf. KB agents-publishing-pattern §1 :
+# "2 mécanismes contextualisation distincts".
+_UI_CONTEXT_KINDS: frozenset[str] = frozenset({
+    "components_panel",  # onglet Composants
+    "assemblies_panel",  # onglet Assemblages
+    "agents_panel",      # onglet Mes agents partagés (Phase 4a)
+    "recipes_panel",     # onglet Recettes
+    "exports_panel",     # onglet Exports
+    "files_panel",       # onglet Fichiers
+    "qgis_canvas",       # canvas QGIS noVNC actif
+    "study_overview",    # vue d'ensemble étude
+})
 
 
 def _get_or_create_stop_signal(session_id: str) -> asyncio.Event:
@@ -780,11 +797,18 @@ async def _resolve_active_profile(form_profile: str, session_id: str = "") -> st
 
     Permet la "contextualisation native" décrite dans CHARTE_AGENT.md §3
     Principe 1 : l'agent suit ce que l'utilisateur fait, sans combobox.
+
+    Sprint Composants Phase 4a (2026-06-27) : SEULS les kinds de
+    _RENDER_KIND_PROFILE basculent le profile. Les kinds de
+    _UI_CONTEXT_KINDS (navigation panneaux) ne basculent PAS — ils
+    enrichissent juste le L2 contexte sans changer la persona.
+    Cf. KB agents-publishing-pattern §1.
     """
     # 1. Render actif pour cette session (le plus spécifique)
     render = _active_renders.get(session_id) if session_id else None
     if render and render.get("kind") in _RENDER_KIND_PROFILE:
         return _RENDER_KIND_PROFILE[render["kind"]]
+    # Navigation panneau (UI_CONTEXT_KINDS) ne bascule PAS le profile — fallback étape suivante
 
     # 2. Étude active (fallback)
     import os, httpx
