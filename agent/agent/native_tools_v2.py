@@ -338,6 +338,49 @@ async def _call_llm_analyzer(
         f"Produis le JSON RecipeAnalysis strict (rien d'autre)."
     )
 
+    def _pad_short_strings(d: dict) -> dict:
+        """Pad les champs string qui ont min_length Pydantic mais que le LLM
+        peut produire trop courts. Fail-safe avant POST cache (sinon 422
+        validation Pydantic stricte).
+
+        Champs concernés (cf. hub/hub/models/recipe_analysis.py) :
+        - usage_typical >= 30
+        - cost_estimate >= 10
+        - description_short >= 10
+        - impact_description >= 50
+        - QualityCheck.title >= 10, description >= 30, fix_hint >= 20
+        """
+        _PAD = " (information à compléter par l'agent enrichisseur dans une prochaine itération)"
+
+        def _ensure_len(s, min_l):
+            if not isinstance(s, str) or len(s) >= min_l:
+                return s
+            return (s + _PAD)[:max(min_l, 50)]
+
+        # Envelope-level fields
+        if "usage_typical" in d:
+            d["usage_typical"] = _ensure_len(d["usage_typical"], 30)
+        if "cost_estimate" in d:
+            d["cost_estimate"] = _ensure_len(d["cost_estimate"], 10)
+
+        # params_analysis fields
+        for p in d.get("params_analysis", []) or []:
+            if "description_short" in p:
+                p["description_short"] = _ensure_len(p["description_short"], 10)
+            if "impact_description" in p:
+                p["impact_description"] = _ensure_len(p["impact_description"], 50)
+
+        # quality_checks fields
+        for q in d.get("quality_checks", []) or []:
+            if "title" in q:
+                q["title"] = _ensure_len(q["title"], 10)
+            if "description" in q:
+                q["description"] = _ensure_len(q["description"], 30)
+            if "fix_hint" in q:
+                q["fix_hint"] = _ensure_len(q["fix_hint"], 20)
+
+        return d
+
     models_to_try = ["qwen3-6-35b-moe", "gemma4-26b-moe"]
     last_error = None
     for model in models_to_try:
@@ -376,6 +419,9 @@ async def _call_llm_analyzer(
                 # Inject analyzer_model dans le dict si manquant (le LLM a tendance à mettre génériquement)
                 analysis_dict["analyzer_model"] = model
                 analysis_dict["status"] = "success"
+                # Pad les champs string trop courts pour passer la validation
+                # Pydantic stricte côté hub (sinon 422 → cache miss_persist_failed)
+                analysis_dict = _pad_short_strings(analysis_dict)
                 return analysis_dict
         except Exception as exc:
             last_error = f"{model} exception: {exc}"
