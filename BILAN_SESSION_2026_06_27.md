@@ -57,6 +57,49 @@ Pour le runtime Marie persona, ce qui mérite analyse n'est plus la brique mais 
 
 → Direction future Geomind : runtime "agent qui réfléchit ET évalue son résultat"
 
+### Bloc 6 — Sprint Composants Phase 4a LIVRÉ (assistants partagés)
+
+Vision Geomind : **assistants partagés configurables** (= "agents publiés" pour collègues CEREMA).
+
+Pattern **meta-récursion** :
+- Niveau 1 : Service agent IA (pod qgis-agent + LLM)
+- Niveau 2 : Assistant conversationnel (Marie scope=supervisor)
+- Niveau 3 : Assistant partagé (scope=scoped + qgisk_<hex>)
+- Niveau 4 : Meta-agent (agent_config_analyzer, recipe_analyzer)
+
+3 commits Phase 4a (~1700 LOC) :
+- `3298d4c` C7 : ALTER scoped_keys + Pydantic AgentConfigAnalysis + table + endpoints REST + meta-agent profile YAML (933 LOC)
+- `0039661` C8 : 5 tools natifs (list_agents, analyze_agent_config, create_agent, publish_agent, revoke_agent) + LLM call analyzer fallback qwen3/gemma4 (556 LOC)
+- `3f4b3b7` C9 : Frontend desk signaux contextuels debounce 200ms + 8e onglet "🤖 Agents" + distinction `_RENDER_KIND_PROFILE` vs `_UI_CONTEXT_KINDS` (189 LOC)
+
+**Smoke E2E v4 final** : 8/9 tests passent
+- ✅ MINT scoped-key + warning_copy_now
+- ✅ PUBLISH audit_chain.signed_hash SHA256 + URL widget
+- ✅ LIST published retrieve
+- ✅ REVOKE soft delete
+- 🟡 Signal context cross-origin CORS (non-bloquant)
+
+Capitalisation : `~/.wikichat/knowledge/agents-publishing-pattern-axis.md` (NEW axe)
+- Nomenclature stricte 4 niveaux
+- 2 mécanismes contextualisation UI
+
+### Bloc 7 — Tag git release Phase 4a
+
+`v1.6.0-agents-partages` poussé (pattern Geomind complet).
+
+## Récap commits cumulés session (11 total)
+
+```
+v1.5.3c-meta-agent → Phase 3b + Phase 3c
+44ff628 + 34eeadd + 70b1fdd        → Phase 3b
+58d12ae + c2e79f3 + ef4e78a +
+f09900f + 96be3e0                  → Phase 3c
+v1.6.0-agents-partages → Phase 4a
+3298d4c + 0039661 + 3f4b3b7        → Phase 4a
+```
+
+**Total session** : 11 commits, ~4334 LOC, 4 phases livrées + 2 tags release.
+
 ## Architecture finale Sprint Composants
 
 ### Profiles (10 chargés)
