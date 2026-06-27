@@ -566,58 +566,6 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       <span class="publi-count" id="publi-count-badge"
             title="{{ catalog_count }} publication(s) sur ce compte (cumul toutes etudes)">{{ catalog_count }}</span>
     </div>
-    {# Sprint UX-3 fix (2026-06-22) : mini legende qui explique les points
-       colores des onglets. Per-projet (bleu) vs Per-etude (orange).
-       Sprint Composants C10 (2026-06-27) : transformation en filtre actif
-       Tout/Projet/Etude, persistant via localStorage. #}
-    <div class="rscope-filter" id="rscope-filter" role="tablist" aria-label="Filtre scope">
-      <button type="button" class="rscope-btn active" data-filter="all"
-              title="Toutes les ressources de l'étude active">
-        Tout
-      </button>
-      <button type="button" class="rscope-btn" data-filter="project"
-              title="Ressources du projet QGIS actif uniquement">
-        <span class="dot dot-project"></span> Projet
-      </button>
-      <button type="button" class="rscope-btn" data-filter="study"
-              title="Ressources partagées au niveau étude">
-        <span class="dot dot-study"></span> Étude
-      </button>
-    </div>
-    <style>
-    /* Sprint Composants C10 (2026-06-27) : filtre scope + sections groupées */
-    .rscope-filter{display:flex;gap:4px;padding:8px 12px;
-      background:#fafafa;border-bottom:1px solid var(--border-default-grey)}
-    .rscope-btn{font-size:11px;padding:4px 10px;border:1px solid #ddd;
-      background:#fff;border-radius:14px;cursor:pointer;color:#666;
-      display:inline-flex;align-items:center;gap:4px;
-      transition:background .15s,color .15s,border-color .15s}
-    .rscope-btn:hover{background:#f3f3f3;border-color:#bbb;color:#222}
-    .rscope-btn.active{background:#000091;color:#fff;border-color:#000091;font-weight:600}
-    .rscope-btn .dot{width:6px;height:6px;border-radius:50%;display:inline-block;opacity:.85}
-    .rscope-btn.active .dot{opacity:1}
-    .dot-project{background:var(--background-action-high-blue-france,#000091)}
-    .dot-study{background:#d64d00}
-    /* Filtre appliqué via attribut data-scope-filter sur .rtabs container :
-       quand filter=project, masque les rtab data-scope="study" et vice versa */
-    .rtabs[data-scope-filter="project"] .rtab[data-scope="study"]{display:none}
-    .rtabs[data-scope-filter="study"] .rtab[data-scope="project"]{display:none}
-    /* Sprint Composants C10 v2 (2026-06-27) : sections décoratives non-collapsibles.
-       L'organisation par cycle de vie reste visible (titres + icônes) mais
-       chaque onglet est directement cliquable sans friction. */
-    .rgroup{border-bottom:1px solid var(--border-default-grey)}
-    .rgroup:last-child{border-bottom:none}
-    .rgroup-header{display:flex;align-items:center;gap:6px;
-      padding:6px 12px 4px;
-      font-size:10px;font-weight:600;color:#666;
-      text-transform:uppercase;letter-spacing:.4px;
-      user-select:none;background:transparent}
-    .rgroup-header .rgroup-icon{font-size:11px;line-height:1;opacity:.7}
-    .rgroup-header .rgroup-title{flex:1}
-    .rgroup-header .rgroup-chevron{display:none} /* plus de chevron */
-    .rgroup-body{padding:0 0 4px}
-    .rgroup-body .rtab{width:100%;justify-content:flex-start}
-    </style>
     {# Sprint UX-3 fix (2026-06-22) : onglets renommes pour clarte +
        tooltips qui explicitent le scope (projet vs etude). 'Publi' devient
        'Livrables' (plus clair pour user CEREMA). Scope visuel signale via
@@ -635,83 +583,47 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
        qui accueille les actions de production de livrables :
        - ZIP etude (relocation depuis header desk)
        - [Futur Sprint Composants-3] : 'Publier Scene Manifest' -> 3 pivots #}
-    <div class="rtabs" data-scope-filter="all">
-      {# Sprint Composants C10 : 4 groupes par cycle de vie. Distinction
-         project (👤 bleu) vs study (🌐 orange) preservee via data-scope
-         + petite pastille emoji prefix. Sections collapsibles persistantes
-         via localStorage `desk.rgroup.{X}.collapsed`. #}
-
-      <section class="rgroup" data-group="sources">
-        <header class="rgroup-header" data-toggle-group="sources">
-          <span class="rgroup-icon">🌱</span>
-          <span class="rgroup-title">Sources</span>
-          <span class="rgroup-chevron">▾</span>
-        </header>
-        <div class="rgroup-body">
-          <button class="rtab active" data-rtab="layers" data-scope="project"
-                  title="Couches du projet QGIS courant (par projet)">
-            👤 🗺 Couches
-          </button>
-          <button class="rtab" data-rtab="files" data-scope="study"
-                  title="Fichiers de donnees SIG partages au niveau etude (par étude)">
-            🌐 📁 Fichiers
-          </button>
-        </div>
-      </section>
-
-      <section class="rgroup" data-group="fabriquer">
-        <header class="rgroup-header" data-toggle-group="fabriquer">
-          <span class="rgroup-icon">🛠</span>
-          <span class="rgroup-title">Fabriquer</span>
-          <span class="rgroup-chevron">▾</span>
-        </header>
-        <div class="rgroup-body">
-          <button class="rtab" data-rtab="recipes" data-scope="study"
-                  title="Recettes user reutilisables sur cette etude (par étude)">
-            🌐 📋 Recettes
-          </button>
-        </div>
-      </section>
-
-      <section class="rgroup" data-group="artefacts">
-        <header class="rgroup-header" data-toggle-group="artefacts">
-          <span class="rgroup-icon">📦</span>
-          <span class="rgroup-title">Artefacts</span>
-          <span class="rgroup-chevron">▾</span>
-        </header>
-        <div class="rgroup-body">
-          <button class="rtab" data-rtab="components" data-scope="study"
-                  title="Composants UI rattachés à l'étude (par étude)">
-            🌐 🎨 Composants
-          </button>
-          <button class="rtab" data-rtab="assemblies" data-scope="study"
-                  title="Assemblages publishables (storymap DSFR, dashboard, sheet A4) (par étude)">
-            🌐 📄 Assemblages
-          </button>
-          <button class="rtab" data-rtab="exports" data-scope="study"
-                  title="Exports techniques generés (Grist, GPKG, ZIP) (par étude)">
-            🌐 📦 Exports
-          </button>
-        </div>
-      </section>
-
-      <section class="rgroup" data-group="diffuser">
-        <header class="rgroup-header" data-toggle-group="diffuser">
-          <span class="rgroup-icon">🚀</span>
-          <span class="rgroup-title">Diffuser</span>
-          <span class="rgroup-chevron">▾</span>
-        </header>
-        <div class="rgroup-body">
-          <button class="rtab" data-rtab="publi" data-scope="study"
-                  title="Livrables publies par cette etude (par étude)">
-            🌐 📚 Livrables
-          </button>
-          <button class="rtab" data-rtab="agents" data-scope="study"
-                  title="Mes agents partagés - peuvent etre bindes projet OU étude">
-            🤖 Agents partagés
-          </button>
-        </div>
-      </section>
+    {# Sprint Composants C10 v3 (2026-06-27) : retour grid 3 colonnes
+       compact, mais ORDRE des onglets revu selon cycle de vie naturel :
+       1. Sources (Couches, Fichiers)
+       2. Fabriquer (Recettes)
+       3. Artefacts (Composants, Assemblages, Exports)
+       4. Diffuser (Livrables, Agents)
+       Pas de wrapper de sections, pas de filtre, pas de badge.
+       Le point coloré data-scope (CSS ::after) reste comme indicateur subtil. #}
+    <div class="rtabs">
+      <button class="rtab active" data-rtab="layers" data-scope="project"
+              title="Couches du projet QGIS courant (par projet)">
+        🗺 Couches
+      </button>
+      <button class="rtab" data-rtab="files" data-scope="study"
+              title="Fichiers de données SIG de l'étude (par étude)">
+        📁 Fichiers
+      </button>
+      <button class="rtab" data-rtab="recipes" data-scope="study"
+              title="Recettes user réutilisables (par étude)">
+        📋 Recettes
+      </button>
+      <button class="rtab" data-rtab="components" data-scope="study"
+              title="Composants UI rattachés à l'étude (par étude)">
+        🎨 Composants
+      </button>
+      <button class="rtab" data-rtab="assemblies" data-scope="study"
+              title="Assemblages publishables (storymap DSFR…) (par étude)">
+        📄 Assemblages
+      </button>
+      <button class="rtab" data-rtab="exports" data-scope="study"
+              title="Exports techniques (Grist, GPKG, ZIP) (par étude)">
+        📦 Exports
+      </button>
+      <button class="rtab" data-rtab="publi" data-scope="study"
+              title="Livrables publiés sur S3 (par étude)">
+        📚 Livrables
+      </button>
+      <button class="rtab" data-rtab="agents" data-scope="study"
+              title="Agents partagés (assistants IA configurables)">
+        🤖 Agents
+      </button>
     </div>
 
     <!-- Onglet Couches QGIS (chargé via /desk/layers) -->
@@ -1488,16 +1400,11 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           const pub = a.published_url
             ? `<a href="${a.published_url}" target="_blank" class="fr-btn fr-btn--sm fr-btn--tertiary" style="font-size:10.5px;padding:4px 8px" title="URL widget de l'agent partagé">👁 URL</a>`
             : '<span style="font-size:10px;color:#999;font-style:italic">draft (non publié)</span>';
-          // Sprint Composants C10 (2026-06-27) : badge scope project vs study
-          const scopeBadge = (a.project_id && a.data_scope === 'project')
-            ? '<span style="background:#000091;color:#fff;padding:1px 6px;border-radius:8px;font-weight:600" title="Agent lié à un projet QGIS spécifique">👤 projet</span>'
-            : '<span style="background:#d64d00;color:#fff;padding:1px 6px;border-radius:8px;font-weight:600" title="Agent au niveau étude (couvre tous les projets)">🌐 étude</span>';
           return `<div class="agent-item" style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--background-alt-grey);border-radius:6px;border-left:3px solid ${aud.bg}">
             <div style="font-size:20px">🤖</div>
             <div style="flex:1;min-width:0">
               <div style="font-size:12.5px;font-weight:600;color:var(--text-title-blue-france);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(a.label || a.id_masked)}</div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:10px;color:var(--text-mention-grey);margin-top:3px">
-                ${scopeBadge}
                 <span style="background:${aud.bg};color:${aud.color};padding:1px 6px;border-radius:8px;font-weight:600">${aud.label}</span>
                 <span style="background:#e3eaf5;color:#000091;padding:1px 6px;border-radius:8px">${escapeHtml(a.persona || '?')}</span>
                 <span style="font-variant-numeric:tabular-nums;color:#666">${escapeHtml(a.id_masked)}</span>
@@ -2005,39 +1912,16 @@ function setActiveRender(kind, id, title) {
 let _resLayersLoaded = false;
 let _resFilesLoaded = false;
 
-/* ── Sprint Composants C10 (2026-06-27) : organisation panel ressources ──────
-   1. Filtre scope Tout/Projet/Etude persistant localStorage
-   2. Sections rgroup collapsibles persistantes localStorage
-   3. Agents partagés : filtrage côté JS pour n'afficher que ceux pertinents
-      pour le projet actif (project_id=actif OR null OR data_scope IN ['study','all'])
-*/
-
-const _DESK_FILTER_KEY = 'desk.filter.scope';
-const _DESK_RGROUP_KEY = (group) => `desk.rgroup.${group}.collapsed`;
-
-(function initDeskC10() {
-  // ── Filtre scope ───────────────────────────────────────────────────────
-  const rtabsContainer = document.querySelector('.rtabs');
-  const filterButtons = document.querySelectorAll('.rscope-btn');
-  if (rtabsContainer && filterButtons.length) {
-    const savedFilter = (localStorage.getItem(_DESK_FILTER_KEY) || 'all').trim();
-    const applyFilter = (filter) => {
-      rtabsContainer.dataset.scopeFilter = filter;
-      filterButtons.forEach(b => b.classList.toggle('active', b.dataset.filter === filter));
-      localStorage.setItem(_DESK_FILTER_KEY, filter);
-    };
-    applyFilter(savedFilter);
-    filterButtons.forEach(b => {
-      b.addEventListener('click', () => applyFilter(b.dataset.filter || 'all'));
-    });
-  }
-
-  // Sprint Composants C10 v2 (2026-06-27) : sections décoratives non-collapsibles.
-  // Cleanup localStorage anciennes valeurs collapse pour eviter friction
-  // residuelle de tests precedents.
-  ['sources', 'fabriquer', 'artefacts', 'diffuser'].forEach(gid => {
-    localStorage.removeItem(_DESK_RGROUP_KEY(gid));
-  });
+/* Sprint Composants C10 v3 (2026-06-27) : cleanup localStorage des
+   experiences UX precedentes (filtre scope + sections collapse).
+   On revient au grid simple sans ces ajouts. */
+(function cleanupOldDeskState() {
+  ['desk.filter.scope',
+   'desk.rgroup.sources.collapsed',
+   'desk.rgroup.fabriquer.collapsed',
+   'desk.rgroup.artefacts.collapsed',
+   'desk.rgroup.diffuser.collapsed']
+    .forEach(k => localStorage.removeItem(k));
 })();
 
 // Sprint Composants Phase 4a (2026-06-27) : signaux contextuels UI vers
