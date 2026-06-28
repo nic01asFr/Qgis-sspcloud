@@ -2174,7 +2174,7 @@ try:
     ]
     # Sprint Composants Phase 4b (2026-06-28) : export GeoJSON dans fichier
     # PVC separe par layer. Manifest reste leger (metadata + path), GeoJSON
-    # vit dans /data/studies/{sid}/projects/{pid}/scene_layers/{layer_id}.geojson
+    # vit dans /data/studies/SID/projects/PID/scene_layers/LAYER_ID.geojson
     # Pas de truncation : les etudes doivent avoir les vraies donnees.
     layers_dir = Path(f"/data/studies/{{sid}}/projects/{{pid}}/scene_layers")
     layers_dir.mkdir(parents=True, exist_ok=True)
