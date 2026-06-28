@@ -4115,9 +4115,136 @@ async def _render_assembly_html(
                         for it in items
                     ])
                     rendered_components[cid] = f'<div style="padding:20px;background:#fff;border:1px solid #e5e5e5;border-radius:6px">{items_html}</div>'
+                elif kind == "interactive_map":
+                    # Fix 2026-06-28 : pre-render MapLibre inline pour validation
+                    # end-to-end avec donnees QGIS reelles (scene_manifest layers).
+                    # Source : params.scene_hash (V0.2) OU params.layers[] inline.
+                    # Layers GeoJSON : recupere depuis scene_manifest PVC + injecte
+                    # comme MapLibre source. Le <head> du template charge MapLibre
+                    # CSS+JS via CDN unpkg.
+                    source = comp_manifest.get("source", {}) or {}
+                    scene_hash = source.get("scene_hash") or params.get("scene_hash")
+                    title = comp_manifest.get("title", "")
+                    bbox_text = ""
+                    layers_inline = params.get("layers", [])
+                    # Si scene_hash : lire manifest PVC et extraire layers GeoJSON
+                    map_layers_js = "[]"
+                    if scene_hash and source.get("pid"):
+                        try:
+                            scene_pid = source.get("pid")
+                            scene_code = studies.read_scene_manifest_pod_code(sid, scene_pid)
+                            scene_out = await _execute_python_in_workspace(username, scene_code)
+                            if "SCENE_MANIFEST_READ_OK" in scene_out:
+                                scene_b64 = scene_out.split("b64=", 1)[1].split()[0].strip()
+                                import base64 as _b64s
+                                scene_obj = _json.loads(_b64s.b64decode(scene_b64).decode())
+                                scene_layers = scene_obj.get("layers", []) or []
+                                # On extrait que les layers GeoJSON inline
+                                geo_layers = [
+                                    {"id": l.get("layer_id", f"layer_{i}"),
+                                     "name": l.get("name", l.get("layer_id", "")),
+                                     "geojson": l.get("geojson"),
+                                     "style": l.get("style", {}),
+                                     "geometry_type": l.get("geometry_type", "polygon")}
+                                    for i, l in enumerate(scene_layers)
+                                    if l.get("geojson")
+                                ]
+                                bbox_text = f" — {len(geo_layers)} couche{'s' if len(geo_layers) > 1 else ''}"
+                                map_layers_js = _json.dumps(geo_layers)
+                        except Exception as exc:
+                            log.warning("interactive_map scene_manifest read %s : %s", cid, exc)
+                    elif layers_inline:
+                        bbox_text = f" — {len(layers_inline)} couche{'s' if len(layers_inline) > 1 else ''}"
+                        map_layers_js = _json.dumps(layers_inline)
+
+                    # Center/zoom par defaut (Marseille 4e arr.) ou depuis params
+                    center_lng = params.get("center_lng", params.get("lng", 5.39))
+                    center_lat = params.get("center_lat", params.get("lat", 43.30))
+                    zoom = params.get("zoom", 13)
+                    map_id = f"map_{cid[:8]}"
+
+                    rendered_components[cid] = f'''
+<div style="background:#fff;border-radius:6px;overflow:hidden">
+  <div style="padding:14px 20px;border-bottom:1px solid #e5e5e5;background:#f6f6f6">
+    <strong style="color:#000091">{_h.escape(title)}</strong>
+    <span style="color:#666;font-size:13px">{_h.escape(bbox_text)}</span>
+  </div>
+  <div id="{map_id}" style="height:480px;width:100%"></div>
+</div>
+<script>
+(function() {{
+  if (typeof maplibregl === 'undefined') {{
+    document.getElementById('{map_id}').innerHTML =
+      '<div style="padding:40px;text-align:center;color:#666">MapLibre indisponible.</div>';
+    return;
+  }}
+  const layers = {map_layers_js};
+  const map = new maplibregl.Map({{
+    container: '{map_id}',
+    style: {{
+      version: 8,
+      sources: {{
+        osm: {{
+          type: 'raster',
+          tiles: ['https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png'],
+          tileSize: 256,
+          attribution: '© OpenStreetMap'
+        }}
+      }},
+      layers: [{{id:'osm', type:'raster', source:'osm'}}]
+    }},
+    center: [{center_lng}, {center_lat}],
+    zoom: {zoom}
+  }});
+  map.addControl(new maplibregl.NavigationControl(), 'top-left');
+  map.on('load', () => {{
+    const palette = ['#000091','#e1000f','#1f8d4d','#ff6f00','#9c27b0','#0288d1'];
+    layers.forEach((layer, i) => {{
+      if (!layer.geojson) return;
+      const sourceId = 'src-' + layer.id;
+      const layerId = 'lyr-' + layer.id;
+      try {{
+        map.addSource(sourceId, {{type:'geojson', data:layer.geojson}});
+        const isPoint = (layer.geometry_type || '').toLowerCase().includes('point');
+        const isLine  = (layer.geometry_type || '').toLowerCase().includes('line');
+        if (isPoint) {{
+          map.addLayer({{id:layerId, type:'circle', source:sourceId,
+            paint:{{'circle-color':palette[i%palette.length], 'circle-radius':6,
+                  'circle-stroke-width':1, 'circle-stroke-color':'#fff'}}}});
+        }} else if (isLine) {{
+          map.addLayer({{id:layerId, type:'line', source:sourceId,
+            paint:{{'line-color':palette[i%palette.length], 'line-width':2}}}});
+        }} else {{
+          map.addLayer({{id:layerId, type:'fill', source:sourceId,
+            paint:{{'fill-color':palette[i%palette.length], 'fill-opacity':0.4,
+                  'fill-outline-color':palette[i%palette.length]}}}});
+        }}
+      }} catch (e) {{ console.warn('addLayer failed', layer.id, e); }}
+    }});
+    // Auto-fit bbox sur la 1re couche GeoJSON
+    if (layers.length && layers[0].geojson) {{
+      try {{
+        const fs = (layers[0].geojson.features) || [];
+        if (fs.length) {{
+          const b = new maplibregl.LngLatBounds();
+          fs.forEach(f => {{
+            const coords = (f.geometry && f.geometry.coordinates) || [];
+            const walk = (c) => {{
+              if (typeof c[0] === 'number') {{ b.extend(c); return; }}
+              c.forEach(walk);
+            }};
+            walk(coords);
+          }});
+          if (!b.isEmpty()) map.fitBounds(b, {{padding:40, maxZoom:16}});
+        }}
+      }} catch (e) {{ console.warn('fitBounds failed', e); }}
+    }}
+  }});
+}})();
+</script>'''
                 else:
-                    # Fallback : si type non gere inline (interactive_map, scene_3d),
-                    # afficher placeholder + lien vers preview
+                    # Fallback final : kind non geré inline (scene_3d, autres) →
+                    # placeholder + lien preview.
                     rendered_components[cid] = (
                         f'<div style="padding:24px;text-align:center;background:#f4f6fa;border-radius:6px;color:#666">'
                         f'<p style="margin:0 0 8px;font-weight:600">Composant {_h.escape(kind)}</p>'

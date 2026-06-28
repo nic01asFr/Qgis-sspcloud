@@ -24,6 +24,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="{{ (assembly.description or assembly.title)|e }}">
 
+{# MapLibre GL JS pour composants interactive_map inline (fix 2026-06-28) #}
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
+
 {# DSFR brand minimal CSS (couleurs CEREMA RF) #}
 <style>
 :root{
