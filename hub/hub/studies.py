@@ -2172,10 +2172,18 @@ try:
         "#1d70b8", "#d64d00", "#18753c", "#e1000f", "#6a6af4",
         "#a558a0", "#695b00", "#3558a2", "#b34000", "#005e6a",
     ]
+    # Sprint Composants Phase 4b (2026-06-28) : export GeoJSON dans fichier
+    # PVC separe par layer. Manifest reste leger (metadata + path), GeoJSON
+    # vit dans /data/studies/{sid}/projects/{pid}/scene_layers/{layer_id}.geojson
+    # Pas de truncation : les etudes doivent avoir les vraies donnees.
+    layers_dir = Path(f"/data/studies/{{sid}}/projects/{{pid}}/scene_layers")
+    layers_dir.mkdir(parents=True, exist_ok=True)
     for i, layer in enumerate(layers):
         try:
             name = layer.name() or f"layer_{{i}}"
             slug = name.lower().replace(" ", "_").replace("/", "_")
+            # Sanitize slug for filesystem
+            slug = "".join(c if c.isalnum() or c in "_-" else "_" for c in slug) or f"layer_{{i}}"
             geom = "vector"
             if hasattr(layer, "type"):
                 t = layer.type()
@@ -2184,10 +2192,21 @@ try:
                 elif t == QgsMapLayerType.VectorLayer:
                     geom = "vector"
             color = DEFAULT_COLORS[i % len(DEFAULT_COLORS)]
+            # Detection geometry_type fin pour MapLibre (point/line/polygon)
+            ml_geom = geom
+            if geom == "vector":
+                try:
+                    wkb_t = layer.geometryType() if hasattr(layer, "geometryType") else 0
+                    # 0=Point, 1=Line, 2=Polygon (Qgis.GeometryType)
+                    if wkb_t == 0: ml_geom = "point"
+                    elif wkb_t == 1: ml_geom = "line"
+                    elif wkb_t == 2: ml_geom = "polygon"
+                except Exception:
+                    pass
             layer_entry = {{
                 "id": slug,
                 "name": name,
-                "geometry_type": geom,
+                "geometry_type": ml_geom,
                 "visible": layer.isVisible() if hasattr(layer, "isVisible") else True,
                 "style": {{
                     "qml_source": None,
@@ -2198,6 +2217,58 @@ try:
                     }},
                 }},
             }}
+            # Export GeoJSON complet (vector) vers fichier PVC dedie - Phase 4b
+            if geom == "vector" and hasattr(layer, "getFeatures"):
+                try:
+                    src_crs = layer.crs() if hasattr(layer, "crs") else None
+                    transform = None
+                    try:
+                        from qgis.core import QgsCoordinateReferenceSystem as _CRS
+                        from qgis.core import QgsCoordinateTransform as _XF
+                        from qgis.core import QgsProject as _P
+                        target_crs = _CRS("EPSG:4326")
+                        if src_crs and src_crs.isValid() and src_crs.authid() != "EPSG:4326":
+                            transform = _XF(src_crs, target_crs, _P.instance())
+                    except Exception:
+                        transform = None
+                    features = []
+                    for feat in layer.getFeatures():
+                        g = feat.geometry()
+                        if not g or g.isNull():
+                            continue
+                        try:
+                            if transform:
+                                g = type(g)(g)
+                                g.transform(transform)
+                            geom_dict = json.loads(g.asJson())
+                            props = {{}}
+                            for k in feat.fields().names():
+                                v = feat[k]
+                                if v is None:
+                                    continue
+                                if isinstance(v, (bytes, bytearray)):
+                                    continue
+                                if isinstance(v, (int, float, str, bool)):
+                                    props[k] = v
+                                else:
+                                    props[k] = str(v)
+                            features.append({{
+                                "type": "Feature",
+                                "geometry": geom_dict,
+                                "properties": props,
+                            }})
+                        except Exception:
+                            continue
+                    fc = {{"type": "FeatureCollection", "features": features}}
+                    geojson_path = layers_dir / f"{{slug}}.geojson"
+                    txt_fc = json.dumps(fc, ensure_ascii=False)
+                    geojson_path.write_text(txt_fc, encoding="utf-8")
+                    layer_entry["geojson_path"] = str(geojson_path)
+                    layer_entry["n_features"] = len(features)
+                    layer_entry["geojson_size_bytes"] = len(txt_fc)
+                    layer_entry["crs"] = "EPSG:4326"
+                except Exception as _geo_exc:
+                    print(f"SCENE_MANIFEST_GEOJSON_ERR layer={{name}} err={{_geo_exc}}")
             manifest["layers"].append(layer_entry)
         except Exception as _layer_exc:
             print(f"SCENE_MANIFEST_LAYER_ERR layer={{i}} err={{_layer_exc}}")
@@ -2228,6 +2299,26 @@ else:
     content = target.read_text(encoding="utf-8")
     b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
     print(f"SCENE_MANIFEST_READ_OK b64={{b64}}")
+"""
+
+
+def read_scene_layer_geojson_pod_code(sid: str, pid: str, layer_id: str) -> str:
+    """Phase 4b (2026-06-28) : lit le GeoJSON d'une couche du scene_manifest.
+    Le fichier est dans /data/studies/{sid}/projects/{pid}/scene_layers/{layer_id}.geojson
+    cree par build_scene_manifest_from_qgis_pod_code. Retourne content en b64."""
+    return f"""
+from pathlib import Path
+import base64
+sid = {sid!r}
+pid = {pid!r}
+layer_id = {layer_id!r}
+target = Path(f"/data/studies/{{sid}}/projects/{{pid}}/scene_layers/{{layer_id}}.geojson")
+if not target.exists():
+    print(f"SCENE_LAYER_NOT_FOUND layer={{layer_id}}")
+else:
+    content = target.read_text(encoding="utf-8")
+    b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    print(f"SCENE_LAYER_READ_OK b64={{b64}} size={{len(content)}}")
 """
 
 

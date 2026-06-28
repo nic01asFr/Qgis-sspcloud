@@ -3605,6 +3605,17 @@ async def create_component_endpoint(
     except Exception as exc:
         raise HTTPException(422, f"Validation Pydantic : {exc}")
 
+    # Sprint Composants Phase 4b (2026-06-28) : auto-fill
+    # provenance.scene_hash_at_creation si source.scene_hash present mais
+    # provenance vide. Evite la discipline agent defaillante et garantit
+    # que build_audit_chain propage le scene_hash dans audit.scene_hashes.
+    try:
+        src_scene_hash = getattr(comp.source, "scene_hash", None) if comp.source else None
+        if src_scene_hash and not comp.provenance.scene_hash_at_creation:
+            comp.provenance.scene_hash_at_creation = src_scene_hash
+    except Exception:
+        pass
+
     # Écrire manifest sur PVC
     import json as _json
     content_json = _json.dumps(
@@ -4129,9 +4140,17 @@ async def _render_assembly_html(
                     layers_inline = params.get("layers", [])
                     # Si scene_hash : lire manifest PVC et extraire layers GeoJSON
                     map_layers_js = "[]"
-                    if scene_hash and source.get("pid"):
+                    # Resilience source.pid : fallback sur projet par defaut
+                    # de l'etude (Maillon 4 — accepter cas ou agent omet pid).
+                    scene_pid = source.get("pid") or params.get("pid")
+                    if scene_hash and not scene_pid:
                         try:
-                            scene_pid = source.get("pid")
+                            _projects = await studies.list_projects(sid)
+                            if _projects:
+                                scene_pid = _projects[0]["pid"]
+                        except Exception: pass
+                    if scene_hash and scene_pid:
+                        try:
                             scene_code = studies.read_scene_manifest_pod_code(sid, scene_pid)
                             scene_out = await _execute_python_in_workspace(username, scene_code)
                             if "SCENE_MANIFEST_READ_OK" in scene_out:
@@ -4139,17 +4158,34 @@ async def _render_assembly_html(
                                 import base64 as _b64s
                                 scene_obj = _json.loads(_b64s.b64decode(scene_b64).decode())
                                 scene_layers = scene_obj.get("layers", []) or []
-                                # On extrait que les layers GeoJSON inline
-                                geo_layers = [
-                                    {"id": l.get("layer_id", f"layer_{i}"),
-                                     "name": l.get("name", l.get("layer_id", "")),
-                                     "geojson": l.get("geojson"),
-                                     "style": l.get("style", {}),
-                                     "geometry_type": l.get("geometry_type", "polygon")}
-                                    for i, l in enumerate(scene_layers)
-                                    if l.get("geojson")
-                                ]
-                                bbox_text = f" — {len(geo_layers)} couche{'s' if len(geo_layers) > 1 else ''}"
+                                # Phase 4b : fetch GeoJSON depuis fichier PVC dedie
+                                # (manifest reste leger, donnees completes via /scene_layers/)
+                                geo_layers = []
+                                for i_l, l in enumerate(scene_layers):
+                                    lid = l.get("id", f"layer_{i_l}")
+                                    geojson_path = l.get("geojson_path")
+                                    geojson = l.get("geojson")  # fallback si inline (legacy)
+                                    if not geojson and geojson_path:
+                                        try:
+                                            gj_code = studies.read_scene_layer_geojson_pod_code(sid, scene_pid, lid)
+                                            gj_out = await _execute_python_in_workspace(username, gj_code)
+                                            if "SCENE_LAYER_READ_OK" in gj_out:
+                                                gj_b64 = gj_out.split("b64=", 1)[1].split()[0].strip()
+                                                geojson = _json.loads(_b64s.b64decode(gj_b64).decode())
+                                        except Exception as _e:
+                                            log.warning("read scene_layer %s : %s", lid, _e)
+                                    if geojson:
+                                        geo_layers.append({
+                                            "id": lid,
+                                            "name": l.get("name", lid),
+                                            "geojson": geojson,
+                                            "style": l.get("style", {}),
+                                            "geometry_type": l.get("geometry_type", "polygon"),
+                                            "n_features": l.get("n_features", 0),
+                                        })
+                                if geo_layers:
+                                    total = sum(l.get("n_features", 0) for l in geo_layers)
+                                    bbox_text = f" — {len(geo_layers)} couche{'s' if len(geo_layers) > 1 else ''} · {total} objets"
                                 map_layers_js = _json.dumps(geo_layers)
                         except Exception as exc:
                             log.warning("interactive_map scene_manifest read %s : %s", cid, exc)
