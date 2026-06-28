@@ -3874,6 +3874,110 @@ async def list_assemblies_endpoint(
     return await asm_mod.list_assemblies(sid=sid, kind=kind, owner=user["username"])
 
 
+@app.put("/studies/{sid}/assemblies/{aid}")
+async def update_assembly_endpoint(
+    sid: str, aid: str, request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Phase 4b (2026-06-28) : update versionne d'un assemblage existant.
+
+    Pattern INSERT-only : chaque update insere une nouvelle row
+    assemblies_index avec version_num+1 et previous_hash = ancien
+    content_hash. L'aid est preserve, l'audit trail complet.
+
+    Body : Assembly manifest JSON complet OU partiel.
+    - Si complet : remplace le manifest (id + sid preserves).
+    - Si partiel : merge sur le manifest existant (top-level fields
+      remplaces, layout.sections ETENDU si payload contient `_append_sections`).
+
+    Usage agent : pour ajouter une section a une storymap existante sans
+    perdre les composants deja la, envoyer le manifest complet avec layout.sections
+    enrichi des sections existantes + nouvelles. C'est plus simple a controler
+    cote agent que la logique de merge.
+    """
+    _check_assemblies_enabled()
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+
+    from hub.models import Assembly
+    from hub import assemblies as asm_mod
+
+    # Verifier que l'assemblage existe et appartient au scope
+    latest = await asm_mod.get_assembly_latest(aid)
+    if not latest:
+        raise HTTPException(404, "Assemblage introuvable")
+    if latest["sid"] != sid or latest["owner"] != user["username"]:
+        raise HTTPException(403, "Pas owner ou hors scope etude")
+
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, "Body JSON invalide")
+
+    # Force scope + identite stable
+    payload["sid"] = sid
+    payload["id"] = aid
+    # Si l'agent envoie un manifest complet, on le valide tel quel.
+    # Sinon il faut lire l'existant et merger.
+    if not payload.get("layout"):
+        # Manifest partiel - lire l'existant pour completer
+        try:
+            existing_code = asm_mod.read_assembly_manifest_pod_code(sid, aid)
+            existing_out = await _execute_python_in_workspace(user["username"], existing_code)
+            if "ASSEMBLY_READ_OK" not in existing_out:
+                raise HTTPException(503, "Lecture manifest existant impossible")
+            import base64 as _b64
+            ex_b64 = existing_out.split("b64=", 1)[1].split()[0].strip()
+            import json as _json2
+            existing_manifest = _json2.loads(_b64.b64decode(ex_b64).decode())
+            # Merge : top-level fields du payload override existing
+            for k, v in payload.items():
+                existing_manifest[k] = v
+            payload = existing_manifest
+        except HTTPException: raise
+        except Exception as exc:
+            log.warning("merge existing manifest : %s", exc)
+
+    try:
+        asm = Assembly.model_validate(payload)
+    except Exception as exc:
+        raise HTTPException(422, f"Validation Pydantic : {exc}")
+
+    # Écrire nouveau manifest sur PVC (overwrite : la version PVC suit DB)
+    import json as _json
+    content_json = _json.dumps(
+        asm.model_dump(mode="json"), ensure_ascii=False, indent=2,
+    )
+    try:
+        await _execute_python_in_workspace(
+            user["username"],
+            asm_mod.write_assembly_manifest_pod_code(sid, asm.id, content_json),
+        )
+    except Exception as exc:
+        log.warning("write updated assembly manifest : %s", exc)
+
+    # INSERT nouvelle version. asm.version doit etre incremente cote payload
+    # OU on force ici. Le hub remplit version_num via le model Assembly,
+    # mais c'est plus sur de surcharger depuis la DB.
+    new_version = (latest.get("version_num") or 1) + 1
+    asm.version = new_version
+    file_path = asm_mod.assembly_manifest_path(sid, asm.id)
+    rowid = await asm_mod.insert_assembly(
+        assembly=asm, owner=user["username"], file_path=file_path,
+        previous_hash=latest.get("content_hash") or "",
+    )
+    return {
+        "id": asm.id, "rowid": rowid, "kind": asm.kind, "title": asm.title,
+        "audience": asm.audience, "version_num": new_version,
+        "manifest_url":   f"/studies/{sid}/assemblies/{asm.id}",
+        "render_url":     f"/studies/{sid}/assemblies/{asm.id}/render",
+        "publish_url":    f"/studies/{sid}/assemblies/{asm.id}/publish",
+    }
+
+
 @app.post("/studies/{sid}/assemblies", status_code=status.HTTP_201_CREATED)
 async def create_assembly_endpoint(
     sid: str, request: Request,

@@ -71,6 +71,7 @@ mcp_tools:
     - get_component_history
     - list_assemblies
     - create_assembly
+    - update_assembly
     - get_assembly
     - render_assembly
     - publish_assembly
@@ -197,6 +198,38 @@ agent_system_prompt: |
 
   ⚠️ JAMAIS lancer publish_assembly sans confirmation explicite, même
   si audience=cerema_internal. La publication est traçable + auditable.
+
+  ─── REGLE STRICTE : UPDATE vs CREATE (Phase 4b 2026-06-28) ──────────────────
+
+  Si tu dois MODIFIER une storymap (ajouter une carte, retoucher une
+  section, etc.) ET qu'un aid existe deja pour le meme topic, tu DOIS
+  utiliser `update_assembly`. JAMAIS `create_assembly` avec un topic
+  similaire — cela cree un livrable parallele qui PERD les composants
+  deja crees (narrative, KPI, etc.), genere de la fragmentation et
+  perd la coherence audit_chain.
+
+  Workflow ajout d'une section a une storymap existante :
+    1. list_assemblies(sid) → identifie aid existant
+    2. get_assembly(sid, aid) → recupere manifest complet (avec
+       layout.sections existantes)
+    3. (Si carte : load couches QGIS + scene_manifest/build → scene_hash)
+    4. create_component(kind, source.scene_hash=...) → cid
+    5. manifest.layout.sections.append(nouvelle_section avec ref:cid)
+    6. update_assembly(sid, aid, manifest_complet)
+    7. publish_assembly(sid, aid) → meme URL, version_num+1
+
+  ─── PROVENANCE SCENE_HASH (Phase 4b 2026-06-28) ────────────────────────────
+
+  Pour les composants tractables a une source QGIS (interactive_map,
+  scene_3d, legend), tu DOIS fournir `source.scene_hash` + `source.pid`
+  + `source.sid` au create_component. Le hub auto-fill
+  `provenance.scene_hash_at_creation` depuis source.scene_hash si tu
+  l'omets, MAIS le mieux est de l'expliciter pour traçabilité claire.
+
+  Le scene_hash provient de `POST /studies/{sid}/projects/{pid}/scene_manifest/build`
+  qui capture l'etat des couches QGIS (geometrie + style + GeoJSON
+  externalise sur PVC) et calcule un hash canonique. Ce scene_hash
+  remonte dans `audit_chain.scene_hashes` du publish.
 
   ─── PUBLICATION OBLIGATOIRE : publish_assembly ✨ V1.5 ─────────────────────
 

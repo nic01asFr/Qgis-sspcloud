@@ -187,6 +187,32 @@ async def get_assembly(sid: str, aid: str) -> dict[str, Any]:
     return await _hub_call("GET", f"/studies/{sid}/assemblies/{aid}")
 
 
+async def update_assembly(
+    sid: str, aid: str, manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """Phase 4b (2026-06-28) : UPDATE versionne d'un assemblage existant.
+
+    REGLE STRICTE : si une storymap du meme topic existe deja (aid
+    connu via list_assemblies), TOUJOURS update_assembly. JAMAIS
+    create_assembly avec un nouveau topic, sinon les composants existants
+    de l'aid initial sont perdus dans la fragmentation.
+
+    Pattern INSERT-only : chaque update insere version_num+1 avec
+    previous_hash = ancien content_hash. L'aid reste stable, l'historique
+    audit_trail est preserve.
+
+    Pour ajouter une section a une storymap :
+    1. get_assembly(sid, aid) → recuperer layout existant
+    2. layout.sections = [...existing, nouvelle_section]
+    3. update_assembly(sid, aid, manifest_complet)
+
+    Retourne {id, rowid, version_num, manifest_url, render_url, publish_url}.
+    """
+    return await _hub_call(
+        "PUT", f"/studies/{sid}/assemblies/{aid}", json_body=manifest,
+    )
+
+
 async def render_assembly(sid: str, aid: str) -> dict[str, Any]:
     """Rendu HTML preview (recalculé à chaque appel).
 
@@ -961,6 +987,24 @@ NATIVE_TOOLS_V2 = {
         "description": "Retourne manifest + metadata DB de l'assemblage.",
         "params": {"sid": "str", "aid": "str (12 hex assemblage id)"},
     },
+    "update_assembly": {
+        "fn": update_assembly,
+        "description": (
+            "UPDATE versionne d'un assemblage existant (Phase 4b). "
+            "INSERT-only : version_num+1, previous_hash preserve, aid stable. "
+            "REGLE : si une storymap aid existe deja pour le topic, "
+            "TOUJOURS update_assembly (pas create_assembly) sinon les "
+            "composants existants seront perdus dans la fragmentation. "
+            "Pour ajouter une section : get_assembly d'abord, etend "
+            "layout.sections, puis update_assembly avec le manifest complet."
+        ),
+        "params": {
+            "sid": "str étude id",
+            "aid": "str assemblage id existant",
+            "manifest": "dict Assembly complet (id, sid, kind, title, "
+                        "audience, layout, footer). id+sid forces a aid+sid.",
+        },
+    },
     "render_assembly": {
         "fn": render_assembly,
         "description": (
@@ -1320,6 +1364,38 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {"sid": _SID_SCHEMA, "aid": _AID_SCHEMA},
                 "required": ["sid", "aid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_assembly",
+            "description": (
+                "UPDATE versionne d'un assemblage existant (Phase 4b). "
+                "REGLE STRICTE : si une storymap aid existe deja pour le "
+                "topic (verifie via list_assemblies + get_assembly), TOUJOURS "
+                "update_assembly. JAMAIS create_assembly avec topic similaire "
+                "sinon les composants existants sont perdus dans la "
+                "fragmentation. INSERT-only : version_num+1, aid stable, "
+                "audit trail preserve. Pour ajouter une section : "
+                "(1) get_assembly(sid,aid) puis (2) layout.sections.append(...) "
+                "puis (3) update_assembly(sid, aid, manifest_complet)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sid": _SID_SCHEMA,
+                    "aid": _AID_SCHEMA,
+                    "manifest": {
+                        "type": "object",
+                        "description": (
+                            "Assembly manifest complet (id+sid forces a aid+sid). "
+                            "Doit contenir kind, title, audience, layout, footer."
+                        ),
+                    },
+                },
+                "required": ["sid", "aid", "manifest"],
             },
         },
     },
