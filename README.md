@@ -3,33 +3,37 @@
 Service QGIS géospatial pour agents CEREMA sur SSPCloud Onyxia.  
 QGIS Desktop + Agent IA + Mémoire long terme.
 
-**État actuel** : Vagues A + B + E1 + E2 base + E2 carto LIVRÉES
-(tag `v1.6.7-carto-metier-base`, 2026-06-29) — pipeline E2E
-`load → scene_manifest → component → update_assembly → publish` validé +
-storymap métier avec grammaire narrative (intro/section/conclusion/appendix) +
-6 patterns canoniques (hero_constat, zoom_territoire, croisement_enjeu,
-fiche_indicateur, reliability_summary, conclusion_actionnable) +
-cartographie thématique riche (choroplèthes graduated + ColorBrewer +
-Jenks/quantile + interactions tooltip/popup/toggle + 6 fonds +
-proportional symbols + heatmap + légende auto gradient_bar/proportional).
-189/189 tests pytest PASSED.
+**État actuel** : Vagues A + B + E1 + E2 (storymap métier base + carto
+métier riche + pivot UI BlockNote éditeur) LIVRÉES (tag
+`v1.7.0-blocknote-editor`, 2026-06-29).
+
+Pipeline E2E `load → scene_manifest → component → update_assembly →
+publish` + storymap métier avec grammaire narrative
+(intro/section/conclusion/appendix) + 6 patterns canoniques + trio
+cartographe + cartographie thématique riche (Jenks + ColorBrewer + 6
+fonds + interactions + proportional/heatmap + légende riche) + **éditeur
+BlockNote block-based** intégré au desk avec 13 custom blocks (DOM +
+iframe) + autosave 30s + optimistic concurrency control vs agent IA.
+216/216 tests pytest PASSED.
 
 **Tags publiés** :
 - `v1.6.5-vague-e1-composition-libre` (UX libre composition agent IA)
 - `v1.6.6-storymap-metier-base` (polish DSFR + 6 patterns métier + trio cartographe)
-- `v1.6.7-carto-metier-base` ⭐ (symbologie + interactions + fonds + viz + légende)
+- `v1.6.7-carto-metier-base` (symbologie + interactions + fonds + viz + légende)
+- `v1.7.0-blocknote-editor` ⭐ (éditeur block-based 13 custom blocks + autosave + bouton desk)
 
-**Prochaine vague** : E2 pivot UI éditeur BlockNote (D-QGIS-010 acté
-2026-06-29) — éditeur block-based dans le desk pour permettre à Marie
-d'éditer visuellement les Assembly après création agent IA. Custom
-blocks DOM (heading, kpi_grid, quote, separator, narrative_text) +
-iframe (interactive_map, chart, data_table). Tag attendu :
-`v1.7.0-blocknote-editor`.
+**Marie peut maintenant** :
+- Demander à l'agent IA via chat (Vague E1)
+- Éditer visuellement via BlockNote (Vague E2 H2) — bouton "📝 BlockNote" sur card livrable desk
+- Compose storymaps via 6 patterns métier canoniques (Vague E2 base)
+- Visualiser avec carto thématique riche (Vague E2 carto)
 
 **Vague E3 différée** : kinds avancés (audit_chain_narrative,
 reliability_matrix) + AuditChain enrichi (Phase, VariableReliability,
 contributors) + layout sidecar Esri scrollytelling + scene_3d MapLibre
-fill-extrusion + multi-cartes synchronisées + `@media print` A4.
+fill-extrusion + multi-cartes synchronisées + `@media print` A4 +
+DSFR theming strict BlockNote + CRDT Yjs collab + création nouveau
+composant depuis BlockNote.
 
 > **Charte de fonctionnement de l'agent** (vision produit, principes,
 > roadmap, invariants) : voir [docs/CHARTE_AGENT.md](docs/CHARTE_AGENT.md).
