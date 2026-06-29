@@ -40,7 +40,8 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, WebSocket, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.websockets import WebSocketDisconnect
 from pathlib import Path
@@ -889,6 +890,25 @@ app = FastAPI(
 # accede a l'espace user. Cf. hub/hub/auth.py:oidc_auth_middleware pour la
 # logique de whitelist (healthchecks, inter-pod Bearer, kube-probe).
 app.middleware("http")(auth.oidc_auth_middleware)
+
+# Vague E2 Commit E1 (D-QGIS-010 2026-06-29) : editeur BlockNote standalone
+# bundle Vite mount statiquement. Le bundle est build par CI Docker
+# multi-stage (node:20-alpine -> hub/hub/static/blocknote-editor/).
+# Endpoint GET /editor/{sid}/assembly/{aid} retourne index.html.
+_BLOCKNOTE_STATIC_DIR = Path(__file__).parent / "static" / "blocknote-editor"
+if _BLOCKNOTE_STATIC_DIR.exists():
+    app.mount(
+        "/static/blocknote-editor",
+        StaticFiles(directory=str(_BLOCKNOTE_STATIC_DIR)),
+        name="blocknote_editor_static",
+    )
+    log.info("BlockNote editor bundle mounted: %s", _BLOCKNOTE_STATIC_DIR)
+else:
+    log.warning(
+        "BlockNote editor bundle ABSENT (%s). Build via 'npm run build' "
+        "dans blocknote-editor/, ou via CI Docker multi-stage.",
+        _BLOCKNOTE_STATIC_DIR,
+    )
 
 
 @app.get("/auth/whoami")
@@ -2965,6 +2985,38 @@ async def schema_validate_endpoint(
     except Exception:
         raise HTTPException(400, "Body JSON invalide")
     return si.validate_manifest(entity_type, payload)
+
+
+# ── BlockNote editor (Vague E2 Commit E1, D-QGIS-010 2026-06-29) ──────────────
+
+@app.get("/editor/{sid}/assembly/{aid}", response_class=HTMLResponse)
+async def blocknote_editor_endpoint(
+    sid: str,
+    aid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Sert l'editeur BlockNote standalone pour edition d'un Assembly.
+
+    D-QGIS-010 Vague E2 pivot UI : permet a Marie de modifier visuellement
+    un livrable apres creation par l'agent IA (chat Vague E1) ou via patterns
+    metier (Vague E2 base).
+
+    Le bundle BlockNote (build via Vite multi-stage Docker) est servi
+    statiquement par mount /static/blocknote-editor/. Cet endpoint retourne
+    l'index.html qui charge le bundle React.
+
+    Le React parse sid/aid depuis URL et fetch l'assembly via API hub.
+    """
+    if not _BLOCKNOTE_STATIC_DIR.exists():
+        raise HTTPException(
+            503,
+            "Bundle BlockNote non installe. Build via 'npm run build' dans "
+            "blocknote-editor/, ou via CI Docker multi-stage (D-QGIS-010)."
+        )
+    index_path = _BLOCKNOTE_STATIC_DIR / "index.html"
+    if not index_path.exists():
+        raise HTTPException(503, "Bundle BlockNote incomplet (index.html absent).")
+    return FileResponse(index_path)
 
 
 # ── Storymap patterns (Vague E2 Commit 3, D-QGIS-009 §3) ──────────────────────

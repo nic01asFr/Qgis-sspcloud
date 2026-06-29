@@ -1,3 +1,26 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 1 : build BlockNote editor bundle (Vague E2 Commit E1, D-QGIS-010)
+# Vite + React + BlockNote v0.22 -> hub/hub/static/blocknote-editor/
+# ─────────────────────────────────────────────────────────────────────────────
+FROM node:20-alpine AS blocknote-builder
+
+WORKDIR /build
+
+# Cache npm install via copy package.json en premier
+COPY blocknote-editor/package*.json ./
+RUN npm ci --no-audit --no-fund
+
+# Copy source TypeScript + Vite config
+COPY blocknote-editor/ ./
+
+# Build production (output dans /build/dist via vite.config.ts outDir).
+# Note : vite.config.ts a outDir = ../hub/hub/static/blocknote-editor mais
+# en builder isolation on remappe vers /build/dist en flag CLI explicite.
+RUN npm run build -- --outDir /build/dist
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 2 : hub Python (existant)
+# ─────────────────────────────────────────────────────────────────────────────
 FROM inseefrlab/onyxia-jupyter-python:py3.13.13
 
 USER root
@@ -5,8 +28,12 @@ WORKDIR /opt/qgis-hub
 
 COPY hub/ .
 RUN pip install -e . --quiet --no-cache-dir
+
 # Templates HTML pour /desk et /workspace
 COPY hub/templates/ templates/
+
+# BlockNote editor bundle (Vague E2 D-QGIS-010) : copy depuis le stage builder
+COPY --from=blocknote-builder /build/dist /opt/qgis-hub/hub/static/blocknote-editor/
 
 ENV SERVICE_NAME=qgis-mcp \
     SERVER_MODULE=hub.main:app \
