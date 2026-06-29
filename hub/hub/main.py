@@ -4431,6 +4431,24 @@ async def _build_interactive_map_ctx(
         bbox_text = f" — {len(layers_inline)} couche{'s' if len(layers_inline) > 1 else ''}"
         map_layers_js = _json2.dumps(layers_inline)
 
+    # ── Vague E2 Commit 5 (D-QGIS-009 §5) — Symbologie thematique ──
+    # Si params.classification ou layer.classification defini, calculer
+    # les breaks/colors/paint_expression et enrichir chaque layer avec
+    # son helper de classification ready-to-inline en MapLibre.
+    classification_param = params.get("classification") or {}
+    if classification_param:
+        try:
+            from hub.carto_classification import compute_classification
+            layers_data = _json2.loads(map_layers_js)
+            for layer_obj in layers_data:
+                features = (layer_obj.get("geojson") or {}).get("features") or []
+                if features:
+                    classif = compute_classification(features, classification_param)
+                    layer_obj["classification"] = classif
+            map_layers_js = _json2.dumps(layers_data)
+        except Exception as exc:
+            log.warning("Classification thematique %s : %s", cid, exc)
+
     # ── Vague E2 Commit 4 (D-QGIS-009 §4) — Trio cartographe metier ──
     # Une carte CEREMA exploitable en COPIL a TOUJOURS : Titre + Legende +
     # Source datee + Caveat (optionnel mais recommande). Sans ces 4, la
@@ -4438,19 +4456,33 @@ async def _build_interactive_map_ctx(
     palette = ['#000091', '#e1000f', '#1f8d4d', '#ff6f00', '#9c27b0', '#0288d1']
 
     # Legende auto-derivee depuis les layers du scene_manifest
+    # Vague E2 Commit 5 : si layer.classification existe, legende = classes
+    # graduated/categorized (vs. couleur flat par layer).
     legend_items = params.get("legend_items")
     if legend_items is None:
-        # Auto-deriver depuis layers + palette utilisee dans le JS MapLibre
         try:
             layers_data = _json2.loads(map_layers_js)
             if layers_data:
                 legend_items = []
                 for i_layer, layer_obj in enumerate(layers_data):
-                    legend_items.append({
-                        "label": layer_obj.get("name", layer_obj.get("id", f"layer {i_layer}")),
-                        "color": palette[i_layer % len(palette)],
-                        "count": layer_obj.get("n_features"),
-                    })
+                    classif = layer_obj.get("classification") or {}
+                    ctype = classif.get("type")
+                    if ctype in ("graduated", "categorized"):
+                        # Legende riche : N classes du tag classification
+                        colors = classif.get("colors", [])
+                        labels = classif.get("labels", [])
+                        for i, (lbl, col) in enumerate(zip(labels, colors)):
+                            legend_items.append({
+                                "label": lbl, "color": col,
+                                "layer": layer_obj.get("name"),
+                            })
+                    else:
+                        # Fallback flat color (1 layer = 1 couleur palette)
+                        legend_items.append({
+                            "label": layer_obj.get("name", layer_obj.get("id", f"layer {i_layer}")),
+                            "color": palette[i_layer % len(palette)],
+                            "count": layer_obj.get("n_features"),
+                        })
         except Exception:
             legend_items = None
 

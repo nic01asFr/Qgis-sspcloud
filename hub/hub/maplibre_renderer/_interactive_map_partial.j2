@@ -107,17 +107,23 @@
         map.addSource(sourceId, {type:'geojson', data:layer.geojson});
         const isPoint = (layer.geometry_type || '').toLowerCase().includes('point');
         const isLine  = (layer.geometry_type || '').toLowerCase().includes('line');
+        // Vague E2 Commit 5 : applique paint_expression de classification thematique
+        // si layer.classification existe (graduated/categorized), sinon flat color
+        // depuis palette index.
+        const classif = layer.classification || {};
+        const themedColor = classif.paint_expression ||
+                            palette[i % palette.length];
         if (isPoint) {
           map.addLayer({id:layerId, type:'circle', source:sourceId,
-            paint:{'circle-color':palette[i%palette.length], 'circle-radius':6,
+            paint:{'circle-color': themedColor, 'circle-radius':6,
                   'circle-stroke-width':1, 'circle-stroke-color':'#fff'}});
         } else if (isLine) {
           map.addLayer({id:layerId, type:'line', source:sourceId,
-            paint:{'line-color':palette[i%palette.length], 'line-width':2}});
+            paint:{'line-color': themedColor, 'line-width':2}});
         } else {
           map.addLayer({id:layerId, type:'fill', source:sourceId,
-            paint:{'fill-color':palette[i%palette.length], 'fill-opacity':0.4,
-                  'fill-outline-color':palette[i%palette.length]}});
+            paint:{'fill-color': themedColor, 'fill-opacity':0.6,
+                  'fill-outline-color': '#ffffff'}});
         }
       } catch (e) { console.warn('addLayer failed', layer.id, e); }
     });
