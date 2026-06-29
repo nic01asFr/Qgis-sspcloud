@@ -223,6 +223,55 @@ agent_system_prompt: |
     6. update_assembly(sid, aid, manifest_complet)
     7. publish_assembly(sid, aid) → meme URL, version_num+1
 
+  ─── VAGUE E1 UX LIBRE (D-QGIS-009 2026-06-29) ────────────────────────────
+
+  Nouveau workflow : composer librement des livrables sur mesure.
+
+  4 nouveaux tools natifs Vague E1 :
+
+  1. **update_component(sid, cid, manifest)** : modifier params/source/title
+     d'un composant existant sans devoir le delete + recreate. INSERT-only :
+     version_num+1, cid stable, audit trail conserve, refs depuis assemblies
+     restent valides.
+     Use case : Marie veut changer la valeur d'un KPI 47%→52%, OU changer
+     la source d'une carte, OU corriger un titre. update_component preserve
+     l'audit chain.
+
+  2. **clone_assembly(sid, aid, deep=False)** : cloner un assemblage existant.
+     shallow par defaut (refs cid composants partages, rapide). deep=true
+     duplique aussi les composants (clone independant).
+     Use case : Marie part d'une storymap reference Blancarde-Chartreux et
+     l'adapte pour son cas (4e arr.→5e arr.) au lieu de tout recreer
+     from scratch.
+
+  3. **list_catalog_components(audience='cerema_internal', kind?, limit, offset)** :
+     decouvrir composants cross-etude publies par d'autres etudes CEREMA
+     (ZEBRA, MobSciDat, Atlas widget, autres users).
+     **DISCIPLINE RECOMMANDEE** : appeler list_catalog_components AVANT
+     create_component pour voir s'il existe deja un composant similaire
+     a reutiliser au lieu de creer from scratch.
+
+  4. **list_catalog_assemblies(audience='cerema_internal', kind?, limit, offset)** :
+     pendant pour les assemblages. Use case : decouvrir templates de
+     storymaps/dashboards a cloner via clone_assembly.
+
+  ANTI-PATTERNS Vague E1 :
+  - ❌ Recreer un composant from scratch quand un similaire existe au
+    catalogue (perte d'efficacite + duplication audit chain)
+  - ❌ Cloner un assembly sans verifier le catalogue d'abord
+  - ❌ Modifier params via delete + recreate (cassse refs assemblies)
+    -> utiliser update_component qui preserve cid
+
+  PATTERN COMPLET reutilisation :
+
+  1. list_catalog_components(kind="interactive_map") -> trouve cid d'une
+     carte BD TOPO Marseille existante
+  2. Marie veut adapter pour Lyon
+  3. Option A : clone_component (pas encore livre Vague E1, Vague E2)
+     OU copy params + create_component avec source.cloned_from=cid_original
+  4. Option B (recommandee Vague E1) : juste reference le composant tel
+     quel via {ref: cid} dans layout.sections, et update_assembly
+
   ─── PROVENANCE SCENE_HASH (Phase 4b 2026-06-28) ────────────────────────────
 
   Pour les composants tractables a une source QGIS (interactive_map,

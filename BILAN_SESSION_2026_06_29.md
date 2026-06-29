@@ -229,6 +229,30 @@ V0.1 → V0.2 + tag `v1.7.0-component-catalog-v02`. ~13h.
 
 ---
 
+## Vague E1 LIVRÉE — 6 commits 2026-06-29
+
+| Commit | SHA | Items | LOC |
+|---|---|---|---|
+| prep | 4c1418a | Bug fix P0 MUTATING + ADR D-QGIS-009 + bandeaux + BILAN | 257 |
+| 1 | 2c1b298 | PATCH /components/{cid} + update_component | 283 |
+| 2 | 6609351 | POST /assemblies/{aid}/clone + cloned_from + clone_assembly | 350 |
+| 3 | a7b31cb | GET /catalog/{components,assemblies} + list_catalog_* | 350 |
+| 4 | cb67e46 | UI desk éditeur sections (modal + reorder + save) | 219 |
+| 5 | (cette session) | system_prompt v15 + docs/api/components-catalog.md | ~200 |
+
+**Cohérence préservée** : D-QGIS-005 (V0.1) · D-QGIS-006 (Source Strate) ·
+D-FORMAT-008 (integrity_hash) · D-QGIS-008 (helper unifié) · D-QGIS-009
+(pivot UX libre). Backward-compat absolue.
+
+**4 nouveaux tools agent** : update_component · clone_assembly ·
+list_catalog_components · list_catalog_assemblies.
+
+**Discipline v15 étendue** : avant create_*, check catalogue (anti-duplication).
+
+**Tag attendu** : `v1.6.5-vague-e1-composition-libre`.
+
+---
+
 ## Prochaine session
 
 Attaque Vague A commit 1 (FONDATIONS) :
