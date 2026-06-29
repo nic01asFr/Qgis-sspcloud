@@ -26,25 +26,38 @@ initiale (par agent IA ou par template).
 
 ### Mapping ComponentKind → BlockNote custom blocks
 
-8 custom blocks couvrent les `ComponentKind` Vague E2 :
+**13 custom blocks** couvrent l'intégralité des `ComponentKind` (Vagues A + B + E1 + E2) :
 
 | ComponentKind | BlockNote type | Rendering | Mapping `block.props` ↔ `Component.params` |
 |---|---|---|---|
-| `heading` | `customHeading` (level 1-4) | DOM React | `{level, text}` ↔ `{level, text}` |
-| `kpi_grid` | `kpiGrid` | DOM React (chips) | `{kpis: [{value, label, unit?, color?}], palette, columns_min}` |
-| `quote` | `customQuote` | DOM React (blockquote) | `{text, author?, source?}` |
-| `separator` | `separator` | DOM React (HR) | `{style, color, variant}` |
-| `narrative_text` | natif (paragraph/heading/list/bold) | DOM React natif BlockNote | `{content: markdown}` (markdown → blocks BlockNote) |
-| `interactive_map` | `interactiveMap` | iframe `/studies/{sid}/components/{cid}/render` | `{cid}` ↔ ref vers Component existant |
+| **DOM atomiques (lights, édition inline immédiate)** | | | |
+| `heading` | `customHeading` (level 1-4) | DOM React | `{level, text}` ↔ `params.{level, text}` |
+| `kpi_grid` | `kpiGrid` | DOM React (chips colorés) | `{kpis: [{value, label, unit?, color?}], palette, columns_min}` |
+| `kpi_badge` | `kpiBadge` | DOM React (1 KPI inline) | `{value, label, unit?, color?, source?}` |
+| `quote` | `customQuote` | DOM React (blockquote DSFR) | `{text, author?, source?}` |
+| `separator` | `separator` | DOM React (HR stylisé) | `{style, color, variant}` |
+| `narrative_text` | natif BlockNote (paragraph/heading/list/bold) | DOM React natif | `{content: markdown}` → blocks BlockNote |
+| `legend` | `legend` | DOM React (chips + source) | `{items: [{label, color}], source}` |
+| **Iframe lourds (réutilise rendu Jinja2 + JS hub)** | | | |
+| `interactive_map` | `interactiveMap` | iframe `/studies/{sid}/components/{cid}/render` | `{cid}` → ref Component existant |
 | `chart` | `chart` | iframe `/render/{cid}` | `{cid}` |
-| `data_table` | `dataTable` | iframe `/render/{cid}` (ou DOM si table simple) | `{cid}` ou `{columns, rows, source}` |
+| `data_table` | `dataTable` | iframe `/render/{cid}` (ou DOM table si simple) | `{cid}` ou inline `{columns, rows, source}` |
+| `scene_3d` | `scene3d` | iframe `/render/{cid}` (MapLibre fill-extrusion) | `{cid}` |
+| `media_embed` | `mediaEmbed` | iframe générique (vidéo, PDF, image) | `{src, type}` |
+| `iframe_grist` | `iframeGrist` | iframe Grist natif | `{grist_doc_id, table, view}` |
 
-**Stratégie mixte DOM/iframe** (cf. discussion architecturale du 2026-06-29) :
-- **DOM React** pour kinds **atomiques** : `heading`, `kpi_grid`, `quote`,
-  `separator`, `narrative_text` (light, édition inline immédiate).
-- **iframe** `/render/{cid}` pour kinds **lourds** : `interactive_map`,
-  `chart`, `data_table` (réutilise le rendu Jinja2 + JS hub, pas de
-  réimplémentation côté React).
+**Stratégie mixte DOM/iframe** :
+- **DOM React** (7 kinds atomiques) : édition inline immédiate, props éditables
+  directement dans BlockNote sans round-trip serveur. Pas d'iframe = bundle léger.
+- **iframe `/render/{cid}`** (6 kinds lourds) : réutilise le rendu Jinja2 + JS
+  MapLibre/ChartJS/DataTables existant côté hub. Pas de duplication code,
+  bundle ne explose pas.
+
+**Communication iframe ↔ parent BlockNote** :
+- À l'init : iframe envoie `postMessage({type: 'ready', height: <px>})` au parent
+- Le parent ajuste `iframe.style.height` dynamiquement
+- Au save Assembly : parent envoie `postMessage({type: 'reload-component'})`,
+  iframe recharge `/render/{cid}` pour preview frais
 
 ### Stack technique
 
@@ -98,15 +111,29 @@ qgis-sspcloud/
 - Déploiement = un seul `set image` (cohérent avec workflow actuel)
 - Aucune nouvelle infra à gérer
 
-### Persistence : autosave 30s
+### Persistence : autosave 30s + optimistic concurrency control
 
 L'éditeur effectue un **autosave debouncé 30s** :
 1. À chaque modif user → timer reset
-2. 30s d'inactivité → POST `/studies/{sid}/assemblies/{aid}` (INSERT-only,
-   `version_num+1`)
-3. Indicateur UI "Sauvegardé il y a Xs" + reconnexion auto si réseau coupé
+2. 30s d'inactivité → PUT `/studies/{sid}/assemblies/{aid}` avec body :
+   ```json
+   {
+     "manifest": {...},
+     "version_num_source": 3  // version chargée au début de l'édition
+   }
+   ```
+3. Hub vérifie `version_num_source == current_version_num` :
+   - OK : INSERT new version_num+1, retourne 200 + nouveau version_num
+   - KO : HTTP 409 Conflict + message "Conflit — l'assembly a été modifié
+     par un autre processus (agent IA chat ?). Recharger ?"
+4. UI BlockNote affiche "Sauvegardé il y a Xs" + spinner pendant requête
+5. Sur 409 : modal "Recharger" / "Forcer écrasement" (default = Recharger)
 
 **Pas de save manuel obligatoire** (UX moderne Notion/OneNote).
+
+**Optimistic concurrency** indispensable car workflow Vague E1 permet à
+l'agent IA de modifier l'assembly via chat en parallèle. Sans contrôle :
+risque de perdre des modifs.
 
 **Pas de CRDT Yjs en V1** : édition mono-utilisateur. Multi-user collab
 différée. Mais format BlockNote `partialBlocks` est **nativement Y-compatible**
@@ -143,16 +170,79 @@ différée. Mais format BlockNote `partialBlocks` est **nativement Y-compatible*
 | Migration Yjs future | Format `partialBlocks` BlockNote déjà Y-compatible |
 | Conflit React versions avec autres frontend | Iframe isolation (sub-window contexte) |
 
-## Plan d'implémentation
+## Plan d'implémentation — 10 micro-commits (optimisé 2026-06-29)
 
-| # | Commit | Effort | Description |
+Découpage fin pour réduire risque débug et livrer incrémentalement.
+Chaque commit livre quelque chose de testable.
+
+### Bloc E — Setup minimal (3h)
+
+| # | Commit | Effort | Livrable |
 |---|---|---|---|
-| E | Setup BlockNote standalone | ~3h | Vite + React + BlockNote v0.20+ + bundle output `hub/static/blocknote-editor/` + endpoint `GET /editor/{sid}/assembly/{aid}` |
-| F | 8 custom blocks Vague E2 | ~5h | DOM blocks (heading/kpi_grid/quote/separator/narrative_text) + iframe blocks (interactive_map/chart/data_table) |
-| G | Sérialisation bi-dir | ~3h | `assembly_to_blocknote_doc(asm)` + inverse + tests round-trip pytest |
-| H | Intégration desk + tag v1.7.0 | ~4h | Bouton "✏️ Editer" sur card + iframe modal + autosave handler + docs + tag `v1.7.0-blocknote-editor` |
+| **E1** | Vite + React + BlockNote "hello world" + CI Docker multi-stage | 2h | Page `/editor/...` affiche BlockNote vide sur image Docker push CI OK |
+| **E2** | Endpoint hub + fetch assembly read-only | 1h | Page charge l'assembly via API + affiche les sections en texte brut |
 
-**Total ~15h** sur 4 commits.
+### Bloc F — 13 custom blocks (10h)
+
+| # | Commit | Effort | Livrable |
+|---|---|---|---|
+| **F1** | 1er custom block (kpi_grid DOM) — pattern de référence | 2h | kpi_grid existant rendu en BlockNote DOM |
+| **F2** | 4 autres DOM atomiques (heading, kpi_badge, quote, separator) | 2h | 5 kinds atomiques DOM supportés |
+| **F3** | 2 derniers DOM (narrative_text markdown + legend) | 1.5h | 7 kinds DOM supportés |
+| **F4** | 3 iframe core (interactive_map, chart, data_table) + postMessage height | 2.5h | 10 kinds rendus (DOM + iframe core) |
+| **F5** | 3 derniers iframe (scene_3d, media_embed, iframe_grist) | 2h | 13 kinds supportés (couverture complète) |
+
+### Bloc G — Sérialisation bi-directionnelle (3h)
+
+| # | Commit | Effort | Livrable |
+|---|---|---|---|
+| **G** | `assembly_to_blocknote_doc()` + inverse + tests round-trip pytest | 3h | Save Assembly → BlockNote JSON → load → Assembly = identique (lossless) |
+
+### Bloc H — Intégration desk + autosave + tag (5h)
+
+| # | Commit | Effort | Livrable |
+|---|---|---|---|
+| **H1** | Autosave debounce 30s + optimistic concurrency control | 2h | Marie édite, save auto 30s, conflit agent IA géré (HTTP 409 + UI recharge) |
+| **H2** | Bouton "✏️ Editer" desk + drawer modal full-height | 2h | Marie ouvre l'éditeur depuis card assembly du desk |
+| **H3** | Docs final + axes wikichat sync + tag `v1.7.0-blocknote-editor` | 1h | Capitalisation + tag publié |
+
+**Total réaliste ~21h sur 10 micro-commits** (vs 15h initial sur 4 monolithiques).
+
+### Compromis V1 acceptés
+
+- **Théming DSFR Mantine custom** : différé Vague E4 (polish final). V1
+  accepte "Mantine bleu" qui ne match pas strictement DSFR mais reste sobre.
+- **Création nouveau composant depuis BlockNote** : différée. V1 = Marie
+  ÉDITE les composants existants. Nouveaux composants restent via agent IA.
+- **CRDT Yjs multi-user collab** : différée Vague future. Format
+  `partialBlocks` BlockNote nativement Y-compatible → migration facile.
+- **Tests E2E Playwright** : différés. V1 = tests unit Vitest + pytest
+  round-trip suffisent.
+
+### Stack CI/CD
+
+**Dockerfile multi-stage** :
+```dockerfile
+FROM node:20-alpine AS blocknote-builder
+WORKDIR /build
+COPY blocknote-editor/package*.json ./
+RUN npm ci
+COPY blocknote-editor/ ./
+RUN npm run build  # output dans dist/
+
+FROM python:3.11-slim AS hub
+WORKDIR /app
+COPY --from=blocknote-builder /build/dist /app/hub/static/blocknote-editor
+COPY hub/ /app/hub/
+# ... reste install Python
+```
+
+**GitHub Actions** : étape `npm run build` avant Docker build, cache
+`node_modules` via `actions/cache@v3`.
+
+**Versioning bundle** : Vite hash assets auto (`main-[hash].js`),
+`Cache-Control: public, max-age=31536000, immutable` sur assets, pas sur
+`index.html`.
 
 ## Cohérence ADR
 
