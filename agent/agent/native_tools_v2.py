@@ -150,6 +150,7 @@ async def get_component_history(sid: str, cid: str) -> dict[str, Any]:
 
 async def update_component(
     sid: str, cid: str, manifest: dict[str, Any],
+    version_num_source: int | None = None,
 ) -> dict[str, Any]:
     """Vague E1 (D-QGIS-009, 2026-06-29) : UPDATE versionne composant existant.
 
@@ -164,11 +165,24 @@ async def update_component(
     - Complet : remplace le manifest (id + sid forces a cid + sid).
     - Partiel : merge top-level avec l'existant (hub lit existant + override).
 
+    Sprint 1 Vague E3 (D2 fix) : `version_num_source` optionnel pour OCC.
+    Si fourni, le hub verifie qu'aucun autre processus (Marie via BlockNote)
+    n'a modifie le composant entre temps. En cas de conflit : HTTP 409 avec
+    {error: 'concurrent_update', current_version_num, source_version_num}.
+
+    DISCIPLINE AGENT IA : pour eviter d'ecraser silencieusement des modifs
+    BlockNote en cours, TOUJOURS appeler get_component AVANT update_component
+    et passer la version_num actuelle comme version_num_source. En cas de 409,
+    re-fetch + retry intelligent.
+
     Retourne {id, rowid, kind, title, classification, version_num,
               manifest_url, render_url, publish_url}.
     """
+    body = {**manifest}
+    if version_num_source is not None:
+        body["version_num_source"] = version_num_source
     return await _hub_call(
-        "PUT", f"/studies/{sid}/components/{cid}", json_body=manifest,
+        "PUT", f"/studies/{sid}/components/{cid}", json_body=body,
     )
 
 
@@ -213,6 +227,7 @@ async def get_assembly(sid: str, aid: str) -> dict[str, Any]:
 
 async def update_assembly(
     sid: str, aid: str, manifest: dict[str, Any],
+    version_num_source: int | None = None,
 ) -> dict[str, Any]:
     """Phase 4b (2026-06-28) : UPDATE versionne d'un assemblage existant.
 
@@ -226,14 +241,29 @@ async def update_assembly(
     audit_trail est preserve.
 
     Pour ajouter une section a une storymap :
-    1. get_assembly(sid, aid) → recuperer layout existant
+    1. get_assembly(sid, aid) → recuperer layout existant + version_num
     2. layout.sections = [...existing, nouvelle_section]
-    3. update_assembly(sid, aid, manifest_complet)
+    3. update_assembly(sid, aid, manifest_complet, version_num_source=v)
+
+    Sprint 1 Vague E3 (D2 fix) : `version_num_source` optionnel pour OCC.
+    Si fourni, le hub verifie qu'aucun autre processus (Marie via BlockNote
+    autosave) n'a modifie l'assembly entre temps. En cas de conflit :
+    HTTP 409 avec {error: 'concurrent_update', current_version_num,
+    source_version_num}.
+
+    DISCIPLINE AGENT IA : pour eviter d'ecraser silencieusement des modifs
+    Marie via BlockNote, TOUJOURS appeler get_assembly AVANT update_assembly
+    et passer version_num actuelle comme version_num_source. En cas de 409,
+    re-fetch + retry intelligent (re-appliquer les changes sur le manifest
+    le plus recent).
 
     Retourne {id, rowid, version_num, manifest_url, render_url, publish_url}.
     """
+    body = {**manifest}
+    if version_num_source is not None:
+        body["version_num_source"] = version_num_source
     return await _hub_call(
-        "PUT", f"/studies/{sid}/assemblies/{aid}", json_body=manifest,
+        "PUT", f"/studies/{sid}/assemblies/{aid}", json_body=body,
     )
 
 

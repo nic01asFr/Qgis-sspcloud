@@ -1,0 +1,67 @@
+{# Partial _media_embed — embed PDF / video / image / iframe externe
+
+   Sprint 1 Vague E3 fix D4 : remplace le placeholder texte par un VRAI
+   rendu HTML adapte au type MIME. Aligne avec D-QGIS-008 helper unifie.
+
+   Variables :
+   - title : titre optionnel affiche en tete
+   - url : URL du media (S3, externe, etc.)
+   - mime : type MIME ('application/pdf', 'video/mp4', 'image/png', etc.)
+   - caption : legende optionnelle
+   - source : citation Strate (corpus + millesime + authority)
+   - height : hauteur en px (default 400)
+   - sandbox : strict pour iframe (default 'allow-scripts allow-same-origin')
+#}
+{% set height = height | default(400) %}
+<div style="margin:24px 0;border:1px solid #e5e7eb;border-radius:8px;
+            background:#fff;overflow:hidden;font-family:system-ui">
+  {% if title %}
+  <div style="padding:12px 16px;background:#f4f6fa;border-bottom:1px solid #e5e7eb;
+              font-weight:600;font-size:14px;color:#000091">{{ title | e }}</div>
+  {% endif %}
+
+  {% if mime.startswith('image/') %}
+    <img src="{{ url | e }}" alt="{{ (title or caption or 'Media embed') | e }}"
+         style="width:100%;height:auto;display:block;max-height:{{ height }}px;
+                object-fit:contain;background:#fafafa" />
+
+  {% elif mime.startswith('video/') %}
+    <video controls preload="metadata"
+           style="width:100%;height:{{ height }}px;background:#000;display:block">
+      <source src="{{ url | e }}" type="{{ mime | e }}">
+      <p style="padding:16px;color:#666;font-style:italic">
+        Video non supportee par ce navigateur.
+        <a href="{{ url | e }}" target="_blank" rel="noopener">Telecharger</a>
+      </p>
+    </video>
+
+  {% elif mime == 'application/pdf' or url.endswith('.pdf') %}
+    <embed src="{{ url | e }}" type="application/pdf"
+           width="100%" height="{{ height }}"
+           style="display:block;background:#525252">
+    <noscript>
+      <a href="{{ url | e }}" target="_blank" rel="noopener"
+         style="display:block;padding:24px;text-align:center;color:#0063cb">
+        Telecharger le PDF
+      </a>
+    </noscript>
+
+  {% else %}
+    {# Fallback : iframe sandboxee pour HTML/embed generique (Youtube, Vimeo...) #}
+    <iframe src="{{ url | e }}"
+            style="width:100%;height:{{ height }}px;border:none;display:block"
+            sandbox="allow-scripts allow-same-origin allow-popups"
+            referrerpolicy="no-referrer"
+            title="{{ (title or caption or 'Media embed') | e }}"
+            loading="lazy"></iframe>
+  {% endif %}
+
+  {% if caption or source %}
+  <div style="padding:8px 16px;background:#fafafa;border-top:1px solid #e5e7eb;
+              font-size:11px;color:#666;display:flex;justify-content:space-between;
+              flex-wrap:wrap;gap:8px">
+    {% if caption %}<span>{{ caption | e }}</span>{% endif %}
+    {% if source %}<span style="font-style:italic">Source : {{ source | e }}</span>{% endif %}
+  </div>
+  {% endif %}
+</div>

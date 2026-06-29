@@ -59,6 +59,70 @@ export async function createComponent(
 }
 
 /**
+ * Sprint 1 Vague E3 (D3 fix) : update versionne d'un Component existant.
+ *
+ * Permet a BlockNote de PUT au lieu de POST quand Marie modifie un block
+ * DOM dont le cid existe deja. Sans ca, on creait un nouveau Component
+ * a chaque save -> pollution PVC/DB/audit_chain.
+ *
+ * @param sid - 12 hex etude id
+ * @param cid - 12 hex component id existant
+ * @param manifest - Component manifest top-level (params, title, etc.)
+ * @param versionNumSource - version_num au load pour OCC (null = bypass)
+ *
+ * Retourne {ok: true, newVersionNum, cid} en cas de succes,
+ * sinon {ok: false, conflict?, error?}.
+ */
+export interface UpdateComponentResult {
+  ok: boolean;
+  newVersionNum?: number;
+  cid?: string;
+  conflict?: {
+    currentVersionNum: number;
+    sourceVersionNum: number;
+  };
+  error?: string;
+}
+
+export async function updateComponent(
+  sid: string,
+  cid: string,
+  manifest: any,
+  versionNumSource: number | null,
+): Promise<UpdateComponentResult> {
+  const body = { ...manifest };
+  if (versionNumSource !== null) {
+    body.version_num_source = versionNumSource;
+  }
+  const url = `${API_BASE}/studies/${sid}/components/${cid}`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 409) {
+    const data = await res.json().catch(() => ({}));
+    const detail = data.detail || data;
+    return {
+      ok: false,
+      conflict: {
+        currentVersionNum: detail.current_version_num || 0,
+        sourceVersionNum: detail.source_version_num || 0,
+      },
+      error: detail.message || 'Conflit version composant',
+    };
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    return { ok: false, error: `HTTP ${res.status} — ${text.slice(0, 200)}` };
+  }
+  const data = await res.json();
+  return { ok: true, newVersionNum: data.version_num, cid: data.id };
+}
+
+/**
  * Update Assembly avec optimistic concurrency control.
  *
  * Vague E2 Commit H1 (D-QGIS-010) : si version_num_source fourni,

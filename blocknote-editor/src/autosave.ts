@@ -11,7 +11,7 @@
  * Si conflit (409) : modal "Recharger" ou "Forcer écrasement".
  */
 import { useEffect, useRef, useState } from 'react';
-import { createComponent, updateAssembly } from './api';
+import { createComponent, updateAssembly, updateComponent } from './api';
 import type { AssemblyManifest } from './types';
 
 const AUTOSAVE_DEBOUNCE_MS = 30_000;
@@ -31,9 +31,22 @@ export type SaveStatus =
  *
  * V1 simple : reuse local logic similaire à hub/blocknote_serializer.py.
  */
-function blocksToSections(blocks: any[]): { sections: any[]; newComponents: any[] } {
+/**
+ * Sprint 1 Vague E3 (D3 fix) : sortie enrichie pour distinguer create vs update.
+ * - newComponents : DOM blocks SANS cid existant -> POST /components (CREATE)
+ * - updatedComponents : DOM blocks AVEC cid existant -> PUT /components/{cid} (UPDATE)
+ *   Format : [{cid, manifest}, ...]. saveBlocks fait le PUT versionne.
+ */
+interface BlocksToSectionsResult {
+  sections: any[];
+  newComponents: any[];
+  updatedComponents: Array<{ cid: string; manifest: any }>;
+}
+
+function blocksToSections(blocks: any[]): BlocksToSectionsResult {
   const sections: any[] = [];
   const newComponents: any[] = [];
+  const updatedComponents: Array<{ cid: string; manifest: any }> = [];
   let current = { kind: 'section', title: null as string | null, narrative_md: null as string | null, components: [] as any[] };
 
   const flush = () => {
@@ -62,18 +75,26 @@ function blocksToSections(blocks: any[]): { sections: any[]; newComponents: any[
       }
       continue;
     }
-    // Custom block -> Component
+    // Custom block -> Component (create OU update selon existingCid)
     const compInfo = customBlockToComponent(block);
     if (!compInfo) continue;
     if (compInfo.refOnly) {
       current.components.push({ ref: compInfo.cid });
+    } else if (compInfo.existingCid) {
+      // UPDATE : cid existe deja, on met a jour le Component
+      updatedComponents.push({
+        cid: compInfo.existingCid,
+        manifest: compInfo.manifest,
+      });
+      current.components.push({ ref: compInfo.existingCid });
     } else {
+      // CREATE : nouveau Component (utilise placeholder __pending__)
       newComponents.push(compInfo.manifest);
       current.components.push({ ref: '__pending__' });
     }
   }
   flush();
-  return { sections, newComponents };
+  return { sections, newComponents, updatedComponents };
 }
 
 function blockTextContent(content: any): string {
@@ -87,9 +108,18 @@ function blockTextContent(content: any): string {
   return '';
 }
 
-function customBlockToComponent(
-  block: any,
-): { refOnly: true; cid: string } | { refOnly: false; manifest: any } | null {
+/**
+ * Sprint 1 Vague E3 (D3 fix) : distingue create vs update.
+ * - refOnly + cid : iframe block, ref direct vers cid existant
+ * - existingCid present : DOM block dont le cid existe deja (UPDATE)
+ * - manifest sans existingCid : DOM block nouveau (CREATE)
+ */
+type CustomBlockMapping =
+  | { refOnly: true; cid: string }
+  | { refOnly: false; manifest: any; existingCid?: string }
+  | null;
+
+function customBlockToComponent(block: any): CustomBlockMapping {
   const TYPE_TO_KIND: Record<string, string> = {
     kpiGrid: 'kpi_grid',
     customHeading: 'heading',
@@ -112,7 +142,7 @@ function customBlockToComponent(
   if (IFRAME_KINDS.includes(kind)) {
     return { refOnly: true, cid: String(props.cid || '') };
   }
-  // DOM kind : nouveau Component à créer (params via switch)
+  // DOM kind : params via switch
   const params: Record<string, any> = {};
   switch (kind) {
     case 'kpi_grid':
@@ -150,6 +180,9 @@ function customBlockToComponent(
       params.content = String(props.content || '');
       break;
   }
+  // Sprint 1 Vague E3 (D3 fix) : si props.cid existe -> UPDATE existant
+  // sinon CREATE nouveau.
+  const existingCid = String(props.cid || '');
   return {
     refOnly: false,
     manifest: {
@@ -159,6 +192,7 @@ function customBlockToComponent(
       params,
       rendering: { runtime: 'html', container_size: 'full' },
     },
+    ...(existingCid ? { existingCid } : {}),
   };
 }
 
@@ -188,7 +222,29 @@ export async function saveBlocks(
   // orphelins). Le caller (useAutosave) maintient cette ref entre essais.
   reusableCids: string[] = [],
 ): Promise<{ ok: boolean; newVersionNum?: number; error?: string; conflict?: any; createdCids?: string[] }> {
-  const { sections, newComponents } = blocksToSections(blocks);
+  const { sections, newComponents, updatedComponents } = blocksToSections(blocks);
+
+  // Sprint 1 Vague E3 (D3 fix) : UPDATE les Components DOM existants en
+  // parallele (PUT versionne au lieu de POST nouveaux = pollution).
+  // versionNumSource=null bypass OCC : on assume que Marie a chargee l'editeur
+  // avec la version actuelle des components (sinon elle aurait recharge avant).
+  if (updatedComponents.length > 0) {
+    try {
+      await Promise.all(
+        updatedComponents.map(({ cid, manifest }) =>
+          updateComponent(sid, cid, manifest, null).then((r) => {
+            if (!r.ok) throw new Error(r.error || 'update component echec');
+            return r;
+          }),
+        ),
+      );
+    } catch (err) {
+      return {
+        ok: false,
+        error: `Échec update composants : ${String(err)}`,
+      };
+    }
+  }
 
   // Créer les new_components DOM côté hub.
   // Audit fix v1.7.1 P0 #4 : parallèle Promise.all + réutilisation cid retry.

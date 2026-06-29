@@ -1,0 +1,55 @@
+{# Partial _iframe_grist — iframe vers widget Grist hebergé
+
+   Sprint 1 Vague E3 fix D4 : remplace le placeholder texte par un VRAI
+   iframe sandboxe. Aligne avec D-QGIS-008 helper unifie.
+
+   Variables :
+   - title : titre optionnel
+   - widget_url : URL Grist du widget (grist.numerique.gouv.fr/...)
+   - height : hauteur px (default 500)
+   - caption : legende
+   - source : citation Strate
+#}
+{% set height = height | default(500) %}
+<div style="margin:24px 0;border:1px solid #e5e7eb;border-radius:8px;
+            background:#fff;overflow:hidden;font-family:system-ui">
+  {% if title %}
+  <div style="padding:12px 16px;background:#f4f6fa;border-bottom:1px solid #e5e7eb;
+              font-weight:600;font-size:14px;color:#000091;
+              display:flex;align-items:center;gap:8px">
+    <span>📊</span>
+    <span>{{ title | e }}</span>
+    {% if widget_url %}
+    <a href="{{ widget_url | e }}" target="_blank" rel="noopener"
+       style="margin-left:auto;font-size:11px;color:#0063cb;text-decoration:none">
+      Ouvrir dans Grist ↗
+    </a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if widget_url %}
+  <iframe src="{{ widget_url | e }}"
+          style="width:100%;height:{{ height }}px;border:none;display:block;
+                 background:#fafafa"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          referrerpolicy="no-referrer"
+          title="{{ (title or 'Widget Grist') | e }}"
+          loading="lazy"
+          allow="clipboard-write"></iframe>
+  {% else %}
+  <div style="padding:32px;text-align:center;color:#888;font-style:italic;
+              background:#fafafa">
+    Aucune URL Grist configuree.
+  </div>
+  {% endif %}
+
+  {% if caption or source %}
+  <div style="padding:8px 16px;background:#fafafa;border-top:1px solid #e5e7eb;
+              font-size:11px;color:#666;display:flex;justify-content:space-between;
+              flex-wrap:wrap;gap:8px">
+    {% if caption %}<span>{{ caption | e }}</span>{% endif %}
+    {% if source %}<span style="font-style:italic">Source : {{ source | e }}</span>{% endif %}
+  </div>
+  {% endif %}
+</div>

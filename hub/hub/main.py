@@ -2995,9 +2995,26 @@ async def schema_kinds_endpoint(
     """Liste les `kind` possibles pour un entity_type (anti-hallucination LLM).
 
     Ex: /schema/component/kinds → {kinds: ['interactive_map', 'scene_3d', ...]}
+
+    Sprint 1 Vague E3 fix D9 : pour `assembly`, on filtre temporairement à
+    `storymap_narrative_dsfr` tant que les templates render des autres kinds
+    (`dashboard`, `sheet_a4`, `modal_embed`, `atlas_immersive`) ne sont pas
+    livres (Sprint 4 ulterieur). Sinon l'agent IA cree un Assembly valide
+    Pydantic mais render_assembly renvoie 501 sans message clair.
     """
     from hub import schema_introspect as si
-    return si.list_entity_kinds(entity_type)
+    result = si.list_entity_kinds(entity_type)
+    if entity_type == "assembly":
+        # Restreindre temporairement aux kinds dont le template Jinja2 existe
+        supported = {"storymap_narrative_dsfr"}
+        kinds = result.get("kinds", [])
+        result["kinds"] = [k for k in kinds if k in supported]
+        result["_filter_note"] = (
+            "Sprint 1 E3 (D9) : seuls les kinds avec template render livre sont "
+            "exposes. Les autres (dashboard, sheet_a4, modal_embed, atlas_immersive) "
+            "sont valides Pydantic mais render_assembly renvoie 501. Sprint 4 a venir."
+        )
+    return result
 
 
 @app.post("/schema/{entity_type}/validate")
@@ -4068,6 +4085,35 @@ async def update_component_endpoint(
     except Exception:
         raise HTTPException(400, "Body JSON invalide")
 
+    # Sprint 1 Vague E3 fix D2 : OCC `version_num_source` aussi pour Component
+    # (identique au pattern update_assembly_endpoint livre v1.7.1).
+    # Si l'editeur BlockNote envoie version_num_source, on verifie qu'aucun
+    # autre processus (agent IA via chat) n'a modifie le composant entre temps.
+    version_num_source = payload.pop("version_num_source", None)
+    if version_num_source is not None:
+        current_version = latest.get("version_num", 1)
+        try:
+            source_version = int(version_num_source)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                400,
+                "version_num_source doit etre un entier",
+            )
+        if source_version != int(current_version):
+            raise HTTPException(
+                409,
+                {
+                    "error": "concurrent_update",
+                    "message": (
+                        f"Conflit : le composant a ete modifie par un autre processus "
+                        f"(version actuelle {current_version}, source {source_version}). "
+                        f"Recharger pour voir les modifications les plus recentes."
+                    ),
+                    "current_version_num": current_version,
+                    "source_version_num": source_version,
+                },
+            )
+
     # Force scope + identite stable
     payload["sid"] = sid
     payload["id"] = cid
@@ -4934,9 +4980,52 @@ async def _pre_render_component_html(
                 f'margin:40px 0;width:100%;opacity:.6">'
             )
 
+        elif kind == "media_embed":
+            # Sprint 1 Vague E3 fix D4 : vrai rendu (vs placeholder texte).
+            # Detecte type MIME via params.mime ou extension url.
+            source = comp_manifest.get("source", {}) or {}
+            url = params.get("url") or source.get("data_url", "")
+            mime = params.get("mime", "")
+            if not mime and url:
+                # Auto-detect via extension
+                url_lower = url.lower()
+                if url_lower.endswith(".pdf"):
+                    mime = "application/pdf"
+                elif url_lower.endswith((".mp4", ".webm", ".ogv")):
+                    mime = f"video/{url_lower.rsplit('.', 1)[-1]}"
+                elif url_lower.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")):
+                    mime = f"image/{url_lower.rsplit('.', 1)[-1].replace('jpg', 'jpeg')}"
+                else:
+                    mime = "text/html"  # fallback iframe
+            tpl = _maplibre_jinja.get_template("_media_embed_partial.j2")
+            return tpl.render(
+                title=params.get("title") or comp_manifest.get("title", ""),
+                url=url,
+                mime=mime,
+                caption=params.get("caption", ""),
+                source=params.get("source", ""),
+                height=params.get("height", 400),
+            )
+
+        elif kind == "iframe_grist":
+            # Sprint 1 Vague E3 fix D4 : vrai rendu iframe Grist.
+            source = comp_manifest.get("source", {}) or {}
+            widget_url = (
+                params.get("widget_url") or params.get("url")
+                or source.get("data_url", "")
+            )
+            tpl = _maplibre_jinja.get_template("_iframe_grist_partial.j2")
+            return tpl.render(
+                title=params.get("title") or comp_manifest.get("title", ""),
+                widget_url=widget_url,
+                height=params.get("height", 500),
+                caption=params.get("caption", ""),
+                source=params.get("source", ""),
+            )
+
         else:
-            # Fallback : kind non géré inline (scene_3d, chart pre-Vague A,
-            # data_table pre-Vague A, media_embed, iframe_grist) → placeholder
+            # Fallback : kind non géré inline (scene_3d differé Vague E3 sprint 3,
+            # chart pre-Vague A, data_table pre-Vague A) → placeholder
             return (
                 f'<div style="padding:24px;text-align:center;background:#f4f6fa;'
                 f'border-radius:6px;color:#666">'
