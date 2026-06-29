@@ -169,6 +169,66 @@ DELETE /studies/{sid}/scoped-keys/{kid}                   (revoke)
 - **1 nouvel axe** créé (publication-flow)
 - **4 ADR** créés (D-QGIS-005/006/008 + D-FORMAT-008)
 
+## Pivot stratégique 2026-06-29 — Vague E1 réaligné UX libre composition
+
+Suite recadrage user "storymap ≠ format figé" + référence ArcGIS StoryMaps
+modèle (palette de blocks composables) :
+
+### Décision D-QGIS-009 actée
+
+Vague E1 = **UX libre composition** (PATCH composants + clone assemblages +
+catalogue cross-étude + UI desk éditeur sections), AVANT d'ajouter de nouveaux
+kinds (reportés Vague E2).
+
+### Rationale
+
+Audit codebase Explore agent (2026-06-29) sur 7 axes :
+- 21 native tools cohérents agent IA + MCP (dispatch + schemas + whitelist v15)
+- Discovery API active (/schema/{entity}/{kinds,validate})
+- Discipline PLAN-PUIS-EXECUTE explicite system_prompt
+- BUG P0 détecté : `publish_component` + `update_assembly` absents de
+  `NATIVE_TOOLS_V2_MUTATING` frozenset (cache L2 invalidation cassé)
+- 3 GAPS critiques UX libre :
+  - PATCH /components/{cid} absent (composants pas éditables après création)
+  - /catalog/components absent (pas de marketplace cross-étude)
+  - clone_assembly absent (pas de fork template)
+- UI desk : pas d'éditeur sections (composition agent-driven only)
+
+### Plan Vague E1 réaligné (~12-14h)
+
+```
+prep-vague-e1-ux-libre (ce commit)
+├─ Bug fix P0 MUTATING (2 LOC)
+├─ ADR D-QGIS-009 NEW
+├─ Bandeaux "spec différée Vague E2" sur 3 docs design équipe
+├─ BILAN section pivot stratégique
+├─ Axes wikichat update
+└─ README mention plan E1
+
+Commit 1 — PATCH components + update_component (~2h)
+Commit 2 — Clone assembly + cloned_from (~2h30)
+Commit 3 — Catalog cross-étude /catalog/components (~2h)
+Commit 4 — UI desk éditeur sections (~3-4h)
+Commit 5 — System prompt v15 + docs final (~1h)
+Validation + Reviewer + Tag v1.6.5-vague-e1-composition-libre (~1h30)
+```
+
+### Décisions de design Vague E1
+
+- **Clone shallow par défaut** (refs cid partagés). `?deep=true` optionnel.
+- **`cloned_from` sur `ComponentProvenance`** (Option C — Component + Assembly)
+- **Audience default `cerema_internal`** sur catalog (anti-fuite RGPD)
+- **Form params UI graceful** : simple forms kinds simples, quick-action agent pour complexes
+
+### Vague E2 différée
+
+5 nouveaux kinds (kpi_grid, audit_chain_narrative, reliability_matrix,
+heading, quote) + AuditChain enrichi (Phase, VariableReliability, contributors)
++ extension narrative_text KPI inline + layout sidecar Esri. Bump Component
+V0.1 → V0.2 + tag `v1.7.0-component-catalog-v02`. ~13h.
+
+---
+
 ## Prochaine session
 
 Attaque Vague A commit 1 (FONDATIONS) :

@@ -1,8 +1,20 @@
 # Design System — Livrables CEREMA DTerMed
 
-> Vague E1 "Resultat final professionnel"
-> Reference cible : `storymap_blancarde_chartreux v12` (1210 lignes, 36 traitements, 9 cartes)
-> Auteur : Design-Lead | Date : 2026-06-29
+> ⚠️ **SPEC DIFFÉRÉE VAGUE E2** (décision D-QGIS-009 2026-06-29)
+>
+> Recadrage user "DSFR-inspiré sobre moderne, pas conformance stricte" + "storymap
+> composition libre Esri-inspired" → Vague E1 cible désormais UX libre composition.
+> Le système visuel décrit ici (full DSFR CDN `dsfr.min.css`, layout sec-map sticky,
+> fr-tabs chapitres, fr-accordion méthode) **reste pertinent** pour Vague E2 mais
+> avec **ajustements** : pas de full DSFR CDN (~280 KB CSS+JS rejetés), garder
+> approche DSFR-inspirée sobre avec couleurs France + Marianne web font + classes
+> utilitaires custom légères.
+>
+> Voir `docs/decisions/D-QGIS-009-vague-e1-ux-libre-composition.md` pour le pivot.
+
+> **Auteur** : Design-Lead · **Date** : 2026-06-29
+> **Statut** : SPEC PARTIELLE VAGUE E2 (full DSFR strict abandonné, DSFR-inspiré sobre conservé)
+> **Référence cible** : `storymap_blancarde_chartreux v12` (1210 lignes, 36 traitements, 9 cartes)
 
 ---
 

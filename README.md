@@ -3,12 +3,20 @@
 Service QGIS géospatial pour agents CEREMA sur SSPCloud Onyxia.  
 QGIS Desktop + Agent IA + Mémoire long terme.
 
-**État actuel** : Phase 4b LIVRÉ (2026-06-29) — pipeline E2E
-`load → scene_manifest → component → update_assembly → publish` validé
-avec 14 270 bâtiments BD TOPO Marseille 4e arr. Storymaps DSFR-inspirées
-opérationnelles avec audit_chain `integrity_hash` SHA256 + composants
-inline MapLibre + sources Strate-aligned. Vague A en cours
-(chart + data_table + helper rendu unifié + publish_component).
+**État actuel** : Vagues A + B LIVRÉES (tag `v1.6.4-pipeline-e2e`, 2026-06-29) —
+pipeline E2E `load → scene_manifest → component → update_assembly → publish`
+validé avec 14 270 bâtiments BD TOPO Marseille 4e arr. Storymaps DSFR-inspirées
+opérationnelles avec `audit_chain.integrity_hash` SHA256 + 6 composants inline
+(narrative + KPI + legend + carto MapLibre + chart Chart.js + data_table) +
+sources Strate-aligned + helper rendu unifié 3-paths.
+
+**Prochaine vague** : E1 "UX libre composition" (D-QGIS-009 acté 2026-06-29) —
+PATCH composants + clone assemblages + catalogue cross-étude + UI desk
+éditeur sections. Tag attendu : `v1.6.5-vague-e1-composition-libre`.
+
+**Vague E2 différée** : 5 nouveaux kinds (kpi_grid, audit_chain_narrative,
+reliability_matrix, heading, quote) + AuditChain enrichi + layout sidecar
+Esri. Bump Component V0.2 → tag `v1.7.0-component-catalog-v02`.
 
 > **Charte de fonctionnement de l'agent** (vision produit, principes,
 > roadmap, invariants) : voir [docs/CHARTE_AGENT.md](docs/CHARTE_AGENT.md).

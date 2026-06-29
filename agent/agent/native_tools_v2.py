@@ -1701,4 +1701,10 @@ NATIVE_TOOLS_V2_MUTATING: frozenset[str] = frozenset({
     "create_agent",
     "publish_agent",
     "revoke_agent",
+    # Bug fix P0 (2026-06-29) : Reviewer-VagueE1 a detecte que ces 2 tools
+    # mutants etaient absents du frozenset. Impact : cache L2 artifacts
+    # _fetch_study_artifacts_summary ne s'invalidait pas apres ces appels
+    # -> agent IA voyait state stale (composants/assemblages obsoletes).
+    "publish_component",   # A3 Vague A (2026-06-28) - mutant S3 + DB
+    "update_assembly",     # Phase 4b (2026-06-28) - mutant DB INSERT-only + PVC
 })

@@ -1,5 +1,14 @@
 # Pattern editorial narratif — Storymaps CEREMA DTerMed
 
+> ✅ **VALIDE CROSS-VAGUE** (Vague E1 + Vague E2)
+>
+> Ce document décrit le **pattern éditorial CEREMA** (chapitres-questions, phrases
+> pivots, KPI inline, ton DTerMed) et reste **directement applicable** :
+> - Vague E1 : pour la discipline de composition libre via agent IA (system_prompt v15)
+> - Vague E2 : pour les nouveaux kinds (kpi_grid, audit_chain_narrative) une fois livrés
+>
+> Voir D-QGIS-009 pour pivot stratégique Vague E1 UX libre.
+
 > Reference : Blancarde-Chartreux (4e arrondissement Marseille, mars 2026).
 > Destinataires : agents IA storymap_creator_v15, redacteurs humains, reviewers.
 

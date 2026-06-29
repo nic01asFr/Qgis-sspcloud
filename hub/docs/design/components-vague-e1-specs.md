@@ -1,7 +1,23 @@
 # Composants Vague E1 — Specs techniques
 
+> ⚠️ **SPEC REPORTÉE EN VAGUE E2** (décision D-QGIS-009 2026-06-29)
+>
+> Recadrage user "storymap = composition libre Esri-inspired, pas format figé" →
+> Vague E1 cible désormais l'**UX libre composition** (PATCH composants + clone
+> assemblages + catalogue cross-étude + UI desk éditeur sections) AVANT d'ajouter
+> de nouveaux kinds. Composants spécifiés ici (kpi_grid, audit_chain_narrative,
+> chapter_section, reliability_matrix, pipeline_signature) deviennent **spec de
+> Vague E2** (post-Vague E1).
+>
+> Voir `docs/decisions/D-QGIS-009-vague-e1-ux-libre-composition.md` pour le
+> pivot stratégique complet.
+>
+> Le document ci-dessous reste **valide tel quel** pour Vague E2 — la spec
+> technique est exhaustive et exécutable une fois UX libre opérationnelle.
+
 > **Auteur** : Components-Designer · **Date** : 2026-06-29
-> **Objectif** : "Résultat final professionnel" — 5 nouveaux kinds + 2 extensions schemas existants
+> **Objectif initial** : "Résultat final professionnel" — 5 nouveaux kinds + 2 extensions schemas existants
+> **Statut** : SPEC DIFFÉRÉE VAGUE E2 (post-Vague E1 UX libre)
 > **Référence visuelle** : `storymap_blancarde_chartreux (24).html`
 > **Backward-compat** : tous les champs ajoutés sont optionnels (defaults vides)
 
