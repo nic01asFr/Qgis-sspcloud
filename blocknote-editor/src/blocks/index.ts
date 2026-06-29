@@ -20,12 +20,23 @@ import { SeparatorBlock } from './Separator';
 import { KpiBadgeBlock } from './KpiBadge';
 import { LegendBlock } from './Legend';
 import { NarrativeTextBlock } from './NarrativeText';
+import {
+  InteractiveMapBlock,
+  ChartBlock,
+  DataTableBlock,
+  Scene3dBlock,
+  MediaEmbedBlock,
+  IframeGristBlock,
+} from './IframeEmbed';
 
 /**
- * Schema BlockNote avec custom blocks Vague E2.
+ * Schema BlockNote avec 13 custom blocks Vague E2 :
+ *  - 7 DOM atomiques (kpiGrid, customHeading, customQuote, separator,
+ *                     kpiBadge, legend, narrativeText)
+ *  - 6 iframe lourds (interactiveMap, chart, dataTable, scene3d,
+ *                      mediaEmbed, iframeGrist)
  *
- * Use case : passé à useCreateBlockNote({schema}) pour permettre à
- * BlockNote d'utiliser nos custom blocks (slash menu, sérialisation, render).
+ * Couverture complète des ComponentKind hub.
  */
 export const qgisBlockNoteSchema = BlockNoteSchema.create({
   blockSpecs: {
@@ -37,6 +48,12 @@ export const qgisBlockNoteSchema = BlockNoteSchema.create({
     kpiBadge: KpiBadgeBlock,
     legend: LegendBlock,
     narrativeText: NarrativeTextBlock,
+    interactiveMap: InteractiveMapBlock,
+    chart: ChartBlock,
+    dataTable: DataTableBlock,
+    scene3d: Scene3dBlock,
+    mediaEmbed: MediaEmbedBlock,
+    iframeGrist: IframeGristBlock,
   },
 });
 
@@ -44,10 +61,11 @@ export type QgisBlockNoteSchema = typeof qgisBlockNoteSchema;
 
 /**
  * Convertit un ComponentKind hub en BlockNote block type.
- * Utilisé par le sérialiseur Assembly -> BlockNote document.
+ * Couverture complète V1 = 13 kinds.
  */
 export function componentKindToBlockType(kind: string): string | null {
   const mapping: Record<string, string> = {
+    // DOM atomiques
     kpi_grid: 'kpiGrid',
     heading: 'customHeading',
     quote: 'customQuote',
@@ -55,13 +73,13 @@ export function componentKindToBlockType(kind: string): string | null {
     kpi_badge: 'kpiBadge',
     legend: 'legend',
     narrative_text: 'narrativeText',
-    // F4+F5 à venir :
-    // interactive_map: 'interactiveMap',
-    // chart: 'chart',
-    // data_table: 'dataTable',
-    // scene_3d: 'scene3d',
-    // media_embed: 'mediaEmbed',
-    // iframe_grist: 'iframeGrist',
+    // Iframe lourds (Vague E2 Commit F4+F5)
+    interactive_map: 'interactiveMap',
+    chart: 'chart',
+    data_table: 'dataTable',
+    scene_3d: 'scene3d',
+    media_embed: 'mediaEmbed',
+    iframe_grist: 'iframeGrist',
   };
   return mapping[kind] || null;
 }

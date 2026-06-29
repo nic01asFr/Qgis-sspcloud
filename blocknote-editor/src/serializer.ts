@@ -62,11 +62,12 @@ export async function assemblyToBlockNoteDoc(
           });
           continue;
         }
-        // Custom block DOM : convertir params -> props
+        // Custom block DOM ou iframe : convertir params -> props
         const params = (component.params || {}) as Record<string, any>;
         const props: Record<string, any> = { cid: compRef.ref };
 
         switch (component.kind) {
+          // ── DOM blocks (F1+F2+F3) ──
           case 'kpi_grid':
             props.kpisJson = JSON.stringify(params.kpis || []);
             props.palette = params.palette || 'monochrome';
@@ -100,6 +101,16 @@ export async function assemblyToBlockNoteDoc(
             break;
           case 'narrative_text':
             props.content = params.content || params.markdown || params.text || '';
+            break;
+          // ── Iframe blocks (F4+F5) — reutilise rendu hub via /render/{cid} ──
+          case 'interactive_map':
+          case 'chart':
+          case 'data_table':
+          case 'scene_3d':
+          case 'media_embed':
+          case 'iframe_grist':
+            // sid + cid suffisent (iframe vers /studies/{sid}/components/{cid}/render)
+            props.sid = sid;
             break;
           default:
             break;
