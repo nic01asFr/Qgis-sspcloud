@@ -522,34 +522,37 @@ d'éditer simultanément.
 
 ---
 
-## 9. Backlog dette technique tracée (17 items)
+## 9. Backlog dette technique tracée (17 items) — état post-v1.9.0
 
-| # | Item | Drift | Vague | Effort |
+| # | Item | Drift | Tag livraison | Statut |
 |---|---|---|---|---|
-| **P0 sprint 1 (semaine 1)** | | | | |
-| 8.1 | BlockNote `update_component` au save vs create (pollution DB) | **D3 ⚠** | E3 S1 | 3-4h |
-| 8.2 | Agent IA + modal E1 OCC `version_num_source` + endpoint hub `update_component` | D2 + D5 | E3 S1 | 2-3h |
-| 8.3 | Helper render `media_embed` + `iframe_grist` partials Jinja2 | D4 partiel | E3 S1 | 1.5h |
-| 8.4 | `/schema/assembly/kinds` limiter à `storymap_narrative_dsfr` | D9 | E3 S1 | 30min |
-| **P1 sprint 2 (semaine 2)** | | | | |
-| 8.5 | Dépréciation modal Vague E1 (option 1 si BlockNote stable) | D5 | E3 S2 | 30min-2h |
-| 8.6 | Tools OpenAI : ajouter 4 kinds Vague E2 dans description | D1 | E3 S2 | 1min |
-| 8.7 | Test paramétré ComponentKind ↔ runtime ↔ helper | D8 | E3 S2 | 30min |
-| 8.8 | Bouton "👁 Aperçu DSFR strict" depuis BlockNote (drawer modal) | — | E3 S2 | 1h |
-| **P2 sprint 3 (polish)** | | | | |
-| 8.9 | Helper render `scene_3d` (Three.js fill-extrusion) | D4 complément | E3 S3 | 1j |
-| 8.10 | Block `sectionBreak` invisible (vs heading H2 natif) + backfill | D6 | E3 S3 | 4-6h |
-| 8.11 | DSFR theming strict BlockNote (Mantine override) | — | E3 S3 | 3-5h |
-| 8.12 | Création composant via slash menu BlockNote | — | E3 S3 | 5-8h |
-| 8.13 | Tests Vitest unit `blocksToSections` | — | E3 S3 | 2-3h |
-| 8.14 | Monitoring client errors (window.error + endpoint hub) | — | E3 S3 | 2h |
-| **P3 bonus stratégique (V1.8/E4)** | | | | |
-| 8.15 | Draft buffer BlockNote + tool `get_draft_blocks` agent | D10 | V1.8 | 4-6h |
-| 8.16 | Block `recipe_output` exécutable live | D7 | V1.8 | 1sem |
-| 8.17 | CRDT Yjs multi-user collab | — | V2 | 1-2sem |
+| **P0 sprint 1** (LIVRÉ v1.8.0, ~8h) | | | | |
+| 8.1 | BlockNote `update_component` au save vs create (pollution DB) | **D3 ⚠** | v1.8.0 | ✅ LIVRÉ |
+| 8.2 | Agent IA + modal E1 OCC `version_num_source` + endpoint hub `update_component` | D2 + D5 | v1.8.0 | ✅ LIVRÉ |
+| 8.3 | Helper render `media_embed` + `iframe_grist` partials Jinja2 | D4 partiel | v1.8.0 | ✅ LIVRÉ (scene_3d différé) |
+| 8.4 | `/schema/assembly/kinds` limiter à `storymap_narrative_dsfr` | D9 | v1.8.0 | ✅ LIVRÉ |
+| **P1 sprint 2** (LIVRÉ v1.9.0, ~3h) | | | | |
+| 8.5 | Dépréciation modal Vague E1 (option 2 rebrand "Métadonnées") | D5 | v1.9.0 | ✅ LIVRÉ (option 2) |
+| 8.6 | Tools OpenAI : ajouter 4 kinds Vague E2 dans description | D1 | v1.9.0 | ✅ LIVRÉ |
+| 8.7 | Test paramétré ComponentKind ↔ runtime ↔ helper | D8 | v1.9.0 | ✅ LIVRÉ (43 tests) |
+| 8.8 | Bouton "👁 Aperçu DSFR strict" depuis BlockNote (drawer modal) | — | v1.9.0 | ✅ LIVRÉ |
+| **P2 sprint 3** (LIVRÉ v1.9.0 partiel, ~5h) | | | | |
+| 8.9 | Helper render `scene_3d` (Three.js fill-extrusion) | D4 complément | — | ⏳ Vague E3 sprint 4 (1j) |
+| 8.10 | Fix H2 vide ne fragmente pas section vide | D6 | v1.9.0 | ✅ LIVRÉ |
+| 8.11 | DSFR theming strict BlockNote (Mantine override) | — | v1.9.0 | ✅ LIVRÉ |
+| 8.12 | Création composant via slash menu BlockNote | — | — | ⏳ Vague E3 sprint 4 (5-8h) |
+| 8.13 | Tests Vitest unit `blocksToSections` (pytest equivalent) | — | v1.9.0 | ✅ LIVRÉ (12 tests pytest) |
+| 8.14 | Monitoring client errors (window.error + endpoint hub) | — | v1.9.0 | ✅ LIVRÉ |
+| **P3 V2 stratégique (~3-5 semaines effort cumulé)** | | | | |
+| 8.15 | Draft buffer BlockNote + tool `get_draft_blocks` agent | D10 | — | ⏳ V2 |
+| 8.16 | Block `recipe_output` exécutable live | D7 | — | ⏳ V2 |
+| 8.17 | CRDT Yjs multi-user collab | — | — | ⏳ V2 |
 
-**Total estimé P0 sprint 1** : ~8-9h (4 items critiques).
-**Total estimé Vague E3 (P0 + P1 + P2)** : ~25-37h sur 3 sprints.
+**LIVRÉ v1.7.0 → v1.9.0** : 12/17 items (~21h effort réel) — Vague E2 complète + Vague E3 sprints 1-3 essentiels.
+**Restant Vague E3 sprint 4** : 8.9 + 8.12 (~13-16h)
+**Restant V2** : 8.15 + 8.16 + 8.17 (~3-5 semaines)
+
+**Drifts identifiés audit : 8/10 résolus, 2 différés V2 (D7 + D10).**
 
 ## Référence
 

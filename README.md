@@ -3,9 +3,8 @@
 Service QGIS géospatial pour agents CEREMA sur SSPCloud Onyxia.  
 QGIS Desktop + Agent IA + Mémoire long terme.
 
-**État actuel** : Vagues A + B + E1 + E2 (storymap métier base + carto
-métier riche + pivot UI BlockNote éditeur) LIVRÉES (tag
-`v1.7.0-blocknote-editor`, 2026-06-29).
+**État actuel** : Vagues A + B + E1 + E2 + **E3 sprints 1-3** LIVRÉES
+(tag `v1.9.0-sprint-2-3-e3`, 2026-06-29).
 
 Pipeline E2E `load → scene_manifest → component → update_assembly →
 publish` + storymap métier avec grammaire narrative
@@ -16,24 +15,49 @@ BlockNote block-based** intégré au desk avec 13 custom blocks (DOM +
 iframe) + autosave 30s + optimistic concurrency control vs agent IA.
 216/216 tests pytest PASSED.
 
-**Tags publiés** :
+**Tags publiés** (Vague E2 BlockNote + Vague E3 sprints 1-3 alignement) :
 - `v1.6.5-vague-e1-composition-libre` (UX libre composition agent IA)
 - `v1.6.6-storymap-metier-base` (polish DSFR + 6 patterns métier + trio cartographe)
 - `v1.6.7-carto-metier-base` (symbologie + interactions + fonds + viz + légende)
-- `v1.7.0-blocknote-editor` ⭐ (éditeur block-based 13 custom blocks + autosave + bouton desk)
+- `v1.7.0-blocknote-editor` (éditeur block-based 13 custom blocks + autosave + bouton desk)
+- `v1.7.1-audit-fixes` (5 P0 audit + truncation + code mort -514 LOC)
+- `v1.7.2-p1p2-optims` (parallèle + force-overwrite + Cache-Control + whitelist OIDC)
+- `v1.7.3-fullwidth` (container 100% + width:100% custom blocks)
+- `v1.7.4-roundtrip-section` (frontière sections via heading H2 vide)
+- `v1.7.5-consolidation` (audit roadmap + footer dynamique + 8 tests pytest)
+- `v1.8.0-sprint1-e3` (alignement reste de l'app : 4 P0 - D2/D3/D4 partiel/D5/D9)
+- `v1.9.0-sprint-2-3-e3` ⭐ (sprint 2+3 essentiels : 8 P1+P2 - D1/D6/D8 + DSFR theming + monitoring)
 
-**Marie peut maintenant** :
+**Marie peut maintenant** (production v1.9.0) :
 - Demander à l'agent IA via chat (Vague E1)
-- Éditer visuellement via BlockNote (Vague E2 H2) — bouton "📝 BlockNote" sur card livrable desk
-- Compose storymaps via 6 patterns métier canoniques (Vague E2 base)
+- Éditer visuellement via BlockNote — bouton "📝 BlockNote" sur card livrable desk
+- Voir le rendu DSFR strict en temps réel via bouton "👁 Aperçu DSFR" dans l'éditeur
+- Composer storymaps via 6 patterns métier canoniques (Vague E2 base)
 - Visualiser avec carto thématique riche (Vague E2 carto)
+- Éditer les métadonnées (titre/audience/sections) via modal "🔧 Métadonnées" expert
+- Bénéficier d'un theming DSFR cohérent en édition vs publication (police Marianne)
 
-**Vague E3 différée** : kinds avancés (audit_chain_narrative,
-reliability_matrix) + AuditChain enrichi (Phase, VariableReliability,
-contributors) + layout sidecar Esri scrollytelling + scene_3d MapLibre
-fill-extrusion + multi-cartes synchronisées + `@media print` A4 +
-DSFR theming strict BlockNote + CRDT Yjs collab + création nouveau
-composant depuis BlockNote.
+**Acquis architecturaux** (Vague E3 sprints 1-3) :
+- Pas de pollution DB/PVC : BlockNote `update_component` au save (vs create-only) — drift D3
+- OCC `version_num_source` bidirectionnel (agent IA + modal E1 + BlockNote) — drifts D2 + D5
+- 12/13 ComponentKind rendus (vs 10/13 avant) : `media_embed` + `iframe_grist` livrés — drift D4 partiel
+- AssemblyKind filtré au schéma (évite 501 sur dashboard/sheet_a4) — drift D9
+- Tests paramétrés `ComponentKind ↔ runtime ↔ helper` (anti-régression future) — drift D8
+- Monitoring serveur erreurs JS clients (`/api/log/client-error` + ring buffer 100) — D-QGIS-010 acté
+- 273/273 pytest tests PASSED.
+
+**Vague E3 sprint 4 + V2 différés** :
+- 8.9 scene_3d Three.js fill-extrusion render (~1j)
+- 8.12 Création composant via slash menu BlockNote (~5-8h)
+- 8.15 Draft buffer BlockNote + tool agent `get_draft_blocks` (V2)
+- 8.16 Block `recipe_output` exécutable live (V2)
+- 8.17 CRDT Yjs multi-user collab (V2)
+- kinds avancés : audit_chain_narrative + reliability_matrix
+- AuditChain enrichi (Phase, VariableReliability, contributors)
+- layout sidecar Esri scrollytelling + multi-cartes synchronisées
+- `@media print` A4
+
+Cf. [docs/blocks-and-deliverables-model.md §9 backlog](docs/blocks-and-deliverables-model.md).
 
 > **Charte de fonctionnement de l'agent** (vision produit, principes,
 > roadmap, invariants) : voir [docs/CHARTE_AGENT.md](docs/CHARTE_AGENT.md).

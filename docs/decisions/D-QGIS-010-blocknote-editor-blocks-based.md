@@ -1,9 +1,11 @@
 # D-QGIS-010 — Éditeur block-based BlockNote pour édition visuelle Assembly
 
-**Statut** : ✅ LIVRÉ — 5 tags consécutifs (v1.7.0 → v1.7.5) — production-ready
-**Date** : 2026-06-29 (livraison + audit + consolidation)
+**Statut** : ✅ LIVRÉ — 9 tags consécutifs (v1.7.0 → v1.9.0) — production-ready
+**Date** : 2026-06-29 (livraison Vague E2 + audit + consolidation + Vague E3 sprints 1-3)
 **Auteurs** : Nicolas LAVAL, agent IA Claude (qgis-sspcloud)
-**Tags / Vague** : `v1.7.0-blocknote-editor` → `v1.7.5-consolidation` — Vague E2 pivot UI
+**Tags / Vague** : `v1.7.0-blocknote-editor` → `v1.9.0-sprint-2-3-e3` — Vague E2 pivot UI + Vague E3 alignement
+**Tests** : 273/273 pytest PASSED (vs 196 baseline pré-vague)
+**Drifts résolus** : 8/10 (D1, D2, D3, D4 partiel, D5, D6, D8, D9) + 2 différés V2 (D7, D10)
 
 > **Note pivot architectural acté** (v1.7.1) : la sérialisation Pydantic ↔ BlockNote
 > JSON est **100% TypeScript** (`blocknote-editor/src/serializer.ts` forward +

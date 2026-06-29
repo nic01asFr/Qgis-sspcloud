@@ -182,20 +182,25 @@ app.mount(
 - Mode mobile responsive
 - Export PDF natif depuis BlockNote (`@media print` style)
 
-## Référence (mis à jour v1.7.5)
+## Référence (mis à jour v1.9.0)
 
-- Tags : `v1.7.0-blocknote-editor` → `v1.7.5-consolidation` (5 vagues consécutives)
+- Tags : `v1.7.0-blocknote-editor` → `v1.9.0-sprint-2-3-e3` (9 tags consécutifs)
   - `v1.7.0-blocknote-editor` : livraison initiale 13 custom blocks + autosave + bouton desk
   - `v1.7.1-audit-fixes` : 5 P0 + truncation silencieuse + code mort retiré
   - `v1.7.2-p1p2-optims` : Promise.allSettled + force-overwrite + Cache-Control + whitelist OIDC
   - `v1.7.3-fullwidth` : container 100% + width:100% custom blocks
   - `v1.7.4-roundtrip-section` : frontière sections via heading H2 vide
   - `v1.7.5-consolidation` : tests pytest + docs + footer dynamique
+  - `v1.8.0-sprint1-e3` : alignement reste de l'app (4 P0 : D2/D3/D4 partiel/D5/D9)
+  - `v1.9.0-sprint-2-3-e3` : sprint 2+3 essentiels (8 P1+P2 : D1/D6/D8 + DSFR theming + monitoring + Aperçu DSFR)
 - ADR : `docs/decisions/D-QGIS-010-blocknote-editor-blocks-based.md`
 - Plan détaillé : `docs/blocknote-editor-plan.md`
+- Modèle blocks : `docs/blocks-and-deliverables-model.md` (Component/Assembly/Block + 17 items priorisés)
 - Code React : `blocknote-editor/src/` (serialisation 100% TypeScript, pas de pendant Python)
-- Code Python : `hub/hub/main.py` PUT enrichi `/studies/{sid}/assemblies/{aid}` (version_num_source + skip None merge)
-- Tests : **196/196 pytest PASSED** (post v1.7.1 retrait des 20 tests fictifs de l'ancien `blocknote_serializer.py`)
+- Code Python : `hub/hub/main.py` PUT enrichi `/studies/{sid}/assemblies/{aid}` + `/components/{cid}` (version_num_source + skip None merge)
+- Monitoring : `POST /api/log/client-error` + `GET /api/log/client-errors` (ring buffer 100 RAM)
+- Tests : **273/273 pytest PASSED** (196 baseline + 8 v1.7.5 + 14 sprint 1 + 43 sprint 2 + 12 sprint 3)
+- Drifts résolus : 8/10 (D1, D2, D3, D4 partiel, D5, D6, D8, D9) — 2 différés V2 (D7 recipes + D10 draft buffer)
 
 ## Contact
 

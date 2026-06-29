@@ -336,7 +336,9 @@ intégration desk + tag `v1.7.0-blocknote-editor`.
 - `v1.7.2-p1p2-optims` (Promise.allSettled + force-overwrite + Cache-Control + whitelist OIDC)
 - `v1.7.3-fullwidth` (container 100% + width:100% custom blocks)
 - `v1.7.4-roundtrip-section` (frontière sections via heading H2 vide)
-- `v1.7.5-consolidation` ⭐ (tests pytest concurrency/round-trip/skip-None + docs cohérentes + footer dynamique)
+- `v1.7.5-consolidation` (tests pytest concurrency/round-trip/skip-None + docs cohérentes + footer dynamique)
+- `v1.8.0-sprint1-e3` (alignement reste de l'app sur modèle blocks — 4 P0)
+- `v1.9.0-sprint-2-3-e3` ⭐ (sprint 2+3 essentiels — 8 P1+P2)
 
 ## Vague E2 BlockNote LIVRÉ — 5 vagues v1.7.0 → v1.7.5
 
@@ -359,11 +361,85 @@ d'audit-fixes consécutives (audit critique → consolidation → footer dynamiq
 - Pas de monitoring client (errors)
 - Pas de tests Vitest (3 tests pytest critiques en v1.7.5)
 
-**Tests : 199/199 pytest PASSED (v1.7.5)** (196 + 3 nouveaux concurrency/round-trip/skip-None).
+**Tests : 273/273 pytest PASSED (v1.9.0)** (196 baseline + 8 v1.7.5 + 14 sprint 1 + 43 sprint 2 + 12 sprint 3).
 
 ---
 
-## Prochaine session (Vague E3 différée)
+## Vague E3 sprints 1-3 LIVRÉS — alignement reste de l'app
+
+Après v1.7.5 (Vague E2 BlockNote consolidée), 2 tags supplémentaires
+livrent l'alignement du reste de l'app sur le modèle blocks.
+
+### Sprint 1 (v1.8.0-sprint1-e3, ~8h, SHA a44dfe7)
+
+4 items P0 résolvent 5 drifts critiques identifiés par audit blocks model :
+
+| # | Drift | Description |
+|---|---|---|
+| 8.1 | **D3 critique** | BlockNote `updateComponent` au save (vs create-only) — élimine pollution PVC/DB linéaire avec l'usage |
+| 8.2 | D2 + D5 | OCC `version_num_source` complet : endpoint hub `update_component_endpoint` + agent IA tools + modal E1 desk |
+| 8.3 | D4 partiel | Partials Jinja2 `_media_embed_partial.j2` + `_iframe_grist_partial.j2` — 12/13 ComponentKind rendus |
+| 8.4 | D9 | `/schema/assembly/kinds` filtré à `storymap_narrative_dsfr` — évite agent IA créant assemblies non-renderables |
+
+**Impact mesuré** : Marie modifie un KPI 50 fois → 50 versions INSERT-only
+du MÊME cid (vs 50 cid orphelins avant). Audit_chain au publish ne pollue
+plus avec des cid jetables.
+
+### Sprint 2 (parallèle avec sprint 3, ~5h)
+
+4 items P1 hygiène + UX :
+
+| # | Drift | Description |
+|---|---|---|
+| 8.5 | D5 | Modal E1 rebrandée "🔧 Métadonnées" avec tooltip "mode expert JSON" |
+| 8.6 | D1 | Tools OpenAI `list_entity_kinds` mention les 4 kinds Vague E2 + note filtre D9 |
+| 8.7 | D8 | Test paramétré `ComponentKind ↔ runtime ↔ helper` (43 tests anti-régression) |
+| 8.8 | — | Bouton "👁 Aperçu DSFR" dans header BlockNote → drawer modal iframe `/render/{aid}` |
+
+### Sprint 3 (~5h, SHA 4d9bb55)
+
+4 items P2 polish + monitoring :
+
+| # | Drift | Description |
+|---|---|---|
+| 8.10 | D6 | Fix : heading H2 vide ne fragmente pas section vide (vs bug v1.7.4) |
+| 8.11 | — | DSFR theming strict BlockNote : variables Mantine override → palette Marianne #000091 + police 'Marianne' |
+| 8.13 | — | Tests pytest équivalent Vitest (introspection TS depuis Python, 12 tests) |
+| 8.14 | — | Monitoring client errors : POST/GET `/api/log/client-error` ring buffer RAM 100 + handlers `window.error`/`unhandledrejection` |
+
+### Tag v1.9.0 = état final production
+
+**Marie peut maintenant** :
+- Tous les acquis Vague E2 (édition BlockNote, autosave, conflict, full-width)
+- + Plus de pollution DB (D3 résolu)
+- + Aperçu DSFR strict en temps réel (8.8)
+- + Theming DSFR cohérent édition vs publication (8.11)
+- + Tests anti-régression sur la matrice 13×13 kind/runtime/helper (8.7)
+- + Modal "🔧 Métadonnées" sans confusion vs BlockNote (8.5)
+
+**Ops peut maintenant** :
+- Voir les erreurs JS clients via `GET /api/log/client-errors` (8.14)
+- Diagnostiquer les autosave fails sans Sentry externe
+- Détecter les bugs Edge/Mac/Safari spécifiques en prod
+
+### Drifts résolus : 8/10
+
+| Drift | Description | Statut |
+|---|---|---|
+| D1 | Tools OpenAI 4 kinds | ✅ v1.9.0 (8.6) |
+| D2 | OCC update_component_endpoint | ✅ v1.8.0 (8.2) |
+| D3 | BlockNote update vs create | ✅ v1.8.0 (8.1) |
+| D4 | 3 kinds placeholder helper | 🟡 partiel v1.8.0 (8.3 — media_embed/iframe_grist livrés, scene_3d différé) |
+| D5 | Modal E1 sans OCC | ✅ v1.8.0 (8.2) + rebrand v1.9.0 (8.5) |
+| D6 | H2 round-trip fragmentation | ✅ v1.9.0 (8.10) |
+| D7 | Recipes orphelines | ⏳ V2 (8.16) |
+| D8 | Pas test kind/runtime | ✅ v1.9.0 (8.7) |
+| D9 | AssemblyKind 501 | ✅ v1.8.0 (8.4) |
+| D10 | Pas tool get_draft_blocks | ⏳ V2 (8.15) |
+
+---
+
+## Prochaine session (Vague E3 sprint 4 + V2 différés)
 
 Vague E3 : audit_chain_narrative + reliability_matrix kinds + AuditChain
 enrichi + layout sidecar Esri + scene_3d MapLibre (vrai rendu pas placeholder)
