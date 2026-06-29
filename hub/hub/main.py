@@ -4199,6 +4199,29 @@ async def update_assembly_endpoint(
     except Exception:
         raise HTTPException(400, "Body JSON invalide")
 
+    # Vague E2 Commit H1 (D-QGIS-010) : optimistic concurrency control
+    # Si l'editeur BlockNote envoie version_num_source (charge au debut
+    # de l'edition), on verifie qu'aucun autre processus (agent IA chat
+    # via workflow Vague E1) n'a modifie l'assembly entre temps.
+    # En cas de stale -> 409 Conflict + l'UI BlockNote propose de recharger.
+    version_num_source = payload.pop("version_num_source", None)
+    if version_num_source is not None:
+        current_version = latest.get("version_num", 1)
+        if int(version_num_source) != int(current_version):
+            raise HTTPException(
+                409,
+                {
+                    "error": "concurrent_update",
+                    "message": (
+                        f"Conflit : l'assembly a ete modifie par un autre processus "
+                        f"(version actuelle {current_version}, source {version_num_source}). "
+                        f"Recharger pour voir les modifications les plus recentes."
+                    ),
+                    "current_version_num": current_version,
+                    "source_version_num": int(version_num_source),
+                },
+            )
+
     # Force scope + identite stable
     payload["sid"] = sid
     payload["id"] = aid

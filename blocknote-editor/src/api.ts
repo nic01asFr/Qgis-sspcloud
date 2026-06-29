@@ -35,3 +35,80 @@ export async function fetchComponent(
   // Retourne le manifest (la response wrapper a metadata + manifest)
   return data.manifest || data;
 }
+
+/**
+ * Crée un nouveau Component (DOM kind) avant update_assembly.
+ * Utilisé par H1 autosave pour les blocks DOM qui n'ont pas encore de cid.
+ */
+export async function createComponent(
+  sid: string,
+  manifest: any,
+): Promise<{ id: string }> {
+  const url = `${API_BASE}/studies/${sid}/components`;
+  const res = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(manifest),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Create component : HTTP ${res.status} — ${detail.slice(0, 200)}`);
+  }
+  return await res.json();
+}
+
+/**
+ * Update Assembly avec optimistic concurrency control.
+ *
+ * Vague E2 Commit H1 (D-QGIS-010) : si version_num_source fourni,
+ * le hub renvoie HTTP 409 en cas de conflit (autre processus a modifié
+ * l'assembly entre temps).
+ */
+export interface UpdateAssemblyResult {
+  ok: boolean;
+  newVersionNum?: number;
+  conflict?: {
+    currentVersionNum: number;
+    sourceVersionNum: number;
+  };
+  error?: string;
+}
+
+export async function updateAssembly(
+  sid: string,
+  aid: string,
+  manifest: any,
+  versionNumSource: number | null,
+): Promise<UpdateAssemblyResult> {
+  const body = { ...manifest };
+  if (versionNumSource !== null) {
+    body.version_num_source = versionNumSource;
+  }
+  const url = `${API_BASE}/studies/${sid}/assemblies/${aid}`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 409) {
+    const data = await res.json().catch(() => ({}));
+    const detail = data.detail || data;
+    return {
+      ok: false,
+      conflict: {
+        currentVersionNum: detail.current_version_num || 0,
+        sourceVersionNum: detail.source_version_num || 0,
+      },
+      error: detail.message || 'Conflit version',
+    };
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    return { ok: false, error: `HTTP ${res.status} — ${text.slice(0, 200)}` };
+  }
+  const data = await res.json();
+  return { ok: true, newVersionNum: data.version_num };
+}
