@@ -137,7 +137,16 @@ class Component(BaseModel):
     description: str | None = Field(None, max_length=2000)
 
     classification: Classification = "cerema_internal"
-    source: ComponentSource
+    source: ComponentSource | None = Field(
+        None,
+        description=(
+            "Source data du composant. Obligatoire pour kinds data-driven "
+            "(interactive_map, chart, data_table, scene_3d, narrative_text avec "
+            "data_url notes.md). Optionnel pour kinds purement compositionnels "
+            "Vague E2 (heading, quote, separator, kpi_grid, image_gallery, button) "
+            "qui n'ont pas de source de données externe."
+        ),
+    )
     params: dict[str, Any] = Field(
         default_factory=dict,
         description="Params kind-specific (ex: bbox, basemap, field, stops…)",
