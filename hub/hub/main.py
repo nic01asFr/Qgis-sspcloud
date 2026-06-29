@@ -2967,6 +2967,42 @@ async def schema_validate_endpoint(
     return si.validate_manifest(entity_type, payload)
 
 
+# ── Storymap patterns (Vague E2 Commit 3, D-QGIS-009 §3) ──────────────────────
+
+@app.get("/storymap_patterns")
+async def list_storymap_patterns_endpoint(
+    user: dict = Depends(auth.get_current_user),
+):
+    """Liste les patterns metier d'une storymap CEREMA.
+
+    6 patterns canoniques (hero_constat, zoom_territoire, croisement_enjeu,
+    fiche_indicateur, reliability_summary, conclusion_actionnable).
+
+    Use case agent IA : decouvrir AVANT de composer une storymap from
+    scratch. Permet de penser en chapitres metier au lieu de blocs HTML.
+    """
+    from hub import storymap_patterns as sp
+    return {"patterns": sp.list_patterns()}
+
+
+@app.get("/storymap_patterns/{name}")
+async def get_storymap_pattern_endpoint(
+    name: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Recette complete d'un pattern : params_schema + components_template +
+    section_template + example.
+
+    L'agent IA construit ensuite les N component manifests + cree N components
+    + ajoute la section au layout de son assembly.
+    """
+    from hub import storymap_patterns as sp
+    try:
+        return sp.describe_pattern(name)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
 # ── Components CRUD (Sprint Composants Phase 2) ──────────────────────────────
 
 # ── Sprint Composants Phase 4a (2026-06-27) : agents partagés ────────────────

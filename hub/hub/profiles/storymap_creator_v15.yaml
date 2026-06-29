@@ -76,6 +76,8 @@ mcp_tools:
     - create_assembly
     - update_assembly
     - clone_assembly     # Vague E1 D-QGIS-009 : partir d'un template existant
+    - list_storymap_patterns    # Vague E2 Commit 3 D-QGIS-009 : 6 patterns metier
+    - describe_storymap_pattern # Vague E2 Commit 3 D-QGIS-009 : recette pattern
     - get_assembly
     - render_assembly
     - publish_assembly

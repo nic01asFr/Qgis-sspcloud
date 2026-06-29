@@ -332,6 +332,52 @@ async def list_catalog_assemblies(
     return await _hub_call("GET", "/catalog/assemblies", params=params)
 
 
+# ── Storymap patterns (Vague E2 Commit 3, D-QGIS-009 §3) ──────────────────────
+
+async def list_storymap_patterns() -> dict[str, Any]:
+    """Vague E2 Commit 3 (D-QGIS-009) : liste les patterns metier d'une
+    storymap CEREMA.
+
+    6 patterns canoniques :
+    - hero_constat : ouverture immersive (heading + kpi_grid + source)
+    - zoom_territoire : carte + contexte + legend (trio cartographe)
+    - croisement_enjeu : carte + chart + narrative interpretation
+    - fiche_indicateur : kpi_grid + table + methodo + quote expert
+    - reliability_summary : matrice fiabilite + caveats
+    - conclusion_actionnable : narrative + kpi_grid actions + quote decideur
+
+    DISCIPLINE METIER : penser en chapitres canoniques, pas en blocs HTML.
+    Use case : Marie demande 'comment ouvrir ma storymap ?' -> agent IA
+    lui propose hero_constat avec ses params.
+
+    Retourne {patterns: {name: {description, role_narratif, n_components,
+    section_kind}}}.
+    """
+    return await _hub_call("GET", "/storymap_patterns")
+
+
+async def describe_storymap_pattern(name: str) -> dict[str, Any]:
+    """Vague E2 Commit 3 : recette complete d'un pattern metier.
+
+    Retourne le template params + N component manifests parametrables +
+    section template avec refs aux cid generes + example.
+
+    name : nom du pattern (hero_constat, zoom_territoire, croisement_enjeu,
+    fiche_indicateur, reliability_summary, conclusion_actionnable).
+
+    L'agent IA doit ensuite :
+    1. Construire les N component manifests selon params user
+    2. create_component x N -> recupere les cid generes
+    3. update_assembly en ajoutant section_template avec refs aux cid
+
+    Use case : Marie veut une fiche d'indicateur 'Exposition pietons'.
+    1. describe_storymap_pattern('fiche_indicateur') -> recette
+    2. create_component x 5 (heading + kpi_grid + data_table + narrative + quote)
+    3. update_assembly assembly_id, ajoute la nouvelle section composee
+    """
+    return await _hub_call("GET", f"/storymap_patterns/{name}")
+
+
 async def clone_assembly(
     sid: str, aid: str, deep: bool = False,
 ) -> dict[str, Any]:
@@ -1233,6 +1279,31 @@ NATIVE_TOOLS_V2 = {
             "deep": "bool (default false) — shallow refs partages OU deep dup composants",
         },
     },
+    "list_storymap_patterns": {
+        "fn": list_storymap_patterns,
+        "description": (
+            "Vague E2 Commit 3 (D-QGIS-009 §3) — 6 patterns metier d'une "
+            "storymap CEREMA (hero_constat, zoom_territoire, croisement_enjeu, "
+            "fiche_indicateur, reliability_summary, conclusion_actionnable). "
+            "DISCIPLINE METIER : penser en chapitres canoniques, pas en blocs "
+            "HTML. Use case : Marie demande 'comment ouvrir ma storymap ?' "
+            "-> agent IA suggere hero_constat avec ses params."
+        ),
+        "params": {},
+    },
+    "describe_storymap_pattern": {
+        "fn": describe_storymap_pattern,
+        "description": (
+            "Vague E2 Commit 3 — recette complete d'un pattern metier : "
+            "params_schema + N component manifests parametrables + section "
+            "template avec refs cid. L'agent construit ensuite les manifests, "
+            "create_component x N, update_assembly avec la nouvelle section."
+        ),
+        "params": {
+            "name": "str (hero_constat|zoom_territoire|croisement_enjeu|"
+                    "fiche_indicateur|reliability_summary|conclusion_actionnable)",
+        },
+    },
     "publish_component": {
         "fn": publish_component,
         "description": (
@@ -1779,6 +1850,50 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["sid", "aid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_storymap_patterns",
+            "description": (
+                "Vague E2 Commit 3 (D-QGIS-009 §3) - 6 patterns metier d'une "
+                "storymap CEREMA. Penser en chapitres canoniques au lieu de "
+                "blocs HTML : hero_constat (ouverture immersive), zoom_territoire "
+                "(carte + contexte + legende), croisement_enjeu (carte+chart+"
+                "interpretation), fiche_indicateur (kpi_grid+table+methodo+quote), "
+                "reliability_summary (matrice fiabilite + caveats), "
+                "conclusion_actionnable (synthese+actions+quote decideur). "
+                "Use case : Marie ouvre une nouvelle storymap, agent IA suggere "
+                "hero_constat puis chaine les autres patterns selon le besoin."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "describe_storymap_pattern",
+            "description": (
+                "Vague E2 Commit 3 - recette complete d'un pattern metier : "
+                "params_schema + N component manifests parametrables + section "
+                "template avec refs cid. L'agent construit les manifests, "
+                "create_component x N, puis update_assembly avec section composee."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "enum": [
+                            "hero_constat", "zoom_territoire", "croisement_enjeu",
+                            "fiche_indicateur", "reliability_summary",
+                            "conclusion_actionnable",
+                        ],
+                    },
+                },
+                "required": ["name"],
             },
         },
     },
