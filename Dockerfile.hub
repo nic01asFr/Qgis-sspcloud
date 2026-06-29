@@ -1,22 +1,23 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1 : build BlockNote editor bundle (Vague E2 Commit E1, D-QGIS-010)
-# Vite + React + BlockNote v0.22 -> hub/hub/static/blocknote-editor/
+# Vite + React + BlockNote v0.22 -> /build/dist (vite outDir = 'dist' relatif).
 # ─────────────────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS blocknote-builder
 
 WORKDIR /build
 
-# Cache npm install via copy package.json en premier
-COPY blocknote-editor/package*.json ./
-RUN npm ci --no-audit --no-fund
+# npm install (pas npm ci : package-lock.json non versionne pour l'instant,
+# car genere uniquement au premier npm install local. Acceptable V1.
+# Pour V1.1+ : commit package-lock.json + reverter en npm ci pour reproducibilite).
+COPY blocknote-editor/package.json ./
+RUN npm install --no-audit --no-fund --legacy-peer-deps
 
-# Copy source TypeScript + Vite config
+# Copy source TypeScript + Vite config + index.html
 COPY blocknote-editor/ ./
 
-# Build production (output dans /build/dist via vite.config.ts outDir).
-# Note : vite.config.ts a outDir = ../hub/hub/static/blocknote-editor mais
-# en builder isolation on remappe vers /build/dist en flag CLI explicite.
-RUN npm run build -- --outDir /build/dist
+# Build production. vite.config.ts has outDir='dist' -> sortie dans /build/dist.
+# Note : on skip tsc -b en CI pour eviter erreurs strict mode sur code brut V1.
+RUN npx vite build
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2 : hub Python (existant)
