@@ -352,6 +352,63 @@ function App() {
               <span>v{currentVersionNum}</span>
               <span>•</span>
               <span style={{ color: '#0063cb' }}>{assembly.manifest.audience}</span>
+              {/* Sprint 2 P1 (8.8) : bouton 'Apercu DSFR strict' qui ouvre
+                  la storymap publiable dans un drawer modal. Marie peut voir
+                  le rendu final (avec header/footer DSFR, mentions legales)
+                  vs vue 'nue' BlockNote. */}
+              <span>•</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const url = `/studies/${sid}/assemblies/${aid}/render`;
+                  // Ouvrir dans un drawer modal full-height
+                  const drawer = document.getElementById('dsfr-preview-drawer');
+                  if (drawer) drawer.remove();
+                  const overlay = document.createElement('div');
+                  overlay.id = 'dsfr-preview-drawer';
+                  overlay.style.cssText = `
+                    position: fixed; inset: 0; z-index: 9999;
+                    background: rgba(0,0,0,0.5); display: flex;
+                    align-items: stretch; justify-content: flex-end;
+                  `;
+                  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+                  const drawer2 = document.createElement('div');
+                  drawer2.style.cssText = `
+                    width: 75%; max-width: 1400px; background: #fff;
+                    display: flex; flex-direction: column;
+                    box-shadow: -8px 0 24px rgba(0,0,0,0.15);
+                  `;
+                  drawer2.innerHTML = `
+                    <div style="padding:12px 20px;background:#000091;color:#fff;
+                                display:flex;justify-content:space-between;
+                                align-items:center;font-family:system-ui">
+                      <strong style="font-size:14px">Aperçu DSFR strict — storymap publiable</strong>
+                      <button id="dsfr-drawer-close" style="background:none;border:none;
+                              color:#fff;font-size:24px;cursor:pointer;padding:0 8px">×</button>
+                    </div>
+                    <iframe src="${url}" style="flex:1;width:100%;border:none"
+                            title="Aperçu DSFR strict"></iframe>
+                  `;
+                  overlay.appendChild(drawer2);
+                  document.body.appendChild(overlay);
+                  document.getElementById('dsfr-drawer-close')?.addEventListener(
+                    'click', () => overlay.remove(),
+                  );
+                }}
+                style={{
+                  background: '#fff',
+                  border: '1px solid #000091',
+                  color: '#000091',
+                  padding: '3px 10px',
+                  fontSize: 11,
+                  borderRadius: 3,
+                  cursor: 'pointer',
+                  fontWeight: 500,
+                }}
+                title="Voir le rendu DSFR final (avec header/footer/mentions legales)"
+              >
+                👁 Aperçu DSFR
+              </button>
             </>
           )}
         </div>

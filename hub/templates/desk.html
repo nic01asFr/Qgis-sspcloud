@@ -2468,10 +2468,10 @@ async function loadLivrables() {
         ref: a.aid,
         actions: isPub
           ? [{label:'👁 Voir',  href: _rewriteS3UrlToHub(a.published_url, a.aid), target:'_blank'},
-             {label:'✏️ Éditer', onclick: `openAssemblyEditor('${a.aid}')`},
+             {label:'🔧 Métadonnées', onclick: `openAssemblyEditor('${a.aid}')`, title: 'Editer titre/audience/sections (mode expert JSON). Pour edition visuelle, utiliser BlockNote.'},
              {label:'📝 BlockNote', href:`/editor/${sid}/assembly/${a.aid}`, target:'_blank'}]
           : [{label:'👁 Preview', href:`/studies/${sid}/assemblies/${a.aid}/render`, target:'_blank'},
-             {label:'✏️ Éditer', onclick: `openAssemblyEditor('${a.aid}')`},
+             {label:'🔧 Métadonnées', onclick: `openAssemblyEditor('${a.aid}')`, title: 'Editer titre/audience/sections (mode expert JSON). Pour edition visuelle, utiliser BlockNote.'},
              {label:'📝 BlockNote', href:`/editor/${sid}/assembly/${a.aid}`, target:'_blank'},
              {label:'⎘ Cloner', onclick: `cloneAssembly('${a.aid}', '${(a.title || a.aid).replace(/'/g, "\\'")}')`},
              {label:'🚀 Publier', prompt:`Publie cette storymap (« ${a.title || a.aid} ») avec accès réservé à mes collègues CEREMA. Confirme avec moi l'audience avant publication.`}],
@@ -2541,7 +2541,10 @@ async function loadLivrables() {
       const actionsHtml = c.actions.map(a => {
         if (a.href) return `<a href="${a.href}" target="${a.target||'_self'}">${a.label}</a>`;
         if (a.prompt) return `<button class="quick-action-btn" data-prompt="${escapeHtml(a.prompt)}">${a.label}</button>`;
-        if (a.onclick) return `<button onclick="${a.onclick}">${a.label}</button>`;
+        if (a.onclick) {
+          const titleAttr = a.title ? ` title="${escapeHtml(a.title)}"` : '';
+          return `<button onclick="${a.onclick}"${titleAttr}>${a.label}</button>`;
+        }
         return '';
       }).join('');
       return `<div class="liv-card is-${c.state}">

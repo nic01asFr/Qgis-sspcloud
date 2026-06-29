@@ -1496,11 +1496,18 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
             "name": "list_entity_kinds",
             "description": (
                 "ANTI-HALLUCINATION : liste les `kind` autorisés (enum stable). "
-                "Évite d'inventer un kind inexistant. Pour component : "
+                "Évite d'inventer un kind inexistant. Pour component (13 kinds) : "
                 "interactive_map, scene_3d, chart, kpi_badge, legend, "
-                "narrative_text, data_table, media_embed, iframe_grist. "
-                "Pour assembly : storymap_narrative_dsfr, dashboard, sheet_a4, "
-                "modal_embed, atlas_immersive."
+                "narrative_text, data_table, media_embed, iframe_grist, "
+                "kpi_grid, heading, quote, separator. "
+                "(Sprint 2 fix D1 : les 4 derniers sont des kinds atomiques "
+                "Vague E2 (D-QGIS-009) : kpi_grid = bandeau N chiffres, "
+                "heading = titre H1-H4 standalone, quote = citation, "
+                "separator = separateur horizontal). "
+                "Pour assembly : storymap_narrative_dsfr UNIQUEMENT en V1.8 "
+                "(les autres dashboard/sheet_a4/modal_embed/atlas_immersive "
+                "sont valides Pydantic mais render_assembly renvoie 501 - "
+                "Sprint 4 ulterieur, cf. /schema/assembly/kinds filtre fix D9)."
             ),
             "parameters": {
                 "type": "object",
