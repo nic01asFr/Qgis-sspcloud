@@ -1,0 +1,56 @@
+{# Partial _chart — Chart.js v4 inline pour storymap
+
+   Vague A Commit 3 (2026-06-29). Chart.js CDN charge dans <head> du
+   template parent (storymap_dsfr.html.j2). Sobre, DSFR-inspire.
+
+   Variables :
+   - cid : str (composant id)
+   - title : str
+   - chart_type : str (bar|line|pie|doughnut|scatter)
+   - labels : list[str] (axes X ou legendes)
+   - datasets : list[dict] (Chart.js datasets : [{label, data, backgroundColor?, borderColor?}])
+   - source : str optionnel
+#}
+{% set chart_id = 'chart_' + cid[:8] %}
+<div style="background:#fff;border:1px solid #e5e5e5;border-radius:6px;padding:20px">
+  {% if title %}
+  <h3 style="margin:0 0 16px;color:#000091;font-size:16px;font-weight:700">{{ title | e }}</h3>
+  {% endif %}
+  <div style="position:relative;height:320px"><canvas id="{{ chart_id }}"></canvas></div>
+  {% if source %}
+  <p style="margin:12px 0 0;font-size:11px;color:#999;font-style:italic">Source : {{ source | e }}</p>
+  {% endif %}
+</div>
+<script>
+(function() {
+  if (typeof Chart === 'undefined') {
+    var el = document.getElementById('{{ chart_id }}').parentElement;
+    el.innerHTML = '<div style="padding:40px;text-align:center;color:#666">Chart.js indisponible.</div>';
+    return;
+  }
+  var palette = ['#000091','#e1000f','#1f8d4d','#ff6f00','#9c27b0','#0288d1'];
+  var datasets = {{ datasets | tojson }};
+  datasets.forEach(function(d, i) {
+    if (!d.backgroundColor) d.backgroundColor = palette[i % palette.length];
+    if (!d.borderColor) d.borderColor = palette[i % palette.length];
+  });
+  new Chart(document.getElementById('{{ chart_id }}').getContext('2d'), {
+    type: {{ chart_type | tojson }},
+    data: {
+      labels: {{ labels | tojson }},
+      datasets: datasets
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, font: { family: 'Marianne, system-ui, sans-serif' } } }
+      },
+      scales: ({{ chart_type | tojson }} === 'pie' || {{ chart_type | tojson }} === 'doughnut') ? {} : {
+        y: { beginAtZero: true, ticks: { font: { family: 'Marianne, system-ui, sans-serif' } } },
+        x: { ticks: { font: { family: 'Marianne, system-ui, sans-serif' } } }
+      }
+    }
+  });
+})();
+</script>

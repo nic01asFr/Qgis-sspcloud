@@ -1,0 +1,59 @@
+{# Partial _data_table — Tableau HTML + CSS Grid sobre DSFR-inspire
+
+   Vague A Commit 3 (2026-06-29). Pas de plugin externe (DataTables.net trop
+   lourd). HTML pure + CSS Grid sticky header + tri client basique.
+
+   Variables :
+   - cid : str
+   - title : str
+   - columns : list[dict] {key, label, align?}
+   - rows : list[dict] (chaque dict avec clés des columns)
+   - source : str optionnel
+   - max_rows : int default 100 (paginate sinon)
+#}
+{% set table_id = 'table_' + cid[:8] %}
+{% set max_rows = max_rows | default(100) %}
+<div style="background:#fff;border:1px solid #e5e5e5;border-radius:6px;overflow:hidden">
+  {% if title %}
+  <div style="padding:16px 20px;border-bottom:1px solid #e5e5e5;background:#f6f6f6">
+    <h3 style="margin:0;color:#000091;font-size:15px;font-weight:700">{{ title | e }}</h3>
+    {% if rows | length > max_rows %}
+    <p style="margin:4px 0 0;font-size:12px;color:#666">
+      Affichage des {{ max_rows }} premieres lignes sur {{ rows | length }}.
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+  <div style="max-height:400px;overflow:auto">
+    <table id="{{ table_id }}" style="width:100%;border-collapse:collapse;font-size:13px;font-family:Marianne,system-ui,sans-serif">
+      <thead style="position:sticky;top:0;background:#f6f6f6;z-index:1">
+        <tr>
+          {% for col in columns %}
+          <th style="text-align:{{ col.align | default('left') }};padding:10px 12px;
+                     font-weight:700;color:#000091;border-bottom:2px solid #000091;
+                     font-size:11px;text-transform:uppercase;letter-spacing:.4px">
+            {{ col.label | default(col.key) | e }}
+          </th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows[:max_rows] %}
+        <tr style="border-bottom:1px solid #f0f0f0">
+          {% for col in columns %}
+          <td style="text-align:{{ col.align | default('left') }};padding:8px 12px;color:#161616">
+            {{ row[col.key] | default('') | e }}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if source %}
+  <p style="margin:0;padding:12px 20px;font-size:11px;color:#999;font-style:italic;
+            border-top:1px solid #e5e5e5;background:#fafafa">
+    Source : {{ source | e }}
+  </p>
+  {% endif %}
+</div>

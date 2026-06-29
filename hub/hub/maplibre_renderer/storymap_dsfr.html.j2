@@ -29,6 +29,9 @@
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css">
 <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
 
+{# Chart.js v4 pour composants chart inline (Vague A Commit 3 2026-06-29) #}
+<script src="https://unpkg.com/chart.js@4.4.0/dist/chart.umd.js"></script>
+
 {# DSFR brand minimal CSS (couleurs CEREMA RF) #}
 <style>
 :root{
@@ -165,6 +168,24 @@ a:hover{color:var(--blue-france)}
     <span class="story-hero-audience">{{ assembly.audience|e }}</span>
   </div>
 </section>
+
+{# A5 (Vague A Commit 3) — DSFR-inspire fr-callout pour audience non-public #}
+{% if assembly.audience and assembly.audience != 'public' %}
+<aside style="max-width:1200px;margin:24px auto;padding:16px 20px;
+              background:#fff5e6;border-left:4px solid #ff6f00;border-radius:0 4px 4px 0">
+  <p style="margin:0;font-size:13px;color:#161616">
+    <strong style="color:#ff6f00">Document interne CEREMA</strong> —
+    Audience : <strong>{{ assembly.audience|e }}</strong>.
+    {% if assembly.audience == 'cerema_internal' %}
+    Diffusion limitée aux collègues CEREMA et partenaires officiels.
+    {% elif assembly.audience == 'restricted' %}
+    Accès restreint via clé d'agent partagé (scoped key).
+    {% elif assembly.audience == 'confidential' %}
+    Confidentiel — pas de partage hors équipe.
+    {% endif %}
+  </p>
+</aside>
+{% endif %}
 
 {% for section in sections %}
 <section class="story-section" data-section-kind="{{ section.kind|e }}">

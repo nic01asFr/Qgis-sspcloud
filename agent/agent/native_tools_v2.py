@@ -245,6 +245,31 @@ async def publish_assembly(
     )
 
 
+async def publish_component(
+    sid: str, cid: str, audience: str | None = None,
+) -> dict[str, Any]:
+    """A3 (Vague A Commit 3) — Publie un composant standalone S3 + URL hub.
+
+    Use case : composant publishable individuellement (interactive_map,
+    chart, data_table, ...) embarquable en iframe par sites tiers
+    (Atlas widget Grist, sites CEREMA, etc.) sans contexte assembly.
+
+    Workflow :
+    1. Lit manifest depuis components_index + PVC
+    2. Rend HTML standalone via _pre_render_component_html partagé
+    3. Upload S3 via s3_publication.publish()
+    4. Retourne URL hub /published/{owner}/component/component-{cid}
+
+    Retourne {id, published, published_url, audience, kind, title, size_bytes}.
+    """
+    body = {}
+    if audience:
+        body["audience"] = audience
+    return await _hub_call(
+        "POST", f"/studies/{sid}/components/{cid}/publish", json_body=body or None,
+    )
+
+
 async def get_assembly_history(sid: str, aid: str) -> dict[str, Any]:
     """Historique des versions (audit trail INSERT-only)."""
     return await _hub_call("GET", f"/studies/{sid}/assemblies/{aid}/history")
@@ -1027,6 +1052,20 @@ NATIVE_TOOLS_V2 = {
             "audience": "str optionnel ('public'|'cerema_internal'|'restricted'|'confidential')",
         },
     },
+    "publish_component": {
+        "fn": publish_component,
+        "description": (
+            "A3 (Vague A) — PUBLIE un composant standalone S3 + URL hub. "
+            "Use case : composant embarquable iframe par sites tiers "
+            "(Atlas widget Grist, sites CEREMA externes). Retourne URL "
+            "hub /published/{owner}/component/component-{cid}. "
+            "Audience cerema_internal default (anti-fuite RGPD)."
+        ),
+        "params": {
+            "sid": "str", "cid": "str",
+            "audience": "str optionnel ('public'|'cerema_internal'|'restricted'|'confidential')",
+        },
+    },
     "get_assembly_history": {
         "fn": get_assembly_history,
         "description": "Historique des versions assemblage (audit trail).",
@@ -1441,6 +1480,32 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["sid", "aid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "publish_component",
+            "description": (
+                "A3 (Vague A) - PUBLIE un composant standalone S3 + URL hub. "
+                "Use case : composant embarquable iframe par sites tiers "
+                "(Atlas widget Grist, sites CEREMA, etc.). Retourne URL hub "
+                "/published/{owner}/component/component-{cid}. Audience "
+                "cerema_internal default - JAMAIS public par défaut (anti-RGPD)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sid": _SID_SCHEMA,
+                    "cid": _CID_SCHEMA,
+                    "audience": {
+                        "type": "string",
+                        "enum": ["public", "cerema_internal", "restricted", "confidential"],
+                        "description": "Optionnel - override audience.",
+                    },
+                },
+                "required": ["sid", "cid"],
             },
         },
     },

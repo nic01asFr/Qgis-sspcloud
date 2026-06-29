@@ -4242,6 +4242,36 @@ async def _pre_render_component_html(
             # Accepte plusieurs noms de champ (Bug fix 2026-06-27)
             md = (params.get("content") or params.get("markdown")
                   or params.get("text") or params.get("body") or "")
+            # A4 (Vague A Commit 3) : si source.data_url pointe vers
+            # un fichier markdown étude (notes.md), fetch et utilise.
+            source = comp_manifest.get("source", {}) or {}
+            data_url = source.get("data_url", "")
+            if data_url and not md:
+                try:
+                    import re as _re
+                    # Whitelist : /files/{sid}/[\w./-]+\.md (anti-path traversal)
+                    m = _re.match(r"^/files/([0-9a-f]{12})/([\w./-]+\.md)$", data_url)
+                    if m:
+                        data_sid = m.group(1)
+                        path = m.group(2)
+                        read_code = (
+                            "from pathlib import Path\n"
+                            "import base64\n"
+                            f"target = Path('/data/studies/{data_sid}/{path}')\n"
+                            "if target.exists():\n"
+                            "    content = target.read_text(encoding='utf-8')\n"
+                            "    b64 = base64.b64encode(content.encode('utf-8')).decode('ascii')\n"
+                            "    print(f'FILE_READ_OK b64={b64}')\n"
+                            "else:\n"
+                            "    print('FILE_NOT_FOUND')\n"
+                        )
+                        out = await _execute_python_in_workspace(username, read_code)
+                        if "FILE_READ_OK" in out:
+                            import base64 as _b
+                            b64 = out.split("b64=", 1)[1].split()[0].strip()
+                            md = _b.b64decode(b64).decode("utf-8")
+                except Exception as exc:
+                    log.warning("notes.md fetch %s : %s", data_url, exc)
             content_html = _markdown_to_html_basique(md)
             tpl = _maplibre_jinja.get_template("_narrative_text_partial.j2")
             return tpl.render(content_html=content_html)
@@ -4277,6 +4307,32 @@ async def _pre_render_component_html(
             ctx = await _build_interactive_map_ctx(comp_manifest, sid, username, cid)
             tpl = _maplibre_jinja.get_template("_interactive_map_partial.j2")
             return tpl.render(**ctx)
+
+        elif kind == "chart":
+            # A2 (Vague A Commit 3) : Chart.js v4 inline.
+            # Schema params : {chart_type, labels, datasets, source?}
+            tpl = _maplibre_jinja.get_template("_chart_partial.j2")
+            return tpl.render(
+                cid=cid,
+                title=comp_manifest.get("title", ""),
+                chart_type=params.get("chart_type", "bar"),
+                labels=params.get("labels", []),
+                datasets=params.get("datasets", []),
+                source=params.get("source", ""),
+            )
+
+        elif kind == "data_table":
+            # A2 (Vague A Commit 3) : tableau HTML + CSS Grid sobre.
+            # Schema params : {columns: [{key, label, align?}], rows: list[dict], source?, max_rows?}
+            tpl = _maplibre_jinja.get_template("_data_table_partial.j2")
+            return tpl.render(
+                cid=cid,
+                title=comp_manifest.get("title", ""),
+                columns=params.get("columns", []),
+                rows=params.get("rows", []),
+                source=params.get("source", ""),
+                max_rows=params.get("max_rows", 100),
+            )
 
         else:
             # Fallback : kind non géré inline (scene_3d, chart pre-Vague A,
@@ -4422,6 +4478,101 @@ async def render_assembly_endpoint(
     _check_assemblies_enabled()
     html, _chain = await _render_assembly_html(sid, aid, user["username"])
     return HTMLResponse(content=html)
+
+
+@app.post("/studies/{sid}/components/{cid}/publish")
+async def publish_component_endpoint(
+    sid: str, cid: str, request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """A3 (Vague A Commit 3) — Publie un composant standalone S3 + URL hub.
+
+    Body optionnel : {audience?: 'public'|'cerema_internal'|'restricted'|'confidential'}
+
+    Workflow :
+    1. Lit manifest composant depuis components_index + PVC
+    2. Rend HTML standalone via template Jinja2 partial (DSFR sobre)
+    3. Upload S3 via /publish/component/{slug} generic endpoint
+    4. Retourne URL hub /published/{owner}/component/{slug}
+
+    URL produite est embeddable iframe par sites tiers (CSP B5 frame-ancestors *).
+    Use case : Atlas widget Grist iframe d'un interactive_map qgis-sspcloud,
+    sites CEREMA tiers, agents partagés.
+    """
+    _check_components_enabled()
+    from hub import components as comp_mod
+
+    comp_meta = await comp_mod.get_component_latest(cid)
+    if not comp_meta or comp_meta["sid"] != sid:
+        raise HTTPException(404, "Composant introuvable")
+    if comp_meta["owner"] != user["username"]:
+        raise HTTPException(403, "Pas owner du composant")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    audience = body.get("audience", "cerema_internal")
+
+    # Lire manifest depuis PVC
+    code = comp_mod.read_component_manifest_pod_code(sid, cid)
+    stdout = await _execute_python_in_workspace(user["username"], code)
+    if "COMPONENT_READ_OK" not in stdout:
+        raise HTTPException(503, "Lecture manifest impossible")
+    import base64 as _b
+    b64 = stdout.split("b64=", 1)[1].split()[0].strip()
+    comp_manifest = _json.loads(_b.b64decode(b64).decode())
+
+    # Render HTML standalone : envelope + partial inline
+    component_html = await _pre_render_component_html(
+        comp_manifest, sid, user["username"], cid,
+    )
+    standalone_html = (
+        "<!DOCTYPE html><html lang='fr'><head>"
+        "<meta charset='UTF-8'>"
+        f"<title>{comp_manifest.get('title', cid)}</title>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<link rel='stylesheet' href='https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css'>"
+        "<script src='https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js'></script>"
+        "<script src='https://unpkg.com/chart.js@4.4.0/dist/chart.umd.js'></script>"
+        "<style>body{margin:0;font-family:Marianne,system-ui,sans-serif;background:#f6f6f6;padding:20px}</style>"
+        "</head><body>"
+        f"{component_html}"
+        "</body></html>"
+    )
+
+    # Upload S3 directement via s3_publication.publish()
+    if not _S3_AVAILABLE:
+        raise HTTPException(503, "Publication S3 indisponible")
+    slug = f"component-{cid}"
+    owner = user["username"]
+    try:
+        result = s3_publication.publish(
+            owner=owner,
+            kind="component",
+            slug=slug,
+            content=standalone_html.encode("utf-8"),
+            content_type="text/html; charset=utf-8",
+            study_id=sid,
+        )
+        # URL hub (anti-MinIO ACL bug fix f11da9d)
+        hub_base = (_HUB_URL or _SELF_URL or "").rstrip("/")
+        published_url = (
+            f"{hub_base}/published/{owner}/component/{slug}"
+            if hub_base else result.get("url")
+        )
+        return {
+            "id": cid,
+            "published": True,
+            "published_url": published_url,
+            "audience": audience,
+            "kind": comp_meta["kind"],
+            "title": comp_meta["title"],
+            "size_bytes": result.get("size", 0),
+        }
+    except Exception as exc:
+        log.error("publish_component %s/%s : %s", sid, cid, exc)
+        raise HTTPException(503, f"Publication échec : {exc}")
 
 
 @app.post("/studies/{sid}/assemblies/{aid}/publish")

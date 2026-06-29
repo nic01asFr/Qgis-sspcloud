@@ -75,6 +75,7 @@ mcp_tools:
     - get_assembly
     - render_assembly
     - publish_assembly
+    - publish_component   # A3 Vague A : iframe embeddable sites tiers
     - get_assembly_history
     # Recipes natifs (capitalisation workflow)
     - save_recipe
