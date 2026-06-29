@@ -148,6 +148,30 @@ async def get_component_history(sid: str, cid: str) -> dict[str, Any]:
     return await _hub_call("GET", f"/studies/{sid}/components/{cid}/history")
 
 
+async def update_component(
+    sid: str, cid: str, manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """Vague E1 (D-QGIS-009, 2026-06-29) : UPDATE versionne composant existant.
+
+    Pattern INSERT-only : version_num+1, previous_hash preserve, cid stable.
+    Pour modifier params/source/title sans recreate. Audit trail conserve.
+    Refs depuis assemblies (layout.sections[].components[].ref) restent valides.
+
+    Le hub auto-fill provenance.scene_hash_at_creation si source.scene_hash
+    present et provenance vide (pattern Phase 4b).
+
+    Body : Component manifest JSON complet OU partiel :
+    - Complet : remplace le manifest (id + sid forces a cid + sid).
+    - Partiel : merge top-level avec l'existant (hub lit existant + override).
+
+    Retourne {id, rowid, kind, title, classification, version_num,
+              manifest_url, render_url, publish_url}.
+    """
+    return await _hub_call(
+        "PUT", f"/studies/{sid}/components/{cid}", json_body=manifest,
+    )
+
+
 # ── Tools CRUD assemblages (Sprint Composants Phase 3) ────────────────────────
 
 async def list_assemblies(
@@ -986,6 +1010,25 @@ NATIVE_TOOLS_V2 = {
         ),
         "params": {"sid": "str", "cid": "str"},
     },
+    "update_component": {
+        "fn": update_component,
+        "description": (
+            "Vague E1 (D-QGIS-009) — UPDATE versionne composant existant. "
+            "INSERT-only : version_num+1, cid stable, audit trail conserve. "
+            "Pour modifier params/source/title sans devoir delete + recreate "
+            "(les refs depuis assemblies restent valides). Hub auto-fill "
+            "provenance.scene_hash_at_creation si source.scene_hash present."
+        ),
+        "params": {
+            "sid": "str étude id",
+            "cid": "str composant id (12 hex)",
+            "manifest": (
+                "dict Component (id+sid forces a cid+sid). Complet ou partiel : "
+                "manifest partiel (sans kind/source/rendering) sera merge avec "
+                "l'existant top-level fields override."
+            ),
+        },
+    },
 
     # CRUD assemblages (Sprint Composants Phase 3)
     "list_assemblies": {
@@ -1339,6 +1382,37 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {"sid": _SID_SCHEMA, "cid": _CID_SCHEMA},
                 "required": ["sid", "cid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_component",
+            "description": (
+                "Vague E1 (D-QGIS-009) - UPDATE versionne composant existant. "
+                "INSERT-only versioning : version_num+1, cid stable, audit "
+                "trail conserve. Pour modifier params/source/title sans devoir "
+                "delete + recreate (les refs depuis assemblies restent valides). "
+                "Le hub auto-fill provenance.scene_hash_at_creation si "
+                "source.scene_hash present. Manifest complet OU partiel "
+                "(merge top-level avec l'existant)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sid": _SID_SCHEMA,
+                    "cid": _CID_SCHEMA,
+                    "manifest": {
+                        "type": "object",
+                        "description": (
+                            "Component manifest (id+sid forces a cid+sid). "
+                            "Doit contenir kind, source, rendering au minimum "
+                            "ou merge avec l'existant via lecture PVC."
+                        ),
+                    },
+                },
+                "required": ["sid", "cid", "manifest"],
             },
         },
     },
@@ -1707,4 +1781,6 @@ NATIVE_TOOLS_V2_MUTATING: frozenset[str] = frozenset({
     # -> agent IA voyait state stale (composants/assemblages obsoletes).
     "publish_component",   # A3 Vague A (2026-06-28) - mutant S3 + DB
     "update_assembly",     # Phase 4b (2026-06-28) - mutant DB INSERT-only + PVC
+    # Vague E1 (D-QGIS-009 2026-06-29) - UX libre composition
+    "update_component",    # Vague E1 - mutant DB INSERT-only + PVC
 })

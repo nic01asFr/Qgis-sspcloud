@@ -67,6 +67,7 @@ mcp_tools:
     - revoke_agent
     - list_components
     - create_component
+    - update_component   # Vague E1 D-QGIS-009 : modifier params sans delete+recreate
     - get_component
     - get_component_history
     - list_assemblies

@@ -3906,6 +3906,122 @@ async def _render_component_endpoint_legacy(
         )
 
 
+@app.put("/studies/{sid}/components/{cid}")
+async def update_component_endpoint(
+    sid: str, cid: str, request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Vague E1 (D-QGIS-009, 2026-06-29) : update versionne composant existant.
+
+    Pattern INSERT-only identique update_assembly_endpoint (Phase 4b) :
+    chaque update insere une nouvelle row components_index avec version_num+1
+    et previous_hash = ancien content_hash. Le cid est preserve, audit trail
+    complet, et le manifest PVC est ecrase.
+
+    Body : Component manifest JSON complet OU partiel.
+    - Si complet : remplace le manifest (id + sid preserves).
+    - Si partiel : merge sur le manifest existant (top-level fields remplaces).
+
+    Auto-fill provenance.scene_hash_at_creation si source.scene_hash present
+    et provenance vide (pattern Phase 4b create_component_endpoint).
+
+    Usage agent : pour modifier params/source/title d'un composant sans
+    devoir le supprimer et le recreer (preserve cid, audit trail, refs
+    depuis assemblies).
+    """
+    _check_components_enabled()
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+
+    from hub.models import Component
+    from hub import components as comp_mod
+
+    # Verifier que le composant existe et appartient au scope
+    latest = await comp_mod.get_component_latest(cid)
+    if not latest:
+        raise HTTPException(404, "Composant introuvable")
+    if latest["sid"] != sid or latest["owner"] != user["username"]:
+        raise HTTPException(403, "Pas owner ou hors scope etude")
+
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, "Body JSON invalide")
+
+    # Force scope + identite stable
+    payload["sid"] = sid
+    payload["id"] = cid
+
+    # Si l'agent envoie un manifest partiel (sans kind par exemple), lire
+    # l'existant et merger top-level. Le kind doit etre present pour valider.
+    if not payload.get("kind") or not payload.get("source") or not payload.get("rendering"):
+        try:
+            existing_code = comp_mod.read_component_manifest_pod_code(sid, cid)
+            existing_out = await _execute_python_in_workspace(user["username"], existing_code)
+            if "COMPONENT_READ_OK" not in existing_out:
+                raise HTTPException(503, "Lecture manifest existant impossible")
+            import base64 as _b64
+            ex_b64 = existing_out.split("b64=", 1)[1].split()[0].strip()
+            import json as _json2
+            existing_manifest = _json2.loads(_b64.b64decode(ex_b64).decode())
+            # Merge : top-level fields du payload override existing
+            for k, v in payload.items():
+                existing_manifest[k] = v
+            payload = existing_manifest
+        except HTTPException:
+            raise
+        except Exception as exc:
+            log.warning("merge existing component manifest : %s", exc)
+
+    try:
+        comp = Component.model_validate(payload)
+    except Exception as exc:
+        raise HTTPException(422, f"Validation Pydantic : {exc}")
+
+    # Auto-fill provenance.scene_hash_at_creation (pattern Phase 4b)
+    # Si source.scene_hash present mais provenance vide, propage automatiquement.
+    try:
+        src_scene_hash = getattr(comp.source, "scene_hash", None) if comp.source else None
+        if src_scene_hash and not comp.provenance.scene_hash_at_creation:
+            comp.provenance.scene_hash_at_creation = src_scene_hash
+    except Exception:
+        pass
+
+    # Ecrire nouveau manifest sur PVC (overwrite : la version PVC suit DB)
+    import json as _json
+    content_json = _json.dumps(
+        comp.model_dump(mode="json"), ensure_ascii=False, indent=2,
+    )
+    try:
+        await _execute_python_in_workspace(
+            user["username"],
+            comp_mod.write_component_manifest_pod_code(sid, comp.id, content_json),
+        )
+    except Exception as exc:
+        log.warning("write updated component manifest : %s", exc)
+
+    # INSERT nouvelle version (INSERT-only versioning)
+    new_version = (latest.get("version_num") or 1) + 1
+    comp.version = new_version
+    file_path = comp_mod.component_manifest_path(sid, comp.id)
+    size_bytes = len(content_json.encode("utf-8"))
+    rowid = await comp_mod.insert_component(
+        component=comp, owner=user["username"], sid=sid,
+        file_path=file_path, size_bytes=size_bytes,
+        previous_hash=latest.get("content_hash") or "",
+    )
+    return {
+        "id": comp.id, "rowid": rowid, "kind": comp.kind, "title": comp.title,
+        "classification": comp.classification, "version_num": new_version,
+        "manifest_url":   f"/studies/{sid}/components/{comp.id}",
+        "render_url":     f"/studies/{sid}/components/{comp.id}/render",
+        "publish_url":    f"/studies/{sid}/components/{comp.id}/publish",
+    }
+
+
 @app.delete("/studies/{sid}/components/{cid}", status_code=status.HTTP_204_NO_CONTENT)
 async def archive_component_endpoint(
     sid: str, cid: str,
