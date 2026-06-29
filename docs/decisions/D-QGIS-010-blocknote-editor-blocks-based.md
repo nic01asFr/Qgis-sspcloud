@@ -1,9 +1,23 @@
 # D-QGIS-010 — Éditeur block-based BlockNote pour édition visuelle Assembly
 
-**Statut** : 🟡 Acté en intention (cadrage technique validé, implémentation à suivre)
-**Date** : 2026-06-29
+**Statut** : ✅ LIVRÉ — 5 tags consécutifs (v1.7.0 → v1.7.5) — production-ready
+**Date** : 2026-06-29 (livraison + audit + consolidation)
 **Auteurs** : Nicolas LAVAL, agent IA Claude (qgis-sspcloud)
-**Tags / Vague** : `v1.7.0-blocknote-editor` (cible) — Vague E2 pivot UI
+**Tags / Vague** : `v1.7.0-blocknote-editor` → `v1.7.5-consolidation` — Vague E2 pivot UI
+
+> **Note pivot architectural acté** (v1.7.1) : la sérialisation Pydantic ↔ BlockNote
+> JSON est **100% TypeScript** (`blocknote-editor/src/serializer.ts` forward +
+> `autosave.ts:blocksToSections` backward). Le pendant Python (`hub/hub/blocknote_serializer.py`)
+> initialement prévu Commit G a été supprimé en v1.7.1 (audit P0 #3 — aucun endpoint
+> hub ne l'appelait, code mort 514 LOC + 20 tests fictifs).
+
+> **Limitations V1 actées** (v1.7.4) :
+> - scene_3d / media_embed / iframe_grist : iframe `/render/{cid}` retourne un
+>   placeholder texte côté hub (helper `_pre_render_component_html` ne supporte
+>   pas ces kinds). UX dégradée pour 3 des 13 kinds, à upgrader Vague E3.
+> - Agent IA `update_assembly` n'envoie pas `version_num_source` → peut écraser
+>   silencieusement les modifs BlockNote en cours (OCC unidirectionnelle).
+>   Mitigation Vague E3 : agent IA passe via le même endpoint + version_num_source.
 
 ## Contexte
 

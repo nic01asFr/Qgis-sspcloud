@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
+import pkg from './package.json';
 
 /**
  * Vite config pour l'editeur BlockNote standalone qgis-sspcloud.
@@ -15,6 +16,11 @@ import { resolve } from 'path';
  */
 export default defineConfig({
   plugins: [react()],
+  // v1.7.5 : expose version package.json comme __EDITOR_VERSION__ pour
+  // footer dynamique (vs hardcode dans App.tsx qui derive a chaque tag)
+  define: {
+    __EDITOR_VERSION__: JSON.stringify(pkg.version),
+  },
   // Base URL : les assets sont servis depuis /static/blocknote-editor/
   base: '/static/blocknote-editor/',
   build: {

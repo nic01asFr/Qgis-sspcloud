@@ -398,7 +398,7 @@ function App() {
       >
         <span>D-QGIS-010 · BlockNote v0.22</span>
         <span>•</span>
-        <span>v1.7.2 audit-optims (13 blocks · autosave 30s · conflict resolver)</span>
+        <span>{`v${__EDITOR_VERSION__} (13 blocks · autosave 30s · conflict resolver)`}</span>
         <span style={{ marginLeft: 'auto' }}>
           {assembly?.manifest?.layout?.sections?.length ?? 0} sections
         </span>

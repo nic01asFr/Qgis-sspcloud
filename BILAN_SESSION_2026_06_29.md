@@ -330,19 +330,44 @@ intégration desk + tag `v1.7.0-blocknote-editor`.
 
 - `v1.6.5-vague-e1-composition-libre` (UX libre composition agent IA, 6 commits)
 - `v1.6.6-storymap-metier-base` (storymap métier + trio cartographe, 3 commits)
-- `v1.6.7-carto-metier-base` ⭐ (carto thématique + interactions + fonds, 5 commits)
+- `v1.6.7-carto-metier-base` (carto thématique + interactions + fonds, 5 commits)
+- `v1.7.0-blocknote-editor` (BlockNote E1→H3, 8 commits, 13 custom blocks + autosave)
+- `v1.7.1-audit-fixes` (5 P0 + truncation + suppression code mort 514 LOC + 20 tests)
+- `v1.7.2-p1p2-optims` (Promise.allSettled + force-overwrite + Cache-Control + whitelist OIDC)
+- `v1.7.3-fullwidth` (container 100% + width:100% custom blocks)
+- `v1.7.4-roundtrip-section` (frontière sections via heading H2 vide)
+- `v1.7.5-consolidation` ⭐ (tests pytest concurrency/round-trip/skip-None + docs cohérentes + footer dynamique)
+
+## Vague E2 BlockNote LIVRÉ — 5 vagues v1.7.0 → v1.7.5
+
+Pivot UI block-based pour permettre à Marie de modifier visuellement les
+Assembly après création par l'agent IA. 8 commits initiaux + 4 vagues
+d'audit-fixes consécutives (audit critique → consolidation → footer dynamique).
+
+**Marie peut désormais :**
+- Demander à l'agent IA via chat (Vague E1)
+- **Éditer visuellement via BlockNote** (Vague E2) — bouton "📝 BlockNote"
+  sur card livrable desk → nouvelle tab `/editor/{sid}/assembly/{aid}`
+- Autosave 30s avec indicateur Notion-style
+- Conflit 409 → modal "Recharger" + "Forcer écrasement"
+- 13 custom blocks (7 DOM inline éditables + 6 iframe preview)
+- Container BlockNote full-width (~1500px sur écran 1600px)
+
+**Limitations actées V1 :**
+- Agent IA `update_assembly` n'envoie pas `version_num_source` → OCC unidirectionnelle
+- scene_3d / media_embed / iframe_grist : iframe placeholder texte (hub V0.1)
+- Pas de monitoring client (errors)
+- Pas de tests Vitest (3 tests pytest critiques en v1.7.5)
+
+**Tests : 199/199 pytest PASSED (v1.7.5)** (196 + 3 nouveaux concurrency/round-trip/skip-None).
 
 ---
 
-## Prochaine session (suite cadrage v1.6.7 + BlockNote)
+## Prochaine session (Vague E3 différée)
 
-Si pivot BlockNote validé :
-- Commit E setup BlockNote standalone Vite + bundle CI + hub static serve
-- Commit F 8 custom blocks Vague E2
-- Commit G sérialisation bi-dir Assembly ↔ BlockNote JSON
-- Commit H intégration desk + bouton "✏️ Editer" + tag v1.7.0-blocknote-editor
-
-Vague E3 différée (reprise quand bandwidth) : audit_chain_narrative +
-reliability_matrix kinds + AuditChain enrichi + layout sidecar Esri +
-scene_3d MapLibre + multi-cartes + print A4 + reliability chips +
-cross-références narratives + sommaire sticky + audit chain narrative humain.
+Vague E3 : audit_chain_narrative + reliability_matrix kinds + AuditChain
+enrichi + layout sidecar Esri + scene_3d MapLibre (vrai rendu pas placeholder)
++ multi-cartes + print A4 + reliability chips + cross-références narratives +
+sommaire sticky + audit chain narrative humain + DSFR theming strict
+BlockNote + CRDT Yjs multi-user collab + création nouveau composant depuis
+slash menu BlockNote + agent IA aligné sur OCC `version_num_source`.

@@ -286,13 +286,34 @@ function InteractiveMapEmbed({ block }) {
 
 ---
 
-## G — Sérialisation bi-directionnelle (3h)
+## G — Sérialisation bi-directionnelle (3h) — ⚠ PIVOT TS-only (acté v1.7.1)
 
-### Livrable
+> **Pivot architectural a posteriori** : ce commit avait initialement livré
+> `hub/hub/blocknote_serializer.py` (Python backward) + 20 tests pytest fictifs,
+> mais l'audit critique post-v1.7.0 a constaté qu'**aucun endpoint hub ne
+> l'appelait** (toute la sérialisation se fait côté React via
+> `serializer.ts` forward + `autosave.ts:blocksToSections` backward).
+>
+> Le module Python a été supprimé en v1.7.1 (audit P0 #3, -514 LOC + -20 tests).
+> Le présent bloc reste à titre historique mais ne reflète plus le code livré.
+
+### Livrable RÉEL (post-pivot v1.7.1)
+
+- `blocknote-editor/src/serializer.ts` : `assemblyToBlockNoteDoc(sid, assembly)`
+  (forward Assembly → BlockNote blocks via `Promise.allSettled` fetch composants
+  parallèle, v1.7.2).
+- `blocknote-editor/src/autosave.ts` : `blocksToSections(blocks)` (backward
+  BlockNote → sections + new_components). Appelé uniquement par le hook
+  `useAutosave` au moment du save.
+- Pas d'endpoint hub dédié à la sérialisation : `PUT /studies/{sid}/assemblies/{aid}`
+  reçoit directement un manifest Assembly Pydantic validé (le client React fait
+  la traduction avant le PUT).
+
+### Livrable INITIAL (annulé)
 Fonctions `assembly_to_blocknote_doc()` + `blocknote_doc_to_assembly()`
 côté Python + tests round-trip pytest.
 
-### Fichier créé
+### Fichier créé (supprimé v1.7.1)
 `hub/hub/blocknote_serializer.py`
 
 ### API Python

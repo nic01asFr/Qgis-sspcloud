@@ -182,14 +182,20 @@ app.mount(
 - Mode mobile responsive
 - Export PDF natif depuis BlockNote (`@media print` style)
 
-## Référence
+## Référence (mis à jour v1.7.5)
 
-- Tag : `v1.7.0-blocknote-editor`
+- Tags : `v1.7.0-blocknote-editor` → `v1.7.5-consolidation` (5 vagues consécutives)
+  - `v1.7.0-blocknote-editor` : livraison initiale 13 custom blocks + autosave + bouton desk
+  - `v1.7.1-audit-fixes` : 5 P0 + truncation silencieuse + code mort retiré
+  - `v1.7.2-p1p2-optims` : Promise.allSettled + force-overwrite + Cache-Control + whitelist OIDC
+  - `v1.7.3-fullwidth` : container 100% + width:100% custom blocks
+  - `v1.7.4-roundtrip-section` : frontière sections via heading H2 vide
+  - `v1.7.5-consolidation` : tests pytest + docs + footer dynamique
 - ADR : `docs/decisions/D-QGIS-010-blocknote-editor-blocks-based.md`
 - Plan détaillé : `docs/blocknote-editor-plan.md`
-- Code React : `blocknote-editor/src/`
-- Code Python : `hub/hub/blocknote_serializer.py` + `hub/hub/main.py` (PUT enrichi)
-- Tests : 216/216 PASSED (16 nouveaux Commit G + 4 nouveaux Commit H1)
+- Code React : `blocknote-editor/src/` (serialisation 100% TypeScript, pas de pendant Python)
+- Code Python : `hub/hub/main.py` PUT enrichi `/studies/{sid}/assemblies/{aid}` (version_num_source + skip None merge)
+- Tests : **196/196 pytest PASSED** (post v1.7.1 retrait des 20 tests fictifs de l'ancien `blocknote_serializer.py`)
 
 ## Contact
 
