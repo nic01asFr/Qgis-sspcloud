@@ -1,0 +1,22 @@
+{# Partial _kpi_badge — pre-rendu inline pour storymap
+
+   Vague A Commit 2 (D-QGIS-008). Pas de <head>/<style>/<body> : embedded
+   dans story-component d'une storymap. Le styling vient du template parent.
+
+   Variables :
+   - kpi : dict {value, unit?, label, source?, gradient?}
+#}
+{% set gradient = kpi.gradient or 'linear-gradient(135deg,#000091,#0063cb)' %}
+<div style="padding:40px 32px;text-align:center;background:{{ gradient }};
+            color:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,145,0.15)">
+  <div style="font-size:56px;font-weight:700;line-height:1;letter-spacing:-1px">
+    {{ kpi.value }}{{ kpi.unit | default('') }}
+  </div>
+  <div style="font-size:14px;opacity:.92;margin-top:12px;text-transform:uppercase;
+              letter-spacing:1px;font-weight:600">
+    {{ kpi.label | e }}
+  </div>
+  {% if kpi.source %}
+  <p style="font-size:10px;opacity:.7;margin-top:8px">Source : {{ kpi.source | e }}</p>
+  {% endif %}
+</div>

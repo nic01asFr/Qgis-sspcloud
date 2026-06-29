@@ -1,0 +1,12 @@
+{# Partial _narrative_text — pre-rendu inline pour storymap
+
+   Vague A Commit 2 (D-QGIS-008). Markdown -> HTML basique DSFR couleurs.
+
+   Variables :
+   - content_html : str pre-rendered markdown converti (rendu côté Python pour
+                    eviter dépendance js Marked dans page statique).
+#}
+<div style="padding:28px 32px;background:#fff;border-radius:6px;
+            line-height:1.7;font-size:15px;color:#161616">
+{{ content_html | safe }}
+</div>

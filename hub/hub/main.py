@@ -4092,6 +4092,212 @@ async def assembly_history_endpoint(
     return h
 
 
+# ── Helper rendu partagé (D-QGIS-008) ────────────────────────────────────────
+
+
+def _markdown_to_html_basique(md: str) -> str:
+    """Convertit markdown simple en HTML (H1-H3 + paragraphes).
+
+    Pas de dépendance externe (Marked.js etc.). Suffisant pour
+    narrative_text V1. Conversions : ## titre → <h2>, paragraphes
+    multi-lignes joints.
+    """
+    import html as _h
+    lines = (md or "").split("\n")
+    rendered = []
+    in_para: list[str] = []
+
+    def _flush_para():
+        if in_para:
+            rendered.append(f'<p>{_h.escape(" ".join(in_para))}</p>')
+            in_para.clear()
+
+    for ln in lines:
+        s = ln.strip()
+        if s.startswith("### "):
+            _flush_para()
+            rendered.append(f"<h3>{_h.escape(s[4:])}</h3>")
+        elif s.startswith("## "):
+            _flush_para()
+            rendered.append(f"<h2 style='color:#000091'>{_h.escape(s[3:])}</h2>")
+        elif s.startswith("# "):
+            _flush_para()
+            rendered.append(f"<h1 style='color:#000091'>{_h.escape(s[2:])}</h1>")
+        elif not s:
+            _flush_para()
+        else:
+            in_para.append(s)
+    _flush_para()
+    return "".join(rendered)
+
+
+async def _build_interactive_map_ctx(
+    comp_manifest: dict,
+    sid: str,
+    username: str,
+    cid: str,
+) -> dict:
+    """Construit le contexte Jinja2 pour _interactive_map_partial.j2.
+
+    Lit scene_manifest + GeoJSON depuis PVC, prépare layers JSON inline.
+    Logique migrée depuis _render_assembly_html (Phase 4b).
+    """
+    import base64 as _b64s
+    import json as _json2
+
+    params = comp_manifest.get("params", {}) or {}
+    source = comp_manifest.get("source", {}) or {}
+    scene_hash = source.get("scene_hash") or params.get("scene_hash")
+    title = comp_manifest.get("title", "")
+    bbox_text = ""
+    layers_inline = params.get("layers", [])
+    map_layers_js = "[]"
+
+    # Résilience source.pid : fallback projet par défaut étude
+    scene_pid = source.get("pid") or params.get("pid")
+    if scene_hash and not scene_pid:
+        try:
+            _projects = await studies.list_projects(sid)
+            if _projects:
+                scene_pid = _projects[0]["pid"]
+        except Exception:
+            pass
+
+    if scene_hash and scene_pid:
+        try:
+            scene_code = studies.read_scene_manifest_pod_code(sid, scene_pid)
+            scene_out = await _execute_python_in_workspace(username, scene_code)
+            if "SCENE_MANIFEST_READ_OK" in scene_out:
+                scene_b64 = scene_out.split("b64=", 1)[1].split()[0].strip()
+                scene_obj = _json2.loads(_b64s.b64decode(scene_b64).decode())
+                scene_layers = scene_obj.get("layers", []) or []
+                geo_layers = []
+                for i_l, l in enumerate(scene_layers):
+                    lid = l.get("id", f"layer_{i_l}")
+                    geojson_path = l.get("geojson_path")
+                    geojson = l.get("geojson")  # fallback inline legacy
+                    if not geojson and geojson_path:
+                        try:
+                            gj_code = studies.read_scene_layer_geojson_pod_code(sid, scene_pid, lid)
+                            gj_out = await _execute_python_in_workspace(username, gj_code)
+                            if "SCENE_LAYER_READ_OK" in gj_out:
+                                gj_b64 = gj_out.split("b64=", 1)[1].split()[0].strip()
+                                geojson = _json2.loads(_b64s.b64decode(gj_b64).decode())
+                        except Exception as _e:
+                            log.warning("read scene_layer %s : %s", lid, _e)
+                    if geojson:
+                        geo_layers.append({
+                            "id": lid,
+                            "name": l.get("name", lid),
+                            "geojson": geojson,
+                            "style": l.get("style", {}),
+                            "geometry_type": l.get("geometry_type", "polygon"),
+                            "n_features": l.get("n_features", 0),
+                        })
+                if geo_layers:
+                    total = sum(l.get("n_features", 0) for l in geo_layers)
+                    bbox_text = f" — {len(geo_layers)} couche{'s' if len(geo_layers) > 1 else ''} · {total} objets"
+                map_layers_js = _json2.dumps(geo_layers)
+        except Exception as exc:
+            log.warning("interactive_map scene_manifest read %s : %s", cid, exc)
+    elif layers_inline:
+        bbox_text = f" — {len(layers_inline)} couche{'s' if len(layers_inline) > 1 else ''}"
+        map_layers_js = _json2.dumps(layers_inline)
+
+    return {
+        "cid": cid,
+        "title": title,
+        "bbox_text": bbox_text,
+        "center_lng": params.get("center_lng", params.get("lng", 5.39)),
+        "center_lat": params.get("center_lat", params.get("lat", 43.30)),
+        "zoom": params.get("zoom", 13),
+        "map_layers_json": map_layers_js,
+    }
+
+
+async def _pre_render_component_html(
+    comp_manifest: dict,
+    sid: str,
+    username: str,
+    cid: str,
+) -> str:
+    """Source unique du rendu HTML composant (D-QGIS-008 acté 2026-06-29).
+
+    Consommé par :
+    - _render_assembly_html (pré-rendu inline storymap)
+    - render_component_endpoint (rendu standalone iframe)
+
+    Templates partials `_{kind}_partial.j2` dans
+    hub/hub/maplibre_renderer/ (sans <head>/<body>, embeddable).
+    """
+    import html as _h
+    kind = comp_manifest.get("kind", "unknown")
+    params = comp_manifest.get("params", {}) or {}
+
+    if not _maplibre_jinja:
+        return f'<div style="padding:20px;color:#888;font-style:italic">Jinja indisponible.</div>'
+
+    try:
+        if kind == "narrative_text":
+            # Accepte plusieurs noms de champ (Bug fix 2026-06-27)
+            md = (params.get("content") or params.get("markdown")
+                  or params.get("text") or params.get("body") or "")
+            content_html = _markdown_to_html_basique(md)
+            tpl = _maplibre_jinja.get_template("_narrative_text_partial.j2")
+            return tpl.render(content_html=content_html)
+
+        elif kind == "kpi_badge":
+            # Accepte value/label/unit OU value/label/icon (Bug fix 2026-06-27)
+            color_token = params.get("color", "")
+            gradient = (
+                "linear-gradient(135deg,#e1000f,#aa0000)" if color_token == "marianne-red"
+                else "linear-gradient(135deg,#1f8d4d,#0a5d2e)" if color_token == "success-green"
+                else "linear-gradient(135deg,#000091,#0063cb)"  # default blue CEREMA
+            )
+            kpi = {
+                "value": params.get("value", "?"),
+                "unit": params.get("unit") or "",
+                "label": params.get("label", ""),
+                "source": params.get("source", ""),
+                "gradient": gradient,
+            }
+            tpl = _maplibre_jinja.get_template("_kpi_badge_partial.j2")
+            return tpl.render(kpi=kpi)
+
+        elif kind == "legend":
+            items = params.get("items", []) or []
+            tpl = _maplibre_jinja.get_template("_legend_partial.j2")
+            return tpl.render(
+                items=items,
+                title=params.get("title") or comp_manifest.get("title", ""),
+                source=params.get("source", ""),
+            )
+
+        elif kind == "interactive_map":
+            ctx = await _build_interactive_map_ctx(comp_manifest, sid, username, cid)
+            tpl = _maplibre_jinja.get_template("_interactive_map_partial.j2")
+            return tpl.render(**ctx)
+
+        else:
+            # Fallback : kind non géré inline (scene_3d, chart pre-Vague A,
+            # data_table pre-Vague A, media_embed, iframe_grist) → placeholder
+            return (
+                f'<div style="padding:24px;text-align:center;background:#f4f6fa;'
+                f'border-radius:6px;color:#666">'
+                f'<p style="margin:0 0 8px;font-weight:600">Composant {_h.escape(kind)}</p>'
+                f'<p style="margin:0;font-size:13px">'
+                f'<a href="/studies/{sid}/components/{cid}/render" target="_blank">'
+                f'Voir l\'aperçu interactif</a>'
+                f'</p></div>'
+            )
+    except Exception as exc:
+        log.warning("pre_render_component %s/%s : %s", kind, cid, exc)
+        return (
+            f'<div style="padding:20px;color:#888;font-style:italic">'
+            f'Composant {cid[:8]} indisponible ({type(exc).__name__}).</div>'
+        )
+
+
 async def _render_assembly_html(
     sid: str, aid: str, username: str,
 ) -> tuple[str, dict]:
@@ -4140,11 +4346,8 @@ async def _render_assembly_html(
     if not _maplibre_jinja:
         raise HTTPException(503, "Maplibre Jinja2 indisponible")
 
-    # Bug fix 2026-06-27 : pre-rendre les composants cote hub pour eviter
-    # les iframe avec src relatif `/studies/.../render` qui retournent 404
-    # quand la storymap est servie via S3 ou tier sans le contexte hub.
-    # Le template lit dict `rendered_components[cid] = html_content`
-    # et inline le HTML au lieu de l'iframe.
+    # Pré-rendu inline des composants via helper unifié D-QGIS-008
+    # (consommé aussi par render_component_endpoint pour cohérence).
     from hub import components as comp_mod
     rendered_components: dict[str, str] = {}
     for section in asm.layout.sections:
@@ -4153,251 +4356,36 @@ async def _render_assembly_html(
             if not cid or cid in rendered_components:
                 continue
             try:
-                # Pre-render via mock request to render_component endpoint
-                # (DRY : reutilise la logique de render_component_endpoint).
-                # On lit le manifest + rend selon kind.
                 comp_meta = await comp_mod.get_component_latest(cid)
                 if not comp_meta:
-                    rendered_components[cid] = f'<div style="padding:20px;color:#666;font-style:italic">Composant {cid[:8]} introuvable.</div>'
+                    rendered_components[cid] = (
+                        f'<div style="padding:20px;color:#666;font-style:italic">'
+                        f'Composant {cid[:8]} introuvable.</div>'
+                    )
                     continue
                 # Lire manifest PVC
                 code = comp_mod.read_component_manifest_pod_code(sid, cid)
                 stdout = await _execute_python_in_workspace(username, code)
                 if "COMPONENT_READ_OK" not in stdout:
-                    rendered_components[cid] = f'<div style="padding:20px;color:#666;font-style:italic">Composant {cid[:8]} indisponible.</div>'
+                    rendered_components[cid] = (
+                        f'<div style="padding:20px;color:#666;font-style:italic">'
+                        f'Composant {cid[:8]} indisponible.</div>'
+                    )
                     continue
                 import base64 as _b64
                 b64_data = stdout.split("b64=", 1)[1].split()[0].strip()
                 comp_manifest = _json.loads(_b64.b64decode(b64_data).decode())
-                # Render direct via _render_component_inline helper
-                kind = comp_manifest.get("kind", "unknown")
-                params = comp_manifest.get("params", {})
-                import html as _h
-                if kind == "narrative_text":
-                    # Bug fix 2026-06-27 : l'agent stocke le markdown soit dans
-                    # params.content soit params.markdown selon ses humeurs.
-                    # On accepte les 2 + fallback sur tout champ string trouve.
-                    md = (params.get("content") or params.get("markdown")
-                          or params.get("text") or params.get("body") or "")
-                    lines = md.split("\n")
-                    rendered = []
-                    in_para = []
-                    def _flush_para():
-                        if in_para:
-                            rendered.append(f'<p>{_h.escape(" ".join(in_para))}</p>')
-                            in_para.clear()
-                    for ln in lines:
-                        s = ln.strip()
-                        if s.startswith("### "):
-                            _flush_para()
-                            rendered.append(f"<h3>{_h.escape(s[4:])}</h3>")
-                        elif s.startswith("## "):
-                            _flush_para()
-                            rendered.append(f"<h2 style='color:#000091'>{_h.escape(s[3:])}</h2>")
-                        elif s.startswith("# "):
-                            _flush_para()
-                            rendered.append(f"<h1 style='color:#000091'>{_h.escape(s[2:])}</h1>")
-                        elif not s:
-                            _flush_para()
-                        else:
-                            in_para.append(s)
-                    _flush_para()
-                    rendered_components[cid] = f'<div style="padding:28px 32px;background:#fff;border-radius:6px;line-height:1.7;font-size:15px;color:#161616">{"".join(rendered)}</div>'
-                elif kind == "kpi_badge":
-                    # Bug fix 2026-06-27 : l'agent peut utiliser value/label/unit
-                    # OU value/label/icon. Accepte les 2 patterns.
-                    value = params.get("value", "?")
-                    label = params.get("label", "")
-                    suffix = params.get("unit") or ""  # icon n'est pas un suffix textuel
-                    icon = params.get("icon", "")  # ex: "alert-circle" (peut être ignore en V1)
-                    color_token = params.get("color", "")
-                    # Gradient personnalisable via color token (default blue CEREMA)
-                    gradient = (
-                        "linear-gradient(135deg,#e1000f,#aa0000)" if color_token == "marianne-red"
-                        else "linear-gradient(135deg,#1f8d4d,#0a5d2e)" if color_token == "success-green"
-                        else "linear-gradient(135deg,#000091,#0063cb)"  # default blue CEREMA
-                    )
-                    rendered_components[cid] = (
-                        f'<div style="padding:40px 32px;text-align:center;background:{gradient};'
-                        f'color:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,145,0.15)">'
-                        f'<div style="font-size:56px;font-weight:700;line-height:1;letter-spacing:-1px">{_h.escape(str(value))}{_h.escape(suffix)}</div>'
-                        f'<div style="font-size:14px;opacity:.92;margin-top:12px;text-transform:uppercase;letter-spacing:1px;font-weight:600">{_h.escape(label)}</div>'
-                        f'</div>'
-                    )
-                elif kind == "legend":
-                    items = params.get("items", [])
-                    items_html = "".join([
-                        f'<div style="display:flex;align-items:center;gap:8px;padding:4px 0">'
-                        f'<span style="width:16px;height:16px;background:{it.get("color","#999")};border-radius:3px"></span>'
-                        f'<span>{_h.escape(it.get("label","?"))}</span></div>'
-                        for it in items
-                    ])
-                    rendered_components[cid] = f'<div style="padding:20px;background:#fff;border:1px solid #e5e5e5;border-radius:6px">{items_html}</div>'
-                elif kind == "interactive_map":
-                    # Fix 2026-06-28 : pre-render MapLibre inline pour validation
-                    # end-to-end avec donnees QGIS reelles (scene_manifest layers).
-                    # Source : params.scene_hash (V0.2) OU params.layers[] inline.
-                    # Layers GeoJSON : recupere depuis scene_manifest PVC + injecte
-                    # comme MapLibre source. Le <head> du template charge MapLibre
-                    # CSS+JS via CDN unpkg.
-                    source = comp_manifest.get("source", {}) or {}
-                    scene_hash = source.get("scene_hash") or params.get("scene_hash")
-                    title = comp_manifest.get("title", "")
-                    bbox_text = ""
-                    layers_inline = params.get("layers", [])
-                    # Si scene_hash : lire manifest PVC et extraire layers GeoJSON
-                    map_layers_js = "[]"
-                    # Resilience source.pid : fallback sur projet par defaut
-                    # de l'etude (Maillon 4 — accepter cas ou agent omet pid).
-                    scene_pid = source.get("pid") or params.get("pid")
-                    if scene_hash and not scene_pid:
-                        try:
-                            _projects = await studies.list_projects(sid)
-                            if _projects:
-                                scene_pid = _projects[0]["pid"]
-                        except Exception: pass
-                    if scene_hash and scene_pid:
-                        try:
-                            scene_code = studies.read_scene_manifest_pod_code(sid, scene_pid)
-                            scene_out = await _execute_python_in_workspace(username, scene_code)
-                            if "SCENE_MANIFEST_READ_OK" in scene_out:
-                                scene_b64 = scene_out.split("b64=", 1)[1].split()[0].strip()
-                                import base64 as _b64s
-                                scene_obj = _json.loads(_b64s.b64decode(scene_b64).decode())
-                                scene_layers = scene_obj.get("layers", []) or []
-                                # Phase 4b : fetch GeoJSON depuis fichier PVC dedie
-                                # (manifest reste leger, donnees completes via /scene_layers/)
-                                geo_layers = []
-                                for i_l, l in enumerate(scene_layers):
-                                    lid = l.get("id", f"layer_{i_l}")
-                                    geojson_path = l.get("geojson_path")
-                                    geojson = l.get("geojson")  # fallback si inline (legacy)
-                                    if not geojson and geojson_path:
-                                        try:
-                                            gj_code = studies.read_scene_layer_geojson_pod_code(sid, scene_pid, lid)
-                                            gj_out = await _execute_python_in_workspace(username, gj_code)
-                                            if "SCENE_LAYER_READ_OK" in gj_out:
-                                                gj_b64 = gj_out.split("b64=", 1)[1].split()[0].strip()
-                                                geojson = _json.loads(_b64s.b64decode(gj_b64).decode())
-                                        except Exception as _e:
-                                            log.warning("read scene_layer %s : %s", lid, _e)
-                                    if geojson:
-                                        geo_layers.append({
-                                            "id": lid,
-                                            "name": l.get("name", lid),
-                                            "geojson": geojson,
-                                            "style": l.get("style", {}),
-                                            "geometry_type": l.get("geometry_type", "polygon"),
-                                            "n_features": l.get("n_features", 0),
-                                        })
-                                if geo_layers:
-                                    total = sum(l.get("n_features", 0) for l in geo_layers)
-                                    bbox_text = f" — {len(geo_layers)} couche{'s' if len(geo_layers) > 1 else ''} · {total} objets"
-                                map_layers_js = _json.dumps(geo_layers)
-                        except Exception as exc:
-                            log.warning("interactive_map scene_manifest read %s : %s", cid, exc)
-                    elif layers_inline:
-                        bbox_text = f" — {len(layers_inline)} couche{'s' if len(layers_inline) > 1 else ''}"
-                        map_layers_js = _json.dumps(layers_inline)
-
-                    # Center/zoom par defaut (Marseille 4e arr.) ou depuis params
-                    center_lng = params.get("center_lng", params.get("lng", 5.39))
-                    center_lat = params.get("center_lat", params.get("lat", 43.30))
-                    zoom = params.get("zoom", 13)
-                    map_id = f"map_{cid[:8]}"
-
-                    rendered_components[cid] = f'''
-<div style="background:#fff;border-radius:6px;overflow:hidden">
-  <div style="padding:14px 20px;border-bottom:1px solid #e5e5e5;background:#f6f6f6">
-    <strong style="color:#000091">{_h.escape(title)}</strong>
-    <span style="color:#666;font-size:13px">{_h.escape(bbox_text)}</span>
-  </div>
-  <div id="{map_id}" style="height:480px;width:100%"></div>
-</div>
-<script>
-(function() {{
-  if (typeof maplibregl === 'undefined') {{
-    document.getElementById('{map_id}').innerHTML =
-      '<div style="padding:40px;text-align:center;color:#666">MapLibre indisponible.</div>';
-    return;
-  }}
-  const layers = {map_layers_js};
-  const map = new maplibregl.Map({{
-    container: '{map_id}',
-    style: {{
-      version: 8,
-      sources: {{
-        osm: {{
-          type: 'raster',
-          tiles: ['https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png'],
-          tileSize: 256,
-          attribution: '© OpenStreetMap'
-        }}
-      }},
-      layers: [{{id:'osm', type:'raster', source:'osm'}}]
-    }},
-    center: [{center_lng}, {center_lat}],
-    zoom: {zoom}
-  }});
-  map.addControl(new maplibregl.NavigationControl(), 'top-left');
-  map.on('load', () => {{
-    const palette = ['#000091','#e1000f','#1f8d4d','#ff6f00','#9c27b0','#0288d1'];
-    layers.forEach((layer, i) => {{
-      if (!layer.geojson) return;
-      const sourceId = 'src-' + layer.id;
-      const layerId = 'lyr-' + layer.id;
-      try {{
-        map.addSource(sourceId, {{type:'geojson', data:layer.geojson}});
-        const isPoint = (layer.geometry_type || '').toLowerCase().includes('point');
-        const isLine  = (layer.geometry_type || '').toLowerCase().includes('line');
-        if (isPoint) {{
-          map.addLayer({{id:layerId, type:'circle', source:sourceId,
-            paint:{{'circle-color':palette[i%palette.length], 'circle-radius':6,
-                  'circle-stroke-width':1, 'circle-stroke-color':'#fff'}}}});
-        }} else if (isLine) {{
-          map.addLayer({{id:layerId, type:'line', source:sourceId,
-            paint:{{'line-color':palette[i%palette.length], 'line-width':2}}}});
-        }} else {{
-          map.addLayer({{id:layerId, type:'fill', source:sourceId,
-            paint:{{'fill-color':palette[i%palette.length], 'fill-opacity':0.4,
-                  'fill-outline-color':palette[i%palette.length]}}}});
-        }}
-      }} catch (e) {{ console.warn('addLayer failed', layer.id, e); }}
-    }});
-    // Auto-fit bbox sur la 1re couche GeoJSON
-    if (layers.length && layers[0].geojson) {{
-      try {{
-        const fs = (layers[0].geojson.features) || [];
-        if (fs.length) {{
-          const b = new maplibregl.LngLatBounds();
-          fs.forEach(f => {{
-            const coords = (f.geometry && f.geometry.coordinates) || [];
-            const walk = (c) => {{
-              if (typeof c[0] === 'number') {{ b.extend(c); return; }}
-              c.forEach(walk);
-            }};
-            walk(coords);
-          }});
-          if (!b.isEmpty()) map.fitBounds(b, {{padding:40, maxZoom:16}});
-        }}
-      }} catch (e) {{ console.warn('fitBounds failed', e); }}
-    }}
-  }});
-}})();
-</script>'''
-                else:
-                    # Fallback final : kind non geré inline (scene_3d, autres) →
-                    # placeholder + lien preview.
-                    rendered_components[cid] = (
-                        f'<div style="padding:24px;text-align:center;background:#f4f6fa;border-radius:6px;color:#666">'
-                        f'<p style="margin:0 0 8px;font-weight:600">Composant {_h.escape(kind)}</p>'
-                        f'<p style="margin:0;font-size:13px">'
-                        f'<a href="/studies/{sid}/components/{cid}/render" target="_blank">Voir l\'aperçu interactif</a>'
-                        f'</p></div>'
-                    )
+                # Helper unifié (D-QGIS-008) — templates partials Jinja2
+                rendered_components[cid] = await _pre_render_component_html(
+                    comp_manifest, sid, username, cid,
+                )
             except Exception as exc:
                 log.warning("pre-render component %s : %s", cid, exc)
-                rendered_components[cid] = f'<div style="padding:20px;color:#888;font-style:italic">Composant indisponible ({type(exc).__name__}).</div>'
+                rendered_components[cid] = (
+                    f'<div style="padding:20px;color:#888;font-style:italic">'
+                    f'Composant indisponible ({type(exc).__name__}).</div>'
+                )
+
 
     try:
         tpl_short = template_name.replace("maplibre_renderer/", "")

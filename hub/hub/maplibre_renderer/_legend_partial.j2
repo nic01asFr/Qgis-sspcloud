@@ -1,0 +1,27 @@
+{# Partial _legend — pre-rendu inline pour storymap
+
+   Vague A Commit 2 (D-QGIS-008). Legende declarative items {color, label}.
+
+   Variables :
+   - items : list[dict] {color, label}
+   - title : str optionnel
+   - source : str optionnel (millesime + authority + licence ; B3 Vague B
+              auto-fill via list_datasources)
+#}
+<div style="padding:20px;background:#fff;border:1px solid #e5e5e5;border-radius:6px">
+  {% if title %}
+  <p style="margin:0 0 12px;font-weight:700;color:#000091;font-size:14px">{{ title | e }}</p>
+  {% endif %}
+  {% for it in items %}
+  <div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+    <span style="width:16px;height:16px;background:{{ it.color | default('#999') }};
+                 border-radius:3px;flex-shrink:0"></span>
+    <span style="font-size:13px">{{ it.label | default('?') | e }}</span>
+  </div>
+  {% endfor %}
+  {% if source %}
+  <p style="margin:12px 0 0;font-size:11px;color:#999;font-style:italic">
+    Source : {{ source | e }}
+  </p>
+  {% endif %}
+</div>
