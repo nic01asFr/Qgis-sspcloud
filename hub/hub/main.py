@@ -4296,11 +4296,33 @@ async def _pre_render_component_html(
 
         elif kind == "legend":
             items = params.get("items", []) or []
+            source_text = params.get("source", "")
+            # B3 (Vague B 2026-06-29) : auto-fill source depuis catalog datasources
+            # si source.data_url cite un datasource_id reconnu (ex: 'bdtopo_batiments').
+            # Pattern : producteur cite la source officielle CEREMA (millésime + licence).
+            if not source_text:
+                ds_ref = (params.get("datasource_id")
+                          or (comp_manifest.get("source") or {}).get("data_url", "").split("/")[-1])
+                if ds_ref:
+                    # Catalog datasources hardcodés CEREMA (sous-ensemble usual).
+                    # Pour catalog complet : appel /mcp list_datasources (V2 si besoin).
+                    catalog = {
+                        "bdtopo_batiments": "BD TOPO 2024 — IGN — Licence Ouverte 2.0",
+                        "bdtopo_parcelles": "BD TOPO 2024 — IGN — Licence Ouverte 2.0",
+                        "bdtopo_adresses": "BD TOPO 2024 — IGN — Licence Ouverte 2.0",
+                        "bdtdv": "DVF (Demandes Valeurs Foncières) — DGFiP — Licence Ouverte 2.0",
+                        "georisques_api": "Géorisques API — DGPR — Licence Ouverte 2.0",
+                        "tri_limites": "TRI (Territoires Risque Inondation) — DGPR — Licence Ouverte 2.0",
+                        "corine_land_cover": "CORINE Land Cover 2018 — Copernicus EEA — Licence Ouverte",
+                        "admin_communes": "Découpage administratif — IGN ADMIN EXPRESS — Licence Ouverte 2.0",
+                        "rge_alti": "RGE ALTI 5m — IGN — Licence Ouverte 2.0",
+                    }
+                    source_text = catalog.get(ds_ref, "")
             tpl = _maplibre_jinja.get_template("_legend_partial.j2")
             return tpl.render(
                 items=items,
                 title=params.get("title") or comp_manifest.get("title", ""),
-                source=params.get("source", ""),
+                source=source_text,
             )
 
         elif kind == "interactive_map":
@@ -5382,10 +5404,29 @@ async def serve_published(
         except Exception as exc:
             log.warning("Banner injection failed for %s/%s: %s", kind, safe_slug, exc)
 
+    # B5 (Vague B 2026-06-29) : CSP + Cache-Control + iframe permission.
+    # Validé par Passerelle-Archi msg 6c517f58 : frame-ancestors * wildcard V1
+    # (iframe Atlas Grist + sites tiers CEREMA). Whitelist sources MapLibre +
+    # Chart.js (unpkg) + tiles OSM. Cache 1h URL versionnée (slug stable).
+    headers = {
+        "Cache-Control": "public, max-age=3600",
+        "Content-Security-Policy": (
+            "default-src 'self' https://unpkg.com https://tile.openstreetmap.org "
+            "https://*.minio.lab.sspcloud.fr; "
+            "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+            "style-src 'self' 'unsafe-inline' https://unpkg.com; "
+            "img-src * data: blob:; "
+            "connect-src 'self' https://*.minio.lab.sspcloud.fr "
+            "https://tile.openstreetmap.org; "
+            "frame-ancestors *"
+        ),
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+    }
     return Response(
         content=content,
         media_type=meta.get("content_type", "application/octet-stream"),
-        headers={"Cache-Control": "public, max-age=60"},
+        headers=headers,
     )
 
 
