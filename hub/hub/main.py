@@ -5081,6 +5081,95 @@ async def archive_assembly_endpoint(
     return None
 
 
+@app.get("/catalog/components")
+async def catalog_components_endpoint(
+    audience: Literal["public", "cerema_internal", "restricted", "confidential"] = "cerema_internal",
+    kind: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Vague E1 (D-QGIS-009, 2026-06-29) : catalogue cross-étude des composants.
+
+    Permet à l'agent IA et au user de découvrir les composants réutilisables
+    publiés par d'autres études CEREMA (ZEBRA, MobSciDat, autres users).
+
+    Filtres :
+    - `audience` (default 'cerema_internal' anti-fuite RGPD) :
+      * 'public' : composants vraiment publics (peu nombreux)
+      * 'cerema_internal' : collègues CEREMA (default sain)
+      * 'restricted' : scoped key requise
+      * 'confidential' : archive (généralement pas listée)
+    - `kind` : filtre ComponentKind (interactive_map, kpi_badge, ...)
+    - `limit` + `offset` : pagination (default 50/0)
+
+    Use case agent IA : avant de créer un composant from scratch, check
+    le catalogue pour voir s'il existe déjà un composant similaire à
+    réutiliser ou cloner.
+
+    Use case user : browse marketplace de composants CEREMA.
+
+    Retourne {items: list[Component], total, audience, kind, limit, offset}.
+    """
+    _check_components_enabled()
+    from hub import components as comp_mod
+
+    rows = await comp_mod.list_components(
+        sid=None,  # Cross-étude (pas de filtre sid)
+        kind=kind,
+        classification=audience,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "items": rows,
+        "total": len(rows),
+        "audience": audience,
+        "kind": kind,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/catalog/assemblies")
+async def catalog_assemblies_endpoint(
+    audience: Literal["public", "cerema_internal", "restricted", "confidential"] = "cerema_internal",
+    kind: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Vague E1 (D-QGIS-009) : catalogue cross-étude des assemblages.
+
+    Pendant à catalog_components_endpoint pour les assemblages (storymap,
+    dashboard, sheet_a4...). Permet de découvrir des templates de livrables
+    réutilisables (à cloner via POST /assemblies/{aid}/clone).
+
+    Pattern identique catalogue composants : filtres audience/kind +
+    pagination. Default audience='cerema_internal' anti-fuite RGPD.
+    """
+    _check_assemblies_enabled()
+    from hub import assemblies as asm_mod
+
+    rows = await asm_mod.list_assemblies(
+        sid=None,  # Cross-étude
+        kind=kind,
+        # NB : list_assemblies n'a pas encore filtre classification, on filtre Python
+    )
+    # Filter par audience côté Python (extension list_assemblies future)
+    filtered = [r for r in rows if r.get("classification") == audience]
+    # Pagination
+    paginated = filtered[offset:offset + limit]
+    return {
+        "items": paginated,
+        "total": len(filtered),
+        "audience": audience,
+        "kind": kind,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
 @app.get("/studies/{sid}/publications")
 async def list_study_publications(
     sid: str,

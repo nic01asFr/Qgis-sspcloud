@@ -66,11 +66,13 @@ mcp_tools:
     - publish_agent
     - revoke_agent
     - list_components
+    - list_catalog_components  # Vague E1 D-QGIS-009 : decouvrir composants cross-etude (avant create_component)
     - create_component
     - update_component   # Vague E1 D-QGIS-009 : modifier params sans delete+recreate
     - get_component
     - get_component_history
     - list_assemblies
+    - list_catalog_assemblies  # Vague E1 D-QGIS-009 : decouvrir templates cross-etude
     - create_assembly
     - update_assembly
     - clone_assembly     # Vague E1 D-QGIS-009 : partir d'un template existant

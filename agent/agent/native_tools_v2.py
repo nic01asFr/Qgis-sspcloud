@@ -269,6 +269,69 @@ async def publish_assembly(
     )
 
 
+async def list_catalog_components(
+    audience: str = "cerema_internal",
+    kind: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Vague E1 (D-QGIS-009, 2026-06-29) : catalogue cross-etude composants.
+
+    Permet a l'agent IA de decouvrir les composants publies par d'autres
+    etudes CEREMA (ZEBRA, MobSciDat, autres users) pour potentiellement
+    les reutiliser au lieu de creer from scratch.
+
+    Discipline recommandee : appeler list_catalog_components AVANT
+    create_component pour voir s'il existe deja un composant similaire.
+
+    Filtres :
+    - audience : 'public' | 'cerema_internal' (DEFAULT) | 'restricted' | 'confidential'
+      DEFAULT 'cerema_internal' anti-fuite RGPD
+    - kind : filtre ComponentKind (interactive_map, kpi_badge, ...)
+    - limit + offset : pagination (default 50/0)
+
+    Retourne {items: list[Component], total, audience, kind, limit, offset}.
+    """
+    params = {
+        "audience": audience,
+        "limit": str(limit),
+        "offset": str(offset),
+    }
+    if kind:
+        params["kind"] = kind
+    return await _hub_call("GET", "/catalog/components", params=params)
+
+
+async def list_catalog_assemblies(
+    audience: str = "cerema_internal",
+    kind: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Vague E1 (D-QGIS-009) : catalogue cross-etude assemblages.
+
+    Pendant a list_catalog_components pour les assemblages. Permet de
+    decouvrir des templates de livrables a cloner via clone_assembly.
+
+    Use case : Marie veut creer une storymap risque inondation.
+    1. list_catalog_assemblies(kind='storymap_narrative_dsfr') -> trouve aid
+       d'une storymap reference Blancarde-Chartreux
+    2. clone_assembly(sid, aid=trouve, deep=true)
+    3. Adapte les params pour son cas (4e -> 5e arr.)
+    4. publish_assembly
+
+    Retourne {items, total, audience, kind, limit, offset}.
+    """
+    params = {
+        "audience": audience,
+        "limit": str(limit),
+        "offset": str(offset),
+    }
+    if kind:
+        params["kind"] = kind
+    return await _hub_call("GET", "/catalog/assemblies", params=params)
+
+
 async def clone_assembly(
     sid: str, aid: str, deep: bool = False,
 ) -> dict[str, Any]:
@@ -1124,6 +1187,37 @@ NATIVE_TOOLS_V2 = {
             "audience": "str optionnel ('public'|'cerema_internal'|'restricted'|'confidential')",
         },
     },
+    "list_catalog_components": {
+        "fn": list_catalog_components,
+        "description": (
+            "Vague E1 (D-QGIS-009) — CATALOGUE cross-etude composants. "
+            "Decouvrir composants publies par d'autres etudes CEREMA pour "
+            "reutiliser au lieu de creer from scratch. Discipline recommandee : "
+            "appeler AVANT create_component. Default audience cerema_internal "
+            "(anti-fuite RGPD)."
+        ),
+        "params": {
+            "audience": "str (public|cerema_internal|restricted|confidential), default cerema_internal",
+            "kind": "str optionnel (filtre ComponentKind)",
+            "limit": "int (default 50)",
+            "offset": "int (default 0)",
+        },
+    },
+    "list_catalog_assemblies": {
+        "fn": list_catalog_assemblies,
+        "description": (
+            "Vague E1 (D-QGIS-009) — CATALOGUE cross-etude assemblages. "
+            "Decouvrir templates de livrables (storymap, dashboard...) a cloner "
+            "via clone_assembly. Use case : partir d'une storymap reference "
+            "et l'adapter au lieu de tout recreer from scratch."
+        ),
+        "params": {
+            "audience": "str default cerema_internal",
+            "kind": "str optionnel (storymap_narrative_dsfr|dashboard|sheet_a4|...)",
+            "limit": "int (default 50)",
+            "offset": "int (default 0)",
+        },
+    },
     "clone_assembly": {
         "fn": clone_assembly,
         "description": (
@@ -1598,6 +1692,62 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["sid", "aid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_catalog_components",
+            "description": (
+                "Vague E1 (D-QGIS-009) - CATALOGUE cross-etude composants. "
+                "Decouvre composants publies par d'autres etudes CEREMA "
+                "(ZEBRA, MobSciDat, etc.) pour reutiliser au lieu de creer "
+                "from scratch. Discipline recommandee : appeler AVANT "
+                "create_component pour voir s'il existe deja un composant "
+                "similaire."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "audience": {
+                        "type": "string",
+                        "enum": ["public", "cerema_internal", "restricted", "confidential"],
+                        "default": "cerema_internal",
+                        "description": "Default cerema_internal (anti-fuite RGPD).",
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Optionnel - filtre ComponentKind.",
+                    },
+                    "limit": {"type": "integer", "default": 50},
+                    "offset": {"type": "integer", "default": 0},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_catalog_assemblies",
+            "description": (
+                "Vague E1 (D-QGIS-009) - CATALOGUE cross-etude assemblages. "
+                "Decouvre templates de livrables (storymap, dashboard...) a "
+                "cloner via clone_assembly. Use case : partir d'une storymap "
+                "reference et adapter au lieu de creer from scratch."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "audience": {
+                        "type": "string",
+                        "enum": ["public", "cerema_internal", "restricted", "confidential"],
+                        "default": "cerema_internal",
+                    },
+                    "kind": {"type": "string", "description": "Optionnel - filtre AssemblyKind."},
+                    "limit": {"type": "integer", "default": 50},
+                    "offset": {"type": "integer", "default": 0},
+                },
             },
         },
     },

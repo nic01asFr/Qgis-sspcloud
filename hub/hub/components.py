@@ -99,9 +99,15 @@ async def list_components(
     kind: str | None = None,
     owner: str | None = None,
     status: str = "active",
+    classification: str | None = None,
     limit: int = 100,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """Liste les composants. Si sid donné, scope étude. Sinon scope user."""
+    """Liste les composants. Si sid donné, scope étude. Sinon scope user.
+
+    Vague E1 D-QGIS-009 (2026-06-29) : ajout filtres `classification` et
+    `offset` pour endpoint /catalog/components cross-étude.
+    """
     wheres = ["status = ?"]
     params: list[Any] = [status]
     if sid:
@@ -113,6 +119,9 @@ async def list_components(
     if owner:
         wheres.append("owner = ?")
         params.append(owner)
+    if classification:
+        wheres.append("classification = ?")
+        params.append(classification)
 
     sql = (
         f"SELECT * FROM components_index "
@@ -121,9 +130,10 @@ async def list_components(
         f"  SELECT cid, MAX(version_num) FROM components_index "
         f"  WHERE status = 'active' GROUP BY cid"
         f") "
-        f"ORDER BY created_at DESC LIMIT ?"
+        f"ORDER BY created_at DESC LIMIT ? OFFSET ?"
     )
     params.append(limit)
+    params.append(offset)
 
     async with aiosqlite.connect(_DB_PATH) as db:
         db.row_factory = aiosqlite.Row
