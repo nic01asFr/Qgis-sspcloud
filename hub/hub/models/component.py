@@ -44,6 +44,11 @@ ComponentKind = Literal[
     "data_table",
     "media_embed",
     "iframe_grist",
+    # Vague E2 (D-QGIS-009 §3, 2026-06-29) — kinds atomiques composables Esri-canon
+    "kpi_grid",          # Bandeau N chiffres clés (vs kpi_badge isolé répété)
+    "heading",           # Titre H1-H4 standalone (vs concat dans narrative_text)
+    "quote",             # Citation / pull-quote (sources expertes, témoignages)
+    "separator",         # Séparateur horizontal entre blocks
 ]
 
 

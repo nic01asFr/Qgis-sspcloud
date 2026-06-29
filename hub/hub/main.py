@@ -4560,6 +4560,76 @@ async def _pre_render_component_html(
                 max_rows=params.get("max_rows", 100),
             )
 
+        elif kind == "kpi_grid":
+            # Vague E2 (D-QGIS-009 §3, 2026-06-29) : grid responsive de N KPIs
+            # Params : {kpis: [{value, label, unit?, color?}, ...], columns_min?: 140}
+            color_map = {
+                "marianne-red": "linear-gradient(135deg,#e1000f,#aa0000)",
+                "success-green": "linear-gradient(135deg,#1f8d4d,#0a5d2e)",
+                "warning-orange": "linear-gradient(135deg,#b34000,#cd6133)",
+                "info-blue": "linear-gradient(135deg,#000091,#0063cb)",
+            }
+            kpis = params.get("kpis", []) or []
+            cols_min = int(params.get("columns_min", 140))
+            items_html = []
+            for k in kpis[:24]:
+                grad = color_map.get(k.get("color", ""), color_map["info-blue"])
+                items_html.append(
+                    f'<div style="background:{grad};color:#fff;padding:18px 14px;'
+                    f'border-radius:6px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.08)">'
+                    f'<div style="font-size:28px;font-weight:700;line-height:1.1">{_h.escape(str(k.get("value", "?")))}'
+                    f'<span style="font-size:14px;font-weight:500;margin-left:4px">{_h.escape(str(k.get("unit") or ""))}</span></div>'
+                    f'<div style="font-size:12px;margin-top:6px;opacity:.92">{_h.escape(str(k.get("label", "")))}</div>'
+                    f'</div>'
+                )
+            return (
+                f'<div style="display:grid;'
+                f'grid-template-columns:repeat(auto-fit,minmax({cols_min}px,1fr));'
+                f'gap:12px;margin:16px 0">{"".join(items_html)}</div>'
+            )
+
+        elif kind == "heading":
+            # Vague E2 : titre H1-H4 standalone (au lieu de markdown ## dans narrative_text).
+            # Params : {text, level?: 2}
+            level = max(1, min(4, int(params.get("level", 2))))
+            text = _h.escape(str(params.get("text", comp_manifest.get("title", ""))))
+            sizes = {1: "32px", 2: "26px", 3: "20px", 4: "16px"}
+            return (
+                f'<h{level} style="font-size:{sizes[level]};color:#161616;'
+                f'margin:24px 0 12px;font-weight:700;line-height:1.3">{text}</h{level}>'
+            )
+
+        elif kind == "quote":
+            # Vague E2 : citation / pull-quote (sources expertes, témoignages CEREMA).
+            # Params : {text, author?, source?}
+            text = _h.escape(str(params.get("text", "")))
+            author = _h.escape(str(params.get("author", "")))
+            source_text = _h.escape(str(params.get("source", "")))
+            attr_html = ""
+            if author or source_text:
+                parts = [p for p in [author, source_text] if p]
+                attr_html = f'<footer style="margin-top:8px;font-size:13px;color:#666">— {" · ".join(parts)}</footer>'
+            return (
+                f'<blockquote style="border-left:4px solid #000091;'
+                f'padding:12px 18px;margin:18px 0;background:#f4f6fa;'
+                f'font-style:italic;color:#1a1a1a;font-size:16px;line-height:1.6">'
+                f'{text}{attr_html}</blockquote>'
+            )
+
+        elif kind == "separator":
+            # Vague E2 : séparateur horizontal entre blocks.
+            # Params : {style?: "solid"|"dashed"|"dotted", color?: "#ddd"}
+            style = params.get("style", "solid")
+            if style not in ("solid", "dashed", "dotted"):
+                style = "solid"
+            color = params.get("color", "#dddddd")
+            if not isinstance(color, str) or len(color) > 7 or not color.startswith("#"):
+                color = "#dddddd"
+            return (
+                f'<hr style="border:none;border-top:1px {style} {color};'
+                f'margin:24px 0;width:100%">'
+            )
+
         else:
             # Fallback : kind non géré inline (scene_3d, chart pre-Vague A,
             # data_table pre-Vague A, media_embed, iframe_grist) → placeholder
