@@ -6,17 +6,21 @@
    Variables :
    - kpi : dict {value, unit?, label, source?, gradient?}
 #}
+{# Vague E2 Commit 2 (P5) : kpi_badge compact (vs ancien -40% hauteur).
+   Layout horizontal avec value + label inline. Pour un KPI ISOLE.
+   Si N>1 KPIs, prefer kind=kpi_grid (Vague E2). #}
 {% set gradient = kpi.gradient or 'linear-gradient(135deg,#000091,#0063cb)' %}
-<div style="padding:40px 32px;text-align:center;background:{{ gradient }};
-            color:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,145,0.15)">
-  <div style="font-size:56px;font-weight:700;line-height:1;letter-spacing:-1px">
+<div style="padding:20px 28px;background:{{ gradient }};color:#fff;
+            border-radius:8px;box-shadow:0 2px 8px rgba(0,0,145,0.15);
+            display:flex;align-items:baseline;gap:16px;flex-wrap:wrap">
+  <div style="font-size:36px;font-weight:700;line-height:1;letter-spacing:-.5px">
     {{ kpi.value }}{{ kpi.unit | default('') }}
   </div>
-  <div style="font-size:14px;opacity:.92;margin-top:12px;text-transform:uppercase;
-              letter-spacing:1px;font-weight:600">
+  <div style="font-size:13px;opacity:.95;text-transform:uppercase;
+              letter-spacing:.8px;font-weight:600;flex:1;min-width:140px">
     {{ kpi.label | e }}
   </div>
   {% if kpi.source %}
-  <p style="font-size:10px;opacity:.7;margin-top:8px">Source : {{ kpi.source | e }}</p>
+  <div style="font-size:10px;opacity:.75;font-style:italic">{{ kpi.source | e }}</div>
   {% endif %}
 </div>

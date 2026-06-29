@@ -96,9 +96,49 @@ a:hover{color:var(--blue-france)}
 .story-components{display:grid;gap:20px;margin:24px 0}
 .story-component{background:#fff;border-radius:8px;overflow:hidden;
   box-shadow:0 2px 10px rgba(0,0,0,0.06);border:1px solid var(--grey-200)}
+/* Cartes interactives : hauteur fixe (canvas MapLibre) */
 .story-component--map{height:520px}
+/* Composants iframe full : hauteur fixe nécessaire */
 .story-component--full{height:600px}
+/* Vague E2 Commit 2 (D-QGIS-009 P1) : composants atomiques
+   compositionnels (heading, kpi_grid, quote, separator, kpi_badge)
+   doivent s'adapter à leur contenu, pas un wrapper 600px vide. */
+.story-component--atomic{height:auto;background:transparent;
+  border:0;box-shadow:none;border-radius:0;overflow:visible}
 .story-component-iframe{width:100%;height:100%;border:0;display:block}
+
+/* ─── Vague E2 Commit 2 : différenciation visuelle AssemblySection.kind ── */
+/* intro : impact visuel, hero secondaire (immersion d'entrée) */
+.story-section[data-section-kind="intro"]{
+  background:linear-gradient(180deg,#f0f3f9 0%,#fff 100%);
+  padding:70px 24px}
+.story-section[data-section-kind="intro"] .story-section-title{
+  font-size:30px;text-align:center;margin-bottom:18px}
+.story-section[data-section-kind="intro"] .story-section-narrative{
+  font-size:17px;text-align:center;max-width:720px;margin:0 auto 30px}
+/* section : lecture normale (default, pas de override) */
+/* conclusion : call-out coloré marquant la fin de la narration */
+.story-section[data-section-kind="conclusion"]{
+  background:#f0f3f9;
+  border-top:3px solid var(--blue-france);
+  border-bottom:3px solid var(--blue-france);
+  padding:60px 24px}
+.story-section[data-section-kind="conclusion"] .story-section-title{
+  font-size:26px;color:var(--blue-france)}
+.story-section[data-section-kind="conclusion"] .story-section-title::before{
+  content:"✓ ";font-weight:900}
+/* appendix : typo réduite, marges réduites, annexes/sources */
+.story-section[data-section-kind="appendix"]{
+  background:var(--grey-50);padding:36px 24px;
+  font-size:14px}
+.story-section[data-section-kind="appendix"] .story-section-title{
+  font-size:18px;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--grey-700)}
+.story-section[data-section-kind="appendix"] .story-section-narrative{
+  font-size:13.5px;color:var(--grey-700)}
+
+/* ─── Trio cartographe (interactive_map) — Vague E2 Commit 2 P3 ───── */
+/* Caveat ↓ légende dans .story-component--map est gérée côté helper. */
 
 /* ─── Audit chain footer ───────────────────────────────────────────── */
 .audit-chain-block{background:var(--grey-50);padding:28px 24px;
@@ -188,9 +228,19 @@ a:hover{color:var(--blue-france)}
 {% endif %}
 
 {% for section in sections %}
+{# Vague E2 Commit 2 (P2) : skip section.title si 1er composant = heading
+   (anti double-titration). Set _skip_title pour conditionner l'affichage. #}
+{% set _first_kind = (rendered_components_kinds.get((section.components or [{}])[0].ref, '')
+                     if section.components and (section.components[0].ref if section.components[0] else None)
+                     else '') %}
+{% set _skip_title = (_first_kind == 'heading') %}
+{# Vague E2 Commit 2 (P1) : kinds compositionnels atomiques utilisent
+   .story-component--atomic (height:auto, sans card 600px). #}
+{% set _atomic_kinds = ['heading', 'kpi_grid', 'quote', 'separator',
+                       'kpi_badge', 'narrative_text', 'legend'] %}
 <section class="story-section" data-section-kind="{{ section.kind|e }}">
   <div class="story-section-inner">
-    {% if section.title %}
+    {% if section.title and not _skip_title %}
     <h2 class="story-section-title">{{ section.title|e }}</h2>
     {% endif %}
     {% if section.narrative_md %}
@@ -201,7 +251,11 @@ a:hover{color:var(--blue-france)}
       {% for comp_entry in section.components %}
         {% set cid = comp_entry.ref %}
         {% if cid %}
-        <div class="story-component story-component--full">
+        {% set _kind = rendered_components_kinds.get(cid, '') %}
+        {% set _wrap_class = 'story-component--atomic' if _kind in _atomic_kinds
+                            else ('story-component--map' if _kind in ['interactive_map', 'scene_3d']
+                                  else 'story-component--full') %}
+        <div class="story-component {{ _wrap_class }}">
           {# Bug fix 2026-06-27 : composants pre-rendus cote hub (inline) au
              lieu d'iframe src relatif qui retournait 404 hors contexte hub.
              Cf. main.py _render_assembly_html rendered_components dict. #}

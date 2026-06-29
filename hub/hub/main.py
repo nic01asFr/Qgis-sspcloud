@@ -4562,7 +4562,21 @@ async def _pre_render_component_html(
 
         elif kind == "kpi_grid":
             # Vague E2 (D-QGIS-009 §3, 2026-06-29) : grid responsive de N KPIs
-            # Params : {kpis: [{value, label, unit?, color?}, ...], columns_min?: 140}
+            # Params : {kpis: [{value, label, unit?, color?, reliability?}, ...],
+            #          columns_min?: 140, palette?: 'monochrome'|'rainbow'}
+            #
+            # Vague E2 Commit 2 (P3) : palette MONOCHROME bleu marianne par
+            # defaut (DSFR sobre). 'rainbow' uniquement si user demande
+            # explicitement palette='rainbow'. 'color' override par-KPI
+            # reserve aux alertes semantiques (marianne-red = danger).
+            palette = params.get("palette", "monochrome")
+            # Monochrome = degrade subtil de bleu Marianne (1 couleur dominante)
+            monochrome_gradients = [
+                "linear-gradient(135deg,#000091,#0063cb)",  # bleu fonce
+                "linear-gradient(135deg,#1212a1,#1d75d0)",  # legerement plus clair
+                "linear-gradient(135deg,#2424b0,#3d87d4)",
+                "linear-gradient(135deg,#3636bf,#5099d7)",
+            ]
             color_map = {
                 "marianne-red": "linear-gradient(135deg,#e1000f,#aa0000)",
                 "success-green": "linear-gradient(135deg,#1f8d4d,#0a5d2e)",
@@ -4572,8 +4586,17 @@ async def _pre_render_component_html(
             kpis = params.get("kpis", []) or []
             cols_min = int(params.get("columns_min", 140))
             items_html = []
-            for k in kpis[:24]:
-                grad = color_map.get(k.get("color", ""), color_map["info-blue"])
+            for idx, k in enumerate(kpis[:24]):
+                # Si user a explicitement specifie color, respect.
+                # Sinon : monochrome (default) -> shading bleu indexed,
+                #         OR rainbow -> info-blue default si pas de color.
+                user_color = k.get("color")
+                if user_color and user_color in color_map:
+                    grad = color_map[user_color]
+                elif palette == "monochrome":
+                    grad = monochrome_gradients[idx % len(monochrome_gradients)]
+                else:  # rainbow legacy
+                    grad = color_map["info-blue"]
                 items_html.append(
                     f'<div style="background:{grad};color:#fff;padding:18px 14px;'
                     f'border-radius:6px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.08)">'
@@ -4618,16 +4641,30 @@ async def _pre_render_component_html(
 
         elif kind == "separator":
             # Vague E2 : séparateur horizontal entre blocks.
-            # Params : {style?: "solid"|"dashed"|"dotted", color?: "#ddd"}
+            # Params : {style?: "solid"|"dashed"|"dotted", color?: "#ddd",
+            #          variant?: "rule"|"break"|"ornament"}
+            # Vague E2 Commit 2 (P7) : separator plus visible
+            # (border 2px + margin 40px) + variants narratifs
             style = params.get("style", "solid")
             if style not in ("solid", "dashed", "dotted"):
                 style = "solid"
-            color = params.get("color", "#dddddd")
+            color = params.get("color", "#000091")  # default bleu marianne (vs gris invisible)
             if not isinstance(color, str) or len(color) > 7 or not color.startswith("#"):
-                color = "#dddddd"
+                color = "#000091"
+            variant = params.get("variant", "rule")
+            if variant == "ornament":
+                # Trait court centre (beat narratif fort)
+                return (
+                    f'<hr style="border:none;border-top:3px {style} {color};'
+                    f'margin:48px auto;width:80px">'
+                )
+            elif variant == "break":
+                # Espacement fort sans trait (pause respiratoire)
+                return f'<div style="height:60px"></div>'
+            # rule (default) : trait pleine largeur, visible
             return (
-                f'<hr style="border:none;border-top:1px {style} {color};'
-                f'margin:24px 0;width:100%">'
+                f'<hr style="border:none;border-top:2px {style} {color};'
+                f'margin:40px 0;width:100%;opacity:.6">'
             )
 
         else:
@@ -4702,6 +4739,10 @@ async def _render_assembly_html(
     # (consommé aussi par render_component_endpoint pour cohérence).
     from hub import components as comp_mod
     rendered_components: dict[str, str] = {}
+    # Vague E2 Commit 2 : map cid -> kind pour le template (decide
+    # .story-component--atomic vs --map vs --full, skip section.title si
+    # 1er composant = heading).
+    rendered_components_kinds: dict[str, str] = {}
     for section in asm.layout.sections:
         for comp_entry in (section.components or []):
             cid = (comp_entry.dict() if hasattr(comp_entry, 'dict') else comp_entry).get("ref") if isinstance(comp_entry, dict) or hasattr(comp_entry, 'dict') else None
@@ -4727,6 +4768,8 @@ async def _render_assembly_html(
                 import base64 as _b64
                 b64_data = stdout.split("b64=", 1)[1].split()[0].strip()
                 comp_manifest = _json.loads(_b64.b64decode(b64_data).decode())
+                # Stocke le kind pour le template (Vague E2 Commit 2)
+                rendered_components_kinds[cid] = comp_manifest.get("kind", "")
                 # Helper unifié (D-QGIS-008) — templates partials Jinja2
                 rendered_components[cid] = await _pre_render_component_html(
                     comp_manifest, sid, username, cid,
@@ -4746,6 +4789,7 @@ async def _render_assembly_html(
             assembly=asm.model_dump(mode="json"),
             sections=[s.model_dump(mode="json") for s in asm.layout.sections],
             rendered_components=rendered_components,
+            rendered_components_kinds=rendered_components_kinds,
             audit_chain=chain.model_dump(mode="json"),
             footer=asm.footer.model_dump(mode="json"),
         )
