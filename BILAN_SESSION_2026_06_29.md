@@ -263,3 +263,86 @@ Attaque Vague A commit 1 (FONDATIONS) :
 5. Smoke test pytest
 
 Puis commit 2 (HELPER UNIFIÉ) et commit 3 (BIBLIOTHÈQUE).
+
+---
+
+## Vague E2 LIVRÉE — 9 commits 2026-06-29 (tags v1.6.6 + v1.6.7)
+
+Re-cadrage métier suite critique UX/UI ("storymap CEREMA livrable institutionnel,
+pas patchwork de kinds techniques"). Au lieu d'ajouter 5 nouveaux kinds isolés,
+on a transformé la **forme et le contenu** pour atteindre un livrable qui se tient.
+
+### Bloc Storymap métier base (tag v1.6.6) — 3 commits
+
+| Commit | SHA | Items | Effet |
+|---|---|---|---|
+| C2 | 1822feb | Polish DSFR P1-P7 + diff visuelle AssemblySection.kind | Grammaire narrative visible (intro/section/conclusion/appendix) |
+| C3 | c53ab54 | 6 patterns métier `AssemblyKind` + 2 endpoints + 2 native tools | Agent IA pense en chapitres canoniques (hero_constat, zoom_territoire, croisement_enjeu, fiche_indicateur, reliability_summary, conclusion_actionnable) |
+| C4 | 1c893da | Trio cartographe métier obligatoire | Cartes COPIL-ready (titre + légende + source + caveat) |
+
+### Bloc Carto métier riche (tag v1.6.7) — 5 commits
+
+| Commit | SHA | Items | Effet |
+|---|---|---|---|
+| C5 | 720aa0a | Symbologie thématique (graduated/categorized + ColorBrewer + Jenks/quantile) | Choroplèthes vraies DSFR sobre |
+| C6 | cd5e3a0 | Interactions (tooltip survol + popup clic + toggle layers UI) | Cartes vivantes |
+| C7 | b4aa724 | Catalogue 6 fonds (osm/plan-ign/ortho-ign/dsfr-sobre/hillshade/etalab) | Choix éditorial fond |
+| C8 | 22e3f1b | Proportional symbols + heatmap MapLibre | Densité spatiale |
+| C10 | 9fc7fed | Légende riche 3 formats (chips/gradient_bar/proportional) auto | Lecture facilitée |
+
+### Tests
+
+189/189 pytest tests PASSED dont 47 nouveaux Vague E2 (carto_classification 22 +
+carto_interactions 8 + carto_basemaps 12 + carto_advanced_viz 5 + legend_rich 8 +
+storymap_patterns + trio_cartographe + vague_e2_atomic_kinds).
+
+### Acquis qualitatifs
+
+1. **Grammaire narrative visible** : AssemblySection.kind différencie le rendu
+2. **6 patterns métier canoniques** : Marie pense en chapitres pas en blocs
+3. **Carte exploitable COPIL** : trio cartographe systématique
+4. **Symbologie thématique vraie** : choroplèthes Jenks + ColorBrewer
+5. **Interactions cartographiques** : tooltip + popup + toggle
+6. **Choix éditorial fond** : 6 fonds dont dsfr-sobre institutionnel
+7. **Visualisations avancées** : proportional + heatmap
+8. **Légende auto adaptive** selon classification
+
+---
+
+## Pivot UI BlockNote envisagé (D-QGIS-010 acté 2026-06-29)
+
+Revue compatibilité écosystème CEREMA validée (ZEBRA, Atlas, panoramax3d,
+Strate, geoai-kit, MobSciDat = zéro impact). Pivot vers BlockNoteJS (financé
+ANCT, utilisé par LaSuite Docs gouv.fr).
+
+**Décisions techniques actées** (D-QGIS-010) :
+- Architecture statique bundle servi par hub FastAPI
+- Autosave debounce 30s
+- Mix DOM/iframe selon kind (DOM atomiques, iframe interactive_map/chart/data_table)
+- CRDT Yjs multi-user collab différé Vague future
+
+**Plan 4 commits ~15h** : E setup + F custom blocks + G sérialisation + H
+intégration desk + tag `v1.7.0-blocknote-editor`.
+
+---
+
+## Tags publiés cette session
+
+- `v1.6.5-vague-e1-composition-libre` (UX libre composition agent IA, 6 commits)
+- `v1.6.6-storymap-metier-base` (storymap métier + trio cartographe, 3 commits)
+- `v1.6.7-carto-metier-base` ⭐ (carto thématique + interactions + fonds, 5 commits)
+
+---
+
+## Prochaine session (suite cadrage v1.6.7 + BlockNote)
+
+Si pivot BlockNote validé :
+- Commit E setup BlockNote standalone Vite + bundle CI + hub static serve
+- Commit F 8 custom blocks Vague E2
+- Commit G sérialisation bi-dir Assembly ↔ BlockNote JSON
+- Commit H intégration desk + bouton "✏️ Editer" + tag v1.7.0-blocknote-editor
+
+Vague E3 différée (reprise quand bandwidth) : audit_chain_narrative +
+reliability_matrix kinds + AuditChain enrichi + layout sidecar Esri +
+scene_3d MapLibre + multi-cartes + print A4 + reliability chips +
+cross-références narratives + sommaire sticky + audit chain narrative humain.

@@ -3,20 +3,33 @@
 Service QGIS géospatial pour agents CEREMA sur SSPCloud Onyxia.  
 QGIS Desktop + Agent IA + Mémoire long terme.
 
-**État actuel** : Vagues A + B LIVRÉES (tag `v1.6.4-pipeline-e2e`, 2026-06-29) —
-pipeline E2E `load → scene_manifest → component → update_assembly → publish`
-validé avec 14 270 bâtiments BD TOPO Marseille 4e arr. Storymaps DSFR-inspirées
-opérationnelles avec `audit_chain.integrity_hash` SHA256 + 6 composants inline
-(narrative + KPI + legend + carto MapLibre + chart Chart.js + data_table) +
-sources Strate-aligned + helper rendu unifié 3-paths.
+**État actuel** : Vagues A + B + E1 + E2 base + E2 carto LIVRÉES
+(tag `v1.6.7-carto-metier-base`, 2026-06-29) — pipeline E2E
+`load → scene_manifest → component → update_assembly → publish` validé +
+storymap métier avec grammaire narrative (intro/section/conclusion/appendix) +
+6 patterns canoniques (hero_constat, zoom_territoire, croisement_enjeu,
+fiche_indicateur, reliability_summary, conclusion_actionnable) +
+cartographie thématique riche (choroplèthes graduated + ColorBrewer +
+Jenks/quantile + interactions tooltip/popup/toggle + 6 fonds +
+proportional symbols + heatmap + légende auto gradient_bar/proportional).
+189/189 tests pytest PASSED.
 
-**Prochaine vague** : E1 "UX libre composition" (D-QGIS-009 acté 2026-06-29) —
-PATCH composants + clone assemblages + catalogue cross-étude + UI desk
-éditeur sections. Tag attendu : `v1.6.5-vague-e1-composition-libre`.
+**Tags publiés** :
+- `v1.6.5-vague-e1-composition-libre` (UX libre composition agent IA)
+- `v1.6.6-storymap-metier-base` (polish DSFR + 6 patterns métier + trio cartographe)
+- `v1.6.7-carto-metier-base` ⭐ (symbologie + interactions + fonds + viz + légende)
 
-**Vague E2 différée** : 5 nouveaux kinds (kpi_grid, audit_chain_narrative,
-reliability_matrix, heading, quote) + AuditChain enrichi + layout sidecar
-Esri. Bump Component V0.2 → tag `v1.7.0-component-catalog-v02`.
+**Prochaine vague** : E2 pivot UI éditeur BlockNote (D-QGIS-010 acté
+2026-06-29) — éditeur block-based dans le desk pour permettre à Marie
+d'éditer visuellement les Assembly après création agent IA. Custom
+blocks DOM (heading, kpi_grid, quote, separator, narrative_text) +
+iframe (interactive_map, chart, data_table). Tag attendu :
+`v1.7.0-blocknote-editor`.
+
+**Vague E3 différée** : kinds avancés (audit_chain_narrative,
+reliability_matrix) + AuditChain enrichi (Phase, VariableReliability,
+contributors) + layout sidecar Esri scrollytelling + scene_3d MapLibre
+fill-extrusion + multi-cartes synchronisées + `@media print` A4.
 
 > **Charte de fonctionnement de l'agent** (vision produit, principes,
 > roadmap, invariants) : voir [docs/CHARTE_AGENT.md](docs/CHARTE_AGENT.md).
