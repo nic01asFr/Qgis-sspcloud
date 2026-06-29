@@ -1,25 +1,25 @@
 /**
  * Editeur BlockNote - App principal.
  *
- * Vague E2 Commit E2 (D-QGIS-010) : fetch assembly read-only + display
- * sections en blocks BlockNote natifs (paragraph/heading/list).
+ * Vague E2 Commits F1+F2+F3 (D-QGIS-010) : 6 custom blocks DOM + EditorContent
+ * pattern (sub-component qui s'initialise APRES le fetch assembly).
  *
- * Prochains commits :
- * - F1 : 1er custom block kpi_grid DOM (pattern de référence)
- * - F2-F5 : 12 autres custom blocks Vague E2
- * - G : sérialisation bi-dir Assembly <-> BlockNote JSON + tests round-trip
- * - H1-H3 : autosave + concurrency + integration desk + tag v1.7.0
+ * Architecture corrigée vs E2 :
+ * - App fait le fetch (loading/error states)
+ * - EditorContent reçoit l'assembly chargé et initialise BlockNote avec
+ *   les blocks dérivés via assemblyToBlockNoteDoc()
+ * - useCreateBlockNote() est appelé UNE FOIS avec le bon contenu initial
+ *   (vs E2 où il était appelé avant le fetch -> stuck "Chargement…")
  */
 import { useEffect, useState } from 'react';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
 import '@blocknote/mantine/style.css';
 import { fetchAssembly } from './api';
-import type { AssemblyFetchResponse, AssemblySection } from './types';
+import { qgisBlockNoteSchema } from './blocks';
+import { assemblyToBlockNoteDoc } from './serializer';
+import type { AssemblyFetchResponse } from './types';
 
-/**
- * Parse sid/aid depuis l'URL path /editor/{sid}/assembly/{aid}.
- */
 function parseRouteParams(): { sid: string; aid: string } {
   const match = window.location.pathname.match(
     /^\/editor\/([0-9a-f]{12})\/assembly\/([0-9a-f]{12})/,
@@ -28,47 +28,61 @@ function parseRouteParams(): { sid: string; aid: string } {
 }
 
 /**
- * Convertit un AssemblySection en blocks BlockNote natifs read-only
- * (heading + paragraph + placeholder pour composants).
- *
- * Vague E2 Commit E2 = display brut. Commits F1-F5 vont remplacer les
- * placeholders par les vrais custom blocks.
+ * Sub-component qui rend BlockNote APRES le fetch assembly.
+ * useCreateBlockNote initialisé avec le bon contenu = pas de stuck "Loading".
  */
-function sectionToInitialBlocks(sections: AssemblySection[]): any[] {
-  const blocks: any[] = [];
-  for (const section of sections) {
-    // Section title -> heading level 2
-    if (section.title) {
-      blocks.push({
-        type: 'heading',
-        props: { level: 2 },
-        content: section.title,
-      });
-    }
-    // Narrative markdown -> paragraph (V1 simple, F3 fera markdown -> blocks natifs)
-    if (section.narrative_md) {
-      blocks.push({
-        type: 'paragraph',
-        content: section.narrative_md.slice(0, 500), // tronqué V1
-      });
-    }
-    // Components -> placeholder text V1 (F1-F5 ajouteront custom blocks)
-    for (const comp of section.components || []) {
-      blocks.push({
-        type: 'paragraph',
-        content: [
-          { type: 'text', text: '📎 Composant : ', styles: { bold: true } },
-          { type: 'text', text: comp.ref, styles: { code: true } },
-          {
-            type: 'text',
-            text: ' (custom block à venir — Commits F1-F5)',
-            styles: { italic: true, textColor: 'gray' },
-          },
-        ],
-      });
-    }
+function EditorContent({
+  sid,
+  assembly,
+}: {
+  sid: string;
+  assembly: AssemblyFetchResponse;
+}) {
+  const [blocks, setBlocks] = useState<any[] | null>(null);
+  const [serializeError, setSerializeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    assemblyToBlockNoteDoc(sid, assembly.manifest)
+      .then(setBlocks)
+      .catch((err) => setSerializeError(String(err.message || err)));
+  }, [sid, assembly]);
+
+  if (serializeError) {
+    return (
+      <div style={{ padding: 20, color: '#a50f15' }}>
+        Erreur sérialisation : {serializeError}
+      </div>
+    );
   }
-  return blocks;
+
+  if (blocks === null) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>
+        Préparation des blocks…
+      </div>
+    );
+  }
+
+  return <BlockNoteContent initialBlocks={blocks} />;
+}
+
+/**
+ * Wrapper final qui initialise useCreateBlockNote avec les blocks préparés.
+ * Séparé pour que useCreateBlockNote ne soit JAMAIS appelé avec content vide.
+ */
+function BlockNoteContent({ initialBlocks }: { initialBlocks: any[] }) {
+  const editor = useCreateBlockNote({
+    schema: qgisBlockNoteSchema,
+    initialContent: initialBlocks.length > 0 ? initialBlocks : [
+      { type: 'paragraph', content: 'Assembly vide.' },
+    ],
+  });
+
+  return (
+    <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
+      <BlockNoteView editor={editor} theme="light" editable={false} />
+    </div>
+  );
 }
 
 function App() {
@@ -77,7 +91,6 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Fetch l'assembly via API hub
   useEffect(() => {
     if (!sid || !aid) {
       setError("URL invalide. Attendu : /editor/{sid 12hex}/assembly/{aid 12hex}");
@@ -94,23 +107,6 @@ function App() {
         setLoading(false);
       });
   }, [sid, aid]);
-
-  // Construire les blocks initiaux depuis l'assembly chargé
-  const initialContent =
-    assembly?.manifest?.layout?.sections
-      ? sectionToInitialBlocks(assembly.manifest.layout.sections)
-      : [
-          {
-            type: 'paragraph',
-            content: loading ? 'Chargement…' : (error || 'Aucun contenu'),
-          },
-        ];
-
-  const editor = useCreateBlockNote({
-    initialContent: initialContent.length > 0 ? initialContent : [
-      { type: 'paragraph', content: 'Assembly vide.' },
-    ],
-  });
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -136,14 +132,12 @@ function App() {
             </span>
           )}
         </div>
-        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#666' }}>
+        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#666', alignItems: 'center' }}>
           {assembly?.metadata && (
             <>
               <span>v{assembly.metadata.version_num}</span>
               <span>•</span>
-              <span style={{ color: '#0063cb' }}>
-                {assembly.manifest.audience}
-              </span>
+              <span style={{ color: '#0063cb' }}>{assembly.manifest.audience}</span>
             </>
           )}
         </div>
@@ -166,23 +160,14 @@ function App() {
 
       {/* Loading state */}
       {loading && (
-        <div
-          style={{
-            padding: '40px',
-            textAlign: 'center',
-            color: '#666',
-            fontSize: 14,
-          }}
-        >
+        <div style={{ padding: 40, textAlign: 'center', color: '#666', fontSize: 14 }}>
           Chargement de l'assembly {aid}…
         </div>
       )}
 
-      {/* BlockNote editor (read-only V1, F1-F5 ajouteront custom blocks éditables) */}
-      {!loading && !error && (
-        <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
-          <BlockNoteView editor={editor} theme="light" editable={false} />
-        </div>
+      {/* Editor (rendu APRES le fetch via EditorContent) */}
+      {!loading && !error && assembly && (
+        <EditorContent sid={sid} assembly={assembly} />
       )}
 
       {/* Footer status */}
@@ -199,7 +184,7 @@ function App() {
       >
         <span>D-QGIS-010 · BlockNote v0.22</span>
         <span>•</span>
-        <span>Vague E2 Commit E2 (read-only)</span>
+        <span>Vague E2 F-DOM (6 custom blocks)</span>
         <span style={{ marginLeft: 'auto' }}>
           {assembly?.manifest?.layout?.sections?.length ?? 0} sections
         </span>
