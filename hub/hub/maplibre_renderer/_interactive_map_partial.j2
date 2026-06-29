@@ -1,6 +1,11 @@
 {# Partial _interactive_map — pre-rendu inline MapLibre pour storymap
 
    Vague A Commit 2 (D-QGIS-008). MapLibre standalone + scene_manifest layers.
+   Vague E2 Commit 4 (D-QGIS-009 §4) : trio cartographe metier obligatoire
+   (Titre + Légende auto + Source datée + Caveat) rendu sous chaque carte.
+   Convention metier CEREMA : une carte sans ce trio est inexploitable
+   en COPIL (lecteur ne sait pas QUOI il lit, D'OÙ ça vient, JUSQU'OÙ
+   il peut extrapoler).
 
    Le template parent (storymap_dsfr.html.j2) doit charger MapLibre CSS+JS
    dans son <head> (CDN unpkg).
@@ -12,14 +17,59 @@
    - center_lng, center_lat : float (default Marseille 4e 5.39, 43.30)
    - zoom : float (default 13)
    - map_layers_json : str (JSON ready to inline, layers avec geojson)
+   - source_text : str optionnel (source datee auto-filled depuis catalog)
+   - caveat : str optionnel (caveat methodologique)
+   - legend_items : list optionnel (autoderived from layers + palette)
 #}
 {% set map_id = 'map_' + cid[:8] %}
-<div style="background:#fff;border-radius:6px;overflow:hidden">
+<div style="background:#fff;border-radius:6px;overflow:hidden;
+            border:1px solid #e5e5e5">
+  {# A — TITRE OBLIGATOIRE #}
   <div style="padding:14px 20px;border-bottom:1px solid #e5e5e5;background:#f6f6f6">
     <strong style="color:#000091">{{ title | e }}</strong>
     <span style="color:#666;font-size:13px">{{ bbox_text | e }}</span>
   </div>
+  {# Canvas MapLibre #}
   <div id="{{ map_id }}" style="height:480px;width:100%"></div>
+  {# B — LEGENDE AUTO-DERIVEE (si layers presents) #}
+  {% if legend_items %}
+  <div style="padding:10px 20px;background:#fafafa;border-top:1px solid #e5e5e5;
+              display:flex;flex-wrap:wrap;gap:14px;align-items:center;
+              font-size:12px;color:#444">
+    <strong style="color:#000091;text-transform:uppercase;font-size:11px;
+                   letter-spacing:.5px">Légende</strong>
+    {% for item in legend_items %}
+    <span style="display:inline-flex;align-items:center;gap:6px">
+      <span style="display:inline-block;width:14px;height:14px;
+                   background:{{ item.color | e }};border-radius:3px;
+                   border:1px solid rgba(0,0,0,.1)"></span>
+      <span>{{ item.label | e }}{% if item.count %} <em style="color:#888">({{ item.count }})</em>{% endif %}</span>
+    </span>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {# C — SOURCE DATEE (trio cartographe metier) #}
+  {% if source_text %}
+  <div style="padding:8px 20px;background:#fafafa;border-top:1px solid #f0f0f0;
+              font-size:11px;color:#666;font-style:italic">
+    Source : {{ source_text | e }}
+  </div>
+  {% endif %}
+  {# D — CAVEAT METHODOLOGIQUE (lecture critique) #}
+  {% if caveat %}
+  <div style="padding:8px 20px;background:#fff8e6;border-top:1px solid #ffe1a8;
+              font-size:11px;color:#7a4b00">
+    <strong style="color:#b34000">⚠ Caveat :</strong> {{ caveat | e }}
+  </div>
+  {% endif %}
+  {# Si AUCUN element du trio (legend, source, caveat) : afficher hint
+     anti-pattern pour aider l'utilisateur a completer #}
+  {% if not source_text and not caveat and not legend_items %}
+  <div style="padding:8px 20px;background:#fff8e6;border-top:1px solid #ffe1a8;
+              font-size:11px;color:#7a4b00;font-style:italic">
+    ℹ Carte sans légende/source/caveat — ajouter ces métadonnées pour usage COPIL.
+  </div>
+  {% endif %}
 </div>
 <script>
 (function() {

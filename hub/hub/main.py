@@ -4431,6 +4431,56 @@ async def _build_interactive_map_ctx(
         bbox_text = f" — {len(layers_inline)} couche{'s' if len(layers_inline) > 1 else ''}"
         map_layers_js = _json2.dumps(layers_inline)
 
+    # ── Vague E2 Commit 4 (D-QGIS-009 §4) — Trio cartographe metier ──
+    # Une carte CEREMA exploitable en COPIL a TOUJOURS : Titre + Legende +
+    # Source datee + Caveat (optionnel mais recommande). Sans ces 4, la
+    # carte est jolie mais inutilisable metier.
+    palette = ['#000091', '#e1000f', '#1f8d4d', '#ff6f00', '#9c27b0', '#0288d1']
+
+    # Legende auto-derivee depuis les layers du scene_manifest
+    legend_items = params.get("legend_items")
+    if legend_items is None:
+        # Auto-deriver depuis layers + palette utilisee dans le JS MapLibre
+        try:
+            layers_data = _json2.loads(map_layers_js)
+            if layers_data:
+                legend_items = []
+                for i_layer, layer_obj in enumerate(layers_data):
+                    legend_items.append({
+                        "label": layer_obj.get("name", layer_obj.get("id", f"layer {i_layer}")),
+                        "color": palette[i_layer % len(palette)],
+                        "count": layer_obj.get("n_features"),
+                    })
+        except Exception:
+            legend_items = None
+
+    # Source datee : auto-fill depuis le catalog datasources si data_url
+    # contient un datasource_id reconnu. Pattern Vague B B3 reutilise.
+    source_text = params.get("source") or ""
+    if not source_text:
+        ds_ref = (
+            params.get("datasource_id")
+            or (source.get("data_url") or "").split("/")[-1]
+        )
+        if ds_ref:
+            catalog = {
+                "bdtopo_batiments": "BD TOPO 2024 — IGN — Licence Ouverte 2.0",
+                "bdtopo_parcelles": "BD TOPO 2024 — IGN — Licence Ouverte 2.0",
+                "bdtopo_adresses": "BD TOPO 2024 — IGN — Licence Ouverte 2.0",
+                "bdtdv": "DVF (Demandes Valeurs Foncières) — DGFiP — Licence Ouverte 2.0",
+                "georisques_api": "Géorisques API — DGPR — Licence Ouverte 2.0",
+                "tri_limites": "TRI (Territoires Risque Inondation) — DGPR — Licence Ouverte 2.0",
+                "corine_land_cover": "CORINE Land Cover 2018 — Copernicus EEA — Licence Ouverte",
+                "admin_communes": "Découpage administratif — IGN ADMIN EXPRESS — Licence Ouverte 2.0",
+                "rge_alti": "RGE ALTI 5m — IGN — Licence Ouverte 2.0",
+            }
+            source_text = catalog.get(ds_ref, "")
+    # Fallback si scene_manifest mais pas de source datee : signal IGN/CEREMA
+    if not source_text and scene_hash:
+        source_text = "Scene Manifest QGIS — CEREMA"
+
+    caveat = params.get("caveat") or None
+
     return {
         "cid": cid,
         "title": title,
@@ -4439,6 +4489,10 @@ async def _build_interactive_map_ctx(
         "center_lat": params.get("center_lat", params.get("lat", 43.30)),
         "zoom": params.get("zoom", 13),
         "map_layers_json": map_layers_js,
+        # Vague E2 Commit 4 — trio cartographe metier
+        "legend_items": legend_items,
+        "source_text": source_text,
+        "caveat": caveat,
     }
 
 
