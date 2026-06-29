@@ -4513,6 +4513,13 @@ async def _build_interactive_map_ctx(
 
     caveat = params.get("caveat") or None
 
+    # Vague E2 Commit 7 (D-QGIS-009 §7) : catalogue fonds de carte
+    # Si params.basemap_id defini, lookup catalogue. Default OSM.
+    from hub.carto_basemaps import get_basemap_style, get_basemap_metadata
+    basemap_id = params.get("basemap_id", "osm")
+    basemap_style_json = _json2.dumps(get_basemap_style(basemap_id))
+    basemap_meta = get_basemap_metadata(basemap_id)
+
     return {
         "cid": cid,
         "title": title,
@@ -4525,6 +4532,10 @@ async def _build_interactive_map_ctx(
         "legend_items": legend_items,
         "source_text": source_text,
         "caveat": caveat,
+        # Vague E2 Commit 7 — catalogue fonds
+        "basemap_style_json": basemap_style_json,
+        "basemap_name": basemap_meta["name"],
+        "basemap_attribution": basemap_meta["attribution"],
     }
 
 

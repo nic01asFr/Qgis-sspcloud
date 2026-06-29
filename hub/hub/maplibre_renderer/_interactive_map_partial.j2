@@ -79,20 +79,12 @@
     return;
   }
   const layers = {{ map_layers_json | safe }};
+  {# Vague E2 Commit 7 : catalogue fonds via basemap_style_json injecte par hub.
+     Fallback OSM si absent. #}
+  const basemapStyle = {{ basemap_style_json | safe if basemap_style_json else '{version:8,sources:{osm:{type:"raster",tiles:["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],tileSize:256}},layers:[{id:"osm",type:"raster",source:"osm"}]}' }};
   const map = new maplibregl.Map({
     container: '{{ map_id }}',
-    style: {
-      version: 8,
-      sources: {
-        osm: {
-          type: 'raster',
-          tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-          tileSize: 256,
-          attribution: '© OpenStreetMap'
-        }
-      },
-      layers: [{id:'osm', type:'raster', source:'osm'}]
-    },
+    style: basemapStyle,
     center: [{{ center_lng | float }}, {{ center_lat | float }}],
     zoom: {{ zoom | float }}
   });
