@@ -4456,9 +4456,11 @@ async def _build_interactive_map_ctx(
     palette = ['#000091', '#e1000f', '#1f8d4d', '#ff6f00', '#9c27b0', '#0288d1']
 
     # Legende auto-derivee depuis les layers du scene_manifest
-    # Vague E2 Commit 5 : si layer.classification existe, legende = classes
-    # graduated/categorized (vs. couleur flat par layer).
+    # Vague E2 Commit 5 + 10 : si layer.classification existe, legende riche
+    # (gradient_bar pour graduated, chips pour categorized).
+    # Si layer.proportional_field defini, legende 'proportional' (3 cercles).
     legend_items = params.get("legend_items")
+    legend_format = params.get("legend_format")  # override explicite
     if legend_items is None:
         try:
             layers_data = _json2.loads(map_layers_js)
@@ -4467,17 +4469,31 @@ async def _build_interactive_map_ctx(
                 for i_layer, layer_obj in enumerate(layers_data):
                     classif = layer_obj.get("classification") or {}
                     ctype = classif.get("type")
+                    if ctype == "graduated" and legend_format is None:
+                        legend_format = "gradient_bar"
+                    elif layer_obj.get("proportional_field") and legend_format is None:
+                        legend_format = "proportional"
+                        # Legende proportional : 3 tailles (small/medium/big)
+                        prop_min = layer_obj.get("proportional_min", 0)
+                        prop_max = layer_obj.get("proportional_max", 1000)
+                        prop_mid = (prop_min + prop_max) / 2
+                        themed = palette[i_layer % len(palette)]
+                        legend_items.extend([
+                            {"label": f"≤ {prop_min:.0f}", "color": themed, "size": 8},
+                            {"label": f"~ {prop_mid:.0f}", "color": themed, "size": 16},
+                            {"label": f"≥ {prop_max:.0f}", "color": themed, "size": 26},
+                        ])
+                        continue  # skip default branch
                     if ctype in ("graduated", "categorized"):
-                        # Legende riche : N classes du tag classification
                         colors = classif.get("colors", [])
                         labels = classif.get("labels", [])
-                        for i, (lbl, col) in enumerate(zip(labels, colors)):
+                        for lbl, col in zip(labels, colors):
                             legend_items.append({
                                 "label": lbl, "color": col,
                                 "layer": layer_obj.get("name"),
                             })
-                    else:
-                        # Fallback flat color (1 layer = 1 couleur palette)
+                    elif not layer_obj.get("proportional_field"):
+                        # Flat color fallback
                         legend_items.append({
                             "label": layer_obj.get("name", layer_obj.get("id", f"layer {i_layer}")),
                             "color": palette[i_layer % len(palette)],
@@ -4485,6 +4501,7 @@ async def _build_interactive_map_ctx(
                         })
         except Exception:
             legend_items = None
+    # legend_format default 'chips' si non override par classification/proportional
 
     # Source datee : auto-fill depuis le catalog datasources si data_url
     # contient un datasource_id reconnu. Pattern Vague B B3 reutilise.
@@ -4530,6 +4547,7 @@ async def _build_interactive_map_ctx(
         "map_layers_json": map_layers_js,
         # Vague E2 Commit 4 — trio cartographe metier
         "legend_items": legend_items,
+        "legend_format": legend_format,  # Vague E2 Commit 10
         "source_text": source_text,
         "caveat": caveat,
         # Vague E2 Commit 7 — catalogue fonds

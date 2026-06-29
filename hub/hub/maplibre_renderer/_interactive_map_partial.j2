@@ -31,21 +31,62 @@
   </div>
   {# Canvas MapLibre #}
   <div id="{{ map_id }}" style="height:480px;width:100%"></div>
-  {# B — LEGENDE AUTO-DERIVEE (si layers presents) #}
+  {# B — LEGENDE AUTO-DERIVEE riche (Vague E2 Commit 10)
+     3 formats supportes selon legend_format :
+     - 'chips' (default, V0.1) : puces couleur + label, layout flex inline
+     - 'gradient_bar' : barre gradient continue avec breakpoints labelles
+                       (pour classification.type=graduated)
+     - 'proportional' : 3 cercles taille croissante avec labels
+                       (pour layer.proportional_field) #}
   {% if legend_items %}
-  <div style="padding:10px 20px;background:#fafafa;border-top:1px solid #e5e5e5;
-              display:flex;flex-wrap:wrap;gap:14px;align-items:center;
+  <div style="padding:12px 20px;background:#fafafa;border-top:1px solid #e5e5e5;
               font-size:12px;color:#444">
     <strong style="color:#000091;text-transform:uppercase;font-size:11px;
-                   letter-spacing:.5px">Légende</strong>
-    {% for item in legend_items %}
-    <span style="display:inline-flex;align-items:center;gap:6px">
-      <span style="display:inline-block;width:14px;height:14px;
-                   background:{{ item.color | e }};border-radius:3px;
-                   border:1px solid rgba(0,0,0,.1)"></span>
-      <span>{{ item.label | e }}{% if item.count %} <em style="color:#888">({{ item.count }})</em>{% endif %}</span>
-    </span>
-    {% endfor %}
+                   letter-spacing:.5px;display:block;margin-bottom:8px">Légende</strong>
+    {% set fmt = legend_format | default('chips') %}
+    {% if fmt == 'gradient_bar' %}
+      {# Barre gradient continue : couleurs en row, labels en row dessous #}
+      {% set total = legend_items | length %}
+      <div style="display:flex;height:14px;border-radius:3px;overflow:hidden;
+                  border:1px solid rgba(0,0,0,.1);max-width:520px">
+        {% for item in legend_items %}
+        <div style="flex:1;background:{{ item.color | e }}"></div>
+        {% endfor %}
+      </div>
+      <div style="display:flex;font-size:10px;color:#666;margin-top:4px;
+                  max-width:520px">
+        {% for item in legend_items %}
+        <div style="flex:1;text-align:center;padding:0 2px">{{ item.label | e }}</div>
+        {% endfor %}
+      </div>
+    {% elif fmt == 'proportional' %}
+      {# 3 cercles tailles croissantes avec labels #}
+      <div style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap">
+        {% for item in legend_items %}
+        <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+          <div style="width:{{ item.size | default(20) }}px;
+                      height:{{ item.size | default(20) }}px;
+                      background:{{ item.color | e }};border-radius:50%;
+                      border:1px solid #fff;
+                      box-shadow:0 0 0 1px rgba(0,0,0,.2);
+                      opacity:.75"></div>
+          <span style="font-size:10px;color:#666">{{ item.label | e }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      {# Default chips (V0.1) #}
+      <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center">
+      {% for item in legend_items %}
+      <span style="display:inline-flex;align-items:center;gap:6px">
+        <span style="display:inline-block;width:14px;height:14px;
+                     background:{{ item.color | e }};border-radius:3px;
+                     border:1px solid rgba(0,0,0,.1)"></span>
+        <span>{{ item.label | e }}{% if item.count %} <em style="color:#888">({{ item.count }})</em>{% endif %}</span>
+      </span>
+      {% endfor %}
+      </div>
+    {% endif %}
   </div>
   {% endif %}
   {# C — SOURCE DATEE (trio cartographe metier) #}
