@@ -65,6 +65,36 @@
   width: 100% !important;
 }
 
+/* v1.7.3 fix : les blocs React custom (kpiGrid grid, iframe wrapper, legend
+ * chips...) doivent avoir leur direct children divs en width 100% sinon
+ * BlockNote react-node-view-renderer ne propage pas la largeur disponible.
+ * Sans ça, le grid auto-fit du kpiGrid se replie à 200px et les iframes
+ * s'écroulent à 300px (default HTML iframe width). */
+[data-content-type="kpiGrid"] > div,
+[data-content-type="interactiveMap"] > div,
+[data-content-type="chart"] > div,
+[data-content-type="dataTable"] > div,
+[data-content-type="scene3d"] > div,
+[data-content-type="mediaEmbed"] > div,
+[data-content-type="iframeGrist"] > div,
+[data-content-type="legend"] > div,
+[data-content-type="customHeading"] > div,
+[data-content-type="customQuote"] > div,
+[data-content-type="kpiBadge"] > div,
+[data-content-type="separator"] > div,
+[data-content-type="narrativeText"] > div {
+  width: 100% !important;
+}
+
+/* Bonus : le react-renderer (wrapper TipTap/ProseMirror du custom block)
+ * doit AUSSI prendre toute la largeur, sinon le > div interne herite de
+ * la largeur de son contenu. */
+.bn-block-content .react-renderer,
+.bn-block-content .react-renderer > div {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
 /* Wrapper App container : prendre toute la largeur viewport */
 body, #root {
   width: 100%;

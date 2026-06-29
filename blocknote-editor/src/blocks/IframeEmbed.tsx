@@ -84,6 +84,7 @@ function ComponentIframe({
         border: '1px solid #e5e5e5',
         borderRadius: 6,
         overflow: 'hidden',
+        width: '100%', // v1.7.3 fix : parent BlockNote ne propage pas width:100%
       }}
     >
       <iframe

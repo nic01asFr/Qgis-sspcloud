@@ -73,6 +73,7 @@ export const KpiGridBlock = createReactBlockSpec(
             gridTemplateColumns: `repeat(auto-fit, minmax(${columnsMin}px, 1fr))`,
             gap: 12,
             margin: '12px 0',
+            width: '100%', // v1.7.3 fix : sinon container parent BlockNote ne propage pas la largeur
           }}
         >
           {kpis.slice(0, 24).map((k, i) => {
