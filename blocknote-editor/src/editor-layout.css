@@ -1,0 +1,72 @@
+/**
+ * Layout overrides BlockNote — v1.7.3 (D-QGIS-010).
+ *
+ * BlockNote v0.22 contraint le container editor a ~700px max-width (style
+ * Notion confort lecture). Pour qgis-sspcloud, on a besoin que les
+ * composants lourds (interactive_map MapLibre, chart, data_table,
+ * scene_3d) puissent prendre TOUTE la largeur disponible pour la lisibilite
+ * cartographique metier.
+ *
+ * Inspiration LaSuite Docs (ANCT, blocknote-based) : container elargi,
+ * colonnes natives BlockNote pour layout multi-blocs.
+ */
+
+/* Container BlockNote : prendre la largeur du parent (App.tsx restreint
+ * deja via padding 20px) */
+.bn-container {
+  max-width: 100% !important;
+  width: 100% !important;
+}
+
+.bn-editor {
+  max-width: 100% !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+/* Block content : ne pas contraindre les blocs custom (kpi_grid, iframes)
+ * mais garder un peu de marge pour le texte (paragraph, heading natif) */
+.bn-block-content {
+  max-width: 100% !important;
+}
+
+/* Pour les blocs custom QGIS (kpi_grid, interactive_map iframe...),
+ * pas de constraint inline - laisser le rendu inner prendre 100% */
+[data-content-type="kpiGrid"],
+[data-content-type="interactiveMap"],
+[data-content-type="chart"],
+[data-content-type="dataTable"],
+[data-content-type="scene3d"],
+[data-content-type="mediaEmbed"],
+[data-content-type="iframeGrist"],
+[data-content-type="legend"] {
+  width: 100%;
+  max-width: 100% !important;
+}
+
+/* Les blocs texte (paragraph, heading natif, customHeading, narrativeText,
+ * customQuote) gardent une largeur lisible (max-width ~ 880px centree)
+ * pour le confort de lecture. Style 'mixed': lourds full, texte centre. */
+[data-content-type="paragraph"] .bn-inline-content,
+[data-content-type="heading"] .bn-inline-content,
+[data-content-type="customHeading"] .bn-block-content > *,
+[data-content-type="customQuote"] .bn-block-content > *,
+[data-content-type="narrativeText"] .bn-block-content > * {
+  max-width: 880px;
+}
+
+/* Make sure iframes within iframe blocks take full available width */
+[data-content-type="interactiveMap"] iframe,
+[data-content-type="chart"] iframe,
+[data-content-type="dataTable"] iframe,
+[data-content-type="scene3d"] iframe,
+[data-content-type="mediaEmbed"] iframe,
+[data-content-type="iframeGrist"] iframe {
+  width: 100% !important;
+}
+
+/* Wrapper App container : prendre toute la largeur viewport */
+body, #root {
+  width: 100%;
+  max-width: 100vw;
+}
