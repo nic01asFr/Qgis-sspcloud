@@ -245,15 +245,88 @@ Règles dures à respecter sous peine de casser la chaîne d'explicabilité CERE
 
 ## 8. Plan d'alignement reste de l'app sur le modèle blocks
 
-L'audit roadmap post-v1.7.5 a identifié 4 zones d'alignement à traiter.
-Priorisées par impact pour Marie + cohérence architecturale :
+Audit post-v1.7.5 a identifié **10 drifts D1-D10** (cf. §8.0) puis priorisés.
+
+### 8.0 Drifts identifiés (synthèse audit)
+
+| # | Drift | Fichiers concernés | Impact |
+|---|---|---|---|
+| **D1** | Tools `NATIVE_TOOLS_V2_OPENAI` ne mentionnent pas les 4 kinds Vague E2 (`kpi_grid`, `heading`, `quote`, `separator`) dans la description | `agent/agent/native_tools_v2.py:1469-1472` | LLM faible peut continuer d'halluciner `narrative_text` au lieu d'utiliser les kinds atomiques |
+| **D2** | OCC asymétrique : `update_component_endpoint` NE LIT PAS `version_num_source` (vs `update_assembly_endpoint` qui le fait) | `hub/hub/main.py:4027-4145` | Écrasement silencieux Marie BlockNote vs agent IA sur le même `cid` |
+| **D3** ⚠ | BlockNote crée TOUJOURS de nouveaux Components au save (jamais d'update_component) — pollution PVC/DB | `blocknote-editor/src/autosave.ts:178-237` | Marie modifie "47→52" 5 fois = 5 nouveaux cid orphelins. Audit_chain inflate |
+| **D4** | 3 ComponentKind tombent dans placeholder côté hub (`scene_3d`, `media_embed`, `iframe_grist`) | `hub/hub/main.py:4937-4948` | UX dégradée 3/13 kinds |
+| **D5** | Modal "✏️ Éditer" Vague E1 n'envoie pas `version_num_source` (pas d'OCC du tout) | `hub/templates/desk.html:2429+` | Pire que D2, exposé en UI directe Marie |
+| **D6** | `AssemblySection.title` round-trip via heading H2 natif → fragmentation involontaire si 2 H2 côte-à-côte | `serializer.ts:62-75` + `autosave.ts:48-56` | Surprise UX V1.7.4, à fixer via block `sectionBreak` invisible V1.8 |
+| **D7** | Recipes orphelines du modèle Component (pas de kind `recipe_output` re-exécutable) | `native_tools_v2.py` + `main.py` | Storymap pas re-jouable à scene_hash nouveau sans agent manuel |
+| **D8** | Pas de test paramétré `ComponentKind ↔ runtime ↔ helper rendu` | `hub/tests/` | Ajouter un kind sans son runtime = failure surprise CI |
+| **D9** | `AssemblyKind` autre que `storymap_narrative_dsfr` → render renvoie 501 | `main.py:4995-5000` (template_map) | Agent peut créer `dashboard`/`sheet_a4` valides Pydantic mais render 501 |
+| **D10** | Pas de tool agent pour LIRE les blocks BlockNote (state non-sauvegardé invisible côté agent) | `native_tools_v2.py` | Marie demande "déplace KPI" via chat alors qu'elle a BlockNote ouvert → agent voit l'ancienne version |
+
+### Priorisation
 
 ### P0 — À traiter Vague E3 sprint 1 (semaine 1)
 
-#### 8.1 Agent IA aligné sur OCC `version_num_source`
+#### 8.1 ⚠ NOUVEAU CRITIQUE — BlockNote : update_component vs create_component (D3)
 
-**Problème** : `update_assembly` côté agent IA ne pose pas
-`version_num_source` → écrasement silencieux possible.
+**Problème** : `autosave.ts:saveBlocks` appelle systématiquement
+`createComponent` pour chaque DOM block, même si le `cid` existe déjà.
+Marie qui modifie "47→52" 5 fois génère 5 nouveaux Components orphelins.
+
+**Pollution mesurable** :
+- `components_index` row par modif (×5 sur 5min)
+- PVC manifests `*.json` (idem ×5)
+- `audit_chain.components_refs` au publish liste les cid jetables
+- Tout fonctionne mais dette technique grossit linéairement
+
+**Solution proposée** :
+1. `serializer.ts` (forward) : déjà fait pour iframe, propager
+   `props.cid = compRef.ref` aussi pour les DOM blocks (kpiGrid,
+   customHeading, customQuote, separator, kpiBadge, legend, narrativeText).
+2. `autosave.ts` (backward `customBlockToComponent`) :
+   ```typescript
+   if (props.cid && props.cid !== '') {
+     // Modification d'un Component existant
+     return { kind, refOnly: false, manifest, existingCid: props.cid };
+   } else {
+     // Nouveau Component (création)
+     return { kind, refOnly: false, manifest };
+   }
+   ```
+3. `autosave.ts:saveBlocks` :
+   ```typescript
+   if (newComp.existingCid) {
+     await updateComponent(sid, newComp.existingCid, newComp.manifest, null);
+     // Réutiliser le cid existant dans sections
+   } else {
+     const { id } = await createComponent(sid, newComp.manifest);
+     createdCids.push(id);
+   }
+   ```
+4. Ajouter `updateComponent` dans `api.ts` (5 lignes).
+
+**Effort estimé** : 3-4h.
+
+#### 8.2 Agent IA aligné sur OCC `version_num_source` (D2 + D5)
+
+**Problème combiné** :
+- D2 : agent IA `update_assembly` ne pose pas `version_num_source`
+- D2bis : `update_component_endpoint` NE LIT PAS `version_num_source` du tout
+- D5 : modal "✏️ Éditer" Vague E1 desk.html idem
+
+**Solution proposée** :
+1. **Côté hub `update_component_endpoint`** : copier-coller le bloc
+   `version_num_source` (`main.py:4242-4258`) dans
+   `update_component_endpoint` (`main.py:4027`). Comportement identique :
+   pop + compare + 409 structuré.
+2. **Agent IA tools** : `native_tools_v2.py` `update_assembly()` +
+   `update_component()` acceptent un paramètre optionnel
+   `version_num_source: int | None = None`.
+3. **Prompt agent système** : ajouter discipline OCC :
+   > "Avant `update_*`, appeler `get_*` pour récupérer `version_num` actuel
+   > et le passer comme `version_num_source`. Si 409 reçu, re-fetch + retry
+   > intelligent."
+4. **Modal E1 desk.html** : lire `data.metadata.version_num` au load +
+   envoyer dans le PUT save.
 
 **Solution proposée** :
 1. Modifier `agent/agent/native_tools_v2.py` `update_assembly()` :
@@ -274,46 +347,77 @@ Priorisées par impact pour Marie + cohérence architecturale :
    manuellement). Comportement par défaut = retry avec version_num actuel
    (le hub renvoie à l'agent les modifs récentes de Marie).
 
-**Effort estimé** : 1-2h (1 endpoint + 1 prompt update + test).
+**Effort estimé** : 2-3h (1 endpoint hub + 2 tools agent + 1 modal + tests).
 
-#### 8.2 Helper rendu `scene_3d` / `media_embed` / `iframe_grist`
+#### 8.3 Helper rendu `media_embed` / `iframe_grist` (D4 partiel)
 
 **Problème** : 3 des 13 ComponentKind tombent dans placeholder texte côté
-`_pre_render_component_html`. UX dégradée pour Marie (preview Scene 3D ne
-montre rien d'utile).
+`_pre_render_component_html`. UX dégradée pour Marie.
 
-**Solution proposée** :
-- **`scene_3d`** : créer `_scene_3d_partial.j2` avec MapLibre fill-extrusion
-  basique (cf. `panoramax3d` repo qui a déjà la logique 3D buildings).
-  Effort : 4-6h (réutiliser code panoramax3d).
+**Solution proposée Vague E3 sprint 1** :
 - **`media_embed`** : créer `_media_embed_partial.j2` qui détecte type MIME
   (PDF/video/image) et embed via `<embed>`/`<video>`/`<img>`. Effort : 1h.
 - **`iframe_grist`** : créer `_iframe_grist_partial.j2` avec
-  `<iframe src=widget_url>`. Effort : 30 min.
+  `<iframe src=widget_url sandbox="allow-scripts allow-same-origin">`.
+  Effort : 30 min.
 
-Total : ~6-8h Vague E3 sprint 1.
+`scene_3d` renvoyé à Vague E3 sprint 3 (porter pattern atlas_bati Three.js
+depuis legacy `hub/hub/storymap_dsfr.py`, ~1 journée).
+
+Total P0 sprint 1 : ~1.5h.
+
+#### 8.4 AssemblyKind limiter à `storymap_narrative_dsfr` (D9)
+
+**Problème** : agent IA peut créer un `dashboard` valide Pydantic, mais
+`render_assembly` renvoie 501 (template_map mono-kind).
+
+**Solution courte** : filter `/schema/assembly/kinds` pour ne retourner
+que `storymap_narrative_dsfr` tant que les templates Sprint 4 ne sont
+pas livrés. **Effort** : 1 ligne + 1 test.
 
 ### P1 — Vague E3 sprint 2 (semaine 2)
 
-#### 8.3 Dépréciation modal sections Vague E1 ou positionnement clair
+#### 8.5 Dépréciation modal sections Vague E1 (D5 décision UX)
 
-**Problème** : 2 boutons "Éditer" sur card desk créent confusion :
-- "✏️ Éditer" (Vague E1) : modal JSON sections, pas d'OCC
-- "📝 BlockNote" (Vague E2) : éditeur visuel block-based, OCC complet
+**Problème** : 2 boutons "Éditer" sur card desk créent confusion + le modal
+E1 n'a aucune OCC (D5 critique).
 
-**3 options** :
-1. **Déprécier "✏️ Éditer"** — supprimer le code Vague E1 modal sections
-   (~200 LOC desk.html + endpoints). Risque : si BlockNote a un bug en prod,
-   pas de fallback. **Recommandé après stabilisation V1.7.x.**
-2. **Garder comme "mode expert JSON"** — renommer le bouton "🔧 Édition JSON
-   avancée" et le cacher derrière un menu "Plus d'actions...". Effort : 30 min.
+**3 options post-stabilisation V1.7.x** :
+1. **Déprécier "✏️ Éditer" complet** — supprimer le code Vague E1 modal
+   sections (~200 LOC desk.html + endpoints). BlockNote devient l'unique
+   éditeur. **Option recommandée si BlockNote stable en prod 2 semaines.**
+2. **Rebrander "Métadonnées"** — modal limité à titre/audience/footer
+   uniquement (plus de sections JSON). Sections = BlockNote only.
+   Effort : 1-2h.
 3. **Unifier** — ajouter un bouton "Voir le JSON" dans BlockNote header qui
    ouvre la modal Vague E1 en read-only. Effort : 2h.
 
-**Recommandation** : option 2 (cacher derrière menu) pour V1.8, puis option 1
-(déprécier complet) Vague E3 sprint 3.
+**Recommandation finale** : Option 1 si BlockNote prouvé stable, sinon
+Option 2 comme transition.
 
-#### 8.4 Storymap publiée → garantie de cohérence avec BlockNote preview
+#### 8.6 Tools OpenAI : mentionner 4 kinds Vague E2 (D1)
+
+**Problème** : description du tool `create_component` dans
+`NATIVE_TOOLS_V2_OPENAI` liste 9 kinds historiques mais omet `kpi_grid`,
+`heading`, `quote`, `separator`. Un LLM faible function-calling continue
+d'halluciner `narrative_text`.
+
+**Solution** : ajouter les 4 dans la description (1 minute).
+
+#### 8.7 Test paramétré ComponentKind ↔ runtime ↔ helper (D8)
+
+**Problème** : pas de test cross-vérifiant que tous les `ComponentKind` ont
+au moins 1 `runtime` valide ET sont au moins en placeholder dans
+`_pre_render_component_html`. Risque : ajouter un nouveau kind sans son
+runtime = failure surprise CI.
+
+**Solution** : test paramétré dans `test_vague_e2_atomic_kinds.py` qui
+itère sur les 13 kinds + vérifie présence dans Literal runtime + retour
+non-vide du helper.
+
+**Effort** : 30 min.
+
+#### 8.8 Storymap publiée → garantie de cohérence avec BlockNote preview
 
 **État actuel** : le helper rendu est unifié (✅ D-QGIS-008), donc l'iframe
 BlockNote `/render/{cid}` et la storymap publiée utilisent **le même HTML**.
@@ -330,15 +434,33 @@ sources, mentions légales) que BlockNote n'a PAS. Marie voit un rendu BlockNote
 
 ### P2 — Vague E3 sprint 3 (polish)
 
-#### 8.5 BlockNote : DSFR theming strict (différé v1.7.0, à acter)
+#### 8.9 Helper rendu `scene_3d` (D4 complément)
 
-**État** : BlockNote utilise actuellement le thème Mantine "light" (bleu sobre).
-Pas strictement DSFR. La storymap publiée EST en DSFR strict.
+Porter le pattern atlas_bati Three.js depuis legacy
+`hub/hub/storymap_dsfr.py` vers `_scene_3d_partial.j2`. ~1 journée.
+
+#### 8.10 Section break custom block (D6 fix V1.8)
+
+**Problème** : 2 headings H2 natifs côte-à-côte créent une fragmentation
+involontaire de section au round-trip (V1.7.4 acknowledged).
+
+**Solution V1.8** : remplacer le délimiteur "heading H2 natif" par un block
+custom `sectionBreak` invisible/typographique. Migration round-trip avec
+backfill v1.7.x → v1.8.
+
+**Effort** : 4-6h (block + serializer.ts + autosave.ts + tests round-trip
++ backfill).
+
+#### 8.11 BlockNote : DSFR theming strict (différé v1.7.0)
+
+**État** : BlockNote utilise actuellement Mantine "light" (bleu sobre).
+Pas strictement DSFR. La storymap publiée EST en DSFR strict → divergence
+WYSIWYG.
 
 **Solution Vague E3** : override CSS Mantine variables pour mapper sur DSFR
 (`--bn-color-primary: #000091` Marianne blue, etc.). Effort estimé : 3-5h.
 
-#### 8.6 Création nouveau composant depuis BlockNote (slash menu)
+#### 8.12 Création nouveau composant depuis BlockNote (slash menu)
 
 **État** : Marie peut MODIFIER des composants existants dans BlockNote, pas en
 créer de nouveaux. Pour créer, elle doit demander à l'agent IA.
@@ -347,7 +469,7 @@ créer de nouveaux. Pour créer, elle doit demander à l'agent IA.
 `/interactiveMap` `/kpiGrid` etc. qui créent un block vide + ouvrent un panneau
 de config (sélection scene_manifest / params). Effort : 5-8h.
 
-#### 8.7 Tests Vitest unit + cohérence cross-langage
+#### 8.13 Tests Vitest unit + cohérence cross-langage
 
 **État** : 8 tests pytest critiques livrés v1.7.5 (couvrent côté hub). Côté
 React : aucun test Vitest. Côté serializer.ts : pas de test round-trip JS.
@@ -356,7 +478,7 @@ React : aucun test Vitest. Côté serializer.ts : pas de test round-trip JS.
 - Ajouter Vitest minimal sur `blocksToSections` (round-trip + edge cases).
 - Effort : 2-3h.
 
-#### 8.8 Monitoring client errors
+#### 8.14 Monitoring client errors
 
 **État** : aucune télémétrie côté React → erreurs autosave invisibles côté hub.
 
@@ -365,37 +487,69 @@ React : aucun test Vitest. Côté serializer.ts : pas de test round-trip JS.
   `/api/log/client-error`. Endpoint hub stocke dans `client_errors_index`.
 - Effort : 2h.
 
-### P3 — Bonus stratégique (non priorisé)
+### P3 — Bonus stratégique (non priorisé V1)
 
-#### 8.9 CRDT Yjs multi-user collab
+#### 8.15 Pousser draft buffer BlockNote vers hub + tool `get_draft_blocks` (D10)
+
+**Problème** : Marie demande "déplace le KPI grid sous la carte" via chat
+alors qu'elle a l'éditeur ouvert. L'agent ne voit pas l'état non-sauvegardé.
+Mitigation actuelle : autosave 30s. Mais entre 2 saves, l'agent a une vue
+stale.
+
+**Solution proposée** :
+- POST debounce 3-5s `/studies/{sid}/assemblies/{aid}/draft_blocks` côté
+  React → stocke un buffer JSON volatile côté hub.
+- Tool agent `get_draft_blocks(sid, aid)` lit ce buffer.
+- À l'autosave, buffer effacé (remplacé par save Pydantic).
+
+**Effort** : 4-6h.
+
+#### 8.16 Block `recipe_output` exécutable live (D7)
+
+Nouveau ComponentKind `recipe_output` qui pointe vers slug recette + params.
+À l'ouverture BlockNote, ré-exécute la recipe en arrière-plan et met à jour
+le composant si les données ont changé. Bouton "🔄 Rafraîchir" dans desk.html
+et BlockNote.
+
+**Effort** : 1 semaine.
+
+#### 8.17 CRDT Yjs multi-user collab
 
 BlockNote v0.22 supporte nativement Yjs. Permettrait à Marie + collègues
-d'éditer simultanément. Effort : 1-2 semaines (back + front + persistence Y.Doc).
+d'éditer simultanément.
 
-#### 8.10 Block `recipe_output` exécutable live
-
-Idée : un nouveau ComponentKind `recipe_output` qui pointe vers un slug de
-recette + params. À l'ouverture BlockNote, on ré-exécute la recipe en arrière-plan
-et on met à jour le composant si les données ont changé. Effort : 1 semaine.
+**Effort** : 1-2 semaines (back + front + persistence Y.Doc).
 
 ---
 
-## 9. Backlog dette technique tracée
+## 9. Backlog dette technique tracée (17 items)
 
-| # | Item | Vague cible | Effort |
-|---|---|---|---|
-| 8.1 | Agent IA OCC `version_num_source` | E3 sprint 1 | 1-2h |
-| 8.2 | Helper render scene_3d/media_embed/iframe_grist | E3 sprint 1 | 6-8h |
-| 8.3 | Déprécier modal sections Vague E1 | E3 sprint 2 | 30min-2h |
-| 8.4 | Aperçu DSFR strict depuis BlockNote | E3 sprint 2 | 1h |
-| 8.5 | DSFR theming strict BlockNote | E3 sprint 3 | 3-5h |
-| 8.6 | Création composant via slash menu | E3 sprint 3 | 5-8h |
-| 8.7 | Tests Vitest unit (blocksToSections) | E3 sprint 3 | 2-3h |
-| 8.8 | Monitoring client errors | E3 sprint 3 | 2h |
-| 8.9 | CRDT Yjs multi-user collab | E4 | 1-2sem |
-| 8.10 | Block `recipe_output` exécutable | E4 | 1sem |
+| # | Item | Drift | Vague | Effort |
+|---|---|---|---|---|
+| **P0 sprint 1 (semaine 1)** | | | | |
+| 8.1 | BlockNote `update_component` au save vs create (pollution DB) | **D3 ⚠** | E3 S1 | 3-4h |
+| 8.2 | Agent IA + modal E1 OCC `version_num_source` + endpoint hub `update_component` | D2 + D5 | E3 S1 | 2-3h |
+| 8.3 | Helper render `media_embed` + `iframe_grist` partials Jinja2 | D4 partiel | E3 S1 | 1.5h |
+| 8.4 | `/schema/assembly/kinds` limiter à `storymap_narrative_dsfr` | D9 | E3 S1 | 30min |
+| **P1 sprint 2 (semaine 2)** | | | | |
+| 8.5 | Dépréciation modal Vague E1 (option 1 si BlockNote stable) | D5 | E3 S2 | 30min-2h |
+| 8.6 | Tools OpenAI : ajouter 4 kinds Vague E2 dans description | D1 | E3 S2 | 1min |
+| 8.7 | Test paramétré ComponentKind ↔ runtime ↔ helper | D8 | E3 S2 | 30min |
+| 8.8 | Bouton "👁 Aperçu DSFR strict" depuis BlockNote (drawer modal) | — | E3 S2 | 1h |
+| **P2 sprint 3 (polish)** | | | | |
+| 8.9 | Helper render `scene_3d` (Three.js fill-extrusion) | D4 complément | E3 S3 | 1j |
+| 8.10 | Block `sectionBreak` invisible (vs heading H2 natif) + backfill | D6 | E3 S3 | 4-6h |
+| 8.11 | DSFR theming strict BlockNote (Mantine override) | — | E3 S3 | 3-5h |
+| 8.12 | Création composant via slash menu BlockNote | — | E3 S3 | 5-8h |
+| 8.13 | Tests Vitest unit `blocksToSections` | — | E3 S3 | 2-3h |
+| 8.14 | Monitoring client errors (window.error + endpoint hub) | — | E3 S3 | 2h |
+| **P3 bonus stratégique (V1.8/E4)** | | | | |
+| 8.15 | Draft buffer BlockNote + tool `get_draft_blocks` agent | D10 | V1.8 | 4-6h |
+| 8.16 | Block `recipe_output` exécutable live | D7 | V1.8 | 1sem |
+| 8.17 | CRDT Yjs multi-user collab | — | V2 | 1-2sem |
 
-**Total estimé Vague E3 (8.1 → 8.8)** : 21-32h sur 3 sprints.
+**Total estimé P0 sprint 1** : ~8-9h (4 items critiques).
+**Total estimé Vague E3 (P0 + P1 + P2)** : ~25-37h sur 3 sprints.
 
 ## Référence
 
