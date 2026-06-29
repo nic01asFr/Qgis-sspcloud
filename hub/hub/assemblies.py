@@ -10,7 +10,9 @@ Storage :
 - Rendered HTML : `/data/studies/{sid}/assemblies/{aid}/rendered/index.html`
 - Publication S3 : via `s3_publication.publish(owner, 'assembly', slug, ...)`
 
-audit_chain : OBLIGATOIRE au publish. Snapshot signed_hash SHA256 du
+audit_chain : OBLIGATOIRE au publish. Snapshot integrity_hash SHA256 du
+(D-FORMAT-008 2026-06-29 : rename signed_hash → integrity_hash, backward-
+compat 1 release de grâce). Manifest serialise canonique tamper-evident du
 chain canonique. Lien direct vers Scene Manifests + composants + recipes
 ayant contribué.
 

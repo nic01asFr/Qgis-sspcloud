@@ -3715,15 +3715,17 @@ async def render_component_endpoint(
     sid: str, cid: str,
     user: dict = Depends(auth.get_current_user),
 ):
-    """Rendu HTML du composant via template Jinja2 maplibre_renderer.
+    """Rendu HTML preview du composant standalone (iframe-embeddable).
 
-    Retourne une page HTML standalone (iframe-embeddable).
+    Fix Reviewer-VagueA 2026-06-29 : utilise désormais le helper unifié
+    `_pre_render_component_html` (D-QGIS-008) pour cohérence avec
+    `_render_assembly_html` (pré-rendu inline storymap) et
+    `publish_component_endpoint` (S3 publish). Supporte tous les kinds
+    livrés Vague A : narrative_text, kpi_badge, legend, interactive_map,
+    chart, data_table.
     """
     _check_components_enabled()
-    if not _jinja:
-        raise HTTPException(503, "Templates Jinja2 non disponibles")
     from hub import components as comp_mod
-    from hub import maplibre_style_mapper as msm
 
     latest = await comp_mod.get_component_latest(cid)
     if not latest or latest["sid"] != sid:
@@ -3748,6 +3750,78 @@ async def render_component_endpoint(
     except Exception as exc:
         raise HTTPException(500, f"Parse manifest : {exc}")
 
+    # Helper unifié (D-QGIS-008) — mêmes templates partials que storymap inline.
+    try:
+        body_html = await _pre_render_component_html(
+            manifest, sid, user["username"], cid,
+        )
+    except Exception as exc:
+        import traceback as _tb
+        log.error("render_component %s/%s : %s", sid, cid, exc)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_class": type(exc).__name__,
+                "error_message": str(exc)[:300],
+                "traceback_tail": _tb.format_exc().splitlines()[-5:],
+            },
+        )
+
+    # Envelope HTML standalone DSFR-inspire (mêmes CDN que storymap_dsfr).
+    title = manifest.get("title", cid)
+    standalone_html = (
+        "<!DOCTYPE html><html lang='fr'><head>"
+        "<meta charset='UTF-8'>"
+        f"<title>{title}</title>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<link rel='stylesheet' href='https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css'>"
+        "<script src='https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js'></script>"
+        "<script src='https://unpkg.com/chart.js@4.4.0/dist/chart.umd.js'></script>"
+        "<style>body{margin:0;font-family:Marianne,system-ui,sans-serif;background:#f6f6f6;padding:20px}</style>"
+        "</head><body>"
+        f"{body_html}"
+        "</body></html>"
+    )
+    return HTMLResponse(content=standalone_html)
+
+
+@app.get("/studies/{sid}/components/{cid}/render_legacy", response_class=HTMLResponse)
+async def _render_component_endpoint_legacy(
+    sid: str, cid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """LEGACY (sera supprimé v1.7) — rendu via templates Jinja2 standalone
+    `kpi_badge.html.j2` / `interactive_map.html.j2` etc. Conservé pour
+    debug si pré-rendu unifié casse. Cf. _pre_render_component_html.
+    """
+    _check_components_enabled()
+    if not _jinja:
+        raise HTTPException(503, "Templates Jinja2 non disponibles")
+    from hub import components as comp_mod
+    from hub import maplibre_style_mapper as msm
+
+    latest = await comp_mod.get_component_latest(cid)
+    if not latest or latest["sid"] != sid:
+        raise HTTPException(404, "Composant introuvable")
+
+    try:
+        stdout = await _execute_python_in_workspace(
+            user["username"],
+            comp_mod.read_component_manifest_pod_code(sid, cid),
+        )
+    except Exception as exc:
+        log.error("render_legacy: read manifest failed : %s", exc)
+        raise HTTPException(503, "Workspace indisponible")
+
+    import base64, json as _json
+    if "COMPONENT_READ_OK" not in stdout:
+        raise HTTPException(404, "Manifest PVC introuvable")
+    try:
+        b64 = stdout.split("b64=", 1)[1].split()[0].strip()
+        manifest = _json.loads(base64.b64decode(b64).decode())
+    except Exception as exc:
+        raise HTTPException(500, f"Parse manifest : {exc}")
+
     kind = manifest.get("kind", "interactive_map")
     template_map = {
         "interactive_map": "maplibre_renderer/interactive_map.html.j2",
@@ -3759,8 +3833,9 @@ async def render_component_endpoint(
     if not template_name:
         raise HTTPException(
             501,
-            f"Kind '{kind}' non supporté par le renderer Phase 2. "
-            f"Kinds dispo : {list(template_map.keys())}",
+            f"Kind '{kind}' non supporté par le legacy renderer. "
+            f"Kinds dispo : {list(template_map.keys())}. "
+            f"Utiliser /render (unifié D-QGIS-008) à la place.",
         )
 
     if not _maplibre_jinja:
@@ -4249,21 +4324,34 @@ async def _pre_render_component_html(
             if data_url and not md:
                 try:
                     import re as _re
-                    # Whitelist : /files/{sid}/[\w./-]+\.md (anti-path traversal)
+                    # Whitelist : /files/{sid}/[\w./-]+\.md
                     m = _re.match(r"^/files/([0-9a-f]{12})/([\w./-]+\.md)$", data_url)
                     if m:
                         data_sid = m.group(1)
                         path = m.group(2)
+                        # FIX Reviewer 2026-06-29 (path traversal A4) :
+                        # regex autorise / dans path mais '..' doit etre rejete.
+                        # Aussi : enforcer que chemin resolu reste sous /data/studies/{sid}/.
+                        if ".." in path or path.startswith("/"):
+                            log.warning("notes.md path traversal rejete : %s", data_url)
+                            raise ValueError("path traversal rejete")
                         read_code = (
                             "from pathlib import Path\n"
                             "import base64\n"
-                            f"target = Path('/data/studies/{data_sid}/{path}')\n"
-                            "if target.exists():\n"
-                            "    content = target.read_text(encoding='utf-8')\n"
-                            "    b64 = base64.b64encode(content.encode('utf-8')).decode('ascii')\n"
-                            "    print(f'FILE_READ_OK b64={b64}')\n"
+                            f"base = Path('/data/studies/{data_sid}').resolve()\n"
+                            f"target = (base / '{path}').resolve()\n"
+                            "# Garde anti-path-traversal : target doit etre sous base\n"
+                            "try:\n"
+                            "    target.relative_to(base)\n"
+                            "except ValueError:\n"
+                            "    print('PATH_TRAVERSAL_REJECTED')\n"
                             "else:\n"
-                            "    print('FILE_NOT_FOUND')\n"
+                            "    if target.exists():\n"
+                            "        content = target.read_text(encoding='utf-8')\n"
+                            "        b64 = base64.b64encode(content.encode('utf-8')).decode('ascii')\n"
+                            "        print(f'FILE_READ_OK b64={b64}')\n"
+                            "    else:\n"
+                            "        print('FILE_NOT_FOUND')\n"
                         )
                         out = await _execute_python_in_workspace(username, read_code)
                         if "FILE_READ_OK" in out:
