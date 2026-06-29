@@ -682,6 +682,52 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         background:#e3eaf5;border-color:#000091}
       .liv-card-toggle{font-size:10px;color:#666;cursor:pointer;
         user-select:none}
+      /* Vague E1 D-QGIS-009 : Assembly Editor modal */
+      #assembly-editor-modal{display:none;position:fixed;inset:0;z-index:9999}
+      #assembly-editor-backdrop{position:absolute;inset:0;background:rgba(0,0,0,0.45)}
+      #assembly-editor-content{position:absolute;top:50%;left:50%;
+        transform:translate(-50%,-50%);width:min(800px,90vw);
+        max-height:85vh;display:flex;flex-direction:column;background:#fff;
+        border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.2)}
+      #assembly-editor-header{display:flex;align-items:center;
+        padding:14px 20px;border-bottom:1px solid #e5e5e5;background:#f6f6f6}
+      #assembly-editor-title{flex:1;margin:0;font-size:16px;font-weight:700;
+        color:#000091}
+      #assembly-editor-close{background:none;border:none;font-size:18px;
+        cursor:pointer;color:#666;width:32px;height:32px}
+      #assembly-editor-close:hover{color:#000091}
+      #assembly-editor-body{flex:1;overflow-y:auto;padding:18px 20px}
+      #assembly-editor-status{margin:0 0 16px;font-size:12px;color:#666;
+        font-style:italic}
+      #assembly-editor-footer{display:flex;gap:8px;justify-content:flex-end;
+        padding:12px 20px;border-top:1px solid #e5e5e5;background:#fafafa}
+      .ae-btn-primary{background:#000091;color:#fff;border:none;
+        padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:600}
+      .ae-btn-primary:hover{background:#1212a4}
+      .ae-btn-secondary{background:#fff;color:#666;border:1px solid #ccc;
+        padding:8px 16px;border-radius:4px;cursor:pointer}
+      .ae-btn-secondary:hover{border-color:#000091;color:#000091}
+      .ae-btn-mini{background:#fff;border:1px solid #ddd;border-radius:3px;
+        padding:2px 6px;cursor:pointer;font-size:11px;color:#666}
+      .ae-btn-mini:hover{border-color:#000091;color:#000091}
+      .ae-btn-mini:disabled{opacity:0.3;cursor:not-allowed}
+      .ae-btn-danger{color:#d64d00}
+      .ae-btn-danger:hover{background:#ffe5e5;border-color:#d64d00}
+      .ae-section{background:#fff;border:1px solid #e5e5e5;border-radius:4px;
+        padding:12px;margin-bottom:10px}
+      .ae-section-header{display:flex;align-items:center;gap:6px;
+        font-size:13px}
+      .ae-section-num{font-weight:700;color:#000091}
+      .ae-section-title{flex:1;font-weight:600;color:#161616}
+      .ae-section-count{font-size:11px;color:#666;margin-right:8px}
+      .ae-comp-list{margin:8px 0 0;padding:0;list-style:none;
+        font-size:12px}
+      .ae-comp{display:flex;align-items:center;gap:6px;padding:4px 0;
+        color:#666}
+      .ae-comp code{flex:1;font-size:11px;background:#f0f0f0;padding:2px 6px;
+        border-radius:2px}
+      .ae-empty{padding:20px;text-align:center;color:#999;font-style:italic}
+
       .liv-card-children{padding:6px 0 0 18px;border-left:2px solid #eee;
         margin-top:3px;font-size:10.5px;display:none}
       .liv-card-children.expanded{display:block}
@@ -2160,6 +2206,174 @@ function _rewriteS3UrlToHub(url, fallbackSlug) {
   return url;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Vague E1 (D-QGIS-009, 2026-06-29) — Éditeur assembly inline
+   Drawer/modal qui permet de réordonner sections, supprimer/dupliquer
+   composants, et déclencher modifications via quick-action prompt agent.
+   ───────────────────────────────────────────────────────────────────────── */
+
+let _editor_current_aid = null;
+let _editor_current_manifest = null;
+
+async function openAssemblyEditor(aid) {
+  const sid = '{{ active_study_id }}';
+  if (!sid || !aid) return alert('Étude ou aid manquant');
+  _editor_current_aid = aid;
+
+  // Créer modal si pas déjà
+  let modal = document.getElementById('assembly-editor-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'assembly-editor-modal';
+    modal.innerHTML = `
+      <div id="assembly-editor-backdrop" onclick="closeAssemblyEditor()"></div>
+      <div id="assembly-editor-content">
+        <div id="assembly-editor-header">
+          <h2 id="assembly-editor-title">Éditer assemblage</h2>
+          <button onclick="closeAssemblyEditor()" id="assembly-editor-close">✕</button>
+        </div>
+        <div id="assembly-editor-body">
+          <p id="assembly-editor-status">Chargement…</p>
+          <div id="assembly-editor-sections"></div>
+        </div>
+        <div id="assembly-editor-footer">
+          <button onclick="closeAssemblyEditor()" class="ae-btn-secondary">Annuler</button>
+          <button onclick="saveAssemblyEditor()" class="ae-btn-primary">💾 Enregistrer (nouvelle version)</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+  modal.style.display = 'block';
+
+  // Fetch manifest courant
+  try {
+    const r = await fetch(`/studies/${sid}/assemblies/${aid}`, {credentials: 'include'});
+    if (!r.ok) throw new Error('http_' + r.status);
+    const data = await r.json();
+    _editor_current_manifest = data.manifest || {};
+    document.getElementById('assembly-editor-title').textContent =
+      `Éditer : ${_editor_current_manifest.title || aid}`;
+    document.getElementById('assembly-editor-status').textContent =
+      `Version ${data.metadata?.version_num || 1} — ${(_editor_current_manifest.layout?.sections || []).length} section(s)`;
+    renderEditorSections();
+  } catch (e) {
+    document.getElementById('assembly-editor-status').textContent =
+      `Erreur chargement : ${e.message}`;
+  }
+}
+
+function closeAssemblyEditor() {
+  const modal = document.getElementById('assembly-editor-modal');
+  if (modal) modal.style.display = 'none';
+  _editor_current_aid = null;
+  _editor_current_manifest = null;
+}
+
+function renderEditorSections() {
+  const target = document.getElementById('assembly-editor-sections');
+  if (!target || !_editor_current_manifest) return;
+  const sections = _editor_current_manifest.layout?.sections || [];
+  if (!sections.length) {
+    target.innerHTML = '<p class="ae-empty">Aucune section. Demande à l\'assistant d\'ajouter du contenu.</p>';
+    return;
+  }
+  target.innerHTML = sections.map((s, idx) => {
+    const compsCount = (s.components || []).length;
+    const compsList = (s.components || []).map(c =>
+      `<li class="ae-comp">
+        ${c.ref ? `<code>${escapeHtml(c.ref)}</code>` : `<em>${escapeHtml(c.kind || 'inline')}</em>`}
+        <button onclick="removeComponentFromSection(${idx}, '${c.ref || ''}')"
+                class="ae-btn-mini" title="Supprimer">✕</button>
+        <button onclick="duplicateComponentInSection(${idx}, '${c.ref || ''}')"
+                class="ae-btn-mini" title="Dupliquer">⎘</button>
+      </li>`
+    ).join('');
+    return `<div class="ae-section" data-section-idx="${idx}">
+      <div class="ae-section-header">
+        <span class="ae-section-num">${idx + 1}.</span>
+        <span class="ae-section-title">${escapeHtml(s.title || '(sans titre)')}</span>
+        <span class="ae-section-count">${compsCount} composant(s)</span>
+        <button onclick="moveSection(${idx}, -1)" class="ae-btn-mini" ${idx === 0 ? 'disabled' : ''} title="Monter">↑</button>
+        <button onclick="moveSection(${idx}, 1)" class="ae-btn-mini" ${idx === sections.length - 1 ? 'disabled' : ''} title="Descendre">↓</button>
+        <button onclick="deleteSection(${idx})" class="ae-btn-mini ae-btn-danger" title="Supprimer">🗑</button>
+      </div>
+      <ul class="ae-comp-list">${compsList}</ul>
+    </div>`;
+  }).join('');
+}
+
+function moveSection(idx, direction) {
+  if (!_editor_current_manifest?.layout?.sections) return;
+  const sections = _editor_current_manifest.layout.sections;
+  const newIdx = idx + direction;
+  if (newIdx < 0 || newIdx >= sections.length) return;
+  [sections[idx], sections[newIdx]] = [sections[newIdx], sections[idx]];
+  renderEditorSections();
+}
+
+function deleteSection(idx) {
+  if (!confirm('Supprimer cette section (et ses composants référencés) ?')) return;
+  if (!_editor_current_manifest?.layout?.sections) return;
+  _editor_current_manifest.layout.sections.splice(idx, 1);
+  renderEditorSections();
+}
+
+function removeComponentFromSection(sectionIdx, cid) {
+  if (!_editor_current_manifest?.layout?.sections?.[sectionIdx]) return;
+  const section = _editor_current_manifest.layout.sections[sectionIdx];
+  section.components = (section.components || []).filter(c => c.ref !== cid);
+  renderEditorSections();
+}
+
+function duplicateComponentInSection(sectionIdx, cid) {
+  if (!_editor_current_manifest?.layout?.sections?.[sectionIdx]) return;
+  const section = _editor_current_manifest.layout.sections[sectionIdx];
+  if (!cid) return;
+  // Duplique la ref (même cid, sera réutilisé — note shallow)
+  const idx = (section.components || []).findIndex(c => c.ref === cid);
+  if (idx >= 0) {
+    section.components.splice(idx + 1, 0, {ref: cid});
+    renderEditorSections();
+  }
+}
+
+async function saveAssemblyEditor() {
+  if (!_editor_current_aid || !_editor_current_manifest) return;
+  const sid = '{{ active_study_id }}';
+  try {
+    const r = await fetch(`/studies/${sid}/assemblies/${_editor_current_aid}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(_editor_current_manifest),
+    });
+    if (!r.ok) throw new Error('http_' + r.status);
+    const data = await r.json();
+    alert(`✅ Enregistré — nouvelle version ${data.version_num}`);
+    closeAssemblyEditor();
+    if (typeof loadLivrables === 'function') loadLivrables();
+  } catch (e) {
+    alert(`Erreur enregistrement : ${e.message}`);
+  }
+}
+
+async function cloneAssembly(aid, title) {
+  const sid = '{{ active_study_id }}';
+  if (!confirm(`Cloner « ${title} » ?\n(Le clone aura un nouvel ID et le titre suffixé " (clone)".)`)) return;
+  try {
+    const r = await fetch(`/studies/${sid}/assemblies/${aid}/clone?deep=false`, {
+      method: 'POST', credentials: 'include',
+    });
+    if (!r.ok) throw new Error('http_' + r.status);
+    const data = await r.json();
+    alert(`✅ Cloné : ${data.title}\nNouvel aid : ${data.id}`);
+    if (typeof loadLivrables === 'function') loadLivrables();
+  } catch (e) {
+    alert(`Erreur clonage : ${e.message}`);
+  }
+}
+
 async function loadLivrables() {
   const target = document.getElementById('liv-list');
   if (!target) return;
@@ -2211,8 +2425,11 @@ async function loadLivrables() {
         children: comps,
         ref: a.aid,
         actions: isPub
-          ? [{label:'👁 Voir',  href: _rewriteS3UrlToHub(a.published_url, a.aid), target:'_blank'}]
+          ? [{label:'👁 Voir',  href: _rewriteS3UrlToHub(a.published_url, a.aid), target:'_blank'},
+             {label:'✏️ Éditer', onclick: `openAssemblyEditor('${a.aid}')`}]
           : [{label:'👁 Preview', href:`/studies/${sid}/assemblies/${a.aid}/render`, target:'_blank'},
+             {label:'✏️ Éditer', onclick: `openAssemblyEditor('${a.aid}')`},
+             {label:'⎘ Cloner', onclick: `cloneAssembly('${a.aid}', '${(a.title || a.aid).replace(/'/g, "\\'")}')`},
              {label:'🚀 Publier', prompt:`Publie cette storymap (« ${a.title || a.aid} ») avec accès réservé à mes collègues CEREMA. Confirme avec moi l'audience avant publication.`}],
       });
     });
@@ -2280,6 +2497,7 @@ async function loadLivrables() {
       const actionsHtml = c.actions.map(a => {
         if (a.href) return `<a href="${a.href}" target="${a.target||'_self'}">${a.label}</a>`;
         if (a.prompt) return `<button class="quick-action-btn" data-prompt="${escapeHtml(a.prompt)}">${a.label}</button>`;
+        if (a.onclick) return `<button onclick="${a.onclick}">${a.label}</button>`;
         return '';
       }).join('');
       return `<div class="liv-card is-${c.state}">
