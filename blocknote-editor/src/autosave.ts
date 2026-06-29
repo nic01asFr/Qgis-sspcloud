@@ -62,8 +62,22 @@ function blocksToSections(blocks: any[]): BlocksToSectionsResult {
     if (btype === 'heading') {
       const level = block.props?.level || 2;
       if (level <= 2) {
+        const title = blockTextContent(block.content);
+        // Sprint 3 P2 (8.10) fix D6 : un heading H2 VIDE ne fragmente que si
+        // la section courante a deja du contenu. Sinon il est ignore (evite
+        // fragmentation involontaire si Marie ajoute 2 H2 vides cote-a-cote
+        // ou si le forward serializer pose un marker frontiere sur une
+        // section initialement vide).
+        const isEmpty = !title;
+        const currentHasContent = (
+          current.title || current.narrative_md || current.components.length > 0
+        );
+        if (isEmpty && !currentHasContent) {
+          // Skip : ne pas creer de section vide
+          continue;
+        }
         flush();
-        current.title = blockTextContent(block.content);
+        current.title = title;
         continue;
       }
     }

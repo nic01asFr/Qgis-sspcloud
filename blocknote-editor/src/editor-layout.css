@@ -100,3 +100,73 @@ body, #root {
   width: 100%;
   max-width: 100vw;
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Sprint 3 P2 (8.11) - DSFR theming strict BlockNote (Mantine override)
+ *
+ * Aligne les couleurs et typographie BlockNote sur la charte DSFR pour
+ * que Marie voie en edition une previsualisation FIDELE au rendu publi.
+ * Variables DSFR officielles : Marianne blue #000091, accent #0063cb.
+ * ───────────────────────────────────────────────────────────────────── */
+
+/* Variables BlockNote/Mantine -> DSFR */
+.bn-container,
+.bn-container.light,
+.bn-container.bn-mantine {
+  --bn-color-primary: #000091;
+  --bn-color-primary-hover: #1212a1;
+  --bn-color-editor-background: #ffffff;
+  --bn-color-editor-text: #161616;
+  --bn-color-side-menu: #000091;
+  --bn-color-tooltip-background: #161616;
+  --bn-color-tooltip-text: #ffffff;
+  --bn-color-menu-background: #ffffff;
+  --bn-color-menu-text: #161616;
+  --bn-color-hovered-background: #f5f5fe;
+  --bn-color-selected-background: #ececfe;
+  --bn-color-selected-text: #000091;
+  --bn-color-disabled-background: #eeeeee;
+  --bn-color-disabled-text: #929292;
+  --bn-color-shadow: rgba(0, 0, 145, 0.12);
+  --bn-color-border: #dddddd;
+  --bn-color-side-menu-hovered: #ececfe;
+  font-family: 'Marianne', system-ui, -apple-system, sans-serif;
+}
+
+/* Police DSFR Marianne sur les blocs texte (heading natifs + paragraphs) */
+.bn-block-content [data-content-type="heading"],
+.bn-block-content [data-content-type="paragraph"],
+.bn-block-content [data-content-type="bulletListItem"],
+.bn-block-content [data-content-type="numberedListItem"] {
+  font-family: 'Marianne', system-ui, -apple-system, sans-serif;
+  color: #161616;
+}
+
+/* Focus border : bleu Marianne (vs Mantine bleu defaut) */
+.bn-editor .ProseMirror-selectednode {
+  outline-color: #000091 !important;
+  box-shadow: 0 0 0 2px rgba(0, 0, 145, 0.25);
+}
+
+/* Slash menu items : highlight DSFR */
+.bn-side-menu button:hover,
+.bn-slash-menu-item:hover {
+  background-color: #f5f5fe !important;
+  color: #000091 !important;
+}
+
+/* Toolbar (bold, italic, etc.) : couleurs DSFR */
+.bn-toolbar button[data-state="on"],
+.bn-toolbar button.is-active {
+  background-color: #ececfe !important;
+  color: #000091 !important;
+}
+
+/* Liens : couleur DSFR officielle */
+.bn-block-content a {
+  color: #000091;
+  text-decoration: underline;
+}
+.bn-block-content a:hover {
+  color: #0063cb;
+}

@@ -2987,6 +2987,71 @@ async def schema_describe_endpoint(
     return si.describe_entity_schema(entity_type, kind=kind)
 
 
+# Sprint 3 P2 (8.14) - Monitoring client errors
+# Buffer simple en RAM (premier 100 erreurs) pour traçabilité erreurs JavaScript
+# côté BlockNote ou autre frontend. Pas de persistence DB (volontaire V1).
+_CLIENT_ERROR_BUFFER: list[dict] = []
+_CLIENT_ERROR_BUFFER_MAX = 100
+
+
+@app.post("/api/log/client-error")
+async def log_client_error_endpoint(
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Sprint 3 P2 (8.14) : recoit les erreurs JavaScript des clients BlockNote.
+
+    Permet de detecter les autosave fails, les bundle errors, etc. sans
+    monitoring externe Sentry. Ring-buffer 100 entries en RAM (volatile).
+
+    Body attendu :
+        {message: str, stack?: str, url?: str, line?: int, ua?: str,
+         context?: dict}
+    """
+    import time as _time
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, "Body JSON invalide")
+
+    entry = {
+        "ts": _time.time(),
+        "user": user.get("username", "anonymous"),
+        "message": str(payload.get("message", ""))[:500],
+        "stack": str(payload.get("stack", ""))[:2000],
+        "url": str(payload.get("url", ""))[:300],
+        "line": payload.get("line"),
+        "ua": str(payload.get("ua", ""))[:200],
+        "context": payload.get("context"),
+    }
+    _CLIENT_ERROR_BUFFER.append(entry)
+    # Ring buffer : drop le plus ancien si overflow
+    if len(_CLIENT_ERROR_BUFFER) > _CLIENT_ERROR_BUFFER_MAX:
+        _CLIENT_ERROR_BUFFER.pop(0)
+    log.warning(
+        "client error from %s : %s (%s)",
+        entry["user"], entry["message"][:100], entry["url"][:80],
+    )
+    return {"ok": True, "count_in_buffer": len(_CLIENT_ERROR_BUFFER)}
+
+
+@app.get("/api/log/client-errors")
+async def get_client_errors_endpoint(
+    user: dict = Depends(auth.get_current_user),
+    limit: int = 50,
+):
+    """Sprint 3 P2 (8.14) : lit le ring buffer client errors (auth obligatoire).
+
+    Retourne les `limit` dernieres erreurs (default 50, max 100).
+    """
+    limit = min(max(limit, 1), _CLIENT_ERROR_BUFFER_MAX)
+    return {
+        "count": len(_CLIENT_ERROR_BUFFER),
+        "limit": limit,
+        "errors": _CLIENT_ERROR_BUFFER[-limit:],
+    }
+
+
 @app.get("/schema/{entity_type}/kinds")
 async def schema_kinds_endpoint(
     entity_type: str,
