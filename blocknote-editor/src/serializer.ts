@@ -54,12 +54,23 @@ export async function assemblyToBlockNoteDoc(
   // Construction des blocks dans l'ordre déclaratif
   const blocks: any[] = [];
 
-  for (const section of sections) {
-    if (section.title) {
+  // v1.7.4 fix : TOUJOURS insérer un heading natif H2 par section pour
+  // marquer la frontière. Sinon le backend round-trip blocksToSections()
+  // fusionne toutes les sections en une seule (aucun marqueur entre elles).
+  // Si section.title vide, on utilise un placeholder discret pour préserver
+  // la structure (sera retiré au save si user vide).
+  for (let i = 0; i < sections.length; i++) {
+    const section = sections[i];
+    const isFirstSection = i === 0;
+    const hasMarker =
+      section.title ||
+      // 1ère section : pas besoin de marqueur (current = nouvelle section au reset)
+      !isFirstSection;
+    if (hasMarker) {
       blocks.push({
         type: 'heading',
         props: { level: 2 },
-        content: section.title,
+        content: section.title || '',
       });
     }
 
