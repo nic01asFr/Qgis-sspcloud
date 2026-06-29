@@ -1,23 +1,23 @@
 /**
  * Editeur BlockNote - App principal.
  *
- * Vague E2 Commits F1+F2+F3 (D-QGIS-010) : 6 custom blocks DOM + EditorContent
- * pattern (sub-component qui s'initialise APRES le fetch assembly).
+ * Vague E2 Commit H2 (D-QGIS-010) : editable=true + autosave 30s +
+ * indicateur "Sauvegardé".
  *
- * Architecture corrigée vs E2 :
- * - App fait le fetch (loading/error states)
- * - EditorContent reçoit l'assembly chargé et initialise BlockNote avec
- *   les blocks dérivés via assemblyToBlockNoteDoc()
- * - useCreateBlockNote() est appelé UNE FOIS avec le bon contenu initial
- *   (vs E2 où il était appelé avant le fetch -> stuck "Chargement…")
+ * Architecture :
+ * - App : fetch assembly + states loading/error
+ * - EditorContent : serialise assembly -> blocks, recoit setBlocks de
+ *   BlockNoteContent pour autosave
+ * - BlockNoteContent : useCreateBlockNote + onChange handler + autosave hook
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
 import '@blocknote/mantine/style.css';
 import { fetchAssembly } from './api';
 import { qgisBlockNoteSchema } from './blocks';
 import { assemblyToBlockNoteDoc } from './serializer';
+import { useAutosave, type SaveStatus } from './autosave';
 import type { AssemblyFetchResponse } from './types';
 
 function parseRouteParams(): { sid: string; aid: string } {
@@ -29,14 +29,17 @@ function parseRouteParams(): { sid: string; aid: string } {
 
 /**
  * Sub-component qui rend BlockNote APRES le fetch assembly.
- * useCreateBlockNote initialisé avec le bon contenu = pas de stuck "Loading".
+ * Sépare le rendering pour que useCreateBlockNote ne soit jamais appelé
+ * avec content vide.
  */
 function EditorContent({
   sid,
   assembly,
+  onVersionUpdate,
 }: {
   sid: string;
   assembly: AssemblyFetchResponse;
+  onVersionUpdate: (newVersionNum: number) => void;
 }) {
   const [blocks, setBlocks] = useState<any[] | null>(null);
   const [serializeError, setSerializeError] = useState<string | null>(null);
@@ -63,14 +66,38 @@ function EditorContent({
     );
   }
 
-  return <BlockNoteContent initialBlocks={blocks} />;
+  return (
+    <BlockNoteContent
+      sid={sid}
+      aid={assembly.metadata?.aid || ''}
+      assembly={assembly}
+      initialBlocks={blocks}
+      onVersionUpdate={onVersionUpdate}
+    />
+  );
 }
 
 /**
- * Wrapper final qui initialise useCreateBlockNote avec les blocks préparés.
- * Séparé pour que useCreateBlockNote ne soit JAMAIS appelé avec content vide.
+ * Wrapper final qui initialise BlockNote + autosave hook.
  */
-function BlockNoteContent({ initialBlocks }: { initialBlocks: any[] }) {
+function BlockNoteContent({
+  sid,
+  aid,
+  assembly,
+  initialBlocks,
+  onVersionUpdate,
+}: {
+  sid: string;
+  aid: string;
+  assembly: AssemblyFetchResponse;
+  initialBlocks: any[];
+  onVersionUpdate: (newVersionNum: number) => void;
+}) {
+  const [currentBlocks, setCurrentBlocks] = useState<any[]>(initialBlocks);
+  const [versionNumSource, setVersionNumSource] = useState<number>(
+    assembly.metadata?.version_num || 1,
+  );
+
   const editor = useCreateBlockNote({
     schema: qgisBlockNoteSchema,
     initialContent: initialBlocks.length > 0 ? initialBlocks : [
@@ -78,9 +105,88 @@ function BlockNoteContent({ initialBlocks }: { initialBlocks: any[] }) {
     ],
   });
 
+  const handleVersionUpdate = useCallback(
+    (newVersionNum: number) => {
+      setVersionNumSource(newVersionNum);
+      onVersionUpdate(newVersionNum);
+    },
+    [onVersionUpdate],
+  );
+
+  const status = useAutosave(
+    true, // enabled
+    sid,
+    aid,
+    currentBlocks,
+    assembly.manifest,
+    versionNumSource,
+    handleVersionUpdate,
+  );
+
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
-      <BlockNoteView editor={editor} theme="light" editable={false} />
+    <>
+      <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
+        <BlockNoteView
+          editor={editor}
+          theme="light"
+          editable={true}
+          onChange={() => setCurrentBlocks(editor.document)}
+        />
+      </div>
+      <SaveStatusBar status={status} />
+    </>
+  );
+}
+
+/**
+ * Barre d'état autosave (Notion-style "Sauvegardé il y a Xs").
+ */
+function SaveStatusBar({ status }: { status: SaveStatus }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  let label = '';
+  let color = '#666';
+  if (status.type === 'idle') {
+    label = 'En attente de modifications…';
+  } else if (status.type === 'pending') {
+    const elapsed = Math.round((now - status.sinceMs) / 1000);
+    const remaining = Math.max(0, 30 - elapsed);
+    label = `Modifications en attente — sauvegarde dans ${remaining}s`;
+    color = '#b34000';
+  } else if (status.type === 'saving') {
+    label = 'Sauvegarde en cours…';
+    color = '#0063cb';
+  } else if (status.type === 'saved') {
+    const elapsed = Math.round((now - status.atTime) / 1000);
+    label =
+      elapsed < 5
+        ? `✓ Sauvegardé (v${status.versionNum})`
+        : `✓ Sauvegardé il y a ${elapsed}s (v${status.versionNum})`;
+    color = '#1f8d4d';
+  } else if (status.type === 'error') {
+    label = `⚠ Erreur sauvegarde : ${status.message.slice(0, 80)}`;
+    color = '#a50f15';
+  } else if (status.type === 'conflict') {
+    label = `⚠ Conflit (v${status.currentVersionNum} vs v${status.sourceVersionNum}) — rechargez la page`;
+    color = '#a50f15';
+  }
+
+  return (
+    <div
+      style={{
+        padding: '6px 24px',
+        background: '#fff',
+        borderTop: '1px solid #e5e5e5',
+        fontSize: 12,
+        color,
+        fontWeight: 500,
+      }}
+    >
+      {label}
     </div>
   );
 }
@@ -90,6 +196,7 @@ function App() {
   const [assembly, setAssembly] = useState<AssemblyFetchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [currentVersionNum, setCurrentVersionNum] = useState<number>(1);
 
   useEffect(() => {
     if (!sid || !aid) {
@@ -100,6 +207,7 @@ function App() {
     fetchAssembly(sid, aid)
       .then((data) => {
         setAssembly(data);
+        setCurrentVersionNum(data.metadata?.version_num || 1);
         setLoading(false);
       })
       .catch((err) => {
@@ -110,7 +218,6 @@ function App() {
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* Header sobre DSFR-inspired */}
       <header
         style={{
           padding: '12px 24px',
@@ -127,15 +234,13 @@ function App() {
             CEREMA · QGIS · Éditeur
           </strong>
           {assembly?.manifest && (
-            <span style={{ color: '#666', fontSize: 13 }}>
-              {assembly.manifest.title}
-            </span>
+            <span style={{ color: '#666', fontSize: 13 }}>{assembly.manifest.title}</span>
           )}
         </div>
         <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#666', alignItems: 'center' }}>
           {assembly?.metadata && (
             <>
-              <span>v{assembly.metadata.version_num}</span>
+              <span>v{currentVersionNum}</span>
               <span>•</span>
               <span style={{ color: '#0063cb' }}>{assembly.manifest.audience}</span>
             </>
@@ -143,7 +248,6 @@ function App() {
         </div>
       </header>
 
-      {/* Erreur si fetch fail */}
       {error && (
         <div
           style={{
@@ -158,19 +262,20 @@ function App() {
         </div>
       )}
 
-      {/* Loading state */}
       {loading && (
         <div style={{ padding: 40, textAlign: 'center', color: '#666', fontSize: 14 }}>
           Chargement de l'assembly {aid}…
         </div>
       )}
 
-      {/* Editor (rendu APRES le fetch via EditorContent) */}
       {!loading && !error && assembly && (
-        <EditorContent sid={sid} assembly={assembly} />
+        <EditorContent
+          sid={sid}
+          assembly={assembly}
+          onVersionUpdate={setCurrentVersionNum}
+        />
       )}
 
-      {/* Footer status */}
       <footer
         style={{
           padding: '8px 24px',
@@ -184,7 +289,7 @@ function App() {
       >
         <span>D-QGIS-010 · BlockNote v0.22</span>
         <span>•</span>
-        <span>Vague E2 F-DOM (6 custom blocks)</span>
+        <span>Vague E2 H2 (13 blocks + autosave 30s)</span>
         <span style={{ marginLeft: 'auto' }}>
           {assembly?.manifest?.layout?.sections?.length ?? 0} sections
         </span>

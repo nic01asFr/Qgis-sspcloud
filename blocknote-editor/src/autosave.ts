@@ -1,0 +1,279 @@
+/**
+ * Autosave hook React — Vague E2 Commit H2 (D-QGIS-010).
+ *
+ * Debounce 30s : à chaque modif user, timer reset. 30s d'inactivité ->
+ * appel saveBlocks() qui :
+ * 1. Convertit blocks BlockNote en (sections, new_components) via API hub
+ * 2. Crée les new_components DOM (POST /components)
+ * 3. Remplace les __pending__ refs par les cid réels
+ * 4. PUT /assemblies/{aid} avec version_num_source pour concurrency
+ *
+ * Si conflit (409) : modal "Recharger" ou "Forcer écrasement".
+ */
+import { useEffect, useRef, useState } from 'react';
+import { createComponent, updateAssembly } from './api';
+import type { AssemblyManifest } from './types';
+
+const AUTOSAVE_DEBOUNCE_MS = 30_000;
+
+export type SaveStatus =
+  | { type: 'idle' }
+  | { type: 'pending'; sinceMs: number }
+  | { type: 'saving' }
+  | { type: 'saved'; atTime: number; versionNum: number }
+  | { type: 'error'; message: string }
+  | { type: 'conflict'; currentVersionNum: number; sourceVersionNum: number };
+
+/**
+ * Convertit blocks BlockNote en sections Assembly via le serializer Python
+ * exposé par le hub (POC : pour V1 on fait la conversion côté front via
+ * équivalent JS pour éviter un round-trip).
+ *
+ * V1 simple : reuse local logic similaire à hub/blocknote_serializer.py.
+ */
+function blocksToSections(blocks: any[]): { sections: any[]; newComponents: any[] } {
+  const sections: any[] = [];
+  const newComponents: any[] = [];
+  let current = { kind: 'section', title: null as string | null, narrative_md: null as string | null, components: [] as any[] };
+
+  const flush = () => {
+    if (current.title || current.narrative_md || current.components.length) {
+      sections.push({ ...current });
+    }
+    current = { kind: 'section', title: null, narrative_md: null, components: [] };
+  };
+
+  for (const block of blocks) {
+    const btype = block.type || '';
+    // Heading natif H1/H2 -> nouvelle section
+    if (btype === 'heading') {
+      const level = block.props?.level || 2;
+      if (level <= 2) {
+        flush();
+        current.title = blockTextContent(block.content);
+        continue;
+      }
+    }
+    // Paragraph natif -> narrative_md
+    if (btype === 'paragraph') {
+      const text = blockTextContent(block.content);
+      if (text) {
+        current.narrative_md = (current.narrative_md || '') + (current.narrative_md ? '\n\n' : '') + text;
+      }
+      continue;
+    }
+    // Custom block -> Component
+    const compInfo = customBlockToComponent(block);
+    if (!compInfo) continue;
+    if (compInfo.refOnly) {
+      current.components.push({ ref: compInfo.cid });
+    } else {
+      newComponents.push(compInfo.manifest);
+      current.components.push({ ref: '__pending__' });
+    }
+  }
+  flush();
+  return { sections, newComponents };
+}
+
+function blockTextContent(content: any): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((c) => (typeof c === 'object' && c?.text ? String(c.text) : typeof c === 'string' ? c : ''))
+      .join(' ')
+      .trim();
+  }
+  return '';
+}
+
+function customBlockToComponent(
+  block: any,
+): { refOnly: true; cid: string } | { refOnly: false; manifest: any } | null {
+  const TYPE_TO_KIND: Record<string, string> = {
+    kpiGrid: 'kpi_grid',
+    customHeading: 'heading',
+    customQuote: 'quote',
+    separator: 'separator',
+    kpiBadge: 'kpi_badge',
+    legend: 'legend',
+    narrativeText: 'narrative_text',
+    interactiveMap: 'interactive_map',
+    chart: 'chart',
+    dataTable: 'data_table',
+    scene3d: 'scene_3d',
+    mediaEmbed: 'media_embed',
+    iframeGrist: 'iframe_grist',
+  };
+  const kind = TYPE_TO_KIND[block.type || ''];
+  if (!kind) return null;
+  const props = block.props || {};
+  const IFRAME_KINDS = ['interactive_map', 'chart', 'data_table', 'scene_3d', 'media_embed', 'iframe_grist'];
+  if (IFRAME_KINDS.includes(kind)) {
+    return { refOnly: true, cid: String(props.cid || '') };
+  }
+  // DOM kind : nouveau Component à créer (params via switch)
+  const params: Record<string, any> = {};
+  switch (kind) {
+    case 'kpi_grid':
+      try { params.kpis = JSON.parse(props.kpisJson || '[]'); } catch { params.kpis = []; }
+      params.palette = props.palette || 'monochrome';
+      params.columns_min = Number(props.columnsMin || 140);
+      break;
+    case 'heading':
+      params.text = String(props.text || '');
+      params.level = Number(props.level || 2);
+      break;
+    case 'kpi_badge':
+      params.value = String(props.value || '');
+      params.label = String(props.label || '');
+      params.unit = String(props.unit || '');
+      params.color = String(props.color || 'info-blue');
+      params.source = String(props.source || '');
+      break;
+    case 'quote':
+      params.text = String(props.text || '');
+      params.author = String(props.author || '');
+      params.source = String(props.source || '');
+      break;
+    case 'separator':
+      params.style = String(props.style || 'solid');
+      params.color = String(props.color || '#000091');
+      params.variant = String(props.variant || 'rule');
+      break;
+    case 'legend':
+      try { params.items = JSON.parse(props.itemsJson || '[]'); } catch { params.items = []; }
+      params.title = String(props.title || '');
+      params.source = String(props.source || '');
+      break;
+    case 'narrative_text':
+      params.content = String(props.content || '');
+      break;
+  }
+  return {
+    refOnly: false,
+    manifest: {
+      kind,
+      title: params.text || params.label || params.title || kind,
+      classification: 'cerema_internal',
+      params,
+      rendering: { runtime: 'html', container_size: 'full' },
+    },
+  };
+}
+
+/**
+ * Effectue la sauvegarde complète d'un document BlockNote vers un Assembly.
+ *
+ * Workflow :
+ * 1. blocksToSections() : convert BlockNote -> sections + new_components
+ * 2. Pour chaque new_component (DOM) : POST /components -> cid réel
+ * 3. Replace __pending__ refs par les cid
+ * 4. PUT /assemblies/{aid} avec version_num_source pour concurrency
+ *
+ * @returns success : { ok: true, versionNum }
+ * @returns conflict : { ok: false, conflict: {currentVersionNum, sourceVersionNum} }
+ * @returns error : { ok: false, error: 'message' }
+ */
+export async function saveBlocks(
+  sid: string,
+  aid: string,
+  blocks: any[],
+  existingManifest: AssemblyManifest,
+  versionNumSource: number,
+): Promise<{ ok: boolean; newVersionNum?: number; error?: string; conflict?: any }> {
+  const { sections, newComponents } = blocksToSections(blocks);
+
+  // Créer les new_components DOM côté hub
+  const createdCids: string[] = [];
+  for (const manifest of newComponents) {
+    try {
+      const result = await createComponent(sid, manifest);
+      createdCids.push(result.id);
+    } catch (err) {
+      return { ok: false, error: `Échec création composant ${manifest.kind} : ${String(err)}` };
+    }
+  }
+
+  // Remplacer __pending__ refs par cid réels
+  let pendingIdx = 0;
+  for (const section of sections) {
+    for (let i = 0; i < section.components.length; i++) {
+      if (section.components[i].ref === '__pending__') {
+        if (pendingIdx >= createdCids.length) {
+          return { ok: false, error: 'Désynchronisation __pending__ refs vs created cids' };
+        }
+        section.components[i].ref = createdCids[pendingIdx++];
+      }
+    }
+  }
+
+  // PUT update_assembly
+  const newManifest = {
+    ...existingManifest,
+    layout: { ...(existingManifest.layout || { type: 'scroll_vertical' }), sections },
+  };
+  const result = await updateAssembly(sid, aid, newManifest, versionNumSource);
+  return result;
+}
+
+/**
+ * Hook React useAutosave : debounce 30s à chaque modif blocks.
+ */
+export function useAutosave(
+  enabled: boolean,
+  sid: string,
+  aid: string,
+  blocks: any[] | null,
+  existingManifest: AssemblyManifest | null,
+  versionNumSource: number,
+  onSaveSuccess: (newVersionNum: number) => void,
+): SaveStatus {
+  const [status, setStatus] = useState<SaveStatus>({ type: 'idle' });
+  const timerRef = useRef<number | null>(null);
+  const lastBlocksRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!enabled || !blocks || !existingManifest) return;
+    const blocksJson = JSON.stringify(blocks);
+    if (lastBlocksRef.current === null) {
+      // Premier render : enregistrer le baseline, pas de save
+      lastBlocksRef.current = blocksJson;
+      return;
+    }
+    if (lastBlocksRef.current === blocksJson) {
+      // Pas de changement
+      return;
+    }
+    lastBlocksRef.current = blocksJson;
+    setStatus({ type: 'pending', sinceMs: Date.now() });
+
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+    }
+    timerRef.current = window.setTimeout(async () => {
+      setStatus({ type: 'saving' });
+      try {
+        const result = await saveBlocks(sid, aid, blocks, existingManifest, versionNumSource);
+        if (result.ok && result.newVersionNum) {
+          setStatus({ type: 'saved', atTime: Date.now(), versionNum: result.newVersionNum });
+          onSaveSuccess(result.newVersionNum);
+        } else if (result.conflict) {
+          setStatus({ type: 'conflict', ...result.conflict });
+        } else {
+          setStatus({ type: 'error', message: result.error || 'Erreur inconnue' });
+        }
+      } catch (err) {
+        setStatus({ type: 'error', message: String(err) });
+      }
+    }, AUTOSAVE_DEBOUNCE_MS);
+
+    return () => {
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+      }
+    };
+  }, [enabled, blocks, sid, aid, existingManifest, versionNumSource, onSaveSuccess]);
+
+  return status;
+}
