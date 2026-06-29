@@ -32,11 +32,12 @@ export async function assemblyToBlockNoteDoc(
       });
     }
 
-    // Narrative_md -> paragraph
+    // Narrative_md -> paragraph (audit fix v1.7.1 : ne PAS tronquer
+    // sinon premier autosave écrase silencieusement le narratif côté DB)
     if (section.narrative_md) {
       blocks.push({
         type: 'paragraph',
-        content: section.narrative_md.slice(0, 1000),
+        content: section.narrative_md,
       });
     }
 

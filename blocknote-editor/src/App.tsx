@@ -66,8 +66,12 @@ function EditorContent({
     );
   }
 
+  // Audit fix v1.7.1 P0 #2 : key={version_num} force remount BlockNoteContent
+  // quand l'assembly est rafraîchi (sinon useCreateBlockNote garde le
+  // contenu initial mounté, désynchro vs currentBlocks state).
   return (
     <BlockNoteContent
+      key={`bn-${assembly.metadata?.version_num ?? 0}`}
       sid={sid}
       aid={assembly.metadata?.aid || ''}
       assembly={assembly}

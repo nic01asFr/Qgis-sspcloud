@@ -181,17 +181,29 @@ export async function saveBlocks(
   blocks: any[],
   existingManifest: AssemblyManifest,
   versionNumSource: number,
-): Promise<{ ok: boolean; newVersionNum?: number; error?: string; conflict?: any }> {
+  // Audit fix v1.7.1 P0 #4 : reusableCids permet de récupérer des cid déjà
+  // créés lors d'un essai précédent qui a échoué au PUT (évite composants
+  // orphelins). Le caller (useAutosave) maintient cette ref entre essais.
+  reusableCids: string[] = [],
+): Promise<{ ok: boolean; newVersionNum?: number; error?: string; conflict?: any; createdCids?: string[] }> {
   const { sections, newComponents } = blocksToSections(blocks);
 
-  // Créer les new_components DOM côté hub
-  const createdCids: string[] = [];
-  for (const manifest of newComponents) {
+  // Créer les new_components DOM côté hub.
+  // Audit fix v1.7.1 P0 #4 : parallèle Promise.all + réutilisation cid retry.
+  const createdCids: string[] = [...reusableCids];
+  const toCreate = newComponents.slice(reusableCids.length);
+  if (toCreate.length > 0) {
     try {
-      const result = await createComponent(sid, manifest);
-      createdCids.push(result.id);
+      const results = await Promise.all(
+        toCreate.map((manifest) => createComponent(sid, manifest)),
+      );
+      for (const r of results) createdCids.push(r.id);
     } catch (err) {
-      return { ok: false, error: `Échec création composant ${manifest.kind} : ${String(err)}` };
+      return {
+        ok: false,
+        error: `Échec création composants : ${String(err)}`,
+        createdCids, // retourne ce qu'on a réussi, le caller pourra retry
+      };
     }
   }
 
@@ -201,7 +213,11 @@ export async function saveBlocks(
     for (let i = 0; i < section.components.length; i++) {
       if (section.components[i].ref === '__pending__') {
         if (pendingIdx >= createdCids.length) {
-          return { ok: false, error: 'Désynchronisation __pending__ refs vs created cids' };
+          return {
+            ok: false,
+            error: 'Désynchronisation __pending__ refs vs created cids',
+            createdCids,
+          };
         }
         section.components[i].ref = createdCids[pendingIdx++];
       }
@@ -214,7 +230,8 @@ export async function saveBlocks(
     layout: { ...(existingManifest.layout || { type: 'scroll_vertical' }), sections },
   };
   const result = await updateAssembly(sid, aid, newManifest, versionNumSource);
-  return result;
+  // En cas d'échec du PUT, on retourne les cid créés pour réutilisation
+  return { ...result, createdCids };
 }
 
 /**
@@ -231,21 +248,28 @@ export function useAutosave(
 ): SaveStatus {
   const [status, setStatus] = useState<SaveStatus>({ type: 'idle' });
   const timerRef = useRef<number | null>(null);
-  const lastBlocksRef = useRef<string | null>(null);
+  // Audit fix v1.7.1 P0 #1 : lastBlocksRef ne reflète que l'état SAUVEGARDÉ.
+  // Sans ça, si un save échoue (409, 500), le `lastBlocksRef` reflète l'état
+  // tenté → un keystroke identique à l'état échoué est ignoré tant qu'aucun
+  // autre changement ne survient.
+  const lastSavedBlocksRef = useRef<string | null>(null);
+  // Audit fix v1.7.1 P0 #4 : composants déjà créés sur un essai antérieur
+  // qui a échoué au PUT (concurrency, validation). Réutilisés au prochain
+  // essai pour éviter les composants orphelins côté hub.
+  const reusableCidsRef = useRef<string[]>([]);
 
   useEffect(() => {
     if (!enabled || !blocks || !existingManifest) return;
     const blocksJson = JSON.stringify(blocks);
-    if (lastBlocksRef.current === null) {
+    if (lastSavedBlocksRef.current === null) {
       // Premier render : enregistrer le baseline, pas de save
-      lastBlocksRef.current = blocksJson;
+      lastSavedBlocksRef.current = blocksJson;
       return;
     }
-    if (lastBlocksRef.current === blocksJson) {
-      // Pas de changement
+    if (lastSavedBlocksRef.current === blocksJson) {
+      // Pas de changement vs dernier état sauvegardé
       return;
     }
-    lastBlocksRef.current = blocksJson;
     setStatus({ type: 'pending', sinceMs: Date.now() });
 
     if (timerRef.current !== null) {
@@ -254,14 +278,27 @@ export function useAutosave(
     timerRef.current = window.setTimeout(async () => {
       setStatus({ type: 'saving' });
       try {
-        const result = await saveBlocks(sid, aid, blocks, existingManifest, versionNumSource);
+        const result = await saveBlocks(
+          sid, aid, blocks, existingManifest, versionNumSource,
+          reusableCidsRef.current,
+        );
         if (result.ok && result.newVersionNum) {
+          // Audit fix v1.7.1 P0 #1 : update lastSavedBlocksRef SEULEMENT
+          // après succès. Reset les cid réutilisables (consommés).
+          lastSavedBlocksRef.current = blocksJson;
+          reusableCidsRef.current = [];
           setStatus({ type: 'saved', atTime: Date.now(), versionNum: result.newVersionNum });
           onSaveSuccess(result.newVersionNum);
-        } else if (result.conflict) {
-          setStatus({ type: 'conflict', ...result.conflict });
         } else {
-          setStatus({ type: 'error', message: result.error || 'Erreur inconnue' });
+          // Audit fix v1.7.1 P0 #4 : conserver les cid créés pour retry
+          if (result.createdCids) {
+            reusableCidsRef.current = result.createdCids;
+          }
+          if (result.conflict) {
+            setStatus({ type: 'conflict', ...result.conflict });
+          } else {
+            setStatus({ type: 'error', message: result.error || 'Erreur inconnue' });
+          }
         }
       } catch (err) {
         setStatus({ type: 'error', message: String(err) });

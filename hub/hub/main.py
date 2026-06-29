@@ -4055,8 +4055,14 @@ async def update_component_endpoint(
             ex_b64 = existing_out.split("b64=", 1)[1].split()[0].strip()
             import json as _json2
             existing_manifest = _json2.loads(_b64.b64decode(ex_b64).decode())
-            # Merge : top-level fields du payload override existing
+            # Merge : top-level fields du payload override existing.
+            # Audit fix v1.7.1 P0 #5 : skip les keys avec valeur None pour
+            # eviter d'ecraser des champs existants (notamment layout pour
+            # assembly, params pour component) avec un null que JSON.stringify
+            # cote client peut emettre involontairement.
             for k, v in payload.items():
+                if v is None:
+                    continue
                 existing_manifest[k] = v
             payload = existing_manifest
         except HTTPException:
@@ -4238,8 +4244,14 @@ async def update_assembly_endpoint(
             ex_b64 = existing_out.split("b64=", 1)[1].split()[0].strip()
             import json as _json2
             existing_manifest = _json2.loads(_b64.b64decode(ex_b64).decode())
-            # Merge : top-level fields du payload override existing
+            # Merge : top-level fields du payload override existing.
+            # Audit fix v1.7.1 P0 #5 : skip les keys avec valeur None pour
+            # eviter d'ecraser des champs existants (notamment layout pour
+            # assembly, params pour component) avec un null que JSON.stringify
+            # cote client peut emettre involontairement.
             for k, v in payload.items():
+                if v is None:
+                    continue
                 existing_manifest[k] = v
             payload = existing_manifest
         except HTTPException: raise
