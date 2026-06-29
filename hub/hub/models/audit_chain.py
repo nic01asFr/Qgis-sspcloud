@@ -144,8 +144,10 @@ class ConfidenceFactors(BaseModel):
 class ComponentProvenance(BaseModel):
     """Provenance individuelle d'un composant créé (par agent IA ou user).
 
-    Utilisé sur `Component.provenance` ET référencé depuis `AuditChain`
-    quand un assemblage agrège plusieurs composants.
+    Utilisé sur `Component.provenance` ET sur `Assembly.provenance` (les 2
+    réutilisent ce model — option C D-QGIS-009 Vague E1 2026-06-29).
+    Référencé depuis `AuditChain` quand un assemblage agrège plusieurs
+    composants.
     """
     created_by: Literal["agent", "user", "library_template"] = "agent"
     recipe_used: str | None = Field(
@@ -159,6 +161,16 @@ class ComponentProvenance(BaseModel):
         None, description="Snapshot du Scene Manifest au moment de la création"
     )
     llm_provenance: LLMProvenance | None = None
+    # Vague E1 D-QGIS-009 (2026-06-29) : trace clone pour reusabilite catalogue.
+    # Reference cid si Component cloné, ou aid si Assembly cloné (sémantique
+    # selon contexte d'usage). Default None : entité créée from scratch.
+    cloned_from: str | None = Field(
+        None,
+        description=(
+            "Référence vers l'entité source si clonée (cid pour Component, "
+            "aid pour Assembly). None = créé from scratch."
+        ),
+    )
 
 
 # ── AuditChain ────────────────────────────────────────────────────────────────

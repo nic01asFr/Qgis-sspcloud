@@ -269,6 +269,35 @@ async def publish_assembly(
     )
 
 
+async def clone_assembly(
+    sid: str, aid: str, deep: bool = False,
+) -> dict[str, Any]:
+    """Vague E1 (D-QGIS-009, 2026-06-29) : clone un assemblage existant.
+
+    Use case : partir d'un template (storymap reference) et l'adapter
+    pour un nouveau cas au lieu de tout recreer from scratch.
+
+    - `deep=False` (DEFAULT, shallow) : refs cid composants partages.
+      Modifs source impactent le clone. Rapide.
+    - `deep=True` : duplique aussi tous les composants references
+      (nouveaux cid). Clone independant. Plus lourd.
+
+    Le nouveau assemblage :
+    - new aid (12 hex generated)
+    - version_num = 1
+    - provenance.cloned_from = aid source
+    - title suffixé " (clone)"
+    - sid preserve (clone dans la même etude)
+
+    Retourne {id, rowid, cloned_from, deep, kind, title, audience,
+              version_num, manifest_url, render_url, publish_url}.
+    """
+    params = {"deep": "true" if deep else "false"}
+    return await _hub_call(
+        "POST", f"/studies/{sid}/assemblies/{aid}/clone", params=params,
+    )
+
+
 async def publish_component(
     sid: str, cid: str, audience: str | None = None,
 ) -> dict[str, Any]:
@@ -1095,6 +1124,21 @@ NATIVE_TOOLS_V2 = {
             "audience": "str optionnel ('public'|'cerema_internal'|'restricted'|'confidential')",
         },
     },
+    "clone_assembly": {
+        "fn": clone_assembly,
+        "description": (
+            "Vague E1 (D-QGIS-009) — CLONE un assemblage existant. "
+            "Use case : partir d'un template reference (storymap risque "
+            "inondation Marseille) et l'adapter au lieu de tout recreer "
+            "from scratch. Default shallow (refs cid partages). "
+            "deep=true duplique aussi les composants (nouveaux cid)."
+        ),
+        "params": {
+            "sid": "str étude id",
+            "aid": "str assemblage source id (12 hex)",
+            "deep": "bool (default false) — shallow refs partages OU deep dup composants",
+        },
+    },
     "publish_component": {
         "fn": publish_component,
         "description": (
@@ -1560,6 +1604,37 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "clone_assembly",
+            "description": (
+                "Vague E1 (D-QGIS-009) - CLONE un assemblage existant. "
+                "Use case : partir d'un template reference (storymap risque "
+                "inondation) et l'adapter au lieu de recreer from scratch. "
+                "shallow par defaut (refs cid partages, rapide). deep=true "
+                "duplique aussi composants (nouveaux cid, clone independant). "
+                "Le nouvel assemblage a provenance.cloned_from = aid source, "
+                "title suffixe ' (clone)', sid preserve."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sid": _SID_SCHEMA,
+                    "aid": _AID_SCHEMA,
+                    "deep": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "false (default) : shallow clone, refs cid composants "
+                            "partages. true : deep clone, duplique aussi composants."
+                        ),
+                    },
+                },
+                "required": ["sid", "aid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "publish_component",
             "description": (
                 "A3 (Vague A) - PUBLIE un composant standalone S3 + URL hub. "
@@ -1783,4 +1858,5 @@ NATIVE_TOOLS_V2_MUTATING: frozenset[str] = frozenset({
     "update_assembly",     # Phase 4b (2026-06-28) - mutant DB INSERT-only + PVC
     # Vague E1 (D-QGIS-009 2026-06-29) - UX libre composition
     "update_component",    # Vague E1 - mutant DB INSERT-only + PVC
+    "clone_assembly",      # Vague E1 - mutant DB INSERT new aid + PVC
 })

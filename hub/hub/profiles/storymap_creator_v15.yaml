@@ -73,6 +73,7 @@ mcp_tools:
     - list_assemblies
     - create_assembly
     - update_assembly
+    - clone_assembly     # Vague E1 D-QGIS-009 : partir d'un template existant
     - get_assembly
     - render_assembly
     - publish_assembly

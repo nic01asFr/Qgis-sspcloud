@@ -4801,6 +4801,158 @@ async def publish_component_endpoint(
         raise HTTPException(503, f"Publication échec : {exc}")
 
 
+@app.post("/studies/{sid}/assemblies/{aid}/clone", status_code=status.HTTP_201_CREATED)
+async def clone_assembly_endpoint(
+    sid: str, aid: str,
+    deep: bool = False,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Vague E1 (D-QGIS-009, 2026-06-29) : clone un assemblage existant.
+
+    Use case : Marie part d'un template (storymap risque inondation reference)
+    et l'adapte pour son cas (4e arrondissement -> 5e arrondissement) au lieu
+    de tout recreer from scratch via agent IA.
+
+    Comportement :
+    - `deep=false` (DEFAULT, shallow) : refs cid composants partagés. Modifs
+      sur les composants source impactent le clone. Avantage : rapide,
+      audit trail simple.
+    - `deep=true` : duplique aussi tous les composants référencés (nouveaux
+      cid). Le clone devient indépendant. Plus lourd mais utile pour fork
+      réel.
+
+    Le nouveau assemblage :
+    - new aid (12 hex)
+    - version_num = 1
+    - provenance.cloned_from = aid source
+    - sid preserve (clone dans la même étude)
+    - audience défaut héritée de l'assemblage source
+    """
+    _check_assemblies_enabled()
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+
+    from hub.models import Assembly
+    from hub import assemblies as asm_mod
+    from hub import components as comp_mod
+    from hub.models import Component
+
+    # Verifier que la source existe et est lisible
+    latest = await asm_mod.get_assembly_latest(aid)
+    if not latest:
+        raise HTTPException(404, "Assemblage source introuvable")
+    if latest["sid"] != sid or latest["owner"] != user["username"]:
+        raise HTTPException(403, "Pas owner ou hors scope etude")
+
+    # Lire manifest source PVC
+    try:
+        stdout = await _execute_python_in_workspace(
+            user["username"],
+            asm_mod.read_assembly_manifest_pod_code(sid, aid),
+        )
+    except Exception as exc:
+        raise HTTPException(503, f"Workspace : {exc}")
+
+    if "ASSEMBLY_READ_OK" not in stdout:
+        raise HTTPException(404, "Manifest PVC source introuvable")
+
+    import base64 as _b64
+    b64 = stdout.split("b64=", 1)[1].split()[0].strip()
+    source_manifest = _json.loads(_b64.b64decode(b64).decode())
+
+    # Construire new manifest : nouvel aid + clear version + trace cloned_from
+    new_aid = studies._new_id()
+    new_manifest = dict(source_manifest)  # shallow copy
+    new_manifest["id"] = new_aid
+    new_manifest["sid"] = sid
+    new_manifest["version"] = 1
+    new_manifest.setdefault("provenance", {})["cloned_from"] = aid
+    new_manifest["provenance"]["created_by"] = "agent"
+    # Title : ajout " (clone)" pour distinguer
+    if not new_manifest.get("title", "").endswith("(clone)"):
+        new_manifest["title"] = f"{new_manifest.get('title', 'Assemblage')} (clone)"
+
+    # Deep clone : dupliquer chaque composant référencé
+    if deep and new_manifest.get("layout", {}).get("sections"):
+        for section in new_manifest["layout"]["sections"]:
+            for comp_entry in (section.get("components") or []):
+                if "ref" in comp_entry:
+                    old_cid = comp_entry["ref"]
+                    # Lire manifest composant source + créer copie avec nouveau cid
+                    try:
+                        comp_stdout = await _execute_python_in_workspace(
+                            user["username"],
+                            comp_mod.read_component_manifest_pod_code(sid, old_cid),
+                        )
+                        if "COMPONENT_READ_OK" in comp_stdout:
+                            cb64 = comp_stdout.split("b64=", 1)[1].split()[0].strip()
+                            comp_manifest = _json.loads(_b64.b64decode(cb64).decode())
+                            new_cid = studies._new_id()
+                            comp_manifest["id"] = new_cid
+                            comp_manifest["sid"] = sid
+                            comp_manifest["version"] = 1
+                            comp_manifest.setdefault("provenance", {})["cloned_from"] = old_cid
+                            comp_obj = Component.model_validate(comp_manifest)
+                            # Ecrire + insert nouveau composant
+                            new_comp_json = _json.dumps(
+                                comp_obj.model_dump(mode="json"),
+                                ensure_ascii=False, indent=2,
+                            )
+                            await _execute_python_in_workspace(
+                                user["username"],
+                                comp_mod.write_component_manifest_pod_code(
+                                    sid, new_cid, new_comp_json,
+                                ),
+                            )
+                            await comp_mod.insert_component(
+                                component=comp_obj, owner=user["username"], sid=sid,
+                                file_path=comp_mod.component_manifest_path(sid, new_cid),
+                                size_bytes=len(new_comp_json.encode("utf-8")),
+                                previous_hash="",  # Premier dans la nouvelle chaîne
+                            )
+                            comp_entry["ref"] = new_cid
+                    except Exception as exc:
+                        log.warning("deep clone component %s : %s", old_cid, exc)
+
+    # Valider le nouveau manifest
+    try:
+        asm = Assembly.model_validate(new_manifest)
+    except Exception as exc:
+        raise HTTPException(422, f"Validation Pydantic clone : {exc}")
+
+    # Écrire manifest PVC
+    content_json = _json.dumps(asm.model_dump(mode="json"), ensure_ascii=False, indent=2)
+    try:
+        await _execute_python_in_workspace(
+            user["username"],
+            asm_mod.write_assembly_manifest_pod_code(sid, asm.id, content_json),
+        )
+    except Exception as exc:
+        log.warning("write cloned assembly manifest : %s", exc)
+
+    # INSERT new row assemblies_index
+    file_path = asm_mod.assembly_manifest_path(sid, asm.id)
+    rowid = await asm_mod.insert_assembly(
+        assembly=asm, owner=user["username"], file_path=file_path,
+    )
+    return {
+        "id": asm.id,
+        "rowid": rowid,
+        "cloned_from": aid,
+        "deep": deep,
+        "kind": asm.kind,
+        "title": asm.title,
+        "audience": asm.audience,
+        "version_num": 1,
+        "manifest_url":   f"/studies/{sid}/assemblies/{asm.id}",
+        "render_url":     f"/studies/{sid}/assemblies/{asm.id}/render",
+        "publish_url":    f"/studies/{sid}/assemblies/{asm.id}/publish",
+    }
+
+
 @app.post("/studies/{sid}/assemblies/{aid}/publish")
 async def publish_assembly_endpoint(
     sid: str, aid: str, request: Request,
