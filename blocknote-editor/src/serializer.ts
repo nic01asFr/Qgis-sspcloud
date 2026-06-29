@@ -1,29 +1,60 @@
 /**
  * Sérialisation Assembly Pydantic <-> BlockNote document.
  *
- * Vague E2 Commit F1-F3 (D-QGIS-010) : V1 forward only (Assembly -> BlockNote).
- * Round-trip complet (BlockNote -> Assembly) sera livré Commit G.
+ * Vague E2 Commit F1-F5 (D-QGIS-010) + audit v1.7.2 optims P1 :
+ * - V1 forward only (Assembly -> BlockNote)
+ * - Round-trip BlockNote -> Assembly via blocksToSections (autosave.ts)
+ * - Parallelisation Promise.all fetchComponent (gain ouverture 4s -> 1s)
  */
-import type { AssemblyManifest, ComponentManifest } from './types';
+import type { AssemblyManifest } from './types';
 import { componentKindToBlockType } from './blocks';
 import { fetchComponent } from './api';
 
 /**
  * Convertit un Assembly + ses composants en blocks BlockNote.
  *
+ * Audit v1.7.2 P1 #1 : tous les fetchComponent sont lancés EN PARALLÈLE
+ * via Promise.all (vs séquentiel V1.7.1 = ~200ms/composant × N).
+ *
  * Pour chaque AssemblySection :
  * 1. Si section.title -> heading natif H2
- * 2. Si section.narrative_md -> paragraph (V1 simple)
- * 3. Pour chaque component ref -> fetch component + mapping kind -> block
+ * 2. Si section.narrative_md -> paragraph
+ * 3. Pour chaque component ref -> fetch component (parallèle) + mapping
  */
 export async function assemblyToBlockNoteDoc(
   sid: string,
   assembly: AssemblyManifest,
 ): Promise<any[]> {
+  const sections = assembly.layout?.sections || [];
+
+  // Audit v1.7.2 P1 #1 : pré-récupérer TOUS les composants en parallèle.
+  // Map<cid, ComponentManifest | Error> pour ne pas re-fetcher + survivre
+  // aux 404/timeouts individuels (Promise.allSettled).
+  const allCids = new Set<string>();
+  for (const section of sections) {
+    for (const compRef of section.components || []) {
+      if (compRef.ref) allCids.add(compRef.ref);
+    }
+  }
+
+  const cidList = Array.from(allCids);
+  const fetchResults = await Promise.allSettled(
+    cidList.map((cid) => fetchComponent(sid, cid)),
+  );
+  const componentByCid = new Map<string, any | Error>();
+  for (let i = 0; i < cidList.length; i++) {
+    const res = fetchResults[i];
+    if (res.status === 'fulfilled') {
+      componentByCid.set(cidList[i], res.value);
+    } else {
+      componentByCid.set(cidList[i], new Error(String(res.reason)));
+    }
+  }
+
+  // Construction des blocks dans l'ordre déclaratif
   const blocks: any[] = [];
 
-  for (const section of assembly.layout?.sections || []) {
-    // Section title -> heading natif H2
+  for (const section of sections) {
     if (section.title) {
       blocks.push({
         type: 'heading',
@@ -32,8 +63,6 @@ export async function assemblyToBlockNoteDoc(
       });
     }
 
-    // Narrative_md -> paragraph (audit fix v1.7.1 : ne PAS tronquer
-    // sinon premier autosave écrase silencieusement le narratif côté DB)
     if (section.narrative_md) {
       blocks.push({
         type: 'paragraph',
@@ -41,103 +70,101 @@ export async function assemblyToBlockNoteDoc(
       });
     }
 
-    // Components -> custom blocks via mapping kind -> block type
     for (const compRef of section.components || []) {
       if (!compRef.ref) continue;
-      try {
-        const component = await fetchComponent(sid, compRef.ref);
-        const blockType = componentKindToBlockType(component.kind);
-        if (!blockType) {
-          // Kind pas encore supporté (F4+F5 à venir) — placeholder
-          blocks.push({
-            type: 'paragraph',
-            content: [
-              { type: 'text', text: '📎 Composant ', styles: { bold: true } },
-              { type: 'text', text: component.kind, styles: { code: true } },
-              {
-                type: 'text',
-                text: ` (${compRef.ref.slice(0, 8)}…) — block iframe à venir F4+F5`,
-                styles: { italic: true, textColor: 'gray' },
-              },
-            ],
-          });
-          continue;
-        }
-        // Custom block DOM ou iframe : convertir params -> props
-        const params = (component.params || {}) as Record<string, any>;
-        const props: Record<string, any> = { cid: compRef.ref };
+      const component = componentByCid.get(compRef.ref);
 
-        switch (component.kind) {
-          // ── DOM blocks (F1+F2+F3) ──
-          case 'kpi_grid':
-            props.kpisJson = JSON.stringify(params.kpis || []);
-            props.palette = params.palette || 'monochrome';
-            props.columnsMin = params.columns_min || 140;
-            break;
-          case 'heading':
-            props.level = params.level || 2;
-            props.text = params.text || component.title || '';
-            break;
-          case 'kpi_badge':
-            props.value = String(params.value || '');
-            props.label = params.label || '';
-            props.unit = params.unit || '';
-            props.color = params.color || 'info-blue';
-            props.source = params.source || '';
-            break;
-          case 'quote':
-            props.text = params.text || '';
-            props.author = params.author || '';
-            props.source = params.source || '';
-            break;
-          case 'separator':
-            props.style = params.style || 'solid';
-            props.color = params.color || '#000091';
-            props.variant = params.variant || 'rule';
-            break;
-          case 'legend':
-            props.itemsJson = JSON.stringify(params.items || []);
-            props.title = params.title || component.title || '';
-            props.source = params.source || '';
-            break;
-          case 'narrative_text':
-            props.content = params.content || params.markdown || params.text || '';
-            break;
-          // ── Iframe blocks (F4+F5) — reutilise rendu hub via /render/{cid} ──
-          case 'interactive_map':
-          case 'chart':
-          case 'data_table':
-          case 'scene_3d':
-          case 'media_embed':
-          case 'iframe_grist':
-            // sid + cid suffisent (iframe vers /studies/{sid}/components/{cid}/render)
-            props.sid = sid;
-            break;
-          default:
-            break;
-        }
-
-        blocks.push({
-          type: blockType,
-          props,
-        });
-      } catch (err) {
-        // Component fetch failed -> placeholder erreur
+      // Échec fetch -> placeholder erreur
+      if (component instanceof Error) {
         blocks.push({
           type: 'paragraph',
           content: [
             {
               type: 'text',
-              text: `⚠️ Erreur composant ${compRef.ref.slice(0, 8)}… : ${String(err).slice(0, 80)}`,
+              text: `⚠️ Erreur composant ${compRef.ref.slice(0, 8)}… : ${component.message.slice(0, 80)}`,
               styles: { textColor: 'red' },
             },
           ],
         });
+        continue;
       }
+
+      const blockType = componentKindToBlockType(component.kind);
+      if (!blockType) {
+        blocks.push({
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: '📎 Composant ', styles: { bold: true } },
+            { type: 'text', text: component.kind, styles: { code: true } },
+            {
+              type: 'text',
+              text: ` (${compRef.ref.slice(0, 8)}…) — kind non encore mappé`,
+              styles: { italic: true, textColor: 'gray' },
+            },
+          ],
+        });
+        continue;
+      }
+
+      const params = (component.params || {}) as Record<string, any>;
+      const props: Record<string, any> = { cid: compRef.ref };
+
+      switch (component.kind) {
+        // ── DOM blocks ──
+        case 'kpi_grid':
+          props.kpisJson = JSON.stringify(params.kpis || []);
+          props.palette = params.palette || 'monochrome';
+          props.columnsMin = params.columns_min || 140;
+          break;
+        case 'heading':
+          props.level = params.level || 2;
+          props.text = params.text || component.title || '';
+          break;
+        case 'kpi_badge':
+          props.value = String(params.value || '');
+          props.label = params.label || '';
+          props.unit = params.unit || '';
+          props.color = params.color || 'info-blue';
+          props.source = params.source || '';
+          break;
+        case 'quote':
+          props.text = params.text || '';
+          props.author = params.author || '';
+          props.source = params.source || '';
+          break;
+        case 'separator':
+          props.style = params.style || 'solid';
+          props.color = params.color || '#000091';
+          props.variant = params.variant || 'rule';
+          break;
+        case 'legend':
+          props.itemsJson = JSON.stringify(params.items || []);
+          props.title = params.title || component.title || '';
+          props.source = params.source || '';
+          break;
+        case 'narrative_text':
+          props.content = params.content || params.markdown || params.text || '';
+          break;
+        // ── Iframe blocks ──
+        case 'interactive_map':
+        case 'chart':
+        case 'data_table':
+        case 'scene_3d':
+        case 'media_embed':
+        case 'iframe_grist':
+          props.sid = sid;
+          break;
+        default:
+          break;
+      }
+
+      blocks.push({
+        type: blockType,
+        props,
+      });
     }
   }
 
-  // Fallback : assembly vide
   if (blocks.length === 0) {
     blocks.push({
       type: 'paragraph',

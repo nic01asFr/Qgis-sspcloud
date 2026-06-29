@@ -17,7 +17,7 @@ import '@blocknote/mantine/style.css';
 import { fetchAssembly } from './api';
 import { qgisBlockNoteSchema } from './blocks';
 import { assemblyToBlockNoteDoc } from './serializer';
-import { useAutosave, type SaveStatus } from './autosave';
+import { useAutosave, saveBlocks, type SaveStatus } from './autosave';
 import type { AssemblyFetchResponse } from './types';
 
 function parseRouteParams(): { sid: string; aid: string } {
@@ -44,11 +44,16 @@ function EditorContent({
   const [blocks, setBlocks] = useState<any[] | null>(null);
   const [serializeError, setSerializeError] = useState<string | null>(null);
 
+  // Audit v1.7.2 P2 : restreindre deps a sid+aid+version_num (eviter
+  // re-fetch des composants a chaque save qui change l'objet `assembly`).
+  const aid = assembly.metadata?.aid;
+  const vnum = assembly.metadata?.version_num;
   useEffect(() => {
     assemblyToBlockNoteDoc(sid, assembly.manifest)
       .then(setBlocks)
       .catch((err) => setSerializeError(String(err.message || err)));
-  }, [sid, assembly]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sid, aid, vnum]);
 
   if (serializeError) {
     return (
@@ -101,6 +106,7 @@ function BlockNoteContent({
   const [versionNumSource, setVersionNumSource] = useState<number>(
     assembly.metadata?.version_num || 1,
   );
+  const [overrideStatus, setOverrideStatus] = useState<SaveStatus | null>(null);
 
   const editor = useCreateBlockNote({
     schema: qgisBlockNoteSchema,
@@ -117,8 +123,8 @@ function BlockNoteContent({
     [onVersionUpdate],
   );
 
-  const status = useAutosave(
-    true, // enabled
+  const autosaveStatus = useAutosave(
+    true,
     sid,
     aid,
     currentBlocks,
@@ -126,6 +132,40 @@ function BlockNoteContent({
     versionNumSource,
     handleVersionUpdate,
   );
+
+  // Audit v1.7.2 P1 #2 : 'Forcer ecrasement' appelle saveBlocks directement
+  // avec versionNumSource = null (bypass check concurrency cote hub).
+  const handleForceOverwrite = useCallback(async () => {
+    setOverrideStatus({ type: 'saving' });
+    try {
+      const result = await saveBlocks(
+        sid, aid, currentBlocks, assembly.manifest,
+        null as any, // null bypass version_num_source côté hub
+        [],
+      );
+      if (result.ok && result.newVersionNum) {
+        setOverrideStatus({
+          type: 'saved',
+          atTime: Date.now(),
+          versionNum: result.newVersionNum,
+        });
+        handleVersionUpdate(result.newVersionNum);
+        // Reset override apres 5s pour reprendre l'autosave normal
+        setTimeout(() => setOverrideStatus(null), 5000);
+      } else {
+        setOverrideStatus({
+          type: 'error',
+          message: result.error || 'Echec ecrasement',
+        });
+      }
+    } catch (err) {
+      setOverrideStatus({ type: 'error', message: String(err) });
+    }
+  }, [sid, aid, currentBlocks, assembly, handleVersionUpdate]);
+
+  // Le status affiche : override (force-save en cours/fini) si présent,
+  // sinon le status autosave normal
+  const displayStatus = overrideStatus || autosaveStatus;
 
   return (
     <>
@@ -137,20 +177,46 @@ function BlockNoteContent({
           onChange={() => setCurrentBlocks(editor.document)}
         />
       </div>
-      <SaveStatusBar status={status} />
+      <SaveStatusBar
+        status={displayStatus}
+        onForceOverwrite={handleForceOverwrite}
+        onReload={() => window.location.reload()}
+      />
     </>
   );
 }
 
 /**
  * Barre d'état autosave (Notion-style "Sauvegardé il y a Xs").
+ *
+ * Audit v1.7.2 P1 #2 : sur status='conflict', expose 2 boutons :
+ * - 'Recharger' : revient à la version actuelle du serveur (perd les modifs locales)
+ * - 'Forcer écrasement' : envoie le PUT sans version_num_source (écrase serveur)
+ *
+ * Audit v1.7.2 P2 : setInterval 1Hz mis en pause si status idle/saved-vieux/error
+ * (économise 60 ticks/min en idle).
  */
-function SaveStatusBar({ status }: { status: SaveStatus }) {
+function SaveStatusBar({
+  status,
+  onForceOverwrite,
+  onReload,
+}: {
+  status: SaveStatus;
+  onForceOverwrite: () => void;
+  onReload: () => void;
+}) {
   const [now, setNow] = useState(Date.now());
+
+  // Le timer ne tourne QUE si on a besoin d'afficher un compteur live
+  const needsTicker =
+    status.type === 'pending' ||
+    (status.type === 'saved' && Date.now() - status.atTime < 60_000);
+
   useEffect(() => {
+    if (!needsTicker) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [needsTicker]);
 
   let label = '';
   let color = '#666';
@@ -175,7 +241,7 @@ function SaveStatusBar({ status }: { status: SaveStatus }) {
     label = `⚠ Erreur sauvegarde : ${status.message.slice(0, 80)}`;
     color = '#a50f15';
   } else if (status.type === 'conflict') {
-    label = `⚠ Conflit (v${status.currentVersionNum} vs v${status.sourceVersionNum}) — rechargez la page`;
+    label = `⚠ Conflit : l'assembly a été modifié ailleurs (serveur v${status.currentVersionNum}, vous v${status.sourceVersionNum})`;
     color = '#a50f15';
   }
 
@@ -188,9 +254,48 @@ function SaveStatusBar({ status }: { status: SaveStatus }) {
         fontSize: 12,
         color,
         fontWeight: 500,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
       }}
     >
-      {label}
+      <span style={{ flex: 1 }}>{label}</span>
+      {status.type === 'conflict' && (
+        <>
+          <button
+            type="button"
+            onClick={onReload}
+            style={{
+              padding: '4px 10px',
+              fontSize: 11,
+              border: '1px solid #0063cb',
+              background: '#fff',
+              color: '#0063cb',
+              borderRadius: 3,
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}
+          >
+            Recharger (perdre mes modifs)
+          </button>
+          <button
+            type="button"
+            onClick={onForceOverwrite}
+            style={{
+              padding: '4px 10px',
+              fontSize: 11,
+              border: '1px solid #a50f15',
+              background: '#a50f15',
+              color: '#fff',
+              borderRadius: 3,
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}
+          >
+            Forcer écrasement
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -293,7 +398,7 @@ function App() {
       >
         <span>D-QGIS-010 · BlockNote v0.22</span>
         <span>•</span>
-        <span>Vague E2 H2 (13 blocks + autosave 30s)</span>
+        <span>v1.7.2 audit-optims (13 blocks · autosave 30s · conflict resolver)</span>
         <span style={{ marginLeft: 'auto' }}>
           {assembly?.manifest?.layout?.sections?.length ?? 0} sections
         </span>

@@ -180,7 +180,9 @@ export async function saveBlocks(
   aid: string,
   blocks: any[],
   existingManifest: AssemblyManifest,
-  versionNumSource: number,
+  // Audit v1.7.2 P1 #2 : versionNumSource = null bypass concurrency check
+  // côté hub (utilisé pour 'Forcer écrasement' après conflit 409).
+  versionNumSource: number | null,
   // Audit fix v1.7.1 P0 #4 : reusableCids permet de récupérer des cid déjà
   // créés lors d'un essai précédent qui a échoué au PUT (évite composants
   // orphelins). Le caller (useAutosave) maintient cette ref entre essais.

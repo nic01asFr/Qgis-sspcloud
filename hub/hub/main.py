@@ -896,10 +896,39 @@ app.middleware("http")(auth.oidc_auth_middleware)
 # multi-stage (node:20-alpine -> hub/hub/static/blocknote-editor/).
 # Endpoint GET /editor/{sid}/assembly/{aid} retourne index.html.
 _BLOCKNOTE_STATIC_DIR = Path(__file__).parent / "static" / "blocknote-editor"
+
+# Audit v1.7.2 P1 #3 : wrapper StaticFiles qui pose Cache-Control selon
+# le nom de fichier. Les assets Vite ont un hash dans le nom (index-abc123.js)
+# donc immuables -> public, max-age=1y, immutable. index.html change a chaque
+# build sans hash -> no-cache pour invalider.
+import re as _re_static
+_VITE_HASHED_ASSET = _re_static.compile(r"-[a-zA-Z0-9_-]{8,}\.(js|css|woff2?|ttf|png|jpg|jpeg|gif|svg|webp)$")
+
+
+class _BlockNoteStaticFiles(StaticFiles):
+    """StaticFiles avec Cache-Control adapte au bundle Vite."""
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        try:
+            if response.status_code == 200:
+                if _VITE_HASHED_ASSET.search(path):
+                    response.headers["Cache-Control"] = (
+                        "public, max-age=31536000, immutable"
+                    )
+                else:
+                    response.headers["Cache-Control"] = (
+                        "no-cache, must-revalidate"
+                    )
+        except Exception:
+            pass
+        return response
+
+
 if _BLOCKNOTE_STATIC_DIR.exists():
     app.mount(
         "/static/blocknote-editor",
-        StaticFiles(directory=str(_BLOCKNOTE_STATIC_DIR)),
+        _BlockNoteStaticFiles(directory=str(_BLOCKNOTE_STATIC_DIR)),
         name="blocknote_editor_static",
     )
     log.info("BlockNote editor bundle mounted: %s", _BLOCKNOTE_STATIC_DIR)

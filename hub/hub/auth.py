@@ -820,6 +820,12 @@ _OIDC_MIDDLEWARE_PUBLIC = (
     # (assemblages publishables avec audience), accessible aux collegues
     # CEREMA via SSO ET aux tiers via lien direct. Pas d'OIDC requis.
     "/published",
+    # Audit v1.7.2 P1 #3 (D-QGIS-010) : bundle Vite BlockNote = JS/CSS pur
+    # statique, AUCUN secret. La page principale /editor/{sid}/assembly/{aid}
+    # reste protegee OIDC (elle sert l'index.html via FileResponse). Whitelist
+    # /static/blocknote-editor evite un round-trip JWT decode + JWKS fetch
+    # par asset (browser charge ~10 chunks Vite) -> perf + scaling.
+    "/static/blocknote-editor",
 )
 
 # Routes inter-pods : Bearer HUB_API_KEY = clé hub partagée entre hub et agent
