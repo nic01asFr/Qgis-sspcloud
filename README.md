@@ -3,9 +3,25 @@
 Service QGIS géospatial pour agents CEREMA sur SSPCloud Onyxia.  
 QGIS Desktop + Agent IA + Mémoire long terme.
 
+**État actuel** : Phase 4b LIVRÉ (2026-06-29) — pipeline E2E
+`load → scene_manifest → component → update_assembly → publish` validé
+avec 14 270 bâtiments BD TOPO Marseille 4e arr. Storymaps DSFR-inspirées
+opérationnelles avec audit_chain `integrity_hash` SHA256 + composants
+inline MapLibre + sources Strate-aligned. Vague A en cours
+(chart + data_table + helper rendu unifié + publish_component).
+
 > **Charte de fonctionnement de l'agent** (vision produit, principes,
 > roadmap, invariants) : voir [docs/CHARTE_AGENT.md](docs/CHARTE_AGENT.md).
 > Document évolutif à relire avant toute décision technique.
+
+> **Bilan session courante** : [BILAN_SESSION_2026_06_29.md](BILAN_SESSION_2026_06_29.md)
+>
+> **Décisions architecturales** : [docs/decisions/](docs/decisions/) (ADR)
+>
+> **Pipeline publication** : axe wikichat
+> [qgis-sspcloud-publication-flow-axis](~/.wikichat/knowledge/qgis-sspcloud-publication-flow-axis.md)
+> + [docs/scene-manifest-v0.2-contract.md](docs/scene-manifest-v0.2-contract.md)
+> (livrable pour Passerelle-Archi Lead #6 geoai-kit `applyManifestToMap`)
 
 ## Installation
 
