@@ -3082,7 +3082,7 @@ async def publish_agent_endpoint(
     1. Vérifier que kid appartient au user
     2. Récupérer metadata (profile, audience, scope)
     3. Résoudre composants/recipes/assemblies visibles depuis sid
-    4. Calculer audit_chain.signed_hash SHA256
+    4. Calculer audit_chain.integrity_hash SHA256 (D-FORMAT-008 ex-signed_hash)
     5. Générer URL widget (https://hub.../agent-share/{key_short})
     6. UPDATE scoped_keys (published_url, published_at, audit_chain_json)
 
@@ -3147,7 +3147,9 @@ async def publish_agent_endpoint(
         "has_restricted_components": has_restricted,
     }
     canonical = _json.dumps(audit_chain, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    audit_chain["signed_hash"] = "sha256:" + _hash.sha256(canonical.encode("utf-8")).hexdigest()
+    audit_chain["integrity_hash"] = "sha256:" + _hash.sha256(canonical.encode("utf-8")).hexdigest()
+    # Backward-compat legacy field (1 release de grâce, D-FORMAT-008)
+    audit_chain["signed_hash"] = audit_chain["integrity_hash"]
 
     # URL widget : page d'atterrissage côté hub (sert /chat-embed avec Bearer)
     key_short = kid.replace(auth._SCOPED_PREFIX, "")[:12]
@@ -3169,7 +3171,8 @@ async def publish_agent_endpoint(
         "published_url": published_url,
         "audience": audience,
         "audit_chain": {
-            "signed_hash": audit_chain["signed_hash"],
+            "integrity_hash": audit_chain["integrity_hash"],
+            "signed_hash": audit_chain["signed_hash"],  # legacy backward-compat D-FORMAT-008
             "components_visible_count": len(components_visible),
             "recipes_visible_count": len(recipes_visible),
             "assemblies_visible_count": len(assemblies_visible),
@@ -4527,7 +4530,9 @@ async def publish_assembly_endpoint(
         "published": published_url is not None,
         "published_url": published_url,
         "audit_chain": {
-            "signed_hash": chain_dict.get("signed_hash"),
+            # D-FORMAT-008 : integrity_hash + signed_hash legacy backward-compat
+            "integrity_hash": chain_dict.get("integrity_hash") or chain_dict.get("signed_hash"),
+            "signed_hash": chain_dict.get("integrity_hash") or chain_dict.get("signed_hash"),
             "components_refs": chain_dict.get("components_refs", []),
             "scene_hashes": chain_dict.get("scene_hashes", []),
             "recipes_used": chain_dict.get("recipes_used", []),

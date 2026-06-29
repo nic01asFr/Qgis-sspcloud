@@ -9,7 +9,8 @@
    - sections : assembly.layout.sections[] avec narrative_md + components refs/inline
    - rendered_components : dict {cid: html_content} pré-rendu par hub
                            (iframe-style intégration directe ou inline)
-   - audit_chain : dict AuditChain (signed_hash + components_refs + scene_hashes + sources)
+   - audit_chain : dict AuditChain (integrity_hash + components_refs + scene_hashes + sources)
+                  (legacy signed_hash accessible en backward-compat 1 release D-FORMAT-008)
    - footer : assembly.footer (sources, disclaimer, mentions DSFR)
 
    Pattern : 1 page HTML standalone, scrollytelling DSFR + composants
@@ -147,8 +148,8 @@ a:hover{color:var(--blue-france)}
     </div>
     <div class="dsfr-context">
       Audience : <strong>{{ assembly.audience|e }}</strong>
-      {% if audit_chain.signed_hash %}
-        · <code style="font-size:10px">{{ audit_chain.signed_hash[:23] }}…</code>
+      {% if (audit_chain.integrity_hash or audit_chain.signed_hash) %}
+        · <code style="font-size:10px">{{ (audit_chain.integrity_hash or audit_chain.signed_hash)[:23] }}…</code>
       {% endif %}
     </div>
   </div>
@@ -208,7 +209,7 @@ a:hover{color:var(--blue-france)}
       <div class="audit-chain-item">
         <div class="audit-chain-item-label">Signed Hash (SHA256)</div>
         <div class="audit-chain-item-value">
-          <code>{{ audit_chain.signed_hash[:30]|e }}…</code>
+          <code>{{ (audit_chain.integrity_hash or audit_chain.signed_hash)[:30]|e }}…</code>
         </div>
       </div>
       <div class="audit-chain-item">
@@ -232,7 +233,7 @@ a:hover{color:var(--blue-france)}
       Cette publication a été générée à partir de {{ audit_chain.components_refs|length }}
       composant{{ 's' if audit_chain.components_refs|length > 1 else '' }} et
       {{ audit_chain.scene_hashes|length }} Scene Manifest{{ 's' if audit_chain.scene_hashes|length > 1 else '' }}.
-      Le <code>signed_hash</code> SHA256 canonique permet de vérifier l'intégrité
+      Le <code>integrity_hash</code> SHA256 canonique permet de vérifier l'intégrité
       de la chaîne d'audit. Owner : <strong>{{ audit_chain.owner|e }}</strong>,
       généré le {{ audit_chain.created_at|e if audit_chain.created_at is string else audit_chain.created_at.isoformat() }}.
     </p>
@@ -266,8 +267,8 @@ a:hover{color:var(--blue-france)}
         <li>Recipes : {{ audit_chain.recipes_used|join(', ')|e }}</li>
         {% endif %}
         <li>Plateforme : <strong>QGIS Service CEREMA / SSPCloud</strong></li>
-        {% if audit_chain.signed_hash %}
-        <li><code style="font-size:10px">{{ audit_chain.signed_hash[:24]|e }}…</code></li>
+        {% if (audit_chain.integrity_hash or audit_chain.signed_hash) %}
+        <li><code style="font-size:10px">{{ (audit_chain.integrity_hash or audit_chain.signed_hash)[:24]|e }}…</code></li>
         {% endif %}
       </ul>
     </div>

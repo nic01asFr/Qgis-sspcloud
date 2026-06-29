@@ -210,16 +210,19 @@ async def build_audit_chain(
     2. Lookup scene_manifest_index → récupère scene_hash latest du projet
     3. Lookup recipes_index → récupère slugs des recipes ayant créé le composant
 
-    Agrège tout dans un AuditChain Pydantic + calcule signed_hash SHA256
-    canonique. C'est ce hash qui ancre la traçabilité tamper-evident.
+    Agrège tout dans un AuditChain Pydantic + calcule integrity_hash SHA256
+    canonique (D-FORMAT-008 rename, ex-signed_hash). C'est ce hash qui ancre
+    la traçabilité tamper-evident.
     """
     from hub import components as comp_mod
+
+    from hub.models.audit_chain import Source as AuditSource
 
     scene_hashes: list[str] = []
     components_refs: list[str] = []
     recipes_used: list[str] = []
     tool_calls_made: list[dict] = []
-    sources: list[dict] = []
+    sources: list[AuditSource] = []
 
     # Parcourir les sections + extraire refs composants
     for section in assembly.layout.sections:
@@ -255,7 +258,7 @@ async def build_audit_chain(
         sources=sources,
         created_at=datetime.utcnow(),
     )
-    chain.signed_hash = chain.compute_signed_hash()
+    chain.integrity_hash = chain.compute_integrity_hash()
     return chain
 
 
