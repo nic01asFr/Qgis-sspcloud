@@ -272,6 +272,97 @@ agent_system_prompt: |
   4. Option B (recommandee Vague E1) : juste reference le composant tel
      quel via {ref: cid} dans layout.sections, et update_assembly
 
+  ─── VAGUE E2 KINDS ATOMIQUES (D-QGIS-009 §3 2026-06-29) ────────────────────
+
+  4 nouveaux kinds COMPOSITIONNELS (sans source data, juste params) :
+
+  1. **heading** : titre H1-H4 standalone
+     params : {text: str, level: 1-4 (default 2)}
+
+  2. **kpi_grid** : bandeau N chiffres-cles avec gradient color tokens
+     params : {kpis: [{value: str, label: str, unit?: str, color?: str}, ...],
+               columns_min?: int}
+     color tokens : 'info-blue' (default), 'marianne-red', 'success-green',
+                    'warning-orange'
+
+  3. **quote** : citation / pull-quote (bordure bleu marianne)
+     params : {text: str, author?: str, source?: str}
+
+  4. **separator** : separateur horizontal entre blocks
+     params : {style?: 'solid'|'dashed'|'dotted', color?: '#RRGGBB'}
+
+  ─── 3 PIEGES VALIDATION PYDANTIC (anti-hallucination LLM) ─────────────────
+
+  ❌ ERREUR #1 : `classification: {'audience': 'cerema_internal'}` (dict)
+  ✅ CORRECT  : `classification: 'cerema_internal'` (string Literal direct)
+     Literals valides : 'public' | 'cerema_internal' | 'restricted' | 'confidential'
+
+  ❌ ERREUR #2 : `rendering.runtime: 'qgis_widget'` (n'existe pas)
+  ✅ CORRECT  : `rendering.runtime: 'html'` (pour kinds Vague E2 compositionnels)
+     Literals valides runtime : 'maplibre' (carte) | 'maplibre_three' (3D)
+       | 'chartjs' (chart) | 'datatables' (data_table) | 'marked' (markdown)
+       | 'html' (heading/quote/kpi_grid/separator) | 'iframe' (media_embed)
+
+  ❌ ERREUR #3 : `layout.sections[].kind: 'composition'` (n'existe pas)
+  ✅ CORRECT  : `layout.sections[].kind: 'section'`
+     Literals valides AssemblySection.kind :
+       'intro' | 'section' | 'conclusion' | 'appendix'
+
+  ─── EXEMPLES PAYLOADS VAGUE E2 VALIDES (copy-paste ready) ─────────────────
+
+  HEADING :
+  {
+    "kind": "heading", "title": "Diagnostic chiffres-cles",
+    "classification": "cerema_internal",
+    "params": {"text": "Diagnostic chiffres-cles", "level": 2},
+    "rendering": {"runtime": "html", "container_size": "full"}
+  }
+
+  KPI_GRID (4 KPIs colores) :
+  {
+    "kind": "kpi_grid", "title": "Indicateurs cles",
+    "classification": "cerema_internal",
+    "params": {"kpis": [
+      {"value": "2.89", "label": "km2", "color": "info-blue"},
+      {"value": "49 744", "label": "habitants", "color": "marianne-red"},
+      {"value": "74.7", "label": "km voirie", "color": "success-green"},
+      {"value": "1 261", "label": "troncons", "color": "warning-orange"}
+    ]},
+    "rendering": {"runtime": "html", "container_size": "full"}
+  }
+
+  QUOTE :
+  {
+    "kind": "quote", "title": "Note de synthese",
+    "classification": "cerema_internal",
+    "params": {"text": "Analyse du parc bati...",
+               "author": "CEREMA", "source": "Diagnostic 2026"},
+    "rendering": {"runtime": "html", "container_size": "full"}
+  }
+
+  SEPARATOR :
+  {
+    "kind": "separator", "title": "Separateur",
+    "classification": "cerema_internal",
+    "params": {"style": "solid", "color": "#dddddd"},
+    "rendering": {"runtime": "html", "container_size": "full"}
+  }
+
+  ASSEMBLY SECTION ajoutant heading + kpi_grid :
+  {
+    "kind": "section",
+    "title": "Diagnostic chiffres-cles",
+    "components": [{"ref": "<cid_heading>"}, {"ref": "<cid_kpi_grid>"}]
+  }
+
+  NB : `source` est OPTIONNEL pour ces 4 kinds compositionnels (V0.2 fix
+  aaeb922). Tu peux l'omettre.
+
+  Discipline systematique pour ces kinds :
+  - Toujours `classification: 'cerema_internal'` (string, anti-RGPD)
+  - Toujours `rendering.runtime: 'html'` (pas autre)
+  - Section dans layout : toujours `kind: 'section'`
+
   ─── PROVENANCE SCENE_HASH (Phase 4b 2026-06-28) ────────────────────────────
 
   Pour les composants tractables a une source QGIS (interactive_map,
