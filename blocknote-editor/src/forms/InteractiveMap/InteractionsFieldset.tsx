@@ -54,16 +54,16 @@ export function InteractionsFieldset({
       }}
     >
       <div style={{ marginBottom: 10 }}>
-        <strong style={{ fontSize: 12, color: '#000091' }}>INTERACTIONS</strong>
+        <strong style={{ fontSize: 12, color: '#000091' }}>BULLES D'INFO</strong>
       </div>
 
       {fieldOptions.length > 1 ? (
         <SelectField
-          label="Tooltip rapide au survol (1 attribut)"
+          label="Bulle rapide au survol"
           value={tooltip}
           onChange={(v) => onChange({ ...config, tooltip_field: v || undefined })}
           options={fieldOptions}
-          hint="Affiche immediatement au survol de la souris (style label leger)."
+          hint="Affiche au passage de la souris une petite info (par exemple le nom de la rue)."
         />
       ) : (
         <div
@@ -92,7 +92,7 @@ export function InteractionsFieldset({
               letterSpacing: 0.5,
             }}
           >
-            Attributs au hover etendu
+            Infos affichees au survol prolonge
           </label>
           <div
             style={{
@@ -143,13 +143,13 @@ export function InteractionsFieldset({
       )}
 
       <TextareaField
-        label="Popup au clic (template HTML)"
+        label="Details affiches au clic (avance - HTML)"
         value={config.popup_template || ''}
         onChange={(v) =>
           onChange({ ...config, popup_template: v || undefined })
         }
         rows={4}
-        hint="HTML avec placeholders {{ feature.properties.X }}. Escape par defaut. Vide = pas de popup au clic. Ex : '<strong>{{ feature.properties.adresse }}</strong><br>Risque : {{ feature.properties.risk_score }}'"
+        hint="Editeur visuel a venir. En attendant : HTML avec placeholders {{ feature.properties.X }}. Vide = pas de details au clic."
       />
     </div>
   );

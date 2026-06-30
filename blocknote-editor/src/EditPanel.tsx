@@ -79,7 +79,7 @@ const DOM_KIND_LABELS: Record<string, string> = {
   narrativeText: 'Texte narratif (markdown)',
   separator: 'Séparateur',
   // v1.12.0 : interactive_map devient editable (cle metier CEREMA)
-  interactiveMap: 'Carte interactive (map)',
+  interactiveMap: 'Carte interactive',
 };
 
 const IFRAME_KIND_LABELS: Record<string, string> = {
@@ -246,11 +246,7 @@ export function EditPanel({
             <div id="edit-panel-title" style={{ fontWeight: 600, fontSize: 14 }}>
               Modifier — {label}
             </div>
-            {cid && (
-              <div style={{ fontSize: 10, opacity: 0.8, marginTop: 2 }}>
-                cid : {cid.slice(0, 12)}
-              </div>
-            )}
+            {/* V1.13.5 F6 : cid debug retire (n'apporte rien a Marie persona) */}
           </div>
           <button
             type="button"
@@ -347,8 +343,9 @@ export function EditPanel({
           )}
           {status.type === 'conflict' && (
             <div style={{ fontSize: 12, color: '#a50f15' }}>
-              ⚠ Conflit (serveur v{status.current}, vous v{status.source}) —
-              fermez et rechargez la page
+              Cette carte a ete modifiee par quelqu'un d'autre entre-temps.
+              Rechargez la page pour voir la derniere version (vos modifications
+              en cours seront perdues).
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>

@@ -27,11 +27,11 @@ export type ClassificationConfig = {
 };
 
 const METHOD_OPTIONS = [
-  { value: 'jenks', label: 'Jenks natural breaks (defaut)' },
-  { value: 'quantile', label: 'Quantiles (egale population)' },
-  { value: 'equal_interval', label: 'Intervalles egaux' },
-  { value: 'manual', label: 'Breaks manuels (CSV)' },
-  { value: 'categorized', label: 'Categorise (valeurs discretes)' },
+  { value: 'jenks', label: 'Seuils naturels (recommande)' },
+  { value: 'quantile', label: 'Population egale' },
+  { value: 'equal_interval', label: 'Intervalles reguliers' },
+  { value: 'manual', label: 'Seuils sur mesure' },
+  { value: 'categorized', label: 'Valeurs discretes (categories)' },
 ];
 
 const PALETTE_OPTIONS = [

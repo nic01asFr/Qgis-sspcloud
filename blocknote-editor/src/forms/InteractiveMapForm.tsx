@@ -67,27 +67,8 @@ export function InteractiveMapForm({
 
   return (
     <>
-      <FieldSection title="Titre et description">
-        <TextField
-          label="Titre de la carte"
-          value={data.title || ''}
-          onChange={(v) => onChange({ ...data, title: v })}
-          placeholder="Batiments BD TOPO 4e arrondissement"
-        />
-        <TextField
-          label="Sous-titre (optionnel)"
-          value={data.subtitle || ''}
-          onChange={(v) => onChange({ ...data, subtitle: v })}
-          placeholder="14 270 batiments — couche IGN"
-        />
-        <TextareaField
-          label="Description / contexte"
-          value={data.description || ''}
-          onChange={(v) => onChange({ ...data, description: v })}
-          rows={3}
-          hint="Affiche au-dessus de la carte. Decrit ce que la carte represente."
-        />
-      </FieldSection>
+      {/* V1.13.5 Sprint 1.5 F7 : reordonner sections selon logique metier Marie
+          (Zone → Couches → Apparence → Titre → Sources, vs V1.13 ordre Pydantic) */}
 
       <ZoneFieldset
         zone={zone}
@@ -107,7 +88,7 @@ export function InteractiveMapForm({
           value={data.basemap_id || 'osm'}
           onChange={(v) => onChange({ ...data, basemap_id: v })}
           options={BASEMAP_OPTIONS}
-          hint="Le fond influence fortement la lisibilite metier. Plan IGN v2 = officiel francais, OSM = repere universel, DSFR sobre = focus sur les donnees metier."
+          hint="Le fond influence la lisibilite metier. Plan IGN v2 = officiel francais, OSM = repere universel, DSFR sobre = focus sur les donnees metier."
         />
         <NumberField
           label="Hauteur (px)"
@@ -120,7 +101,29 @@ export function InteractiveMapForm({
         />
       </FieldSection>
 
-      <FieldSection title="Credibilite (Source + Caveat)">
+      <FieldSection title="Titre et description">
+        <TextField
+          label="Titre de la carte"
+          value={data.title || ''}
+          onChange={(v) => onChange({ ...data, title: v })}
+          placeholder="Batiments BD TOPO 4e arrondissement"
+        />
+        <TextField
+          label="Sous-titre (optionnel)"
+          value={data.subtitle || ''}
+          onChange={(v) => onChange({ ...data, subtitle: v })}
+          placeholder="14 270 batiments — couche IGN"
+        />
+        <TextareaField
+          label="Description / contexte"
+          value={data.description || ''}
+          onChange={(v) => onChange({ ...data, description: v })}
+          rows={3}
+          hint="Affichee au-dessus de la carte. Decrit ce que la carte represente."
+        />
+      </FieldSection>
+
+      <FieldSection title="Source et avertissement">
         <DatasourceAutocomplete
           datasourceId={data.datasource_id || undefined}
           sourceFreeText={data.source || ''}
@@ -128,7 +131,7 @@ export function InteractiveMapForm({
           onChangeSource={(v) => onChange({ ...data, source: v })}
         />
         <TextareaField
-          label="Caveat / mention prudence (optionnel)"
+          label="Avertissement / mention prudence (optionnel)"
           value={data.caveat || ''}
           onChange={(v) => onChange({ ...data, caveat: v })}
           rows={2}
@@ -136,25 +139,8 @@ export function InteractiveMapForm({
         />
       </FieldSection>
 
-      <FieldSection title="Avance">
-        <div
-          style={{
-            padding: 12,
-            background: '#fff5e6',
-            border: '1px solid #ffcb8c',
-            borderRadius: 6,
-            fontSize: 12,
-            color: '#7a4400',
-            lineHeight: 1.5,
-          }}
-        >
-          <strong>Symbologie et interactions par layer :</strong> editables en
-          Sprint 1 V1.13 P0b-2 (a venir). Pour modifier la palette ColorBrewer,
-          la methode de classification (Jenks/quantile) ou les popups au clic,
-          demande a l'agent IA via chat ou utilise la modal "Metadonnees" (mode
-          JSON expert). Edition complete : Sprint 1 V1.13 P0b-2.
-        </div>
-      </FieldSection>
+      {/* V1.13.5 F1 : section "Avance" SUPPRIMEE (etait desinformante, annoncait
+          comme "a venir" des features deja livrees en P0b-2). */}
     </>
   );
 }

@@ -48,7 +48,9 @@ export function ZoneFieldset({
   zone: ZoneConfig;
   onChange: (z: ZoneConfig) => void;
 }) {
-  const kind: ZoneKind = zone?.kind || 'manual';
+  // V1.13.5 F3 : defaut "study" (heritage etude active) au lieu de "manual"
+  // Marie ne devrait pas avoir a saisir des coordonnees par defaut.
+  const kind: ZoneKind = zone?.kind || 'study';
 
   return (
     <FieldSection title="Zone d'etude">

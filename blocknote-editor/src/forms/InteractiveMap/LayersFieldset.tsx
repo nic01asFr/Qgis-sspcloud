@@ -133,14 +133,38 @@ export function LayersFieldset({
     if (!sid || !cid) return;
     setLoading(true);
     setError(null);
-    fetchSourceLayers(sid, cid)
-      .then((res) => setLayers(res.layers))
-      .catch((e) => setError(String(e?.message || e)))
-      .finally(() => setLoading(false));
+    // Sprint 1.5 V1.13.5 F2 : AbortController pour eviter race condition
+    // (bug trouve test user Marie : erreur rouge stale affichee meme apres
+    // fetch successful d'un re-mount sid/cid).
+    const ctrl = new AbortController();
+    fetch(`/studies/${sid}/components/${cid}/source_layers`, {
+      credentials: 'include',
+      signal: ctrl.signal,
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(`source_layers ${r.status}`);
+        return r.json();
+      })
+      .then((res) => {
+        if (ctrl.signal.aborted) return;
+        setLayers(res.layers);
+        setError(null);
+      })
+      .catch((e) => {
+        if (ctrl.signal.aborted) return;
+        // F2 : seulement set error si pas d'AbortError
+        if (e?.name !== 'AbortError') {
+          setError(String(e?.message || e));
+        }
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setLoading(false);
+      });
+    return () => ctrl.abort();
   }, [sid, cid]);
 
   return (
-    <FieldSection title={`Layers ${layers ? `(${layers.length})` : ''}`}>
+    <FieldSection title={`Couches ${layers ? `(${layers.length})` : ''}`}>
       {loading && (
         <div style={{ fontSize: 12, color: '#666' }}>
           Chargement des layers du scene_manifest...
@@ -158,15 +182,15 @@ export function LayersFieldset({
             color: '#a01010',
           }}
         >
-          Impossible de lire les layers : {error}. Verifie que le composant
-          a bien une <code>source.scene_hash</code> defini (sinon, demande
-          a l'agent IA de regenerer la carte).
+          Impossible de lire les couches. La carte sera quand meme affichee,
+          mais sans personnalisation possible des couches. Tu peux demander
+          a l'assistant CEREMA de regenerer cette carte.
         </div>
       )}
 
       {layers && layers.length === 0 && (
         <div style={{ fontSize: 12, color: '#666', fontStyle: 'italic' }}>
-          Aucun layer dans le scene_manifest. Utilise l'agent IA pour ajouter
+          Aucune couche disponible. Utilise l'assistant CEREMA pour ajouter
           des couches au projet QGIS sous-jacent.
         </div>
       )}
@@ -181,9 +205,8 @@ export function LayersFieldset({
               fontStyle: 'italic',
             }}
           >
-            Les layers viennent du scene_manifest (QGIS / agent IA). Tu peux
-            override la visibilite, l'opacite et le nom affiche en legende.
-            Ajouter/supprimer des layers se fait dans QGIS ou via l'agent IA.
+            Les couches viennent de QGIS. Tu peux personnaliser leur visibilite,
+            leur opacite et leur nom dans la legende.
           </div>
 
           {layers.map((layer) => {
@@ -201,7 +224,7 @@ export function LayersFieldset({
                     {ov.name_override || layer.name}
                   </strong>
                   {layer.n_features != null && (
-                    <span style={{ fontSize: 11, color: '#888' }}>
+                    <span style={{ fontSize: 11, color: '#666' }}>
                       {layer.n_features.toLocaleString('fr-FR')} objets
                     </span>
                   )}
@@ -238,7 +261,7 @@ export function LayersFieldset({
                 />
 
                 <TextField
-                  label="Nom override (legende)"
+                  label="Nom dans la legende"
                   value={ov.name_override || ''}
                   onChange={(v) =>
                     onChange(
@@ -248,7 +271,7 @@ export function LayersFieldset({
                     )
                   }
                   placeholder={layer.name}
-                  hint={`ID : ${layer.id} (immuable). Le name override apparait dans la legende.`}
+                  hint="Ce nom apparaitra dans la legende affichee sur la carte."
                 />
 
                 {/* V1.13 P0b-2 : Symbology per-layer */}
@@ -290,6 +313,53 @@ export function LayersFieldset({
               </div>
             );
           })}
+
+          {/* V1.13.5 F8 : escape hatch smart escalation — bouton "+ Ajouter une
+              couche" qui pre-remplit l'assistant IA contextuel. Pattern Notion :
+              Marie ne navigue pas un menu, elle clique une action. */}
+          <button
+            type="button"
+            onClick={() => {
+              const fn = (window as any).__openAssistantWithPrompt;
+              if (typeof fn === 'function') {
+                fn('Je voudrais ajouter une couche supplementaire a cette carte.');
+              } else {
+                // Fallback : pas d'assistant IA disponible (V1.13.5),
+                // afficher message d'aide
+                alert(
+                  "Pour ajouter une couche, demande a l'assistant CEREMA dans " +
+                  "le chat (icone bulle en bas a droite). Decris la couche " +
+                  "souhaitee (par exemple : 'ajoute le perimetre TRI inondation')."
+                );
+              }
+            }}
+            style={{
+              width: '100%',
+              padding: '10px 14px',
+              marginTop: 8,
+              fontSize: 13,
+              background: '#fff',
+              border: '1px dashed #000091',
+              borderRadius: 4,
+              color: '#000091',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              fontWeight: 500,
+            }}
+          >
+            + Ajouter une couche
+          </button>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#666',
+              marginTop: 4,
+              fontStyle: 'italic',
+            }}
+          >
+            L'assistant CEREMA t'aidera a charger une nouvelle couche depuis
+            les referentiels (BD TOPO, TRI, etc.).
+          </div>
         </>
       )}
     </FieldSection>
