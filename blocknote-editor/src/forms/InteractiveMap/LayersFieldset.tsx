@@ -19,6 +19,8 @@
  */
 import { useEffect, useState } from 'react';
 import { TextField, NumberField, FieldSection } from '../fields';
+import { SymbologyFieldset, type ClassificationConfig } from './SymbologyFieldset';
+import { InteractionsFieldset, type InteractionsConfig } from './InteractionsFieldset';
 
 export type SourceLayer = {
   id: string;
@@ -34,6 +36,11 @@ export type LayerOverride = {
   opacity?: number;
   name_override?: string;
   z_index?: number;
+  // V1.13 P0b-2 : Symbology + Interactions per-layer
+  classification?: ClassificationConfig;
+  tooltip_field?: string;
+  hover_attributes?: string[];
+  popup_template?: string;
 };
 
 function fetchSourceLayers(
@@ -242,6 +249,43 @@ export function LayersFieldset({
                   }
                   placeholder={layer.name}
                   hint={`ID : ${layer.id} (immuable). Le name override apparait dans la legende.`}
+                />
+
+                {/* V1.13 P0b-2 : Symbology per-layer */}
+                <SymbologyFieldset
+                  classif={ov.classification}
+                  propertiesKeys={layer.properties_keys}
+                  onChange={(c) =>
+                    onChange(
+                      applyOverride(layersOverride, layer.id, { classification: c }),
+                    )
+                  }
+                  onRemove={() =>
+                    onChange(
+                      applyOverride(layersOverride, layer.id, {
+                        classification: undefined,
+                      }),
+                    )
+                  }
+                />
+
+                {/* V1.13 P0b-2 : Interactions per-layer */}
+                <InteractionsFieldset
+                  config={{
+                    tooltip_field: ov.tooltip_field,
+                    hover_attributes: ov.hover_attributes,
+                    popup_template: ov.popup_template,
+                  }}
+                  propertiesKeys={layer.properties_keys}
+                  onChange={(c) =>
+                    onChange(
+                      applyOverride(layersOverride, layer.id, {
+                        tooltip_field: c.tooltip_field,
+                        hover_attributes: c.hover_attributes,
+                        popup_template: c.popup_template,
+                      }),
+                    )
+                  }
                 />
               </div>
             );

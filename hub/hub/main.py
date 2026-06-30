@@ -4796,7 +4796,7 @@ async def _build_interactive_map_ctx(
                         except Exception as _e:
                             log.warning("read scene_layer %s : %s", lid, _e)
                     if geojson:
-                        geo_layers.append({
+                        layer_dict = {
                             "id": lid,
                             # V1.13 P0b-1 : name_override prioritaire si defini
                             "name": override.get("name_override") or l.get("name", lid),
@@ -4807,7 +4807,18 @@ async def _build_interactive_map_ctx(
                             # V1.13 P0b-1 : opacity propagee au paint MapLibre
                             "opacity": float(override.get("opacity", 1.0)) if override else 1.0,
                             "z_index": override.get("z_index") if override else None,
-                        })
+                        }
+                        # V1.13 P0b-2 : classification per-layer (vs global V1.12)
+                        if override.get("classification"):
+                            layer_dict["classification_override"] = override["classification"]
+                        # V1.13 P0b-2 : interactions per-layer
+                        if override.get("popup_template"):
+                            layer_dict["popup_template"] = override["popup_template"]
+                        if override.get("tooltip_field"):
+                            layer_dict["tooltip_field"] = override["tooltip_field"]
+                        if override.get("hover_attributes"):
+                            layer_dict["hover_attributes"] = override["hover_attributes"]
+                        geo_layers.append(layer_dict)
                 if geo_layers:
                     total = sum(l.get("n_features", 0) for l in geo_layers)
                     bbox_text = f" — {len(geo_layers)} couche{'s' if len(geo_layers) > 1 else ''} · {total} objets"
@@ -4824,22 +4835,41 @@ async def _build_interactive_map_ctx(
         map_layers_js = _json2.dumps(filtered)
 
     # ── Vague E2 Commit 5 (D-QGIS-009 §5) — Symbologie thematique ──
-    # Si params.classification ou layer.classification defini, calculer
-    # les breaks/colors/paint_expression et enrichir chaque layer avec
-    # son helper de classification ready-to-inline en MapLibre.
+    # Si params.classification (global V1.12) ou layer.classification_override
+    # (per-layer V1.13 P0b-2) defini, calculer les breaks/colors/paint_expression
+    # et enrichir chaque layer avec son helper de classification ready-to-inline
+    # en MapLibre. Per-layer prioritaire sur global.
     classification_param = params.get("classification") or {}
-    if classification_param:
-        try:
-            from hub.carto_classification import compute_classification
-            layers_data = _json2.loads(map_layers_js)
-            for layer_obj in layers_data:
-                features = (layer_obj.get("geojson") or {}).get("features") or []
-                if features:
+    try:
+        from hub.carto_classification import compute_classification
+        layers_data = _json2.loads(map_layers_js)
+        had_per_layer = False
+        for layer_obj in layers_data:
+            features = (layer_obj.get("geojson") or {}).get("features") or []
+            if not features:
+                continue
+            # V1.13 P0b-2 : classification_override per-layer prioritaire
+            per_layer_classif = layer_obj.pop("classification_override", None)
+            if per_layer_classif:
+                had_per_layer = True
+                try:
+                    classif = compute_classification(features, per_layer_classif)
+                    layer_obj["classification"] = classif
+                except Exception as exc:
+                    log.warning("Classification per-layer %s/%s : %s",
+                                cid, layer_obj.get("id"), exc)
+            elif classification_param:
+                # V1.12 legacy : classification globale s'applique a tous
+                # les layers qui n'ont pas d'override.
+                try:
                     classif = compute_classification(features, classification_param)
                     layer_obj["classification"] = classif
+                except Exception as exc:
+                    log.warning("Classification globale %s : %s", cid, exc)
+        if had_per_layer or classification_param:
             map_layers_js = _json2.dumps(layers_data)
-        except Exception as exc:
-            log.warning("Classification thematique %s : %s", cid, exc)
+    except Exception as exc:
+        log.warning("Classification thematique %s : %s", cid, exc)
 
     # ── Vague E2 Commit 4 (D-QGIS-009 §4) — Trio cartographe metier ──
     # Une carte CEREMA exploitable en COPIL a TOUJOURS : Titre + Legende +
