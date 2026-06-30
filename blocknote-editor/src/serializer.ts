@@ -187,7 +187,13 @@ export async function assemblyToBlockNoteDoc(
 
       const blockData: any = { type: blockType, props };
       if (inlineContent !== null) {
-        blockData.content = inlineContent;
+        // v1.12.1 fix : BlockNote v0.22 attend un ARRAY d'inline content nodes
+        // (string brut ne se rend pas dans le block content:'inline').
+        // Convertir string -> [{type:'text', text:'...', styles:{}}]
+        const text = String(inlineContent);
+        blockData.content = text
+          ? [{ type: 'text', text, styles: {} }]
+          : [];
       }
       blocks.push(blockData);
     }

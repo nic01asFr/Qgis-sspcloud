@@ -166,7 +166,12 @@ class TestSprint6_Coherence:
         pkg = REPO_ROOT / "blocknote-editor" / "package.json"
         if not pkg.exists():
             pytest.skip()
-        assert '"version": "1.12.0"' in pkg.read_text(encoding="utf-8")
+        content = pkg.read_text(encoding="utf-8")
+        import re
+        m = re.search(r'"version":\s*"(\d+)\.(\d+)\.(\d+)"', content)
+        assert m
+        major, minor, patch = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        assert (major, minor, patch) >= (1, 12, 0), f"v{major}.{minor}.{patch} < 1.12.0"
 
     def test_no_regression_imports(self):
         from hub.main import _build_interactive_map_ctx, update_component_endpoint

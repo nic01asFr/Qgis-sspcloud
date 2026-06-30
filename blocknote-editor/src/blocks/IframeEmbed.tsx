@@ -20,6 +20,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
+import { openEditPanel } from './edit-handler';
 
 /**
  * Component React partagé : iframe vers /studies/{sid}/components/{cid}/render
@@ -34,31 +35,27 @@ function ComponentIframe({
   cid,
   defaultHeight = 520,
   fallbackText,
+  block,
+  editable = false,
 }: {
   sid: string;
   cid: string;
   defaultHeight?: number;
   fallbackText?: string;
+  // v1.12.1 : si block fourni + editable=true, afficher bouton flottant
+  // "Modifier" au hover (l'iframe capture les clics, donc bouton overlay
+  // necessaire pour acceder au drawer Edit Panel).
+  block?: any;
+  editable?: boolean;
 }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(defaultHeight);
-
+  // v1.12.1 : utiliser defaultHeight comme hauteur fixe (vs postMessage
+  // auto-resize qui causait scroll vertical interne quand iframe content
+  // depasse). La hauteur est maintenant config par l'user via le drawer.
   useEffect(() => {
-    const handler = (e: MessageEvent) => {
-      if (
-        e.data &&
-        typeof e.data === 'object' &&
-        e.data.type === 'ready' &&
-        typeof e.data.height === 'number' &&
-        ref.current &&
-        e.source === ref.current.contentWindow
-      ) {
-        setHeight(Math.max(200, Math.min(1200, e.data.height)));
-      }
-    };
-    window.addEventListener('message', handler);
-    return () => window.removeEventListener('message', handler);
-  }, []);
+    setHeight(defaultHeight);
+  }, [defaultHeight]);
 
   if (!sid || !cid) {
     return (
@@ -79,12 +76,14 @@ function ComponentIframe({
 
   return (
     <div
+      className="qgis-iframe-wrapper"
       style={{
         margin: '12px 0',
         border: '1px solid #e5e5e5',
         borderRadius: 6,
         overflow: 'hidden',
-        width: '100%', // v1.7.3 fix : parent BlockNote ne propage pas width:100%
+        width: '100%',
+        position: 'relative',
       }}
     >
       <iframe
@@ -98,6 +97,39 @@ function ComponentIframe({
         }}
         title={`Component ${cid}`}
       />
+      {/* v1.12.1 : bouton flottant 'Modifier' visible au hover du wrapper.
+          L'iframe MapLibre capture les clics pour zoom/pan, donc on ne peut
+          PAS poser onClick sur le wrapper (passerait pas a l'utilisateur).
+          Solution UX : bouton en overlay top-right qui ouvre le drawer. */}
+      {editable && block && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            openEditPanel(block as any, e.nativeEvent);
+          }}
+          className="qgis-iframe-edit-btn"
+          style={{
+            position: 'absolute',
+            top: 10,
+            right: 10,
+            background: '#000091',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 4,
+            padding: '6px 12px',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+            zIndex: 10,
+            fontFamily: 'Marianne, system-ui, sans-serif',
+          }}
+          title="Modifier les paramètres de la carte"
+        >
+          ⚙ Modifier
+        </button>
+      )}
     </div>
   );
 }
@@ -144,6 +176,8 @@ export const InteractiveMapBlock = createReactBlockSpec(
           sid={String(block.props.sid) || getSidFromUrl()}
           cid={String(block.props.cid)}
           defaultHeight={height}
+          block={block}
+          editable={true}
         />
       );
     },
