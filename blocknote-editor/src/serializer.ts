@@ -119,20 +119,17 @@ export async function assemblyToBlockNoteDoc(
 
       const params = (component.params || {}) as Record<string, any>;
       const props: Record<string, any> = { cid: compRef.ref };
-      // v1.11 Phase A : content inline pour les 3 blocks texte (vs props.text)
-      let inlineContent: any = null;
 
       switch (component.kind) {
-        // ── DOM blocks ──
+        // ── DOM blocks (v1.12.4 rollback : tous via props, pas inline) ──
         case 'kpi_grid':
           props.kpisJson = JSON.stringify(params.kpis || []);
           props.palette = params.palette || 'monochrome';
           props.columnsMin = params.columns_min || 140;
           break;
         case 'heading':
-          // v1.11 : level reste en prop, text passe en content inline
           props.level = params.level || 2;
-          inlineContent = params.text || component.title || '';
+          props.text = params.text || component.title || '';
           break;
         case 'kpi_badge':
           props.value = String(params.value || '');
@@ -142,10 +139,9 @@ export async function assemblyToBlockNoteDoc(
           props.source = params.source || '';
           break;
         case 'quote':
-          // v1.11 : text passe en content inline, author/source restent en props
+          props.text = params.text || '';
           props.author = params.author || '';
           props.source = params.source || '';
-          inlineContent = params.text || '';
           break;
         case 'separator':
           props.style = params.style || 'solid';
@@ -158,8 +154,7 @@ export async function assemblyToBlockNoteDoc(
           props.source = params.source || '';
           break;
         case 'narrative_text':
-          // v1.11 : content passe en inline editable
-          inlineContent = params.content || params.markdown || params.text || '';
+          props.content = params.content || params.markdown || params.text || '';
           break;
         // ── Iframe blocks ──
         case 'interactive_map':
@@ -185,17 +180,7 @@ export async function assemblyToBlockNoteDoc(
           break;
       }
 
-      const blockData: any = { type: blockType, props };
-      if (inlineContent !== null) {
-        // v1.12.1 fix : BlockNote v0.22 attend un ARRAY d'inline content nodes
-        // (string brut ne se rend pas dans le block content:'inline').
-        // Convertir string -> [{type:'text', text:'...', styles:{}}]
-        const text = String(inlineContent);
-        blockData.content = text
-          ? [{ type: 'text', text, styles: {} }]
-          : [];
-      }
-      blocks.push(blockData);
+      blocks.push({ type: blockType, props });
     }
   }
 

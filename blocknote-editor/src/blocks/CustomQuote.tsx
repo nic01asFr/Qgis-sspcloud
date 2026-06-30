@@ -1,8 +1,6 @@
 /**
- * CustomQuote - INLINE editable (v1.12.3 fix definitif).
- *
- * Pattern : <div ref={contentRef}> root direct + footer attribution sibling
- * contentEditable=false (pas de blockquote pour eviter incompatibilite ref).
+ * CustomQuote - rollback v1.10 pattern (v1.12.4).
+ * Voir CustomHeading.tsx pour explication rollback.
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
@@ -14,23 +12,20 @@ export const CustomQuoteBlock = createReactBlockSpec(
     propSchema: {
       ...defaultProps,
       cid: { default: '' },
+      text: { default: '' },
       author: { default: '' },
       source: { default: '' },
     },
-    content: 'inline' as const,
+    content: 'none' as const,
   },
   {
-    render: ({ block, contentRef }) => {
-      const { author, source } = block.props;
+    render: ({ block }) => {
+      const { text, author, source } = block.props;
       const hasAttribution = author || source;
       const parts = [author, source].filter(Boolean).join(' · ');
       return (
-        <div
-          ref={contentRef}
-          onContextMenu={(e: any) => {
-            e.preventDefault();
-            openEditPanel(block as any);
-          }}
+        <blockquote
+          onClick={(e) => { e.stopPropagation(); openEditPanel(block as any, e.nativeEvent); }}
           style={{
             borderLeft: '4px solid #000091',
             padding: '12px 18px',
@@ -40,29 +35,23 @@ export const CustomQuoteBlock = createReactBlockSpec(
             color: '#1a1a1a',
             fontSize: 16,
             lineHeight: 1.6,
-            outline: 'none',
-            position: 'relative',
+            cursor: 'pointer',
           }}
         >
-          {/* Footer attribution rendu via CSS pseudo-element ou positionne en sticky bottom
-              pour ne pas interferer avec l'inline editing du contenu principal */}
+          {String(text || '')}
           {hasAttribution && (
-            <span
-              contentEditable={false}
-              suppressContentEditableWarning
+            <footer
               style={{
-                display: 'block',
                 marginTop: 8,
                 fontSize: 13,
                 color: '#666',
                 fontStyle: 'normal',
-                userSelect: 'none',
               }}
             >
               — {parts}
-            </span>
+            </footer>
           )}
-        </div>
+        </blockquote>
       );
     },
   },

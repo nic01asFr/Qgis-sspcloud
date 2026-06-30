@@ -137,22 +137,22 @@ class TestBlocksClickHandlers:
         assert "onClick" in content
         assert "stopPropagation" in content
 
-    # v1.11 : 3 blocks utilisent onContextMenu (right-click) car editables inline
+    # v1.12.4 ROLLBACK : 3 blocks texte retour pattern onClick (vs onContextMenu v1.11)
+    # car inline editing BlockNote NodeView ne fonctionne pas correctement
     @pytest.mark.parametrize("block_file", [
         "blocks/CustomHeading.tsx",
         "blocks/CustomQuote.tsx",
         "blocks/NarrativeText.tsx",
     ])
-    def test_inline_block_uses_contextmenu(self, block_file):
+    def test_text_block_uses_onclick_drawer(self, block_file):
         content = _read_blocknote_file(block_file)
         if content is None:
             pytest.skip("blocknote-editor absent")
         assert "openEditPanel" in content
         assert "edit-handler" in content
-        # v1.11 : right-click ouvre le menu options (vs onClick simple)
-        assert "onContextMenu" in content
-        # Et content: 'inline' (vs 'none' v1.10)
-        assert "content: 'inline'" in content
+        # v1.12.4 rollback : onClick + content:'none' (vs onContextMenu + 'inline')
+        assert "onClick" in content
+        assert "content: 'none'" in content
 
     def test_edit_handler_helper_exists(self):
         content = _read_blocknote_file("blocks/edit-handler.ts")

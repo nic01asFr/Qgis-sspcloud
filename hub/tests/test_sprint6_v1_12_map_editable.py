@@ -23,20 +23,19 @@ def _read(rel: str) -> str | None:
 
 
 class TestBugFix_CustomHeadingContentRef:
-    """v1.12.2 fix : contentRef DIRECTEMENT sur l'element HTML (h1/h2/h3/h4)
-    via switch level explicite. BlockNote v0.22 pose data-node-view-content
-    sur le ref'd element directement, pas sur des span/div child."""
+    """v1.12.4 ROLLBACK : 3 tentatives inline editing ont echoue (BlockNote
+    NodeView React ne propage pas contentRef sur custom blocks). Retour au
+    pattern v1.10 : content:'none' + props.text + drawer Edit Panel."""
 
-    def test_custom_heading_ref_on_html_element_direct(self):
+    def test_custom_heading_content_none_with_props_text(self):
         content = _read("blocks/CustomHeading.tsx")
         if content is None:
             pytest.skip()
-        # v1.12.3 : utiliser <div ref={contentRef}> + role/aria-level
-        # (HTMLHeadingElement incompatible avec ref typing BlockNote).
-        # Pattern semantique : role="heading" aria-level={level}
-        assert 'ref={contentRef}' in content
-        assert 'role="heading"' in content
-        assert 'aria-level={level}' in content
+        # v1.12.4 rollback : content:'none' + props.text (vs inline)
+        assert "content: 'none'" in content
+        assert "text: { default: '' }" in content
+        # Edit via drawer onClick (vs caret inline)
+        assert "openEditPanel" in content
 
 
 class TestInteractiveMapForm:

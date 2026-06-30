@@ -26,58 +26,42 @@ def _read(rel: str) -> str | None:
     return p.read_text(encoding="utf-8")
 
 
-class TestPhaseA_InlineEditing:
-    """3 blocks texte passent en content:'inline' editable."""
+class TestPhaseA_InlineEditing_Rollback:
+    """v1.12.4 ROLLBACK Phase A : retour pattern content:'none' + props.text
+    pour les 3 blocks texte. BlockNote v0.22 NodeView React ne propage pas
+    correctement le contentRef sur les custom blocks (3 tentatives echec).
+
+    Marie utilise le drawer Edit Panel pour modifier (click sur le block).
+    Au moins le texte s'AFFICHE correctement (vs 'textes vides' v1.11/v1.12.x).
+    """
 
     @pytest.mark.parametrize("block_file", [
         "blocks/CustomHeading.tsx",
         "blocks/CustomQuote.tsx",
         "blocks/NarrativeText.tsx",
     ])
-    def test_block_uses_inline_content(self, block_file):
+    def test_block_uses_content_none(self, block_file):
         content = _read(block_file)
         if content is None:
             pytest.skip()
-        # content: 'inline' (vs 'none' v1.10)
-        assert "content: 'inline'" in content
-        # contentRef doit etre utilise pour expose le slot editable
-        assert "contentRef" in content
+        # v1.12.4 : retour a content:'none' (v1.10 pattern)
+        assert "content: 'none'" in content
 
-    def test_custom_heading_keeps_level_prop(self):
-        """customHeading garde props.level pour H1-H4."""
+    def test_custom_heading_keeps_level_text_props(self):
         content = _read("blocks/CustomHeading.tsx")
         if content is None:
             pytest.skip()
-        # propSchema garde level + cid (mais retire text qui vient maintenant de content)
+        # propSchema avec level + text (rollback v1.10)
         assert "level: { default: 2 }" in content
-        assert "cid: { default: '' }" in content
+        assert "text: { default: '' }" in content
 
-    def test_custom_quote_keeps_author_source_props(self):
-        """customQuote garde props.author + props.source pour attribution."""
-        content = _read("blocks/CustomQuote.tsx")
-        if content is None:
-            pytest.skip()
-        assert "author: { default: '' }" in content
-        assert "source: { default: '' }" in content
-
-    def test_serializer_pushes_text_to_inline_content(self):
-        """Forward Assembly -> BlockNote pousse params.text dans content (vs props)."""
+    def test_serializer_pushes_text_to_props(self):
+        """Forward Assembly -> BlockNote pousse params.text dans block.props.text."""
         content = _read("serializer.ts")
         if content is None:
             pytest.skip()
-        # Variable inlineContent utilisee pour transporter le text
-        assert "inlineContent" in content
-        # Pour heading/quote/narrative_text, inlineContent recoit params.text
-        assert "inlineContent = params.text" in content
-
-    def test_autosave_reads_text_from_block_content(self):
-        """Backward BlockNote -> Assembly lit block.content pour 3 kinds inline."""
-        content = _read("autosave.ts")
-        if content is None:
-            pytest.skip()
-        # inlineText extrait de block.content via blockTextContent
-        assert "inlineText" in content
-        assert "blockTextContent(block.content)" in content
+        # Apres rollback : props.text = params.text || component.title
+        assert "props.text = params.text" in content
 
 
 class TestPhaseB_PopupCompact:
@@ -149,17 +133,14 @@ class TestPhaseD_AssemblyTitle:
 
 
 class TestPhaseE_HoverHints:
-    """CSS differencie INLINE (cursor text) vs POPUP/DRAWER (cursor pointer + tooltip)."""
+    """CSS hover hints actifs pour blocks editables (v1.12.4 : tous via drawer)."""
 
-    def test_inline_blocks_have_text_cursor(self):
+    def test_blocks_have_hover_outline(self):
         css = _read("editor-layout.css")
         if css is None:
             pytest.skip()
-        # Les 3 inline blocks ont cursor: text
-        # On verifie via presence du selector groupant les 3 avec cursor text
+        # Apres rollback : tous les blocks editables sont en pattern drawer
         assert 'data-content-type="customHeading"' in css
-        # Cursor text quelque part dans le CSS pour ces blocks
-        assert "cursor: text" in css
 
     def test_popup_drawer_blocks_have_pointer_and_tooltip(self):
         css = _read("editor-layout.css")

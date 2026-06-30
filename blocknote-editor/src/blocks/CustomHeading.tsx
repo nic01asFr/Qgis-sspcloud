@@ -1,21 +1,29 @@
 /**
- * CustomHeading - INLINE editable (v1.12.3 fix definitif).
+ * CustomHeading - rollback v1.10 pattern (v1.12.4).
  *
- * Bug v1.12.2 : <h1 ref={contentRef as any}> ne recevait pas
- * data-node-view-content-react. Cause probable : type ref HTMLHeadingElement
- * incompatible avec le HTMLElement attendu par BlockNote, ou autre limitation
- * NodeView TipTap.
+ * v1.11/v1.12.x ont tente d'utiliser content:'inline' editable mais
+ * BlockNote v0.22 NodeView React ne semble pas attacher correctement
+ * data-node-view-content-react sur les custom blocks malgre le pattern
+ * 'contentRef'. 3 tentatives ont echoue (h1/h2/h3/h4 root, span child,
+ * div+ARIA).
  *
- * v1.12.3 : utiliser <div> + role/aria-level pour semantique + font-size
- * stylee. Le contentRef accepte <div> sans probleme (HTMLDivElement
- * compatible avec ref BlockNote).
+ * v1.12.4 : rollback pragmatique vers content:'none' + props.text.
+ * Marie utilise le drawer Edit Panel pour modifier (click sur le block).
+ * Au moins le texte s'AFFICHE correctement (le bug critique 'textes vides').
  *
- * Le rendu visuel est IDENTIQUE a h1/h2/h3/h4 grace au CSS font-size.
- * La semantique a11y est preservee via role="heading" aria-level.
+ * Inline editing reporte V1.13 / V2 (besoin investigation BlockNote v0.22
+ * API plus profonde ou upgrade vers BlockNote v0.23+).
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
 import { openEditPanel } from './edit-handler';
+
+const SIZES: Record<number, string> = {
+  1: '32px',
+  2: '26px',
+  3: '20px',
+  4: '16px',
+};
 
 export const CustomHeadingBlock = createReactBlockSpec(
   {
@@ -24,36 +32,29 @@ export const CustomHeadingBlock = createReactBlockSpec(
       ...defaultProps,
       cid: { default: '' },
       level: { default: 2 },
+      text: { default: '' },
     },
-    content: 'inline' as const,
+    content: 'none' as const,
   },
   {
-    render: ({ block, contentRef }) => {
-      const level = Math.max(1, Math.min(4, Number(block.props.level) || 2));
-      const sizeMap: Record<number, string> = {
-        1: '32px',
-        2: '26px',
-        3: '20px',
-        4: '16px',
-      };
+    render: ({ block }) => {
+      const { level, text } = block.props;
+      const clampedLevel = Math.max(1, Math.min(4, Number(level)));
+      const HeadingTag = (`h${clampedLevel}` as unknown) as keyof JSX.IntrinsicElements;
       return (
-        <div
-          ref={contentRef}
-          role="heading"
-          aria-level={level}
-          onContextMenu={(e: any) => {
-            e.preventDefault();
-            openEditPanel(block as any);
-          }}
+        <HeadingTag
+          onClick={(e: any) => { e.stopPropagation(); openEditPanel(block as any, e.nativeEvent); }}
           style={{
-            fontSize: sizeMap[level],
+            fontSize: SIZES[clampedLevel],
             color: '#161616',
             margin: '24px 0 12px',
             fontWeight: 700,
             lineHeight: 1.3,
-            outline: 'none',
+            cursor: 'pointer',
           }}
-        />
+        >
+          {String(text || '')}
+        </HeadingTag>
       );
     },
   },
