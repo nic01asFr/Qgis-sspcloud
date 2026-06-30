@@ -57,13 +57,15 @@ class TestInteractiveMapForm:
                       "source", "caveat", "height"]:
             assert field in content, f"Field '{field}' absent du form"
 
-    def test_form_documents_v2_layers_deferred(self):
-        """Form mentionne explicitement que layers/symbology/interactions
-        sont differes V2."""
+    def test_form_documents_p0b2_symbology_deferred(self):
+        """V1.12 differait layers V2. V1.13 P0b-1 livre Layers basics ;
+        Symbology+Interactions reste differe P0b-2 (sprint courant)."""
         content = _read("forms/InteractiveMapForm.tsx")
         if content is None:
             pytest.skip()
-        assert "V2" in content or "differé" in content or "differé" in content
+        # Tolere ancien text V1.12 (V2) OU nouveau text V1.13 P0b-2
+        assert ("V2" in content or "P0b-2" in content or "differé" in content
+                or "differe" in content)
 
 
 class TestInteractiveMapBlock_PropsExpanded:

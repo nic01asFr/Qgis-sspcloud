@@ -161,6 +161,7 @@ export async function assemblyToBlockNoteDoc(
           // v1.12 : exposer les params editables dans props (form Edit Panel
           // lit depuis block.props pour init le form)
           props.sid = sid;
+          props.cid = component.id;
           props.title = params.title || component.title || '';
           props.subtitle = params.subtitle || '';
           props.description = params.description || '';
@@ -168,6 +169,9 @@ export async function assemblyToBlockNoteDoc(
           props.source = params.source || '';
           props.caveat = params.caveat || '';
           props.height = params.height || 580;
+          // v1.13 P0b-1 : Zone + Layers overrides (back-compat champs plats V1.12)
+          props.zone = params.zone || null;
+          props.layers_override = params.layers_override || [];
           break;
         case 'chart':
         case 'data_table':

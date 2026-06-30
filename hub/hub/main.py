@@ -3909,6 +3909,148 @@ async def component_history_endpoint(
     return history
 
 
+@app.get("/studies/{sid}/components/{cid}/source_layers")
+async def component_source_layers_endpoint(
+    sid: str, cid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Sprint 1 V1.13 P0b — Retourne la liste des layers du scene_manifest
+    referenced par le composant interactive_map.
+
+    Marie utilise ce endpoint dans le sub-form Layers pour :
+    - Voir la liste des layers disponibles (sans deviner les layer_id_ref)
+    - Voir les properties_keys disponibles (sans lire le GeoJSON)
+    - Configurer un layers_override par layer dans InteractiveMapParams V1.13
+
+    Format reponse :
+    {
+        "layers": [
+            {
+                "id": "batiments_bdtopo",
+                "name": "Batiments BD TOPO 2024",
+                "geometry_type": "polygon",
+                "n_features": 14270,
+                "properties_keys": ["id", "hauteur", "usage_1", "adresse", ...],
+            },
+            ...
+        ],
+        "scene_hash": "abc123...",
+        "scene_pid": "xyz789...",
+    }
+
+    404 si composant pas un interactive_map ou pas de source.scene_hash.
+    """
+    _check_components_enabled()
+    from hub import components as comp_mod
+    import base64 as _b64, json as _json
+
+    latest = await comp_mod.get_component_latest(cid)
+    if not latest or latest["sid"] != sid:
+        raise HTTPException(404, "Composant introuvable")
+    if latest["owner"] != user["username"]:
+        raise HTTPException(403, "Pas owner")
+
+    # Lire le manifest
+    try:
+        stdout = await _execute_python_in_workspace(
+            user["username"],
+            comp_mod.read_component_manifest_pod_code(sid, cid),
+        )
+    except Exception as exc:
+        log.warning("source_layers read manifest : %s", exc)
+        raise HTTPException(500, "Lecture manifest impossible")
+
+    manifest = None
+    if "COMPONENT_READ_OK" in stdout:
+        try:
+            b64 = stdout.split("b64=", 1)[1].split()[0].strip()
+            manifest = _json.loads(_b64.b64decode(b64).decode())
+        except Exception as exc:
+            log.warning("source_layers parse manifest : %s", exc)
+    if not manifest:
+        raise HTTPException(404, "Manifest illisible")
+
+    if manifest.get("kind") != "interactive_map":
+        raise HTTPException(400, "Seuls les interactive_map ont des source_layers")
+
+    source = manifest.get("source", {}) or {}
+    params = manifest.get("params", {}) or {}
+    scene_hash = source.get("scene_hash") or params.get("scene_hash")
+    scene_pid = source.get("pid") or params.get("pid")
+
+    if not scene_hash or not scene_pid:
+        # Fallback : si layers inline dans params (legacy), les retourner
+        layers_inline = params.get("layers", [])
+        return {
+            "layers": [{
+                "id": l.get("id", f"layer_{i}"),
+                "name": l.get("name", f"Layer {i}"),
+                "geometry_type": l.get("geometry_type", "unknown"),
+                "n_features": l.get("n_features"),
+                "properties_keys": [],
+            } for i, l in enumerate(layers_inline)],
+            "scene_hash": None,
+            "scene_pid": None,
+        }
+
+    # Lire le scene_manifest
+    try:
+        scene_code = studies.read_scene_manifest_pod_code(sid, scene_pid)
+        scene_out = await _execute_python_in_workspace(user["username"], scene_code)
+        if "SCENE_MANIFEST_READ_OK" not in scene_out:
+            raise HTTPException(500, "Scene manifest illisible")
+        scene_b64 = scene_out.split("b64=", 1)[1].split()[0].strip()
+        scene_obj = _json.loads(_b64.b64decode(scene_b64).decode())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.warning("source_layers read scene_manifest : %s", exc)
+        raise HTTPException(500, f"Erreur lecture scene_manifest : {exc}")
+
+    scene_layers = scene_obj.get("layers", []) or []
+    result_layers = []
+    for i_l, l in enumerate(scene_layers):
+        lid = l.get("id", f"layer_{i_l}")
+        # Properties keys : on tente de lire le premier feature du GeoJSON
+        properties_keys: list[str] = []
+        geojson_inline = l.get("geojson")
+        geojson_path = l.get("geojson_path")
+        try:
+            features = []
+            if geojson_inline:
+                features = (geojson_inline.get("features") or [])[:1]
+            elif geojson_path:
+                # Lecture sample : on lit le fichier complet mais on n'en
+                # extrait que la 1ere feature. Coute 1 read pod par layer
+                # affiche dans le form, acceptable (Marie n'edite qu'un comp
+                # a la fois).
+                gj_code = studies.read_scene_layer_geojson_pod_code(sid, scene_pid, lid)
+                gj_out = await _execute_python_in_workspace(user["username"], gj_code)
+                if "SCENE_LAYER_READ_OK" in gj_out:
+                    gj_b64 = gj_out.split("b64=", 1)[1].split()[0].strip()
+                    geojson = _json.loads(_b64.b64decode(gj_b64).decode())
+                    features = (geojson.get("features") or [])[:1]
+            if features:
+                props = features[0].get("properties") or {}
+                properties_keys = sorted(props.keys())
+        except Exception as exc:
+            log.warning("source_layers properties_keys %s : %s", lid, exc)
+
+        result_layers.append({
+            "id": lid,
+            "name": l.get("name", lid),
+            "geometry_type": l.get("geometry_type", "unknown"),
+            "n_features": l.get("n_features"),
+            "properties_keys": properties_keys,
+        })
+
+    return {
+        "layers": result_layers,
+        "scene_hash": scene_hash,
+        "scene_pid": scene_pid,
+    }
+
+
 @app.get("/studies/{sid}/components/{cid}/render", response_class=HTMLResponse)
 async def render_component_endpoint(
     sid: str, cid: str,
@@ -4617,6 +4759,16 @@ async def _build_interactive_map_ctx(
         except Exception:
             pass
 
+    # Sprint 1 V1.13 P0b-1 : lecture des layers_override Marie pour appliquer
+    # visibility/opacity/name_override sur les scene_layers (sans dupliquer
+    # les GeoJSON ni l'autorite du scene_manifest).
+    layers_override_list = params.get("layers_override") or []
+    layers_override_by_id: dict = {}
+    if isinstance(layers_override_list, list):
+        for ov in layers_override_list:
+            if isinstance(ov, dict) and ov.get("layer_id_ref"):
+                layers_override_by_id[ov["layer_id_ref"]] = ov
+
     if scene_hash and scene_pid:
         try:
             scene_code = studies.read_scene_manifest_pod_code(sid, scene_pid)
@@ -4628,6 +4780,10 @@ async def _build_interactive_map_ctx(
                 geo_layers = []
                 for i_l, l in enumerate(scene_layers):
                     lid = l.get("id", f"layer_{i_l}")
+                    override = layers_override_by_id.get(lid, {})
+                    # Visibility filter (V1.13 P0b-1) : skip si Marie a masque
+                    if override.get("visible") is False:
+                        continue
                     geojson_path = l.get("geojson_path")
                     geojson = l.get("geojson")  # fallback inline legacy
                     if not geojson and geojson_path:
@@ -4642,11 +4798,15 @@ async def _build_interactive_map_ctx(
                     if geojson:
                         geo_layers.append({
                             "id": lid,
-                            "name": l.get("name", lid),
+                            # V1.13 P0b-1 : name_override prioritaire si defini
+                            "name": override.get("name_override") or l.get("name", lid),
                             "geojson": geojson,
                             "style": l.get("style", {}),
                             "geometry_type": l.get("geometry_type", "polygon"),
                             "n_features": l.get("n_features", 0),
+                            # V1.13 P0b-1 : opacity propagee au paint MapLibre
+                            "opacity": float(override.get("opacity", 1.0)) if override else 1.0,
+                            "z_index": override.get("z_index") if override else None,
                         })
                 if geo_layers:
                     total = sum(l.get("n_features", 0) for l in geo_layers)
@@ -4655,8 +4815,13 @@ async def _build_interactive_map_ctx(
         except Exception as exc:
             log.warning("interactive_map scene_manifest read %s : %s", cid, exc)
     elif layers_inline:
-        bbox_text = f" — {len(layers_inline)} couche{'s' if len(layers_inline) > 1 else ''}"
-        map_layers_js = _json2.dumps(layers_inline)
+        # Legacy : layers inline + filter visibility V1.13 si defini
+        filtered = [
+            l for l in layers_inline
+            if layers_override_by_id.get(l.get("id"), {}).get("visible") is not False
+        ]
+        bbox_text = f" — {len(filtered)} couche{'s' if len(filtered) > 1 else ''}"
+        map_layers_js = _json2.dumps(filtered)
 
     # ── Vague E2 Commit 5 (D-QGIS-009 §5) — Symbologie thematique ──
     # Si params.classification ou layer.classification defini, calculer
@@ -4768,6 +4933,45 @@ async def _build_interactive_map_ctx(
     # Priorite params.title sur comp_manifest.title si Marie l'a modifie via UI.
     title_from_params = params.get("title")
     final_title = title_from_params or title
+
+    # Sprint 1 V1.13 P0b-1 : resolution zone d'etude.
+    # 3 sources possibles (priorite decroissante) :
+    #   1. params.zone (V1.13 structure) - kind=commune/manual/study
+    #   2. params.center_* + zoom (V1.12 legacy plats)
+    #   3. defaults Marseille 4e (test territoire CEREMA)
+    zone_param = params.get("zone") or {}
+    z_kind = (zone_param.get("kind") if isinstance(zone_param, dict) else None) or "manual"
+    final_lng = params.get("center_lng", params.get("lng", 5.39))
+    final_lat = params.get("center_lat", params.get("lat", 43.30))
+    final_zoom = params.get("zoom", 13)
+    if isinstance(zone_param, dict):
+        if z_kind == "manual":
+            if zone_param.get("center_lng") is not None:
+                final_lng = zone_param["center_lng"]
+            if zone_param.get("center_lat") is not None:
+                final_lat = zone_param["center_lat"]
+            if zone_param.get("zoom") is not None:
+                final_zoom = zone_param["zoom"]
+        elif z_kind == "commune" and zone_param.get("insee"):
+            # V1.13 P0c (futur) : resoudre INSEE -> bbox via geo API.
+            # En V1.13 P0b-1 on accepte le bind mais fallback defaults si
+            # pas resolu (Marie peut combiner avec manual pour override).
+            try:
+                _insee = str(zone_param["insee"]).strip()
+                # P0c livrera _try_resolve_major_city ; pour l'instant on
+                # garde les defaults Marseille 4e si pas resolu.
+                if _insee == "13204":
+                    final_lng, final_lat, final_zoom = 5.39, 43.30, 13
+                elif _insee == "75104":
+                    final_lng, final_lat, final_zoom = 2.35, 48.85, 13
+                elif _insee == "69383":
+                    final_lng, final_lat, final_zoom = 4.83, 45.76, 13
+            except Exception:
+                pass
+        elif z_kind == "study":
+            # V1.13 P0c (futur) : lookup study.zone via studies.get_study(sid).
+            # En V1.13 P0b-1 on garde defaults si pas resolu.
+            pass
     return {
         "cid": cid,
         "title": final_title,
@@ -4776,9 +4980,9 @@ async def _build_interactive_map_ctx(
         "description": params.get("description", ""),
         "height": int(params.get("height") or 580),
         "bbox_text": bbox_text,
-        "center_lng": params.get("center_lng", params.get("lng", 5.39)),
-        "center_lat": params.get("center_lat", params.get("lat", 43.30)),
-        "zoom": params.get("zoom", 13),
+        "center_lng": final_lng,
+        "center_lat": final_lat,
+        "zoom": final_zoom,
         "map_layers_json": map_layers_js,
         # Vague E2 Commit 4 — trio cartographe metier
         "legend_items": legend_items,

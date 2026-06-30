@@ -456,10 +456,12 @@ function buildParamsFromFormData(
         color: String(data.color || '#000091'),
         variant: String(data.variant || 'rule'),
       };
-    case 'interactive_map':
-      // v1.12 : params editables - layers/symbology/interactions restent
-      // dans existingManifest non touches (preserves au merge cote hub)
-      return {
+    case 'interactive_map': {
+      // v1.13 P0b-1 : ajoute zone (commune INSEE / manual / study) +
+      // layers_override (visible/opacity/name_override par layer).
+      // Le merge partial cote hub preserve les autres champs non-edites
+      // (classification, popup_template, atlas...).
+      const out: Record<string, any> = {
         title: String(data.title || ''),
         subtitle: String(data.subtitle || ''),
         description: String(data.description || ''),
@@ -468,6 +470,23 @@ function buildParamsFromFormData(
         source: String(data.source || ''),
         caveat: String(data.caveat || ''),
       };
+      // v1.13 P0b-1 : zone (nullable, default V1.12 garde center_lat/lng plat)
+      if (data.zone && typeof data.zone === 'object') {
+        out.zone = data.zone;
+        // Maintien V1.12 flat fields pour back-compat helper hub (jusqu'a
+        // migration totale Sprint 2 P1b).
+        if (data.zone.kind === 'manual') {
+          if (data.zone.center_lat != null) out.center_lat = data.zone.center_lat;
+          if (data.zone.center_lng != null) out.center_lng = data.zone.center_lng;
+          if (data.zone.zoom != null) out.zoom = data.zone.zoom;
+        }
+      }
+      // v1.13 P0b-1 : layers_override
+      if (Array.isArray(data.layers_override)) {
+        out.layers_override = data.layers_override;
+      }
+      return out;
+    }
     default:
       return data;
   }
@@ -497,10 +516,8 @@ function paramsToBlockProps(
     case 'separator':
       return { ...params };
     case 'interactiveMap':
-      // v1.12.5 Bug fix audit P0 (Sprint 1 V1.13) : retourner les 7 props
-      // editables Marie pour qu'elles persistent dans block.props apres save.
-      // Sans ca, reouvrir l'EditPanel dans la meme session affiche les anciennes
-      // valeurs (le hub render OK via manifest, mais block.props est stale).
+      // v1.12.5 Bug fix audit P0 : round-trip props apres save.
+      // v1.13 P0b-1 : ajoute zone + layers_override pour persistence sub-forms.
       return {
         title: params.title || '',
         subtitle: params.subtitle || '',
@@ -509,6 +526,8 @@ function paramsToBlockProps(
         source: params.source || '',
         caveat: params.caveat || '',
         height: Number(params.height || 580),
+        zone: params.zone || null,
+        layers_override: Array.isArray(params.layers_override) ? params.layers_override : [],
       };
     default:
       return { ...params };
