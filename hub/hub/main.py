@@ -4015,6 +4015,16 @@ async def component_source_layers_endpoint(
     scene_hash = source.get("scene_hash") or params.get("scene_hash")
     scene_pid = source.get("pid") or params.get("pid")
 
+    # Resilience source.pid (meme logique que _build_interactive_map_ctx) :
+    # si scene_hash defini mais pas pid, fallback sur le 1er projet de l'etude.
+    if scene_hash and not scene_pid:
+        try:
+            _projects = await studies.list_projects(sid)
+            if _projects:
+                scene_pid = _projects[0]["pid"]
+        except Exception as exc:
+            log.warning("source_layers list_projects fallback : %s", exc)
+
     if not scene_hash or not scene_pid:
         # Fallback : si layers inline dans params (legacy), les retourner
         layers_inline = params.get("layers", [])
@@ -4026,8 +4036,8 @@ async def component_source_layers_endpoint(
                 "n_features": l.get("n_features"),
                 "properties_keys": [],
             } for i, l in enumerate(layers_inline)],
-            "scene_hash": None,
-            "scene_pid": None,
+            "scene_hash": scene_hash,
+            "scene_pid": scene_pid,
         }
 
     # Lire le scene_manifest
