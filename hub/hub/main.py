@@ -4764,9 +4764,17 @@ async def _build_interactive_map_ctx(
     basemap_style_json = _json2.dumps(get_basemap_style(basemap_id))
     basemap_meta = get_basemap_metadata(basemap_id)
 
+    # v1.12 : params editables via EditPanel drawer (form InteractiveMapForm).
+    # Priorite params.title sur comp_manifest.title si Marie l'a modifie via UI.
+    title_from_params = params.get("title")
+    final_title = title_from_params or title
     return {
         "cid": cid,
-        "title": title,
+        "title": final_title,
+        # v1.12 : nouveaux champs editables Marie
+        "subtitle": params.get("subtitle", ""),
+        "description": params.get("description", ""),
+        "height": int(params.get("height") or 580),
         "bbox_text": bbox_text,
         "center_lng": params.get("center_lng", params.get("lng", 5.39)),
         "center_lat": params.get("center_lat", params.get("lat", 43.30)),

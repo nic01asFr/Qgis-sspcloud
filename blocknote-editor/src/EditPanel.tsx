@@ -25,6 +25,7 @@ import { QuoteForm } from './forms/QuoteForm';
 import { NarrativeTextForm } from './forms/NarrativeTextForm';
 import { LegendForm } from './forms/LegendForm';
 import { SeparatorForm } from './forms/SeparatorForm';
+import { InteractiveMapForm } from './forms/InteractiveMapForm';
 
 export interface EditableBlock {
   id: string;        // ID interne BlockNote
@@ -43,7 +44,9 @@ export interface EditableBlock {
 type PanelMode = 'drawer' | 'popup';
 
 const POPUP_KINDS = new Set(['kpiBadge', 'legend', 'separator']);
-const DRAWER_KINDS = new Set(['kpiGrid']);
+// v1.12 : interactiveMap en drawer (form ample : titre/subtitle/description/
+// basemap/source/caveat + section "Layers V2 differe")
+const DRAWER_KINDS = new Set(['kpiGrid', 'interactiveMap']);
 
 function getPanelMode(blockType: string): PanelMode {
   if (POPUP_KINDS.has(blockType)) return 'popup';
@@ -75,10 +78,12 @@ const DOM_KIND_LABELS: Record<string, string> = {
   legend: 'Légende',
   narrativeText: 'Texte narratif (markdown)',
   separator: 'Séparateur',
+  // v1.12.0 : interactive_map devient editable (cle metier CEREMA)
+  interactiveMap: 'Carte interactive (map)',
 };
 
 const IFRAME_KIND_LABELS: Record<string, string> = {
-  interactiveMap: 'Carte interactive',
+  // interactiveMap retire — passe en DOM_KIND_LABELS editable v1.12
   chart: 'Graphique',
   dataTable: 'Tableau de données',
   scene3d: 'Scène 3D',
@@ -119,6 +124,8 @@ export function EditPanel({
     legend: 'legend',
     narrativeText: 'narrative_text',
     separator: 'separator',
+    // v1.12 : interactive_map editable (cle metier CEREMA)
+    interactiveMap: 'interactive_map',
   };
 
   const handleSave = async () => {
@@ -306,6 +313,10 @@ export function EditPanel({
           {!isIframe && block.type === 'separator' && (
             <SeparatorForm data={formData} onChange={setFormData} />
           )}
+          {/* v1.12 : interactive_map editable (cle metier CEREMA) */}
+          {!isIframe && block.type === 'interactiveMap' && (
+            <InteractiveMapForm data={formData} onChange={setFormData} />
+          )}
         </div>
 
         {/* Footer status + actions */}
@@ -445,6 +456,18 @@ function buildParamsFromFormData(
         color: String(data.color || '#000091'),
         variant: String(data.variant || 'rule'),
       };
+    case 'interactive_map':
+      // v1.12 : params editables - layers/symbology/interactions restent
+      // dans existingManifest non touches (preserves au merge cote hub)
+      return {
+        title: String(data.title || ''),
+        subtitle: String(data.subtitle || ''),
+        description: String(data.description || ''),
+        basemap_id: String(data.basemap_id || 'osm'),
+        height: Number(data.height || 520),
+        source: String(data.source || ''),
+        caveat: String(data.caveat || ''),
+      };
     default:
       return data;
   }
@@ -473,6 +496,10 @@ function paramsToBlockProps(
     case 'narrativeText':
     case 'separator':
       return { ...params };
+    case 'interactiveMap':
+      // v1.12 : props minimaux (sid pour iframe + cid). Les params editables
+      // sont pousses dans le manifest hub, l'iframe se rafraichit au reload.
+      return { sid: undefined };  // sid conserve dans block.props existant
     default:
       return { ...params };
   }

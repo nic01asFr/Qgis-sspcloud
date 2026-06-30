@@ -114,20 +114,39 @@ function getSidFromUrl(): string {
 }
 
 // ── interactive_map ─────────────────────────────────────────────────
+// v1.12 : Composant MAP = cle metier CEREMA. PropSchema enrichi avec
+// les params editables via EditPanel drawer (title/subtitle/description/
+// basemap_id/source/caveat/height). Les layers/symbology/interactions
+// restent dans le manifest hub (preserves au merge skip None).
 export const InteractiveMapBlock = createReactBlockSpec(
   {
     type: 'interactiveMap' as const,
-    propSchema: { ...defaultProps, cid: { default: '' }, sid: { default: '' } },
+    propSchema: {
+      ...defaultProps,
+      cid: { default: '' },
+      sid: { default: '' },
+      // v1.12 : params editables exposes pour Edit Panel form
+      title: { default: '' },
+      subtitle: { default: '' },
+      description: { default: '' },
+      basemap_id: { default: 'osm' },
+      source: { default: '' },
+      caveat: { default: '' },
+      height: { default: 580 },
+    },
     content: 'none' as const,
   },
   {
-    render: ({ block }) => (
-      <ComponentIframe
-        sid={String(block.props.sid) || getSidFromUrl()}
-        cid={String(block.props.cid)}
-        defaultHeight={580}
-      />
-    ),
+    render: ({ block }) => {
+      const height = Number(block.props.height) || 580;
+      return (
+        <ComponentIframe
+          sid={String(block.props.sid) || getSidFromUrl()}
+          cid={String(block.props.cid)}
+          defaultHeight={height}
+        />
+      );
+    },
   },
 );
 

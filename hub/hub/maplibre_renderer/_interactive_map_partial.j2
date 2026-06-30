@@ -24,13 +24,22 @@
 {% set map_id = 'map_' + cid[:8] %}
 <div style="background:#fff;border-radius:6px;overflow:hidden;
             border:1px solid #e5e5e5">
-  {# A — TITRE OBLIGATOIRE #}
+  {# A — TITRE OBLIGATOIRE + sous-titre + description (v1.12 cle metier CEREMA) #}
   <div style="padding:14px 20px;border-bottom:1px solid #e5e5e5;background:#f6f6f6">
-    <strong style="color:#000091">{{ title | e }}</strong>
-    <span style="color:#666;font-size:13px">{{ bbox_text | e }}</span>
+    <strong style="color:#000091;font-size:15px;display:block">{{ title | e }}</strong>
+    {% if subtitle %}
+    <div style="color:#444;font-size:13px;margin-top:2px">{{ subtitle | e }}</div>
+    {% endif %}
+    <span style="color:#666;font-size:12px;font-style:italic">{{ bbox_text | e }}</span>
   </div>
-  {# Canvas MapLibre #}
-  <div id="{{ map_id }}" style="height:480px;width:100%"></div>
+  {% if description %}
+  <div style="padding:10px 20px;background:#fafbfd;border-bottom:1px solid #e5e5e5;
+              font-size:13px;color:#333;line-height:1.5">
+    {{ description | e }}
+  </div>
+  {% endif %}
+  {# Canvas MapLibre (hauteur configurable v1.12) #}
+  <div id="{{ map_id }}" style="height:{{ height | default(480) }}px;width:100%"></div>
   {# B — LEGENDE AUTO-DERIVEE riche (Vague E2 Commit 10)
      3 formats supportes selon legend_format :
      - 'chips' (default, V0.1) : puces couleur + label, layout flex inline

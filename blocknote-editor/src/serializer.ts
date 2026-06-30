@@ -163,6 +163,17 @@ export async function assemblyToBlockNoteDoc(
           break;
         // ── Iframe blocks ──
         case 'interactive_map':
+          // v1.12 : exposer les params editables dans props (form Edit Panel
+          // lit depuis block.props pour init le form)
+          props.sid = sid;
+          props.title = params.title || component.title || '';
+          props.subtitle = params.subtitle || '';
+          props.description = params.description || '';
+          props.basemap_id = params.basemap_id || 'osm';
+          props.source = params.source || '';
+          props.caveat = params.caveat || '';
+          props.height = params.height || 580;
+          break;
         case 'chart':
         case 'data_table':
         case 'scene_3d':

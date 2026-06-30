@@ -42,7 +42,6 @@ export const CustomHeadingBlock = createReactBlockSpec(
       const HeadingTag = (`h${clampedLevel}` as unknown) as keyof JSX.IntrinsicElements;
       return (
         <HeadingTag
-          ref={contentRef as any}
           // Right-click ouvre le menu d'options BlockNote natif (Supprimer,
           // Couleurs, Niveau >). Click simple = caret pour edition inline.
           onContextMenu={(e: any) => {
@@ -57,7 +56,11 @@ export const CustomHeadingBlock = createReactBlockSpec(
             lineHeight: 1.3,
             outline: 'none',
           }}
-        />
+        >
+          {/* v1.11.1 fix : contentRef doit etre sur un child element, pas le root.
+              BlockNote injecte le inline content editable dans ce span. */}
+          <span ref={contentRef as any} />
+        </HeadingTag>
       );
     },
   },

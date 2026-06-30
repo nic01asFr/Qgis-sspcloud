@@ -101,12 +101,11 @@ class TestPhaseB_PopupCompact:
         if content is None:
             pytest.skip()
         # POPUP_KINDS contient les 3 compactes
-        # (ordre indifferent, on cherche presence)
         assert "kpiBadge" in content
         assert "legend" in content
         assert "separator" in content
-        # kpiGrid dans DRAWER_KINDS
-        assert "DRAWER_KINDS = new Set(['kpiGrid'])" in content
+        # kpiGrid dans DRAWER_KINDS (+ interactiveMap v1.12)
+        assert "DRAWER_KINDS = new Set(['kpiGrid'" in content
 
     def test_edit_panel_positions_popup_near_block(self):
         """Mode popup positionne pres du block via anchorRect."""
@@ -180,7 +179,13 @@ class TestSprint5_Coherence:
         pkg = REPO_ROOT / "blocknote-editor" / "package.json"
         if not pkg.exists():
             pytest.skip()
-        assert '"version": "1.11.0"' in pkg.read_text(encoding="utf-8")
+        content = pkg.read_text(encoding="utf-8")
+        import re
+        m = re.search(r'"version":\s*"(\d+)\.(\d+)\.(\d+)"', content)
+        assert m
+        major, minor, patch = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        # Sprint 5 a livre v1.11.0 minimum. v1.12+ OK.
+        assert (major, minor, patch) >= (1, 11, 0), f"Version {major}.{minor}.{patch} < 1.11.0"
 
     def test_no_regression_imports(self):
         from hub.main import update_component_endpoint, _pre_render_component_html
