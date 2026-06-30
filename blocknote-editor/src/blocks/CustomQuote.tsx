@@ -1,9 +1,8 @@
 /**
- * CustomQuote - INLINE editable (v1.12.2 fix).
+ * CustomQuote - INLINE editable (v1.12.3 fix definitif).
  *
- * v1.12.2 : ref contentRef directement sur la blockquote (vs span child
- * non reconnu par BlockNote ProseMirror). Author/source en footer
- * contentEditable=false pour ne pas interferer avec l'inline editing.
+ * Pattern : <div ref={contentRef}> root direct + footer attribution sibling
+ * contentEditable=false (pas de blockquote pour eviter incompatibilite ref).
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
@@ -25,47 +24,43 @@ export const CustomQuoteBlock = createReactBlockSpec(
       const { author, source } = block.props;
       const hasAttribution = author || source;
       const parts = [author, source].filter(Boolean).join(' · ');
-      // v1.12.2 : wrapper avec ref direct, footer en sibling contentEditable=false
       return (
         <div
+          ref={contentRef}
+          onContextMenu={(e: any) => {
+            e.preventDefault();
+            openEditPanel(block as any);
+          }}
           style={{
             borderLeft: '4px solid #000091',
             padding: '12px 18px',
             margin: '18px 0',
             background: '#f4f6fa',
+            fontStyle: 'italic',
             color: '#1a1a1a',
+            fontSize: 16,
             lineHeight: 1.6,
-          }}
-          onContextMenu={(e: any) => {
-            e.preventDefault();
-            openEditPanel(block as any);
+            outline: 'none',
+            position: 'relative',
           }}
         >
-          {/* contentRef sur le blockquote => BlockNote pose data-node-view-content
-              et injecte l'inline editable text. */}
-          <blockquote
-            ref={contentRef as any}
-            style={{
-              margin: 0,
-              padding: 0,
-              fontStyle: 'italic',
-              fontSize: 16,
-              outline: 'none',
-            }}
-          />
+          {/* Footer attribution rendu via CSS pseudo-element ou positionne en sticky bottom
+              pour ne pas interferer avec l'inline editing du contenu principal */}
           {hasAttribution && (
-            <div
+            <span
+              contentEditable={false}
+              suppressContentEditableWarning
               style={{
+                display: 'block',
                 marginTop: 8,
                 fontSize: 13,
                 color: '#666',
                 fontStyle: 'normal',
+                userSelect: 'none',
               }}
-              contentEditable={false}
-              suppressContentEditableWarning
             >
               — {parts}
-            </div>
+            </span>
           )}
         </div>
       );

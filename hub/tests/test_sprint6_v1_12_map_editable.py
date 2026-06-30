@@ -31,10 +31,12 @@ class TestBugFix_CustomHeadingContentRef:
         content = _read("blocks/CustomHeading.tsx")
         if content is None:
             pytest.skip()
-        # v1.12.2 : switch explicite par level + ref={contentRef} sur h1/h2/h3/h4
-        assert "<h1 ref={contentRef" in content
-        assert "<h2 ref={contentRef" in content
-        assert "<h3 ref={contentRef" in content
+        # v1.12.3 : utiliser <div ref={contentRef}> + role/aria-level
+        # (HTMLHeadingElement incompatible avec ref typing BlockNote).
+        # Pattern semantique : role="heading" aria-level={level}
+        assert 'ref={contentRef}' in content
+        assert 'role="heading"' in content
+        assert 'aria-level={level}' in content
 
 
 class TestInteractiveMapForm:

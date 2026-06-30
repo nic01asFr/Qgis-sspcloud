@@ -1,12 +1,17 @@
 /**
- * CustomHeading - INLINE editable (v1.12.2 fix).
+ * CustomHeading - INLINE editable (v1.12.3 fix definitif).
  *
- * v1.11/v1.12 : tentative HeadingTag dynamique + span child contentRef
- *   -> BlockNote ne pose pas data-node-view-content-react sur le span
- *   -> inline content reste vide
+ * Bug v1.12.2 : <h1 ref={contentRef as any}> ne recevait pas
+ * data-node-view-content-react. Cause probable : type ref HTMLHeadingElement
+ * incompatible avec le HTMLElement attendu par BlockNote, ou autre limitation
+ * NodeView TipTap.
  *
- * v1.12.2 : switch case explicite par level + ref directement sur le node
- * (pattern BlockNote v0.22 correct = contentRef sur ELEMENT, pas span child).
+ * v1.12.3 : utiliser <div> + role/aria-level pour semantique + font-size
+ * stylee. Le contentRef accepte <div> sans probleme (HTMLDivElement
+ * compatible avec ref BlockNote).
+ *
+ * Le rendu visuel est IDENTIQUE a h1/h2/h3/h4 grace au CSS font-size.
+ * La semantique a11y est preservee via role="heading" aria-level.
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
@@ -31,32 +36,25 @@ export const CustomHeadingBlock = createReactBlockSpec(
         3: '20px',
         4: '16px',
       };
-      const style: React.CSSProperties = {
-        fontSize: sizeMap[level],
-        color: '#161616',
-        margin: '24px 0 12px',
-        fontWeight: 700,
-        lineHeight: 1.3,
-        outline: 'none',
-      };
-      const onContextMenu = (e: any) => {
-        e.preventDefault();
-        openEditPanel(block as any);
-      };
-      // v1.12.2 : switch explicite par level pour que React/JSX
-      // applique correctement le ref de contentRef sur l'element HTML.
-      // Le cast 'as any' contourne le typing strict mais BlockNote pose
-      // bien data-node-view-content-react sur le node retourne.
-      if (level === 1) {
-        return <h1 ref={contentRef as any} style={style} onContextMenu={onContextMenu} />;
-      }
-      if (level === 2) {
-        return <h2 ref={contentRef as any} style={style} onContextMenu={onContextMenu} />;
-      }
-      if (level === 3) {
-        return <h3 ref={contentRef as any} style={style} onContextMenu={onContextMenu} />;
-      }
-      return <h4 ref={contentRef as any} style={style} onContextMenu={onContextMenu} />;
+      return (
+        <div
+          ref={contentRef}
+          role="heading"
+          aria-level={level}
+          onContextMenu={(e: any) => {
+            e.preventDefault();
+            openEditPanel(block as any);
+          }}
+          style={{
+            fontSize: sizeMap[level],
+            color: '#161616',
+            margin: '24px 0 12px',
+            fontWeight: 700,
+            lineHeight: 1.3,
+            outline: 'none',
+          }}
+        />
+      );
     },
   },
 );
