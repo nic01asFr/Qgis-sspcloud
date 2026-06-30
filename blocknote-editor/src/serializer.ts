@@ -119,6 +119,8 @@ export async function assemblyToBlockNoteDoc(
 
       const params = (component.params || {}) as Record<string, any>;
       const props: Record<string, any> = { cid: compRef.ref };
+      // v1.11 Phase A : content inline pour les 3 blocks texte (vs props.text)
+      let inlineContent: any = null;
 
       switch (component.kind) {
         // ── DOM blocks ──
@@ -128,8 +130,9 @@ export async function assemblyToBlockNoteDoc(
           props.columnsMin = params.columns_min || 140;
           break;
         case 'heading':
+          // v1.11 : level reste en prop, text passe en content inline
           props.level = params.level || 2;
-          props.text = params.text || component.title || '';
+          inlineContent = params.text || component.title || '';
           break;
         case 'kpi_badge':
           props.value = String(params.value || '');
@@ -139,9 +142,10 @@ export async function assemblyToBlockNoteDoc(
           props.source = params.source || '';
           break;
         case 'quote':
-          props.text = params.text || '';
+          // v1.11 : text passe en content inline, author/source restent en props
           props.author = params.author || '';
           props.source = params.source || '';
+          inlineContent = params.text || '';
           break;
         case 'separator':
           props.style = params.style || 'solid';
@@ -154,7 +158,8 @@ export async function assemblyToBlockNoteDoc(
           props.source = params.source || '';
           break;
         case 'narrative_text':
-          props.content = params.content || params.markdown || params.text || '';
+          // v1.11 : content passe en inline editable
+          inlineContent = params.content || params.markdown || params.text || '';
           break;
         // ── Iframe blocks ──
         case 'interactive_map':
@@ -169,10 +174,11 @@ export async function assemblyToBlockNoteDoc(
           break;
       }
 
-      blocks.push({
-        type: blockType,
-        props,
-      });
+      const blockData: any = { type: blockType, props };
+      if (inlineContent !== null) {
+        blockData.content = inlineContent;
+      }
+      blocks.push(blockData);
     }
   }
 

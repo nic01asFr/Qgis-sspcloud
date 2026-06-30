@@ -38,7 +38,7 @@ export const KpiBadgeBlock = createReactBlockSpec(
       const gradient = COLOR_MAP[String(color)] || COLOR_MAP['info-blue'];
       return (
         <div
-          onClick={(e) => { e.stopPropagation(); openEditPanel(block as any); }}
+          onClick={(e) => { e.stopPropagation(); openEditPanel(block as any, e.nativeEvent); }}
           style={{
             padding: '20px 28px',
             background: gradient,

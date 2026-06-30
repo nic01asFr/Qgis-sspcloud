@@ -40,7 +40,7 @@ export const LegendBlock = createReactBlockSpec(
       }
       return (
         <div
-          onClick={(e) => { e.stopPropagation(); openEditPanel(block as any); }}
+          onClick={(e) => { e.stopPropagation(); openEditPanel(block as any, e.nativeEvent); }}
           style={{
             padding: '12px 16px',
             background: '#fafafa',

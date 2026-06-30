@@ -30,6 +30,26 @@ export interface EditableBlock {
   id: string;        // ID interne BlockNote
   type: string;      // ex 'kpiGrid', 'customHeading'...
   props: Record<string, any>;
+  // v1.11 Phase B : anchor permet positionner le popup pres du block
+  // (vs drawer fixed right). null = mode drawer plein ecran.
+  anchorRect?: DOMRect;
+}
+
+/**
+ * v1.11 Phase B : modes d'affichage.
+ * - 'drawer' : fixed right 420px (v1.10 — pour kpi_grid structure complexe)
+ * - 'popup' : floating au-dessus du block (~380px — pour blocks structures compacts)
+ */
+type PanelMode = 'drawer' | 'popup';
+
+const POPUP_KINDS = new Set(['kpiBadge', 'legend', 'separator']);
+const DRAWER_KINDS = new Set(['kpiGrid']);
+
+function getPanelMode(blockType: string): PanelMode {
+  if (POPUP_KINDS.has(blockType)) return 'popup';
+  if (DRAWER_KINDS.has(blockType)) return 'drawer';
+  // Default drawer pour les iframe kinds (lecture seule V1)
+  return 'drawer';
 }
 
 interface EditPanelProps {
@@ -142,24 +162,36 @@ export function EditPanel({
     }
   };
 
-  return (
-    <>
-      {/* Overlay backdrop semi-transparent */}
-      <div
-        onClick={onClose}
-        style={{
+  // v1.11 Phase B : choisir mode popup ou drawer selon le block type
+  const mode = getPanelMode(block.type);
+  const anchor = block.anchorRect;
+
+  // Style positionnement selon mode
+  const panelStyle: React.CSSProperties =
+    mode === 'popup' && anchor
+      ? {
           position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.3)',
-          zIndex: 998,
-        }}
-      />
-      {/* Drawer droit fixed */}
-      <aside
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="edit-panel-title"
-        style={{
+          // Popup s'affiche AU-DESSUS du block (top - panel_height - gap)
+          // Si pas assez d'espace en haut, fallback en-dessous
+          left: Math.max(20, Math.min(window.innerWidth - 400, anchor.left)),
+          top:
+            anchor.top > 300
+              ? Math.max(20, anchor.top - 20) // au-dessus
+              : anchor.bottom + 12, // en dessous si pas de place
+          // Si top calcule depasse, ajuster
+          transform: anchor.top > 300 ? 'translateY(-100%)' : 'none',
+          width: 380,
+          maxHeight: '70vh',
+          background: '#fff',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,145,0.1)',
+          borderRadius: 8,
+          zIndex: 999,
+          display: 'flex',
+          flexDirection: 'column',
+          fontFamily: 'Marianne, system-ui, sans-serif',
+          overflow: 'hidden',
+        }
+      : {
           position: 'fixed',
           right: 0,
           top: 0,
@@ -171,7 +203,26 @@ export function EditPanel({
           display: 'flex',
           flexDirection: 'column',
           fontFamily: 'Marianne, system-ui, sans-serif',
+        };
+
+  return (
+    <>
+      {/* Overlay backdrop semi-transparent — discret en popup mode */}
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          background: mode === 'popup' ? 'transparent' : 'rgba(0,0,0,0.3)',
+          zIndex: 998,
         }}
+      />
+      {/* Drawer ou popup selon mode */}
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-panel-title"
+        style={panelStyle}
       >
         <header
           style={{

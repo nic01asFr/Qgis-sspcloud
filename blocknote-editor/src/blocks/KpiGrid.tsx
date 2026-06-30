@@ -71,7 +71,7 @@ export const KpiGridBlock = createReactBlockSpec(
         <div
           onClick={(e) => {
             e.stopPropagation();
-            openEditPanel(block as any);
+            openEditPanel(block as any, e.nativeEvent);
           }}
           style={{
             display: 'grid',

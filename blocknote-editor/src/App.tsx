@@ -10,7 +10,7 @@
  *   BlockNoteContent pour autosave
  * - BlockNoteContent : useCreateBlockNote + onChange handler + autosave hook
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
 import '@blocknote/mantine/style.css';
@@ -19,6 +19,7 @@ import { qgisBlockNoteSchema } from './blocks';
 import { assemblyToBlockNoteDoc } from './serializer';
 import { useAutosave, saveBlocks, type SaveStatus } from './autosave';
 import { EditPanel, type EditableBlock } from './EditPanel';
+import { updateAssembly } from './api';
 import type { AssemblyFetchResponse } from './types';
 
 function parseRouteParams(): { sid: string; aid: string } {
@@ -76,14 +77,128 @@ function EditorContent({
   // quand l'assembly est rafraîchi (sinon useCreateBlockNote garde le
   // contenu initial mounté, désynchro vs currentBlocks state).
   return (
-    <BlockNoteContent
-      key={`bn-${assembly.metadata?.version_num ?? 0}`}
-      sid={sid}
-      aid={assembly.metadata?.aid || ''}
-      assembly={assembly}
-      initialBlocks={blocks}
-      onVersionUpdate={onVersionUpdate}
-    />
+    <>
+      {/* v1.11 Phase D : Titre Assembly = textbox dedie en haut (pattern Docs).
+          Editable inline avec autosave PUT update_assembly debounce 30s. */}
+      <AssemblyTitle
+        sid={sid}
+        aid={assembly.metadata?.aid || ''}
+        manifest={assembly.manifest}
+        versionNumSource={assembly.metadata?.version_num || 1}
+        onVersionUpdate={onVersionUpdate}
+      />
+      <BlockNoteContent
+        key={`bn-${assembly.metadata?.version_num ?? 0}`}
+        sid={sid}
+        aid={assembly.metadata?.aid || ''}
+        assembly={assembly}
+        initialBlocks={blocks}
+        onVersionUpdate={onVersionUpdate}
+      />
+    </>
+  );
+}
+
+/**
+ * v1.11 Phase D : titre Assembly editable inline, pattern Docs.
+ * Champ separe du contenu (vs customHeading H1 1er block) — saut semantique
+ * "titre du livrable" vs "contenu blocks".
+ *
+ * Autosave debounce 30s + PUT update_assembly avec version_num_source OCC.
+ */
+function AssemblyTitle({
+  sid,
+  aid,
+  manifest,
+  versionNumSource,
+  onVersionUpdate,
+}: {
+  sid: string;
+  aid: string;
+  manifest: any;
+  versionNumSource: number;
+  onVersionUpdate: (n: number) => void;
+}) {
+  const [title, setTitle] = useState<string>(String(manifest.title || ''));
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const timerRef = useRef<number | null>(null);
+  const lastSavedRef = useRef<string>(String(manifest.title || ''));
+
+  useEffect(() => {
+    // Reset au changement de manifest (reload)
+    setTitle(String(manifest.title || ''));
+    lastSavedRef.current = String(manifest.title || '');
+  }, [manifest.title]);
+
+  useEffect(() => {
+    if (title === lastSavedRef.current) return;
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(async () => {
+      setStatus('saving');
+      try {
+        const newManifest = { ...manifest, title };
+        const result = await updateAssembly(sid, aid, newManifest, versionNumSource);
+        if (result.ok && result.newVersionNum) {
+          lastSavedRef.current = title;
+          setStatus('saved');
+          onVersionUpdate(result.newVersionNum);
+          setTimeout(() => setStatus('idle'), 2000);
+        } else {
+          setStatus('error');
+        }
+      } catch {
+        setStatus('error');
+      }
+    }, 30_000);
+    return () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title]);
+
+  return (
+    <div
+      style={{
+        padding: '20px 24px 8px',
+        background: '#fff',
+        borderBottom: '1px solid #f0f0f0',
+        position: 'relative',
+      }}
+    >
+      <input
+        type="text"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="Titre du livrable…"
+        aria-label="Titre du livrable"
+        style={{
+          width: '100%',
+          fontSize: 30,
+          fontWeight: 700,
+          color: '#000091',
+          background: 'transparent',
+          border: 'none',
+          outline: 'none',
+          padding: 0,
+          fontFamily: 'Marianne, system-ui, sans-serif',
+          fontStyle: title ? 'normal' : 'italic',
+        }}
+      />
+      <div
+        style={{
+          fontSize: 11,
+          color: status === 'error' ? '#a50f15' : status === 'saving' ? '#0063cb' : status === 'saved' ? '#1f8d4d' : '#999',
+          marginTop: 4,
+          height: 14,
+          transition: 'color 0.2s',
+        }}
+      >
+        {status === 'idle' && title !== lastSavedRef.current && '• modification en attente'}
+        {status === 'saving' && 'Sauvegarde…'}
+        {status === 'saved' && '✓ Titre sauvegardé'}
+        {status === 'error' && '⚠ Erreur sauvegarde titre'}
+      </div>
+    </div>
   );
 }
 

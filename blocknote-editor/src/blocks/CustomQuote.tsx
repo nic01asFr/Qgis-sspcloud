@@ -1,10 +1,12 @@
 /**
- * CustomQuote custom block — Vague E2 Commit F2 (D-QGIS-010).
+ * CustomQuote - INLINE editable (v1.11.0 - Phase A).
  *
- * Mapping ComponentKind 'quote' -> BlockNote block 'customQuote'.
- * Blockquote DSFR sobre avec border-left bleu Marianne + author + source.
+ * v1.10 : content: 'none' + props.text/author/source, edition via drawer.
+ * v1.11 : content: 'inline' pour text + props.author/source via popup
+ *         menu options (right-click ouvre le drawer pour ces 2 metas).
  *
- * Aligné avec helper hub _pre_render_component_html().
+ * Pattern UX Docs : citation = text editable inline + meta-attribution
+ * configurable separement.
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
@@ -16,20 +18,23 @@ export const CustomQuoteBlock = createReactBlockSpec(
     propSchema: {
       ...defaultProps,
       cid: { default: '' },
-      text: { default: '' },
+      // 'text' supprime : vient maintenant de block.content
       author: { default: '' },
       source: { default: '' },
     },
-    content: 'none' as const,
+    content: 'inline' as const,
   },
   {
-    render: ({ block }) => {
-      const { text, author, source } = block.props;
+    render: ({ block, contentRef }) => {
+      const { author, source } = block.props;
       const hasAttribution = author || source;
       const parts = [author, source].filter(Boolean).join(' · ');
       return (
         <blockquote
-          onClick={(e) => { e.stopPropagation(); openEditPanel(block as any); }}
+          onContextMenu={(e: any) => {
+            e.preventDefault();
+            openEditPanel(block as any);
+          }}
           style={{
             borderLeft: '4px solid #000091',
             padding: '12px 18px',
@@ -41,7 +46,7 @@ export const CustomQuoteBlock = createReactBlockSpec(
             lineHeight: 1.6,
           }}
         >
-          {text}
+          <div ref={contentRef as any} style={{ outline: 'none' }} />
           {hasAttribution && (
             <footer
               style={{
@@ -50,6 +55,7 @@ export const CustomQuoteBlock = createReactBlockSpec(
                 color: '#666',
                 fontStyle: 'normal',
               }}
+              contentEditable={false}
             >
               — {parts}
             </footer>

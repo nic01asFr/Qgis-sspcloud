@@ -34,7 +34,7 @@ export const SeparatorBlock = createReactBlockSpec(
       const validColor =
         colorStr.startsWith('#') && colorStr.length <= 7 ? colorStr : '#000091';
 
-      const handleClick = (e: any) => { e.stopPropagation(); openEditPanel(block as any); };
+      const handleClick = (e: any) => { e.stopPropagation(); openEditPanel(block as any, e.nativeEvent || e); };
       if (variantStr === 'ornament') {
         return (
           <hr

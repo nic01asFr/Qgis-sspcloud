@@ -12,10 +12,26 @@ export interface ClickableBlockProps {
   block: { id: string; type: string; props: Record<string, any> };
 }
 
-export function openEditPanel(block: ClickableBlockProps['block']) {
+export function openEditPanel(
+  block: ClickableBlockProps['block'],
+  event?: { currentTarget?: HTMLElement } | MouseEvent,
+) {
   const fn = (window as any).__openEditPanel;
   if (typeof fn === 'function') {
-    fn({ id: block.id, type: block.type, props: block.props });
+    // v1.11 Phase B : capturer le rect du block pour positionner le popup
+    let anchorRect: DOMRect | undefined;
+    const target =
+      (event as any)?.currentTarget ||
+      document.querySelector(`[data-id="${block.id}"]`);
+    if (target && typeof target.getBoundingClientRect === 'function') {
+      anchorRect = target.getBoundingClientRect();
+    }
+    fn({
+      id: block.id,
+      type: block.type,
+      props: block.props,
+      anchorRect,
+    });
   } else {
     console.warn('window.__openEditPanel not registered');
   }

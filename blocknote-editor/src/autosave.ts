@@ -158,6 +158,9 @@ function customBlockToComponent(block: any): CustomBlockMapping {
   }
   // DOM kind : params via switch
   const params: Record<string, any> = {};
+  // v1.11 Phase A : pour heading/quote/narrative_text, le text vient de
+  // block.content (inline editable) au lieu de block.props.text.
+  const inlineText = blockTextContent(block.content);
   switch (kind) {
     case 'kpi_grid':
       try { params.kpis = JSON.parse(props.kpisJson || '[]'); } catch { params.kpis = []; }
@@ -165,7 +168,8 @@ function customBlockToComponent(block: any): CustomBlockMapping {
       params.columns_min = Number(props.columnsMin || 140);
       break;
     case 'heading':
-      params.text = String(props.text || '');
+      // v1.11 : text vient de inline content (BlockNote editable)
+      params.text = inlineText || String(props.text || '');
       params.level = Number(props.level || 2);
       break;
     case 'kpi_badge':
@@ -176,7 +180,8 @@ function customBlockToComponent(block: any): CustomBlockMapping {
       params.source = String(props.source || '');
       break;
     case 'quote':
-      params.text = String(props.text || '');
+      // v1.11 : text vient de inline content (BlockNote editable)
+      params.text = inlineText || String(props.text || '');
       params.author = String(props.author || '');
       params.source = String(props.source || '');
       break;
@@ -191,7 +196,8 @@ function customBlockToComponent(block: any): CustomBlockMapping {
       params.source = String(props.source || '');
       break;
     case 'narrative_text':
-      params.content = String(props.content || '');
+      // v1.11 : content vient de inline content BlockNote (editable)
+      params.content = inlineText || String(props.content || '');
       break;
   }
   // Sprint 1 Vague E3 (D3 fix) : si props.cid existe -> UPDATE existant

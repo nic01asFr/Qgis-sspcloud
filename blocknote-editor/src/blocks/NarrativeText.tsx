@@ -1,11 +1,12 @@
 /**
- * NarrativeText custom block — Vague E2 Commit F3 (D-QGIS-010).
+ * NarrativeText - INLINE editable (v1.11.0 - Phase A).
  *
- * Mapping ComponentKind 'narrative_text' -> BlockNote block 'narrativeText'.
- * Affiche le markdown content sous forme paragraph stylé (V1 simple).
- * V2 future : parser markdown -> blocks BlockNote natifs (paragraph, list, etc).
+ * v1.10 : content: 'none' + props.content markdown, edition via drawer.
+ * v1.11 : content: 'inline' pour edition native BlockNote.
  *
- * Aligné avec helper hub _narrative_text_partial.j2 (marked.js inline).
+ * Pattern UX Docs : texte narratif = paragraph editable inline avec
+ * markdown shortcuts (**gras**, *italique*, [lien]) supportes nativement
+ * par BlockNote.
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
@@ -17,16 +18,18 @@ export const NarrativeTextBlock = createReactBlockSpec(
     propSchema: {
       ...defaultProps,
       cid: { default: '' },
-      content: { default: '' },
+      // 'content' supprime du propSchema : remplace par block.content inline
     },
-    content: 'none' as const,
+    content: 'inline' as const,
   },
   {
-    render: ({ block }) => {
-      const { content } = block.props;
+    render: ({ block, contentRef }) => {
       return (
         <div
-          onClick={(e) => { e.stopPropagation(); openEditPanel(block as any); }}
+          onContextMenu={(e: any) => {
+            e.preventDefault();
+            openEditPanel(block as any);
+          }}
           style={{
             fontSize: '15.5px',
             lineHeight: 1.7,
@@ -36,10 +39,9 @@ export const NarrativeTextBlock = createReactBlockSpec(
             background: '#fff',
             borderLeft: '3px solid #e5e5e5',
             borderRadius: '0 4px 4px 0',
-            whiteSpace: 'pre-wrap',
           }}
         >
-          {String(content || '').slice(0, 2000)}
+          <div ref={contentRef as any} style={{ outline: 'none' }} />
         </div>
       );
     },

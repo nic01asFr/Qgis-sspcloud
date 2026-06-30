@@ -118,26 +118,41 @@ class TestForms:
 
 
 class TestBlocksClickHandlers:
-    """7 blocks DOM doivent avoir onClick -> openEditPanel."""
+    """Blocks DOM exposent openEditPanel via onClick (popup/drawer) ou
+    onContextMenu (inline editable v1.11)."""
 
+    # v1.11 : 4 blocks utilisent onClick (popup/drawer) car non editables inline
     @pytest.mark.parametrize("block_file", [
         "blocks/KpiGrid.tsx",
         "blocks/KpiBadge.tsx",
-        "blocks/CustomHeading.tsx",
-        "blocks/CustomQuote.tsx",
-        "blocks/NarrativeText.tsx",
         "blocks/Legend.tsx",
         "blocks/Separator.tsx",
     ])
-    def test_block_imports_openEditPanel(self, block_file):
+    def test_block_uses_onclick_handler(self, block_file):
         content = _read_blocknote_file(block_file)
         if content is None:
             pytest.skip("blocknote-editor absent")
         assert "openEditPanel" in content
         assert "edit-handler" in content
-        # onClick avec stopPropagation
         assert "onClick" in content
         assert "stopPropagation" in content
+
+    # v1.11 : 3 blocks utilisent onContextMenu (right-click) car editables inline
+    @pytest.mark.parametrize("block_file", [
+        "blocks/CustomHeading.tsx",
+        "blocks/CustomQuote.tsx",
+        "blocks/NarrativeText.tsx",
+    ])
+    def test_inline_block_uses_contextmenu(self, block_file):
+        content = _read_blocknote_file(block_file)
+        if content is None:
+            pytest.skip("blocknote-editor absent")
+        assert "openEditPanel" in content
+        assert "edit-handler" in content
+        # v1.11 : right-click ouvre le menu options (vs onClick simple)
+        assert "onContextMenu" in content
+        # Et content: 'inline' (vs 'none' v1.10)
+        assert "content: 'inline'" in content
 
     def test_edit_handler_helper_exists(self):
         content = _read_blocknote_file("blocks/edit-handler.ts")
@@ -200,10 +215,15 @@ class TestSprint4_Coherence:
         from agent.native_tools_v2 import update_component
         assert all([update_component_endpoint, log_client_error_endpoint, update_component])
 
-    def test_v110_in_package_json(self):
+    def test_version_at_least_v110(self):
         pkg = REPO_ROOT / "blocknote-editor" / "package.json"
         if not pkg.exists():
             pytest.skip()
         content = pkg.read_text(encoding="utf-8")
-        # Doit etre bump a 1.10.0 pour ce sprint
-        assert '"version": "1.10.0"' in content
+        # Doit etre >= 1.10.0 (v1.11.0 OK aussi)
+        import re
+        m = re.search(r'"version":\s*"(\d+)\.(\d+)\.(\d+)"', content)
+        assert m, "version absente de package.json"
+        major, minor, patch = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        # Sprint 4 a livre v1.10.0 minimum. v1.11+ aussi OK.
+        assert (major, minor, patch) >= (1, 10, 0), f"Version {major}.{minor}.{patch} < 1.10.0"
