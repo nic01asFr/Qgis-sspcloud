@@ -172,6 +172,8 @@ export async function assemblyToBlockNoteDoc(
           // v1.13 P0b-1 : Zone + Layers overrides (back-compat champs plats V1.12)
           props.zone = params.zone || null;
           props.layers_override = params.layers_override || [];
+          // v1.13 P0d : datasource_id (autocomplete catalog)
+          props.datasource_id = params.datasource_id || null;
           break;
         case 'chart':
         case 'data_table':

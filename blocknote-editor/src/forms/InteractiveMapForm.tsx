@@ -19,6 +19,7 @@
 import { TextField, TextareaField, SelectField, NumberField, FieldSection } from './fields';
 import { ZoneFieldset, type ZoneConfig } from './InteractiveMap/ZoneFieldset';
 import { LayersFieldset, type LayerOverride } from './InteractiveMap/LayersFieldset';
+import { DatasourceAutocomplete } from './InteractiveMap/DatasourceAutocomplete';
 
 const BASEMAP_OPTIONS = [
   { value: 'osm', label: 'OpenStreetMap (default)' },
@@ -120,12 +121,11 @@ export function InteractiveMapForm({
       </FieldSection>
 
       <FieldSection title="Credibilite (Source + Caveat)">
-        <TextField
-          label="Source Strate-aligned"
-          value={data.source || ''}
-          onChange={(v) => onChange({ ...data, source: v })}
-          placeholder="BD TOPO IGN 2024"
-          hint="Citation officielle de la donnee. Format Strate : corpus + millesime. Sprint P0d livrera un autocomplete depuis /catalog/datasources."
+        <DatasourceAutocomplete
+          datasourceId={data.datasource_id || undefined}
+          sourceFreeText={data.source || ''}
+          onChangeDatasourceId={(id) => onChange({ ...data, datasource_id: id })}
+          onChangeSource={(v) => onChange({ ...data, source: v })}
         />
         <TextareaField
           label="Caveat / mention prudence (optionnel)"

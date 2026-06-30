@@ -3909,6 +3909,43 @@ async def component_history_endpoint(
     return history
 
 
+@app.get("/catalog/datasources")
+async def catalog_datasources_endpoint(
+    category: str | None = None,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Sprint 1 V1.13 P0d — Catalogue des sources de donnees Strate-aligned.
+
+    Use case : autocomplete dans le form Marie InteractiveMapForm pour
+    eviter le drift des citations (avant : TextField libre `source: str`).
+
+    Query param optionnel : `category` (referentiel/risque/fiscalite/
+    environnement/demographie/mobilite). Sans param, retourne tout.
+
+    Format reponse :
+    {
+        "datasources": [
+            {
+                "id": "bdtopo_batiments",
+                "label": "BD TOPO 2024 — Batiments — IGN — Licence Ouverte 2.0",
+                "short_label": "BD TOPO 2024 (batiments)",
+                "authority": "IGN",
+                "licence": "Licence Ouverte 2.0",
+                "category": "referentiel",
+                "url": "https://geoservices.ign.fr/bdtopo"
+            },
+            ...
+        ],
+        "categories": ["referentiel", "risque", ...]
+    }
+    """
+    from hub.catalog_datasources import list_datasources, list_categories
+    return {
+        "datasources": list_datasources(category),
+        "categories": list_categories(),
+    }
+
+
 @app.get("/studies/{sid}/components/{cid}/source_layers")
 async def component_source_layers_endpoint(
     sid: str, cid: str,
@@ -4926,7 +4963,9 @@ async def _build_interactive_map_ctx(
     # legend_format default 'chips' si non override par classification/proportional
 
     # Source datee : auto-fill depuis le catalog datasources si data_url
-    # contient un datasource_id reconnu. Pattern Vague B B3 reutilise.
+    # contient un datasource_id reconnu. V1.13 P0d : delegue a
+    # hub.catalog_datasources (1 source de verite, expose aussi via
+    # endpoint /catalog/datasources pour autocomplete frontend).
     source_text = params.get("source") or ""
     if not source_text:
         ds_ref = (
@@ -4934,18 +4973,8 @@ async def _build_interactive_map_ctx(
             or (source.get("data_url") or "").split("/")[-1]
         )
         if ds_ref:
-            catalog = {
-                "bdtopo_batiments": "BD TOPO 2024 — IGN — Licence Ouverte 2.0",
-                "bdtopo_parcelles": "BD TOPO 2024 — IGN — Licence Ouverte 2.0",
-                "bdtopo_adresses": "BD TOPO 2024 — IGN — Licence Ouverte 2.0",
-                "bdtdv": "DVF (Demandes Valeurs Foncières) — DGFiP — Licence Ouverte 2.0",
-                "georisques_api": "Géorisques API — DGPR — Licence Ouverte 2.0",
-                "tri_limites": "TRI (Territoires Risque Inondation) — DGPR — Licence Ouverte 2.0",
-                "corine_land_cover": "CORINE Land Cover 2018 — Copernicus EEA — Licence Ouverte",
-                "admin_communes": "Découpage administratif — IGN ADMIN EXPRESS — Licence Ouverte 2.0",
-                "rge_alti": "RGE ALTI 5m — IGN — Licence Ouverte 2.0",
-            }
-            source_text = catalog.get(ds_ref, "")
+            from hub.catalog_datasources import get_label
+            source_text = get_label(ds_ref)
     # Fallback si scene_manifest mais pas de source datee : signal IGN/CEREMA
     if not source_text and scene_hash:
         source_text = "Scene Manifest QGIS — CEREMA"

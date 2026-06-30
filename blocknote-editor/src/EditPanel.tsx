@@ -459,8 +459,8 @@ function buildParamsFromFormData(
     case 'interactive_map': {
       // v1.13 P0b-1 : ajoute zone (commune INSEE / manual / study) +
       // layers_override (visible/opacity/name_override par layer).
-      // Le merge partial cote hub preserve les autres champs non-edites
-      // (classification, popup_template, atlas...).
+      // v1.13 P0d : datasource_id (autocomplete catalog Strate).
+      // Le merge partial cote hub preserve les autres champs non-edites.
       const out: Record<string, any> = {
         title: String(data.title || ''),
         subtitle: String(data.subtitle || ''),
@@ -470,6 +470,10 @@ function buildParamsFromFormData(
         source: String(data.source || ''),
         caveat: String(data.caveat || ''),
       };
+      // v1.13 P0d : datasource_id (autocomplete) - undefined si pas choisi
+      if (data.datasource_id) {
+        out.datasource_id = String(data.datasource_id);
+      }
       // v1.13 P0b-1 : zone (nullable, default V1.12 garde center_lat/lng plat)
       if (data.zone && typeof data.zone === 'object') {
         out.zone = data.zone;
@@ -518,6 +522,7 @@ function paramsToBlockProps(
     case 'interactiveMap':
       // v1.12.5 Bug fix audit P0 : round-trip props apres save.
       // v1.13 P0b-1 : ajoute zone + layers_override pour persistence sub-forms.
+      // v1.13 P0d : ajoute datasource_id (autocomplete catalog Strate).
       return {
         title: params.title || '',
         subtitle: params.subtitle || '',
@@ -528,6 +533,7 @@ function paramsToBlockProps(
         height: Number(params.height || 580),
         zone: params.zone || null,
         layers_override: Array.isArray(params.layers_override) ? params.layers_override : [],
+        datasource_id: params.datasource_id || null,
       };
     default:
       return { ...params };
