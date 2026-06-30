@@ -17,6 +17,7 @@
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
+import { openEditPanel } from './edit-handler';
 
 const COLOR_MAP: Record<string, string> = {
   'marianne-red': 'linear-gradient(135deg,#e1000f,#aa0000)',
@@ -68,12 +69,16 @@ export const KpiGridBlock = createReactBlockSpec(
 
       return (
         <div
+          onClick={(e) => {
+            e.stopPropagation();
+            openEditPanel(block as any);
+          }}
           style={{
             display: 'grid',
             gridTemplateColumns: `repeat(auto-fit, minmax(${columnsMin}px, 1fr))`,
             gap: 12,
             margin: '12px 0',
-            width: '100%', // v1.7.3 fix : sinon container parent BlockNote ne propage pas la largeur
+            width: '100%',
           }}
         >
           {kpis.slice(0, 24).map((k, i) => {

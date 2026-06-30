@@ -170,3 +170,60 @@ body, #root {
 .bn-block-content a:hover {
   color: #0063cb;
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Sprint 4 v1.10.0 (8.18) - Hover hint sur les 7 DOM custom blocks
+ * cliquables qui ouvrent le drawer EditPanel.
+ *
+ * Au hover : outline bleu Marianne + curseur pointer + tooltip
+ * "✏️ Cliquer pour modifier".
+ * ───────────────────────────────────────────────────────────────────── */
+[data-content-type="kpiGrid"],
+[data-content-type="kpiBadge"],
+[data-content-type="customHeading"],
+[data-content-type="customQuote"],
+[data-content-type="legend"],
+[data-content-type="narrativeText"],
+[data-content-type="separator"] {
+  cursor: pointer;
+  transition: outline-color 0.15s ease, box-shadow 0.15s ease;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  border-radius: 4px;
+  position: relative;
+}
+
+[data-content-type="kpiGrid"]:hover,
+[data-content-type="kpiBadge"]:hover,
+[data-content-type="customHeading"]:hover,
+[data-content-type="customQuote"]:hover,
+[data-content-type="legend"]:hover,
+[data-content-type="narrativeText"]:hover,
+[data-content-type="separator"]:hover {
+  outline-color: #000091;
+  box-shadow: 0 2px 8px rgba(0, 0, 145, 0.12);
+}
+
+/* Tooltip "Cliquer pour modifier" affiché en haut-droite au hover */
+[data-content-type="kpiGrid"]:hover::after,
+[data-content-type="kpiBadge"]:hover::after,
+[data-content-type="customHeading"]:hover::after,
+[data-content-type="customQuote"]:hover::after,
+[data-content-type="legend"]:hover::after,
+[data-content-type="narrativeText"]:hover::after,
+[data-content-type="separator"]:hover::after {
+  content: "✏️ Cliquer pour modifier";
+  position: absolute;
+  top: -28px;
+  right: 0;
+  background: #000091;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 3px;
+  white-space: nowrap;
+  z-index: 100;
+  pointer-events: none;
+  font-family: 'Marianne', system-ui, sans-serif;
+}

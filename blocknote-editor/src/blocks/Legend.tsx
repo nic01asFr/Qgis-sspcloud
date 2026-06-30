@@ -9,6 +9,7 @@
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
+import { openEditPanel } from './edit-handler';
 
 interface LegendItem {
   label: string;
@@ -39,6 +40,7 @@ export const LegendBlock = createReactBlockSpec(
       }
       return (
         <div
+          onClick={(e) => { e.stopPropagation(); openEditPanel(block as any); }}
           style={{
             padding: '12px 16px',
             background: '#fafafa',

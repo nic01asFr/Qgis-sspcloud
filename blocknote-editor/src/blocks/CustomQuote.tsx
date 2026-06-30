@@ -8,6 +8,7 @@
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
+import { openEditPanel } from './edit-handler';
 
 export const CustomQuoteBlock = createReactBlockSpec(
   {
@@ -28,6 +29,7 @@ export const CustomQuoteBlock = createReactBlockSpec(
       const parts = [author, source].filter(Boolean).join(' · ');
       return (
         <blockquote
+          onClick={(e) => { e.stopPropagation(); openEditPanel(block as any); }}
           style={{
             borderLeft: '4px solid #000091',
             padding: '12px 18px',

@@ -11,6 +11,7 @@
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
+import { openEditPanel } from './edit-handler';
 
 const SIZES: Record<number, string> = {
   1: '32px',
@@ -37,6 +38,7 @@ export const CustomHeadingBlock = createReactBlockSpec(
       const HeadingTag = (`h${clampedLevel}` as unknown) as keyof JSX.IntrinsicElements;
       return (
         <HeadingTag
+          onClick={(e: any) => { e.stopPropagation(); openEditPanel(block as any); }}
           style={{
             fontSize: SIZES[clampedLevel],
             color: '#161616',

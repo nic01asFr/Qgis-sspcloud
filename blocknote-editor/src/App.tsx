@@ -18,6 +18,7 @@ import { fetchAssembly } from './api';
 import { qgisBlockNoteSchema } from './blocks';
 import { assemblyToBlockNoteDoc } from './serializer';
 import { useAutosave, saveBlocks, type SaveStatus } from './autosave';
+import { EditPanel, type EditableBlock } from './EditPanel';
 import type { AssemblyFetchResponse } from './types';
 
 function parseRouteParams(): { sid: string; aid: string } {
@@ -107,6 +108,8 @@ function BlockNoteContent({
     assembly.metadata?.version_num || 1,
   );
   const [overrideStatus, setOverrideStatus] = useState<SaveStatus | null>(null);
+  // Sprint 4 v1.10.0 (8.18) : drawer Edit Panel
+  const [editingBlock, setEditingBlock] = useState<EditableBlock | null>(null);
 
   const editor = useCreateBlockNote({
     schema: qgisBlockNoteSchema,
@@ -167,6 +170,38 @@ function BlockNoteContent({
   // sinon le status autosave normal
   const displayStatus = overrideStatus || autosaveStatus;
 
+  // Sprint 4 v1.10.0 (8.18) : exposer un global pour que les custom blocks
+  // puissent ouvrir le drawer EditPanel via window.__openEditPanel(block).
+  // BlockNote createReactBlockSpec ne permet pas de passer un callback en
+  // prop direct -> bridge global pour eviter prop drilling complexe.
+  useEffect(() => {
+    (window as any).__openEditPanel = (block: EditableBlock) => {
+      setEditingBlock(block);
+    };
+    return () => {
+      delete (window as any).__openEditPanel;
+    };
+  }, []);
+
+  // Apres save Edit Panel : met a jour le block dans BlockNote editor + reset
+  const handleEditPanelSaved = useCallback(
+    (newProps: Record<string, any>) => {
+      if (!editingBlock) return;
+      // BlockNote API : trouver le block et update via editor.updateBlock
+      try {
+        const blockInDoc = editor.document.find((b: any) => b.id === editingBlock.id);
+        if (blockInDoc) {
+          editor.updateBlock(blockInDoc, { props: newProps });
+          // Trigger autosave bypass : sync currentBlocks
+          setCurrentBlocks(editor.document);
+        }
+      } catch (err) {
+        console.warn('updateBlock failed', err);
+      }
+    },
+    [editingBlock, editor],
+  );
+
   return (
     <>
       <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
@@ -177,6 +212,13 @@ function BlockNoteContent({
           onChange={() => setCurrentBlocks(editor.document)}
         />
       </div>
+      <EditPanel
+        block={editingBlock}
+        sid={sid}
+        versionNumSource={versionNumSource}
+        onClose={() => setEditingBlock(null)}
+        onSaved={handleEditPanelSaved}
+      />
       <SaveStatusBar
         status={displayStatus}
         onForceOverwrite={handleForceOverwrite}

@@ -9,6 +9,7 @@
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
+import { openEditPanel } from './edit-handler';
 
 const COLOR_MAP: Record<string, string> = {
   'marianne-red': 'linear-gradient(135deg,#e1000f,#aa0000)',
@@ -37,6 +38,7 @@ export const KpiBadgeBlock = createReactBlockSpec(
       const gradient = COLOR_MAP[String(color)] || COLOR_MAP['info-blue'];
       return (
         <div
+          onClick={(e) => { e.stopPropagation(); openEditPanel(block as any); }}
           style={{
             padding: '20px 28px',
             background: gradient,

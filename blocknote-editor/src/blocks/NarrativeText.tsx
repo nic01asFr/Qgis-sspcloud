@@ -9,6 +9,7 @@
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
+import { openEditPanel } from './edit-handler';
 
 export const NarrativeTextBlock = createReactBlockSpec(
   {
@@ -25,6 +26,7 @@ export const NarrativeTextBlock = createReactBlockSpec(
       const { content } = block.props;
       return (
         <div
+          onClick={(e) => { e.stopPropagation(); openEditPanel(block as any); }}
           style={{
             fontSize: '15.5px',
             lineHeight: 1.7,

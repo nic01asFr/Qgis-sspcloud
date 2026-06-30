@@ -8,6 +8,7 @@
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
+import { openEditPanel } from './edit-handler';
 
 export const SeparatorBlock = createReactBlockSpec(
   {
@@ -33,9 +34,11 @@ export const SeparatorBlock = createReactBlockSpec(
       const validColor =
         colorStr.startsWith('#') && colorStr.length <= 7 ? colorStr : '#000091';
 
+      const handleClick = (e: any) => { e.stopPropagation(); openEditPanel(block as any); };
       if (variantStr === 'ornament') {
         return (
           <hr
+            onClick={handleClick}
             style={{
               border: 'none',
               borderTop: `3px ${validStyle} ${validColor}`,
@@ -46,10 +49,11 @@ export const SeparatorBlock = createReactBlockSpec(
         );
       }
       if (variantStr === 'break') {
-        return <div style={{ height: 60 }} />;
+        return <div onClick={handleClick} style={{ height: 60 }} />;
       }
       return (
         <hr
+          onClick={handleClick}
           style={{
             border: 'none',
             borderTop: `2px ${validStyle} ${validColor}`,
