@@ -497,9 +497,19 @@ function paramsToBlockProps(
     case 'separator':
       return { ...params };
     case 'interactiveMap':
-      // v1.12 : props minimaux (sid pour iframe + cid). Les params editables
-      // sont pousses dans le manifest hub, l'iframe se rafraichit au reload.
-      return { sid: undefined };  // sid conserve dans block.props existant
+      // v1.12.5 Bug fix audit P0 (Sprint 1 V1.13) : retourner les 7 props
+      // editables Marie pour qu'elles persistent dans block.props apres save.
+      // Sans ca, reouvrir l'EditPanel dans la meme session affiche les anciennes
+      // valeurs (le hub render OK via manifest, mais block.props est stale).
+      return {
+        title: params.title || '',
+        subtitle: params.subtitle || '',
+        description: params.description || '',
+        basemap_id: params.basemap_id || 'osm',
+        source: params.source || '',
+        caveat: params.caveat || '',
+        height: Number(params.height || 580),
+      };
     default:
       return { ...params };
   }
