@@ -4964,44 +4964,35 @@ async def _build_interactive_map_ctx(
     title_from_params = params.get("title")
     final_title = title_from_params or title
 
-    # Sprint 1 V1.13 P0b-1 : resolution zone d'etude.
+    # Sprint 1 V1.13 P0c : resolution zone d'etude via hub.zone_resolver.
     # 3 sources possibles (priorite decroissante) :
-    #   1. params.zone (V1.13 structure) - kind=commune/manual/study
+    #   1. params.zone (V1.13 structure) - kind=commune (INSEE via geo.api.gouv.fr) /
+    #      manual (center_lng/lat/zoom direct) / study (lookup study.zone)
     #   2. params.center_* + zoom (V1.12 legacy plats)
     #   3. defaults Marseille 4e (test territoire CEREMA)
-    zone_param = params.get("zone") or {}
-    z_kind = (zone_param.get("kind") if isinstance(zone_param, dict) else None) or "manual"
-    final_lng = params.get("center_lng", params.get("lng", 5.39))
-    final_lat = params.get("center_lat", params.get("lat", 43.30))
-    final_zoom = params.get("zoom", 13)
-    if isinstance(zone_param, dict):
-        if z_kind == "manual":
-            if zone_param.get("center_lng") is not None:
-                final_lng = zone_param["center_lng"]
-            if zone_param.get("center_lat") is not None:
-                final_lat = zone_param["center_lat"]
-            if zone_param.get("zoom") is not None:
-                final_zoom = zone_param["zoom"]
-        elif z_kind == "commune" and zone_param.get("insee"):
-            # V1.13 P0c (futur) : resoudre INSEE -> bbox via geo API.
-            # En V1.13 P0b-1 on accepte le bind mais fallback defaults si
-            # pas resolu (Marie peut combiner avec manual pour override).
-            try:
-                _insee = str(zone_param["insee"]).strip()
-                # P0c livrera _try_resolve_major_city ; pour l'instant on
-                # garde les defaults Marseille 4e si pas resolu.
-                if _insee == "13204":
-                    final_lng, final_lat, final_zoom = 5.39, 43.30, 13
-                elif _insee == "75104":
-                    final_lng, final_lat, final_zoom = 2.35, 48.85, 13
-                elif _insee == "69383":
-                    final_lng, final_lat, final_zoom = 4.83, 45.76, 13
-            except Exception:
-                pass
-        elif z_kind == "study":
-            # V1.13 P0c (futur) : lookup study.zone via studies.get_study(sid).
-            # En V1.13 P0b-1 on garde defaults si pas resolu.
-            pass
+    from hub.zone_resolver import resolve_zone, DEFAULT_CENTER_LNG, DEFAULT_CENTER_LAT, DEFAULT_ZOOM
+
+    fallback_lng = params.get("center_lng", params.get("lng", DEFAULT_CENTER_LNG))
+    fallback_lat = params.get("center_lat", params.get("lat", DEFAULT_CENTER_LAT))
+    fallback_zoom = params.get("zoom", DEFAULT_ZOOM)
+
+    zone_param = params.get("zone")
+    try:
+        zone_resolved = await resolve_zone(
+            zone_param if isinstance(zone_param, dict) else None,
+            sid,
+            fallback_lng=fallback_lng,
+            fallback_lat=fallback_lat,
+            fallback_zoom=fallback_zoom,
+        )
+        final_lng = zone_resolved["center_lng"]
+        final_lat = zone_resolved["center_lat"]
+        final_zoom = zone_resolved["zoom"]
+    except Exception as exc:
+        log.warning("zone_resolver %s : %s, fallback defaults", cid, exc)
+        final_lng = fallback_lng
+        final_lat = fallback_lat
+        final_zoom = fallback_zoom
     return {
         "cid": cid,
         "title": final_title,

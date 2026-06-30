@@ -1,7 +1,7 @@
 {
   "name": "qgis-sspcloud-blocknote-editor",
   "private": true,
-  "version": "1.13.1",
+  "version": "1.13.2",
   "description": "Editeur block-based BlockNote pour qgis-sspcloud (D-QGIS-010 Vague E2)",
   "type": "module",
   "scripts": {

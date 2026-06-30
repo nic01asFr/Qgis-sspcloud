@@ -242,15 +242,15 @@ class TestHubHelper_V113:
         assert 'params.get("zone")' in src or "params.get('zone')" in src
 
     def test_helper_supports_zone_kind_commune_insee(self):
-        """Insee Marseille 4e / Paris 4e / Lyon doivent etre resolus."""
+        """V1.13 P0c : la resolution INSEE est deleguee a hub.zone_resolver
+        (n'importe quel INSEE, via geo.api.gouv.fr). V1.13 P0b-1 livrait
+        3 codes hardcoded ; P0c les remplace par appel API.
+        """
         import inspect
         from hub.main import _build_interactive_map_ctx
         src = inspect.getsource(_build_interactive_map_ctx)
-        # Codes INSEE arrondissements (KB reference_insee_arrondissements)
-        # P0b-1 livre 3 codes connus en dur (P0c livrera _try_resolve_major_city)
-        assert "13204" in src  # Marseille 4e
-        assert "75104" in src  # Paris 4e
-        assert "69383" in src  # Lyon 3e
+        # P0c : zone_resolver appele (resolution dynamique via API)
+        assert "zone_resolver" in src or "resolve_zone" in src
 
 
 class TestSprint1_P0b1_Coherence:
