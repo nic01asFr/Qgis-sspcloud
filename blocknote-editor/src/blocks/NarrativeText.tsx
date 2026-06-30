@@ -1,12 +1,8 @@
 /**
- * NarrativeText - INLINE editable (v1.11.0 - Phase A).
+ * NarrativeText - INLINE editable (v1.12.2 fix).
  *
- * v1.10 : content: 'none' + props.content markdown, edition via drawer.
- * v1.11 : content: 'inline' pour edition native BlockNote.
- *
- * Pattern UX Docs : texte narratif = paragraph editable inline avec
- * markdown shortcuts (**gras**, *italique*, [lien]) supportes nativement
- * par BlockNote.
+ * v1.12.2 : ref contentRef directement sur le div interieur (vs nested
+ * span/div qui causait data-node-view-content-react manquant).
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
@@ -18,32 +14,29 @@ export const NarrativeTextBlock = createReactBlockSpec(
     propSchema: {
       ...defaultProps,
       cid: { default: '' },
-      // 'content' supprime du propSchema : remplace par block.content inline
     },
     content: 'inline' as const,
   },
   {
-    render: ({ block, contentRef }) => {
-      return (
-        <div
-          onContextMenu={(e: any) => {
-            e.preventDefault();
-            openEditPanel(block as any);
-          }}
-          style={{
-            fontSize: '15.5px',
-            lineHeight: 1.7,
-            color: '#161616',
-            margin: '12px 0',
-            padding: '12px 16px',
-            background: '#fff',
-            borderLeft: '3px solid #e5e5e5',
-            borderRadius: '0 4px 4px 0',
-          }}
-        >
-          <div ref={contentRef as any} style={{ outline: 'none' }} />
-        </div>
-      );
-    },
+    render: ({ block, contentRef }) => (
+      <div
+        ref={contentRef as any}
+        onContextMenu={(e: any) => {
+          e.preventDefault();
+          openEditPanel(block as any);
+        }}
+        style={{
+          fontSize: '15.5px',
+          lineHeight: 1.7,
+          color: '#161616',
+          margin: '12px 0',
+          padding: '12px 16px',
+          background: '#fff',
+          borderLeft: '3px solid #e5e5e5',
+          borderRadius: '0 4px 4px 0',
+          outline: 'none',
+        }}
+      />
+    ),
   },
 );

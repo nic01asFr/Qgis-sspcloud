@@ -23,17 +23,18 @@ def _read(rel: str) -> str | None:
 
 
 class TestBugFix_CustomHeadingContentRef:
-    """v1.11.1 fix : contentRef doit etre sur child element (span/div),
-    pas sur le root du render."""
+    """v1.12.2 fix : contentRef DIRECTEMENT sur l'element HTML (h1/h2/h3/h4)
+    via switch level explicite. BlockNote v0.22 pose data-node-view-content
+    sur le ref'd element directement, pas sur des span/div child."""
 
-    def test_custom_heading_uses_child_contentRef(self):
+    def test_custom_heading_ref_on_html_element_direct(self):
         content = _read("blocks/CustomHeading.tsx")
         if content is None:
             pytest.skip()
-        # span enfant porte le contentRef (pattern correct BlockNote)
-        assert "<span ref={contentRef" in content
-        # Le HeadingTag ne doit PAS avoir ref={contentRef} (pattern v1.11.0 buggy)
-        assert "HeadingTag\n          ref={contentRef" not in content
+        # v1.12.2 : switch explicite par level + ref={contentRef} sur h1/h2/h3/h4
+        assert "<h1 ref={contentRef" in content
+        assert "<h2 ref={contentRef" in content
+        assert "<h3 ref={contentRef" in content
 
 
 class TestInteractiveMapForm:
