@@ -2141,6 +2141,273 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
 ]
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Sprint 2.5 V2.5 (2026-07-01) — Tools composant-only cmp_*
+#
+# Assistant IA contextuel scoped a UN composant precis (typiquement
+# interactive_map). Mutations Component.params bornees, enforcement du
+# scope via _assert_cid_in_scope cote hub.
+#
+# 5 tools prioritaires POC (scenarios S3+S4+S5 test Marie E2E) :
+# - cmp_get_context : read-only, contexte composant + scene_manifest summary
+# - cmp_set_tooltip : S3 "Au survol, afficher l'adresse"
+# - cmp_set_zone : S4 "Centrer sur Marseille 4e"
+# - cmp_set_source_citation : S5 "Citer la source TRI DGPR"
+# - cmp_add_layer : S1 "Ajouter le perimetre TRI"
+#
+# Etude B architecture cible (2026-06-30) : ~/.wikichat/knowledge/
+# Profile YAML : hub/hub/profiles/component_assist.yaml
+# ─────────────────────────────────────────────────────────────────────
+
+
+async def cmp_get_context(sid: str, cid: str) -> dict[str, Any]:
+    """Sprint 2.5 V2.5 — Read-only context du composant scope.
+
+    Retourne le contexte minimal pour l'assistant : component metadata
+    (kind, title, params), summary scene_manifest (layers avec
+    properties_keys), zone d'etude active. Budget ~4 KB.
+
+    Args:
+        sid: study id 12 hex
+        cid: component id 12 hex (doit matcher scope.cid)
+
+    Returns:
+        {component: {kind, title, params}, scene_manifest_summary:
+         [{layer_id, name, geometry_type, n_features, properties_keys}]}
+    """
+    comp = await _hub_call("GET", f"/studies/{sid}/components/{cid}")
+    try:
+        source_layers = await _hub_call(
+            "GET", f"/studies/{sid}/components/{cid}/source_layers",
+        )
+        scene_layers = source_layers.get("layers", [])
+    except Exception:
+        scene_layers = []
+    return {
+        "component": {
+            "kind": comp.get("manifest", {}).get("kind"),
+            "title": comp.get("manifest", {}).get("title"),
+            "params": comp.get("manifest", {}).get("params"),
+            "version_num": comp.get("metadata", {}).get("version_num"),
+        },
+        "scene_manifest_summary": [
+            {
+                "layer_id": l.get("id"),
+                "name": l.get("name"),
+                "geometry_type": l.get("geometry_type"),
+                "n_features": l.get("n_features"),
+                "properties_keys": l.get("properties_keys", [])[:20],
+            }
+            for l in scene_layers
+        ],
+    }
+
+
+async def cmp_set_tooltip(
+    sid: str, cid: str, layer_id_ref: str, field: str,
+    version_num_source: int | None = None,
+) -> dict[str, Any]:
+    """Sprint 2.5 V2.5 — Configure la bulle rapide au survol.
+
+    Scenario S3 test Marie : "Au survol, afficher l'adresse".
+    Mutation : Component.params.layers_override[i].tooltip_field = field.
+
+    Args:
+        sid: study id
+        cid: component id
+        layer_id_ref: reference du layer dans scene_manifest
+        field: attribut a afficher au survol (ex: "adresse")
+        version_num_source: OCC guard optionnel
+
+    Returns:
+        Component metadata post-mutation (id, version_num, ...)
+    """
+    existing = await _hub_call("GET", f"/studies/{sid}/components/{cid}")
+    params = dict(existing.get("manifest", {}).get("params") or {})
+    overrides = list(params.get("layers_override") or [])
+    found = False
+    for ov in overrides:
+        if ov.get("layer_id_ref") == layer_id_ref:
+            ov["tooltip_field"] = field
+            found = True
+            break
+    if not found:
+        overrides.append({"layer_id_ref": layer_id_ref, "tooltip_field": field})
+    params["layers_override"] = overrides
+    body = {"params": params}
+    if version_num_source is not None:
+        body["version_num_source"] = version_num_source
+    else:
+        vn = existing.get("metadata", {}).get("version_num")
+        if vn is not None:
+            body["version_num_source"] = vn
+    return await _hub_call("PUT", f"/studies/{sid}/components/{cid}", json_body=body)
+
+
+async def cmp_set_zone(
+    sid: str, cid: str,
+    kind: str,
+    insee: str | None = None,
+    buffer_km: float | None = None,
+    center_lat: float | None = None,
+    center_lng: float | None = None,
+    zoom: float | None = None,
+    version_num_source: int | None = None,
+) -> dict[str, Any]:
+    """Sprint 2.5 V2.5 — Configure la zone d'etude affichee.
+
+    Scenario S4 test Marie : "Centrer sur Marseille 4e".
+    Mutation : Component.params.zone = {kind, ...}.
+
+    Args:
+        sid: study id
+        cid: component id
+        kind: 'commune' | 'manual' | 'study'
+        insee: si kind=commune, code INSEE 5 chiffres
+        buffer_km: si kind=commune, buffer optionnel (defaut 0)
+        center_lat/lng/zoom: si kind=manual
+        version_num_source: OCC guard optionnel
+
+    Returns:
+        Component metadata post-mutation
+    """
+    existing = await _hub_call("GET", f"/studies/{sid}/components/{cid}")
+    params = dict(existing.get("manifest", {}).get("params") or {})
+    zone: dict[str, Any] = {"kind": kind}
+    if kind == "commune":
+        if insee:
+            zone["insee"] = insee
+        if buffer_km is not None:
+            zone["buffer_km"] = buffer_km
+    elif kind == "manual":
+        if center_lat is not None:
+            zone["center_lat"] = center_lat
+        if center_lng is not None:
+            zone["center_lng"] = center_lng
+        if zoom is not None:
+            zone["zoom"] = zoom
+    params["zone"] = zone
+    body = {"params": params}
+    if version_num_source is not None:
+        body["version_num_source"] = version_num_source
+    else:
+        vn = existing.get("metadata", {}).get("version_num")
+        if vn is not None:
+            body["version_num_source"] = vn
+    return await _hub_call("PUT", f"/studies/{sid}/components/{cid}", json_body=body)
+
+
+async def cmp_set_source_citation(
+    sid: str, cid: str, datasource_id: str,
+    version_num_source: int | None = None,
+) -> dict[str, Any]:
+    """Sprint 2.5 V2.5 — Configure la citation source Strate-aligned.
+
+    Scenario S5 test Marie : "Citer la source TRI DGPR".
+    Mutation : Component.params.datasource_id + auto-fill params.source.
+    Le hub reprend le label complet depuis hub.catalog_datasources
+    (14 sources Strate).
+
+    Args:
+        sid: study id
+        cid: component id
+        datasource_id: cle canonique du catalog (ex: 'tri_limites',
+                       'bdtopo_batiments', 'georisques_api', ...)
+        version_num_source: OCC guard optionnel
+
+    Returns:
+        Component metadata post-mutation
+    """
+    existing = await _hub_call("GET", f"/studies/{sid}/components/{cid}")
+    params = dict(existing.get("manifest", {}).get("params") or {})
+    params["datasource_id"] = datasource_id
+    # Le hub _build_interactive_map_ctx auto-fill params.source depuis
+    # datasource_id via hub.catalog_datasources.get_label. Pas besoin de
+    # dupliquer ici.
+    body = {"params": params}
+    if version_num_source is not None:
+        body["version_num_source"] = version_num_source
+    else:
+        vn = existing.get("metadata", {}).get("version_num")
+        if vn is not None:
+            body["version_num_source"] = vn
+    return await _hub_call("PUT", f"/studies/{sid}/components/{cid}", json_body=body)
+
+
+async def cmp_add_layer(
+    sid: str, cid: str,
+    scene_layer_id: str,
+    visible: bool = True,
+    opacity: float = 1.0,
+    z_index: int | None = None,
+    classification_field: str | None = None,
+    classification_method: str | None = None,
+    classification_palette: str | None = None,
+    classification_n_classes: int | None = None,
+    tooltip_field: str | None = None,
+    version_num_source: int | None = None,
+) -> dict[str, Any]:
+    """Sprint 2.5 V2.5 — Ajoute une couche au composant (via layers_override).
+
+    Scenario S1 test Marie : "Ajouter le perimetre TRI au-dessus".
+    Mutation : append LayerOverride a Component.params.layers_override.
+
+    Args:
+        sid: study id
+        cid: component id
+        scene_layer_id: reference du layer dans scene_manifest
+        visible: default True
+        opacity: 0-1, default 1
+        z_index: ordre affichage optionnel (plus eleve = au-dessus)
+        classification_*: bornes classification optionnelles
+        tooltip_field: bulle au survol optionnelle
+        version_num_source: OCC guard
+
+    Returns:
+        Component metadata post-mutation
+    """
+    existing = await _hub_call("GET", f"/studies/{sid}/components/{cid}")
+    params = dict(existing.get("manifest", {}).get("params") or {})
+    overrides = list(params.get("layers_override") or [])
+
+    # Idempotent : si le layer est deja dans overrides, on met a jour au lieu
+    # de dupliquer
+    ov = None
+    for existing_ov in overrides:
+        if existing_ov.get("layer_id_ref") == scene_layer_id:
+            ov = existing_ov
+            break
+    if ov is None:
+        ov = {"layer_id_ref": scene_layer_id}
+        overrides.append(ov)
+
+    ov["visible"] = visible
+    ov["opacity"] = opacity
+    if z_index is not None:
+        ov["z_index"] = z_index
+    if tooltip_field:
+        ov["tooltip_field"] = tooltip_field
+    if classification_field and classification_method:
+        ov["classification"] = {
+            "field": classification_field,
+            "method": classification_method,
+        }
+        if classification_palette:
+            ov["classification"]["palette"] = classification_palette
+        if classification_n_classes:
+            ov["classification"]["n_classes"] = classification_n_classes
+
+    params["layers_override"] = overrides
+    body = {"params": params}
+    if version_num_source is not None:
+        body["version_num_source"] = version_num_source
+    else:
+        vn = existing.get("metadata", {}).get("version_num")
+        if vn is not None:
+            body["version_num_source"] = vn
+    return await _hub_call("PUT", f"/studies/{sid}/components/{cid}", json_body=body)
+
+
 # Tools qui mutent l'état côté hub composants/assemblages. Trigger
 # d'invalidation du cache L2 artifacts (cf. _ARTIFACT_MUTATING_TOOLS dans
 # qgis_agent.py).
@@ -2161,4 +2428,11 @@ NATIVE_TOOLS_V2_MUTATING: frozenset[str] = frozenset({
     # Vague E1 (D-QGIS-009 2026-06-29) - UX libre composition
     "update_component",    # Vague E1 - mutant DB INSERT-only + PVC
     "clone_assembly",      # Vague E1 - mutant DB INSERT new aid + PVC
+    # Sprint 2.5 V2.5 (2026-07-01) - Tools cmp_* assistant composant scoped
+    # Ces 4 tools mutent Component.params via PUT /studies/{sid}/components/{cid}
+    # -> invalident cache L2 artifacts summary comme update_component.
+    "cmp_set_tooltip",
+    "cmp_set_zone",
+    "cmp_set_source_citation",
+    "cmp_add_layer",
 })
