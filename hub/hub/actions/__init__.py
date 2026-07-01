@@ -42,6 +42,10 @@ from hub.actions.assembly_actions import (
     ALL_COMPONENT_KINDS,
     apply_assembly_patch,
 )
+from hub.actions.agent_brick import (
+    AgentBrick,
+    Suggestion,
+)
 
 __all__ = [
     # Errors
@@ -70,4 +74,7 @@ __all__ = [
     "IFRAME_KINDS",
     "ALL_COMPONENT_KINDS",
     "apply_assembly_patch",
+    # AgentBrick
+    "AgentBrick",
+    "Suggestion",
 ]

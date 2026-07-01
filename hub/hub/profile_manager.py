@@ -20,9 +20,82 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 log = logging.getLogger("hub.profile_manager")
+
+
+# ============================================================================
+# Sprint V1.15 Etape 3 : Pydantic ProfileConfig validation
+#
+# Ferme l'anti-pattern C5 (etude C) : faute de frappe silencieuse
+# (native_tools.allowes vs allowed) passait, whitelist vide, agent inutile.
+#
+# Support :
+# - mcp_tools.allowed (legacy V1.0)
+# - native_tools.allowed (V1.14.1 nouveau, component_assist.yaml,
+#   assembly_assist.yaml)
+# - data_scope enum (V1.15 : study | project | component | assembly |
+#   carto-mode | standalone)
+# ============================================================================
+
+
+class ToolsConfig(BaseModel):
+    """Config des tools autorises (mcp ou native)."""
+    model_config = ConfigDict(extra="allow")  # accepte champs legacy
+
+    allowed: list[str] | Literal["all"] | None = None
+    disabled: list[str] | None = None
+
+
+class GeoAIWatcherConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    enabled: bool = False
+
+
+class ProfileMetadata(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    category: str | None = None
+    sprint: str | None = None
+    livre_date: str | None = None
+    scoped_data: str | None = None
+    budget_context_kb: float | None = None
+    budget_llm_per_open_panel: float | None = None
+
+
+class ProfileConfig(BaseModel):
+    """Schema strict d'un profil YAML CEREMA (V1.15).
+
+    Validation Pydantic au boot : faute de frappe = erreur explicite,
+    pas silencieuse whitelist vide.
+    """
+    model_config = ConfigDict(extra="allow")
+
+    id: str = Field(..., min_length=1, description="Identifiant profil")
+    name: str = Field(..., min_length=1)
+    description: str = ""
+    profile_version: str = "1.0"
+    requires_geoai: bool = False
+
+    # Legacy V1.0 (mcp_tools)
+    mcp_tools: ToolsConfig = Field(default_factory=ToolsConfig)
+
+    # V1.14.1 nouveau (native_tools) — utilise par component_assist,
+    # assembly_assist
+    native_tools: ToolsConfig = Field(default_factory=ToolsConfig)
+
+    geoai_watcher: GeoAIWatcherConfig = Field(default_factory=GeoAIWatcherConfig)
+
+    system_prompt: str | None = None
+    agent_system_prompt: str | None = None  # alias legacy
+    data_sources: list[str] = Field(default_factory=list)
+    data_scope: str | None = None  # study | project | component | assembly | ...
+
+    image_variant: str = "standard"
+    metadata: ProfileMetadata = Field(default_factory=ProfileMetadata)
 
 _PROFILES_DIR = Path(__file__).parent / "profiles"
 _DEFAULT_PROFILE_ID = os.getenv("QGIS_DEFAULT_PROFILE", "standard")
@@ -50,10 +123,20 @@ def _load_profiles() -> None:
     for f in _PROFILES_DIR.glob("*.yaml"):
         try:
             with open(f, encoding="utf-8") as fh:
-                p = yaml.safe_load(fh)
-            if p and isinstance(p, dict) and "id" in p:
-                _profiles[p["id"]] = p
-                log.info("Profil chargé: %s (%s)", p["id"], p.get("name", "?"))
+                raw = yaml.safe_load(fh)
+            if not raw or not isinstance(raw, dict) or "id" not in raw:
+                log.warning("Profil %s : structure invalide (id manquant)", f.name)
+                continue
+            # V1.15 Etape 3 : validation Pydantic (evite silencieux
+            # native_tools.allowes vs allowed)
+            try:
+                config = ProfileConfig.model_validate(raw)
+                _profiles[config.id] = config.model_dump(mode="json", exclude_none=True)
+                log.info("Profil chargé: %s (%s)", config.id, config.name)
+            except ValidationError as ve:
+                log.error("Profil %s : validation Pydantic FAILED : %s",
+                          f.name, ve.errors()[:3])
+                # Ne PAS ajouter au registre : profil bugge = fail explicite
         except Exception as e:
             log.warning("Profil %s non chargeable: %s", f.name, e)
 
@@ -145,6 +228,31 @@ def get_allowed_tools(profile_id: str | None = None) -> list[str] | str:
     tools = p.get("mcp_tools", {})
     allowed = tools.get("allowed", "all")
     return allowed
+
+
+def get_allowed_native_tools(profile_id: str | None = None) -> list[str] | str:
+    """V1.15 Etape 3 : whitelist native_tools (cmp_*/asy_*/stu_*).
+
+    Fallback :
+    - V1.14.1+ profils : `native_tools.allowed`
+    - Legacy V1.0 profils : `mcp_tools.allowed` (compat)
+    - Aucune whitelist : "all"
+    """
+    p = get_profile(profile_id)
+    native = p.get("native_tools", {})
+    allowed = native.get("allowed")
+    if allowed is not None:
+        return allowed
+    return p.get("mcp_tools", {}).get("allowed", "all")
+
+
+def get_data_scope(profile_id: str | None = None) -> str:
+    """V1.15 : retourne data_scope pour scoped_keys V2.
+
+    Valeurs : study | project | component | assembly | carto-mode | standalone.
+    """
+    p = get_profile(profile_id)
+    return p.get("data_scope") or p.get("metadata", {}).get("scoped_data") or "study"
 
 
 def reload() -> None:

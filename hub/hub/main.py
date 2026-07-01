@@ -3893,6 +3893,142 @@ async def get_component_endpoint(
     }
 
 
+@app.get("/studies/{sid}/assemblies/{aid}/assist/suggestions")
+async def assembly_assist_suggestions_endpoint(
+    sid: str, aid: str,
+    selected_block_id: str | None = None,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Sprint V1.15 Etape 5 — Suggestions Panel Docs-like Assembly-scope.
+
+    Retourne 5 chips contextuelles pour le Panel V1.15 selon :
+    - Assembly.kind (storymap / dashboard / sheet_a4)
+    - selected_block_id (contexte "bloc actif" pour actions ciblees)
+
+    Format reponse aligne V1.14.1 (composant) : {suggestions, aid, sid}.
+    Iter 2 (V2.5) : suggestions dynamiques via LLM pre-pass cached TTL 1h.
+    """
+    _check_assemblies_enabled()
+    from hub import assemblies as asm_mod
+    from hub import components as comp_mod
+    from hub.actions import AgentBrick, Scope
+
+    latest = await asm_mod.get_assembly_latest(aid)
+    if not latest or latest["sid"] != sid:
+        raise HTTPException(404, "Assemblage introuvable")
+    if latest["owner"] != user["username"]:
+        raise HTTPException(403, "Pas owner")
+
+    brick = AgentBrick(
+        execute_python=_execute_python_in_workspace,
+        asm_mod=asm_mod,
+        comp_mod=comp_mod,
+    )
+    scope = Scope(
+        kind="assembly",
+        sid=sid, aid=aid,
+        owner=user["username"],
+        profile_id="assembly_assist",
+    )
+    suggestions = await brick.get_suggestions(
+        scope=scope,
+        profile="assembly_assist",
+        selected_block_id=selected_block_id,
+    )
+    return {
+        "suggestions": [s.model_dump(mode="json", exclude_none=True) for s in suggestions],
+        "aid": aid,
+        "sid": sid,
+        "selected_block_id": selected_block_id,
+        "assembly_kind": latest.get("kind"),
+        "assistant_available": True,
+    }
+
+
+@app.post("/studies/{sid}/assemblies/{aid}/assist/action")
+async def assembly_assist_action_endpoint(
+    sid: str, aid: str,
+    payload: dict,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Sprint V1.15 Etape 5 — Execute une action tool asy_*/stu_*/cmp_*.
+
+    Dispatcher via hub.actions.AgentBrick.execute_action() :
+    - asy_* -> apply_assembly_patch (mutations layout Assembly)
+    - cmp_* -> apply_component_patch (mutations Component dans aid scope)
+    - stu_* -> read-only study-level
+
+    Payload :
+    - `tool`: nom du tool (whitelist du profil assembly_assist)
+    - `args`: dict d'args (sid+aid injectes depuis URL)
+    - `assembly_version_source`: OCC guard optionnel
+    - `component_version_source`: OCC guard cmp_* optionnel
+    - `cid`: pour cmp_* (dans aid scope)
+
+    Format reponse : ActionResult typed avec :
+    - success, tool, action_type, block (si insert), history_entry, ...
+
+    Sprint V1.15 iter 1 : synchrone. Iter 2 (V2.5) : streaming SSE pour
+    tools longs + retry LLM + suggestions dynamiques cached.
+    """
+    _check_assemblies_enabled()
+    from hub import assemblies as asm_mod
+    from hub import components as comp_mod
+    from hub.actions import (
+        AgentBrick, Scope, ActionError, ConcurrentUpdateError,
+        CMP_ALLOWED_TOOLS,
+    )
+
+    tool = payload.get("tool")
+    args = payload.get("args") or {}
+    asy_v = payload.get("assembly_version_source")
+    cmp_v = payload.get("component_version_source")
+    cid_in_payload = payload.get("cid")
+
+    # Determine scope : component (via cid dans payload) ou assembly
+    scope_cid = None
+    if tool in CMP_ALLOWED_TOOLS:
+        scope_cid = cid_in_payload
+        if not scope_cid:
+            raise HTTPException(
+                400,
+                f"Tool cmp_* '{tool}' requiert 'cid' dans le payload",
+            )
+
+    brick = AgentBrick(
+        execute_python=_execute_python_in_workspace,
+        asm_mod=asm_mod,
+        comp_mod=comp_mod,
+    )
+    scope = Scope(
+        kind="assembly",
+        sid=sid, aid=aid, cid=scope_cid,
+        owner=user["username"],
+        profile_id="assembly_assist",
+    )
+
+    version_source = cmp_v if tool in CMP_ALLOWED_TOOLS else asy_v
+
+    try:
+        result = await brick.execute_action(
+            tool=tool, args=args, scope=scope,
+            version_num_source=version_source,
+        )
+    except ConcurrentUpdateError as exc:
+        raise HTTPException(
+            409,
+            {
+                "error": "concurrent_update",
+                "message": exc.message,
+                **exc.details,
+            },
+        )
+    except ActionError as exc:
+        raise HTTPException(exc.status_code, exc.message)
+
+    return result.model_dump(mode="json", exclude_none=True)
+
+
 @app.get("/studies/{sid}/components/{cid}/assist/suggestions")
 async def component_assist_suggestions_endpoint(
     sid: str, cid: str,
