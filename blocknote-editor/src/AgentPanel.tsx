@@ -197,9 +197,16 @@ export function AgentPanel({
           }
         }
       } else if (result.action_type === 'block_deleted') {
-        // Delete via editor.removeBlocks
-        const args = JSON.parse(result.history_entry?.reversal_args ? '{}' : '{}');
-        // block_id doit venir de la requete originale : on l'a dans le context
+        // Le block_id supprime est dans reversal_args (contract V1.15).
+        // Si absent, autosave 30s realignera au prochain fetch.
+        const reversalArgs = result.history_entry?.reversal_args as any;
+        const deletedId = reversalArgs?.block_id || reversalArgs?.after_block_id;
+        if (deletedId) {
+          const b = editor.document.find((x: any) => x.id === deletedId);
+          if (b) editor.removeBlocks([b]);
+        }
+      } else if (result.action_type === 'block_moved') {
+        // Iter 2 : appliquer moveBlocks. Iter 1 : autosave 30s realignera.
       }
     } catch (err) {
       console.warn('applyLiveUpdate failed', err);
