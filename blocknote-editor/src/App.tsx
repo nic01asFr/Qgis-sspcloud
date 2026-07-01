@@ -19,6 +19,7 @@ import { qgisBlockNoteSchema } from './blocks';
 import { assemblyToBlockNoteDoc } from './serializer';
 import { useAutosave, saveBlocks, type SaveStatus } from './autosave';
 import { EditPanel, type EditableBlock } from './EditPanel';
+import { AgentPanel } from './AgentPanel';
 import { updateAssembly } from './api';
 import type { AssemblyFetchResponse } from './types';
 
@@ -225,6 +226,10 @@ function BlockNoteContent({
   const [overrideStatus, setOverrideStatus] = useState<SaveStatus | null>(null);
   // Sprint 4 v1.10.0 (8.18) : drawer Edit Panel
   const [editingBlock, setEditingBlock] = useState<EditableBlock | null>(null);
+  // Sprint V1.15 (2026-07-01) : AgentPanel Docs-like context selection
+  const [selectedBlock, setSelectedBlock] = useState<
+    { block_id: string; type: string; props?: Record<string, any> } | null
+  >(null);
 
   const editor = useCreateBlockNote({
     schema: qgisBlockNoteSchema,
@@ -298,6 +303,32 @@ function BlockNoteContent({
     };
   }, []);
 
+  // Sprint V1.15 : selection change -> contexte AgentPanel (debounce dans panel).
+  // BlockNote v0.22 expose editor.onSelectionChange qui firent au changement
+  // de curseur. On extrait le bloc courant (getTextCursorPosition.block).
+  useEffect(() => {
+    const unsub = editor.onSelectionChange(() => {
+      try {
+        const pos = editor.getTextCursorPosition();
+        const b = pos?.block;
+        if (b && b.id) {
+          setSelectedBlock({
+            block_id: b.id,
+            type: b.type,
+            props: b.props || {},
+          });
+        } else {
+          setSelectedBlock(null);
+        }
+      } catch {
+        // Selection API failures : silencieux (pas critique)
+      }
+    });
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
+  }, [editor]);
+
   // Apres save Edit Panel : met a jour le block dans BlockNote editor + reset
   const handleEditPanelSaved = useCallback(
     (newProps: Record<string, any>) => {
@@ -317,14 +348,39 @@ function BlockNoteContent({
     [editingBlock, editor],
   );
 
+  // Sprint V1.15 : callback ActionResult -> maj currentBlocks apres apply live
+  const handleAgentActionApplied = useCallback(() => {
+    // AgentPanel a deja appele editor.updateBlock/insertBlocks/removeBlocks
+    // On sync currentBlocks pour trigger autosave (30s -> commit hub)
+    setCurrentBlocks(editor.document);
+  }, [editor]);
+
+  // Sprint V1.15 : layout split 1fr / 340px (AgentPanel persistent Docs-like)
   return (
     <>
-      <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
-        <BlockNoteView
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'row',
+          flex: 1,
+          overflow: 'hidden',
+          minHeight: 0,
+        }}
+      >
+        <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
+          <BlockNoteView
+            editor={editor}
+            theme="light"
+            editable={true}
+            onChange={() => setCurrentBlocks(editor.document)}
+          />
+        </div>
+        <AgentPanel
+          sid={sid}
+          aid={aid}
+          selectedBlock={selectedBlock}
           editor={editor}
-          theme="light"
-          editable={true}
-          onChange={() => setCurrentBlocks(editor.document)}
+          onActionApplied={handleAgentActionApplied}
         />
       </div>
       <EditPanel
