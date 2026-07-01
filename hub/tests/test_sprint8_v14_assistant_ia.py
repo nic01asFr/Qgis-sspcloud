@@ -162,14 +162,20 @@ class TestEndpointsAssist:
         # Reject 400 si tool inconnu
         assert "400" in src or "HTTPException" in src
 
-    def test_action_endpoint_injects_sid_cid_from_url(self):
-        """Enforce scope : sid + cid pris de l'URL, pas du payload."""
+    def test_action_endpoint_enforces_sid_cid_from_url(self):
+        """Enforce scope : sid + cid pris de l'URL, pas du payload.
+
+        V1.14.1 hotfix : refacto endpoint pour appel direct modules hub locaux
+        (comp_mod.insert_component) au lieu de tools cmp_* qui font HTTP self-call.
+        sid + cid sont forces dans new_manifest avant Component.model_validate.
+        """
         import inspect
         from hub.main import component_assist_action_endpoint
         src = inspect.getsource(component_assist_action_endpoint)
-        # Pattern : args["sid"] = sid + args["cid"] = cid apres check payload
-        assert 'args["sid"] = sid' in src or "args['sid'] = sid" in src
-        assert 'args["cid"] = cid' in src or "args['cid'] = cid" in src
+        # Pattern V1.14.1 : new_manifest sid/id forces depuis URL sid/cid
+        assert 'new_manifest' in src
+        assert '"sid": sid' in src or "'sid': sid" in src
+        assert '"id": cid' in src or "'id': cid" in src
 
 
 class TestAssistantCardTsx:

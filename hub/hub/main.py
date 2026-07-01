@@ -4031,35 +4031,161 @@ async def component_assist_action_endpoint(
             f"Tools disponibles : {sorted(ALLOWED_TOOLS)}",
         )
 
-    # Enforce scope : sid + cid sont injectes depuis l'URL, pas depuis
-    # le payload user (evite injection de sid/cid arbitraire).
-    args["sid"] = sid
-    args["cid"] = cid
+    # Sprint 2.5 V1.14.1 hotfix : le hub s'auto-appelle sans HUB_URL configure.
+    # Refacto : appel direct des modules hub locaux (components + PVC) au lieu
+    # de passer par les tools cmp_* qui font HTTP self-call.
+    #
+    # Pattern identique a update_component_endpoint mais scope au cid de l'URL.
 
-    # Import lazy des tools cmp_* pour eviter cycle
-    from agent import native_tools_v2 as nt
+    from hub import components as comp_mod
 
-    tool_fn = getattr(nt, tool, None)
-    if tool_fn is None:
-        raise HTTPException(500, f"Tool '{tool}' manquant dans native_tools_v2")
+    # Lecture manifest actuel via comp_mod (pas d'HTTP)
+    latest = await comp_mod.get_component_latest(cid)
+    if not latest or latest["sid"] != sid:
+        raise HTTPException(404, "Composant introuvable")
+    if latest["owner"] != user["username"]:
+        raise HTTPException(403, "Pas owner")
+
+    # Lecture manifest depuis PVC via pod_code (comme _build_interactive_map_ctx)
+    import base64 as _b64s
+    import json as _json2
 
     try:
-        result = await tool_fn(**args)
-    except HTTPException:
-        raise
-    except TypeError as exc:
-        raise HTTPException(400, f"Args invalides pour {tool} : {exc}")
+        stdout = await _execute_python_in_workspace(
+            user["username"],
+            comp_mod.read_component_manifest_pod_code(sid, cid),
+        )
     except Exception as exc:
-        log.warning("component_assist_action tool=%s err=%s", tool, exc)
-        raise HTTPException(500, f"Erreur execution tool : {exc}")
+        log.warning("assist/action read manifest : %s", exc)
+        raise HTTPException(500, "Lecture manifest impossible")
+
+    manifest = None
+    if "COMPONENT_READ_OK" in stdout:
+        try:
+            b64 = stdout.split("b64=", 1)[1].split()[0].strip()
+            manifest = _json2.loads(_b64s.b64decode(b64).decode())
+        except Exception as exc:
+            log.warning("assist/action parse manifest : %s", exc)
+    if not manifest:
+        raise HTTPException(500, "Manifest illisible")
+
+    # Applique la mutation Component.params en fonction du tool
+    params = dict(manifest.get("params") or {})
+
+    if tool == "cmp_get_context":
+        return {
+            "success": True,
+            "tool": tool,
+            "result": {
+                "kind": manifest.get("kind"),
+                "title": manifest.get("title"),
+                "params": params,
+            },
+        }
+
+    if tool == "cmp_set_source_citation":
+        datasource_id = args.get("datasource_id")
+        if not datasource_id:
+            raise HTTPException(400, "cmp_set_source_citation requiert 'datasource_id'")
+        params["datasource_id"] = datasource_id
+        # Auto-fill params.source depuis le catalog (hub.catalog_datasources)
+        from hub.catalog_datasources import get_label
+        label = get_label(datasource_id)
+        if label:
+            params["source"] = label
+
+    elif tool == "cmp_set_zone":
+        kind = args.get("kind")
+        if kind not in {"commune", "manual", "study"}:
+            raise HTTPException(400, "cmp_set_zone.kind ∈ {commune, manual, study}")
+        zone = {"kind": kind}
+        for k in ("insee", "buffer_km", "center_lat", "center_lng", "zoom"):
+            if args.get(k) is not None:
+                zone[k] = args[k]
+        params["zone"] = zone
+
+    elif tool == "cmp_set_tooltip":
+        layer_id_ref = args.get("layer_id_ref")
+        field = args.get("field")
+        if not layer_id_ref or not field:
+            raise HTTPException(400, "cmp_set_tooltip requiert 'layer_id_ref' et 'field'")
+        overrides = list(params.get("layers_override") or [])
+        found = False
+        for ov in overrides:
+            if ov.get("layer_id_ref") == layer_id_ref:
+                ov["tooltip_field"] = field
+                found = True
+                break
+        if not found:
+            overrides.append({"layer_id_ref": layer_id_ref, "tooltip_field": field})
+        params["layers_override"] = overrides
+
+    elif tool == "cmp_add_layer":
+        scene_layer_id = args.get("scene_layer_id")
+        if not scene_layer_id:
+            raise HTTPException(400, "cmp_add_layer requiert 'scene_layer_id'")
+        overrides = list(params.get("layers_override") or [])
+        ov = None
+        for existing_ov in overrides:
+            if existing_ov.get("layer_id_ref") == scene_layer_id:
+                ov = existing_ov
+                break
+        if ov is None:
+            ov = {"layer_id_ref": scene_layer_id}
+            overrides.append(ov)
+        ov["visible"] = args.get("visible", True)
+        ov["opacity"] = args.get("opacity", 1.0)
+        if args.get("z_index") is not None:
+            ov["z_index"] = args["z_index"]
+        if args.get("tooltip_field"):
+            ov["tooltip_field"] = args["tooltip_field"]
+        params["layers_override"] = overrides
+
+    # Ecrire manifest patched + insert nouvelle version (INSERT-only pattern
+    # identique update_component_endpoint main.py:4590)
+    new_manifest = {**manifest, "params": params, "sid": sid, "id": cid}
+
+    from hub.models import Component
+    try:
+        component = Component.model_validate(new_manifest)
+    except Exception as exc:
+        raise HTTPException(422, f"Manifest invalide apres mutation : {exc}")
+
+    # Bump version pour insert INSERT-only versioning
+    component.version = int(latest.get("version_num", 1)) + 1
+
+    # Ecrire nouveau manifest sur PVC (overwrite)
+    content_json = _json2.dumps(
+        component.model_dump(mode="json"), ensure_ascii=False, indent=2,
+    )
+    try:
+        write_code = comp_mod.write_component_manifest_pod_code(sid, cid, content_json)
+        write_out = await _execute_python_in_workspace(user["username"], write_code)
+        if "COMPONENT_WRITE_OK" not in write_out:
+            raise Exception(f"Ecriture PVC failed: {write_out[:200]}")
+    except Exception as exc:
+        log.warning("assist/action write manifest : %s", exc)
+        raise HTTPException(500, f"Ecriture manifest : {exc}")
+
+    # INSERT-only versioning DB via comp_mod.insert_component
+    try:
+        await comp_mod.insert_component(
+            component=component,
+            owner=user["username"],
+            sid=sid,
+            file_path=comp_mod.component_manifest_path(sid, cid),
+            size_bytes=len(content_json.encode("utf-8")),
+            previous_hash=latest.get("content_hash", ""),
+        )
+    except Exception as exc:
+        log.warning("assist/action insert DB : %s", exc)
+        raise HTTPException(500, f"Insert DB : {exc}")
 
     return {
         "success": True,
         "tool": tool,
-        "result": result,
-        "version_num_after": (
-            result.get("version_num") if isinstance(result, dict) else None
-        ),
+        "cid": cid,
+        "version_num_after": component.version,
     }
 
 
