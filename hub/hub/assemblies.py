@@ -44,8 +44,35 @@ async def insert_assembly(
     rendered_path: str = "",
     audit_chain_json: str = "",
     previous_hash: str = "",
+    version_num_source: int | None = None,
 ) -> int:
-    """Insert nouvelle row assemblies_index. INSERT-only (pas d'UPDATE)."""
+    """Insert nouvelle row assemblies_index. INSERT-only (pas d'UPDATE).
+
+    Sprint V1.15 Etape 2 : OCC enforcement au niveau fonction (pas
+    seulement endpoint). Ferme la dette D2 identifiee par l'etude B :
+    `insert_assembly` acceptait `previous_hash` mais ne verifiait pas
+    `version_num_source` — bypassable si consumer appelait directement.
+
+    Si `version_num_source` fourni ET ne correspond pas a la version
+    actuelle latest en DB, leve `hub.actions.ConcurrentUpdateError` avec
+    detail `current_version_num`, `source_version_num` (pattern identique
+    endpoint update_assembly_endpoint main.py:4838).
+    """
+    # OCC guard V1.15 : verifier version_num_source AVANT insert
+    if version_num_source is not None:
+        latest = await get_assembly_latest(assembly.id)
+        current_version = int(latest.get("version_num", 1)) if latest else 0
+        try:
+            src_version = int(version_num_source)
+        except (TypeError, ValueError):
+            from hub.actions import ActionValidationError
+            raise ActionValidationError("version_num_source doit etre un entier")
+        if src_version != current_version:
+            from hub.actions import ConcurrentUpdateError
+            raise ConcurrentUpdateError(
+                "L'assemblage a ete modifie par un autre processus",
+                current=current_version, source=src_version,
+            )
     canonical = json.dumps(
         assembly.model_dump(
             mode="json",

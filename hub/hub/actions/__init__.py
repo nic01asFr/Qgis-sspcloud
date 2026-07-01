@@ -34,6 +34,14 @@ from hub.actions.component_actions import (
     CMP_ALLOWED_TOOLS,
     apply_component_patch,
 )
+from hub.actions.assembly_actions import (
+    ASY_ALLOWED_TOOLS,
+    STU_ALLOWED_TOOLS,
+    INLINE_KINDS,
+    IFRAME_KINDS,
+    ALL_COMPONENT_KINDS,
+    apply_assembly_patch,
+)
 
 __all__ = [
     # Errors
@@ -55,4 +63,11 @@ __all__ = [
     # Component actions
     "CMP_ALLOWED_TOOLS",
     "apply_component_patch",
+    # Assembly actions
+    "ASY_ALLOWED_TOOLS",
+    "STU_ALLOWED_TOOLS",
+    "INLINE_KINDS",
+    "IFRAME_KINDS",
+    "ALL_COMPONENT_KINDS",
+    "apply_assembly_patch",
 ]
