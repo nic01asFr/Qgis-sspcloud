@@ -1,23 +1,25 @@
 /**
- * AgentPanel — Panel Assistant CEREMA V1.15 Docs-like persistent.
+ * AgentPanel — Panel Assistant redaction CEREMA V1.16.0 (2026-07-01).
  *
- * Sprint V1.15 Etape 6 (2026-07-01) — pattern Notion AI / Cursor Composer /
- * LaSuite Docs adapte au persona Marie CEREMA (chef projet non-tech).
+ * Sprint V1.16.0 quick wins Marie CEREMA (~4j, 13 items P0) :
+ * - Design tokens DSFR CSS vars centralises (src/design/tokens.ts)
+ * - Iconographie SVG inline (fin des emojis pour rendu pro admin + a11y)
+ * - Retirer "IA" du header et onboarding (persona Marie mefiante-IA)
+ * - Vouvoiement + verbes metier (vs tutoiement + jargon dev)
+ * - Undo actionnable historique (clic ligne -> POST reversal_tool + reversal_args)
+ * - Fin des alert() natifs : messages inline confirmation
+ * - aria-live + aria-label + role=alert (RGAA CEREMA obligatoire NVDA)
+ * - Couleurs DSFR strict (succes #18753c warning #b34000 erreur #ce0500)
+ * - Focus-visible clavier + hover lift micro-interaction
+ * - Skeleton shimmer pendant fetch (vs texte "Chargement...")
+ * - Responsive Dell 13" via CSS clamp + auto-collapse <1280px
+ * - Retirer fuite jargon "Iter 2 V2.5 SSE" -> zone desactivee sobre
+ * - friendlyBasemap / Datasource / Field mappers slugs -> labels lisibles
  *
- * Remplace/complete l'AssistantCard V1.14.1 (dans drawer scope composant)
- * par un panel latéral 340px persistent, contextuel au bloc sélectionné
- * dans l'éditeur BlockNote, avec apply live via editor.updateBlock() /
- * insertBlocks() / removeBlocks() (fin des window.location.reload()).
- *
- * Contract AgentBrick backend :
- * - GET /studies/{sid}/assemblies/{aid}/assist/suggestions?selected_block_id=...
- * - POST /studies/{sid}/assemblies/{aid}/assist/action {tool, args, cid?, ...}
- *
- * Etude A UX (score 8.5/10) : pattern hybride Docs+Cursor. Etude B backend
- * (7.5/10) : dispatcher unifie assembly-scope. Etude C AgentBrick (7/10) :
- * contract stable pour cross-projet CEREMA extractable V1.16.
+ * Version anterieure V1.15.0 : voir git history commit 84fa221.
  */
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { T, agentPanelCss, friendlyKind, friendlyBasemap } from './design/tokens';
 
 type Suggestion = {
   id: string;
@@ -65,10 +67,101 @@ type HistoryDisplay = {
   reversal_args?: Record<string, any>;
 };
 
-const PANEL_WIDTH = 340;
-const COLLAPSED_WIDTH = 48;
 const LS_KEY_COLLAPSED = 'cerema.agent_panel.collapsed';
 const LS_KEY_ONBOARDING_SEEN = 'cerema.agent_panel.first_seen';
+
+/**
+ * Injecte le CSS global une fois par window (idempotent).
+ * Pattern adapte a l'existant : pas de CSS module, juste balise <style>.
+ */
+let cssInjected = false;
+function useEnsureAgentPanelCss() {
+  useLayoutEffect(() => {
+    if (cssInjected) return;
+    const el = document.createElement('style');
+    el.setAttribute('data-cerema-agent-panel', '1');
+    el.textContent = agentPanelCss;
+    document.head.appendChild(el);
+    cssInjected = true;
+  }, []);
+}
+
+// ============================================================================
+// Icones SVG inline (fin des emojis)
+// ============================================================================
+
+const iconStyle = { width: 16, height: 16, flexShrink: 0 } as const;
+
+function IconLogo({ color = '#fff' }: { color?: string }) {
+  // Assistant redaction : icone plume/edit sobre
+  return (
+    <svg viewBox="0 0 24 24" fill="none" style={{ ...iconStyle, width: 20, height: 20 }} aria-hidden="true">
+      <path
+        d="M4 20L15.5 8.5M15.5 8.5L18 6L20 8L17.5 10.5M15.5 8.5L17.5 10.5M6 20L4 20L4 18L15.5 6.5M17.5 10.5L6 22"
+        stroke={color}
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconChevronRight({ color }: { color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" style={iconStyle} aria-hidden="true">
+      <path d="M9 6l6 6-6 6" stroke={color || T.blueMarianne} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconChevronLeft({ color = '#fff' }: { color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" style={iconStyle} aria-hidden="true">
+      <path d="M15 6l-6 6 6 6" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconSelection({ color = T.blueMarianne }: { color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" style={iconStyle} aria-hidden="true">
+      <rect x="3" y="3" width="6" height="6" stroke={color} strokeWidth="1.6" />
+      <rect x="15" y="15" width="6" height="6" stroke={color} strokeWidth="1.6" />
+      <path d="M6 9v6M9 6h6M9 18h6M18 9v6" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeDasharray="1 3" />
+    </svg>
+  );
+}
+
+function IconCheck({ color = T.successFg }: { color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" style={iconStyle} aria-hidden="true" className="cerema-check-svg">
+      <path d="M5 12l5 5L20 7" stroke={color} strokeWidth="3" fill="none" />
+    </svg>
+  );
+}
+
+function IconUndo({ color = T.textMuted }: { color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" style={iconStyle} aria-hidden="true">
+      <path d="M9 14L4 9l5-5" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 9h11a5 5 0 015 5v3" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconAlert({ color = T.errorFg }: { color?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" style={iconStyle} aria-hidden="true">
+      <path d="M12 3l10 18H2L12 3z" stroke={color} strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M12 10v4M12 17v.5" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// ============================================================================
+// Composant principal
+// ============================================================================
 
 export function AgentPanel({
   sid,
@@ -76,17 +169,24 @@ export function AgentPanel({
   selectedBlock,
   editor,
   onActionApplied,
+  onRequestReload,
 }: {
   sid: string;
   aid: string;
   selectedBlock: SelectedBlockContext;
-  editor: any;  // BlockNote editor instance
+  editor: any;
   onActionApplied?: (result: ActionResult) => void;
+  onRequestReload?: () => void;
 }) {
+  useEnsureAgentPanelCss();
+
   const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
-      return localStorage.getItem(LS_KEY_COLLAPSED) === '1';
+      const stored = localStorage.getItem(LS_KEY_COLLAPSED);
+      if (stored !== null) return stored === '1';
+      // Auto-collapse par defaut sur Dell 13" (Marie hardware CEREMA)
+      return typeof window !== 'undefined' && window.innerWidth < T.responsiveBreakpoint;
     } catch {
       return false;
     }
@@ -98,13 +198,14 @@ export function AgentPanel({
       return true;
     }
   });
-  const [error, setError] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [conflictErr, setConflictErr] = useState<boolean>(false);
   const [executing, setExecuting] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryDisplay[]>([]);
   const [freeInput, setFreeInput] = useState('');
   const debounceRef = useRef<number | null>(null);
+  const onboardingBtnRef = useRef<HTMLButtonElement>(null);
 
-  // Toggle collapse persist localStorage
   const toggleCollapse = () => {
     const next = !collapsed;
     setCollapsed(next);
@@ -120,14 +221,21 @@ export function AgentPanel({
     } catch {}
   };
 
-  // Fetch suggestions avec debounce 250ms (etude A) sur changement selection
+  // Focus auto onboarding (RGAA 2.4.3 focus order)
+  useEffect(() => {
+    if (!firstSeen && !collapsed) {
+      onboardingBtnRef.current?.focus();
+    }
+  }, [firstSeen, collapsed]);
+
+  // Fetch suggestions debounce 250ms sur changement selection
   useEffect(() => {
     if (!sid || !aid || collapsed) return;
     if (debounceRef.current !== null) {
       window.clearTimeout(debounceRef.current);
     }
+    const ctrl = new AbortController();
     debounceRef.current = window.setTimeout(() => {
-      const ctrl = new AbortController();
       const qs = selectedBlock?.block_id
         ? `?selected_block_id=${encodeURIComponent(selectedBlock.block_id)}`
         : '';
@@ -142,16 +250,16 @@ export function AgentPanel({
         .then((data) => {
           if (!ctrl.signal.aborted) {
             setSuggestions(data.suggestions || []);
-            setError(null);
+            setErrorMsg(null);
           }
         })
         .catch((e: any) => {
           if (ctrl.signal.aborted || e?.name === 'AbortError') return;
-          setError(String(e?.message || e));
+          setErrorMsg(String(e?.message || e));
         });
-      return () => ctrl.abort();
     }, 250);
     return () => {
+      ctrl.abort();
       if (debounceRef.current !== null) {
         window.clearTimeout(debounceRef.current);
       }
@@ -159,11 +267,8 @@ export function AgentPanel({
   }, [sid, aid, selectedBlock?.block_id, collapsed]);
 
   const applyLiveUpdate = (result: ActionResult) => {
-    // Applique la mutation directement dans l'editeur BlockNote (pas de reload)
     try {
       if (result.action_type === 'component_updated' && result.cid) {
-        // Force re-mount iframe via version_num_after (bump props.version_num
-        // qui declenche le re-mount via key)
         const blockInDoc = editor.document.find(
           (b: any) => b.props?.cid === result.cid,
         );
@@ -176,7 +281,6 @@ export function AgentPanel({
           });
         }
       } else if (result.action_type === 'block_inserted' && result.block) {
-        // Insert new block via editor.insertBlocks
         const newBlock = {
           type: mapKindToBlockNoteType(result.block.kind),
           props: {
@@ -197,52 +301,31 @@ export function AgentPanel({
           }
         }
       } else if (result.action_type === 'block_deleted') {
-        // Le block_id supprime est dans reversal_args (contract V1.15).
-        // Si absent, autosave 30s realignera au prochain fetch.
         const reversalArgs = result.history_entry?.reversal_args as any;
         const deletedId = reversalArgs?.block_id || reversalArgs?.after_block_id;
         if (deletedId) {
           const b = editor.document.find((x: any) => x.id === deletedId);
           if (b) editor.removeBlocks([b]);
         }
-      } else if (result.action_type === 'block_moved') {
-        // Iter 2 : appliquer moveBlocks. Iter 1 : autosave 30s realignera.
       }
     } catch (err) {
       console.warn('applyLiveUpdate failed', err);
     }
   };
 
-  const executeSuggestion = async (sug: Suggestion) => {
-    if (!sid || !aid) return;
-    if (sug.hint && !sug.tool) {
-      // Escalade agent complet
-      alert(
-        "Cette action necessite l'agent IA complet. " +
-        `Va dans le chat CEREMA et demande : "${sug.prompt}"`
-      );
-      return;
-    }
-    if (sug.requires_layer_selection || sug.requires_block_selection) {
-      if (!selectedBlock) {
-        alert(
-          "Cette action necessite de selectionner un element au prealable dans l'editeur."
-        );
-        return;
-      }
-    }
-
-    setExecuting(sug.id);
-    setError(null);
+  const postAction = async (
+    tool: string,
+    args: Record<string, any>,
+    opts?: { cid?: string; executingId?: string },
+  ): Promise<ActionResult | null> => {
+    setExecuting(opts?.executingId || tool);
+    setErrorMsg(null);
+    setConflictErr(false);
     try {
-      // Adapte args pour cmp_* tools : si tool est cmp_*, envoyer cid
-      const isCmp = sug.tool?.startsWith('cmp_');
-      const body: any = {
-        tool: sug.tool,
-        args: sug.tool_args || {},
-      };
-      if (isCmp && selectedBlock?.props?.cid) {
-        body.cid = selectedBlock.props.cid;
+      const isCmp = tool.startsWith('cmp_');
+      const body: any = { tool, args };
+      if (isCmp && (opts?.cid || selectedBlock?.props?.cid)) {
+        body.cid = opts?.cid || selectedBlock?.props?.cid;
       }
       const resp = await fetch(
         `/studies/${sid}/assemblies/${aid}/assist/action`,
@@ -254,238 +337,430 @@ export function AgentPanel({
         },
       );
       if (resp.status === 409) {
-        const err409 = await resp.json();
-        setError(
-          `Conflit : ${err409.message || 'un autre processus a modifie'}. Recharge.`
-        );
-        return;
+        setConflictErr(true);
+        return null;
       }
       if (!resp.ok) {
         const errBody = await resp.json().catch(() => ({}));
         throw new Error(errBody.detail || `HTTP ${resp.status}`);
       }
-      const result = (await resp.json()) as ActionResult;
-
-      // Apply live via BlockNote API (V1.15 : plus de reload !)
-      applyLiveUpdate(result);
-
-      // Ajoute a l'historique
-      if (result.history_entry) {
-        setHistory((prev) => [
-          {
-            id: result.history_entry!.id,
-            label: result.history_entry!.label,
-            reversible: result.history_entry!.reversible,
-            at: Date.now(),
-            reversal_tool: result.history_entry!.reversal_tool,
-            reversal_args: result.history_entry!.reversal_args,
-          },
-          ...prev.slice(0, 9),
-        ]);
-      }
-
-      if (onActionApplied) onActionApplied(result);
+      return (await resp.json()) as ActionResult;
     } catch (e: any) {
-      setError(String(e?.message || e));
+      setErrorMsg(String(e?.message || e));
+      return null;
     } finally {
       setExecuting(null);
     }
   };
 
+  const executeSuggestion = async (sug: Suggestion) => {
+    if (!sid || !aid) return;
+    if (sug.hint && !sug.tool) {
+      // Escalade chat principal : message inline sobre (fin des alert())
+      setErrorMsg(
+        `Cette action necessite l'assistant complet. Ouvrez le chat CEREMA principal et demandez : "${sug.prompt}"`,
+      );
+      return;
+    }
+    if (
+      (sug.requires_layer_selection || sug.requires_block_selection) &&
+      !selectedBlock
+    ) {
+      setErrorMsg(
+        "Cette action necessite de selectionner un element dans l'editeur au prealable.",
+      );
+      return;
+    }
+    const result = await postAction(sug.tool!, sug.tool_args || {}, {
+      executingId: sug.id,
+    });
+    if (!result) return;
+    applyLiveUpdate(result);
+    if (result.history_entry) {
+      setHistory((prev) => [
+        {
+          id: result.history_entry!.id,
+          label: friendlyHistoryLabel(result.history_entry!.label),
+          reversible: result.history_entry!.reversible,
+          at: Date.now(),
+          reversal_tool: result.history_entry!.reversal_tool,
+          reversal_args: result.history_entry!.reversal_args,
+        },
+        ...prev.slice(0, 9),
+      ]);
+    }
+    if (onActionApplied) onActionApplied(result);
+  };
+
+  // === UNDO actionnable (V1.16 item #1) ===
+  const executeUndo = async (h: HistoryDisplay) => {
+    if (!h.reversible || !h.reversal_tool) return;
+    const result = await postAction(h.reversal_tool, h.reversal_args || {}, {
+      executingId: `undo-${h.id}`,
+    });
+    if (!result) return;
+    applyLiveUpdate(result);
+    // Retire l'entree annulee et enregistre la nouvelle inversee
+    setHistory((prev) => {
+      const filtered = prev.filter((x) => x.id !== h.id);
+      if (result.history_entry) {
+        return [
+          {
+            id: result.history_entry.id,
+            label: `Annule : ${h.label}`,
+            reversible: false,
+            at: Date.now(),
+          },
+          ...filtered.slice(0, 9),
+        ];
+      }
+      return filtered;
+    });
+    if (onActionApplied) onActionApplied(result);
+  };
+
+  const handleReloadConflict = () => {
+    setConflictErr(false);
+    if (onRequestReload) {
+      onRequestReload();
+    } else {
+      window.location.reload();
+    }
+  };
+
   // ==========================================================================
-  // Render collapsed state (icon toggle)
+  // Render collapsed
   // ==========================================================================
 
   if (collapsed) {
     return (
-      <div
+      <aside
+        className="cerema-panel collapsed"
+        aria-label="Assistant redaction CEREMA (reduit)"
         style={{
-          width: COLLAPSED_WIDTH,
-          background: '#000091',
-          borderLeft: '1px solid #e0e0e0',
+          background: T.blueMarianne,
+          borderLeft: `1px solid ${T.blueMarianneBorder}`,
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          padding: '12px 0',
+          padding: `${T.space3}px 0`,
           flexShrink: 0,
         }}
       >
         <button
           type="button"
+          className="cerema-btn"
           onClick={toggleCollapse}
-          title="Ouvrir Assistant CEREMA"
+          aria-label="Ouvrir l'assistant redaction CEREMA"
+          title="Ouvrir l'assistant redaction CEREMA"
           style={{
             background: 'transparent',
             border: 'none',
-            color: '#fff',
+            color: T.white,
             cursor: 'pointer',
-            padding: 8,
-            borderRadius: 4,
-            fontSize: 18,
-            width: 32,
-            height: 32,
+            padding: T.space2,
+            borderRadius: T.radiusMd,
+            width: 36,
+            height: 36,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
         >
-          ⚡
+          <IconLogo />
         </button>
         {history.length > 0 && (
-          <div
+          <span
+            aria-label={`${history.length} action${history.length > 1 ? 's' : ''} enregistree${history.length > 1 ? 's' : ''}`}
             style={{
-              width: 6,
-              height: 6,
-              borderRadius: 3,
-              background: '#e1000f',
-              marginTop: 4,
+              width: 8,
+              height: 8,
+              borderRadius: 4,
+              background: T.redMarianne,
+              marginTop: T.space1,
             }}
-            title={`${history.length} actions`}
           />
         )}
-      </div>
+      </aside>
     );
   }
 
   // ==========================================================================
-  // Render expanded panel
+  // Render expanded
   // ==========================================================================
 
   return (
     <aside
+      className="cerema-panel"
       role="complementary"
-      aria-label="Assistant CEREMA"
+      aria-label="Assistant redaction CEREMA"
       style={{
-        width: PANEL_WIDTH,
-        background: '#f5f5fe',
-        borderLeft: '1px solid #ececfa',
+        background: T.blueMarianneLight,
+        borderLeft: `1px solid ${T.blueMarianneBorder}`,
         display: 'flex',
         flexDirection: 'column',
         flexShrink: 0,
         overflow: 'hidden',
+        fontFamily: T.fontFamily,
       }}
     >
       {/* Header */}
       <div
         style={{
-          padding: '14px 16px',
-          background: '#000091',
-          color: '#fff',
+          padding: `${T.space3}px ${T.space4}px`,
+          background: T.blueMarianne,
+          color: T.white,
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: T.space2,
         }}
       >
-        <span style={{ fontSize: 18 }}>⚡</span>
-        <div style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>
-          Assistant CEREMA
+        <IconLogo />
+        <div style={{ flex: 1, fontWeight: T.fontWeightBold, fontSize: T.fontSizeLg }}>
+          Assistant redaction CEREMA
         </div>
         <button
           type="button"
+          className="cerema-btn"
           onClick={toggleCollapse}
-          title="Reduire"
+          aria-label="Reduire le panel"
+          title="Reduire (raccourci : cliquer sur l'icone quand replie)"
           style={{
             background: 'transparent',
             border: 'none',
-            color: '#fff',
+            color: T.white,
             cursor: 'pointer',
-            padding: 4,
-            fontSize: 14,
+            padding: T.space1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: T.radiusSm,
           }}
         >
-          ◀
+          <IconChevronLeft />
         </button>
       </div>
 
-      {/* Onboarding tooltip (first visit) */}
+      {/* Onboarding tooltip (first-visit) */}
       {!firstSeen && (
         <div
+          role="region"
+          aria-label="Message d'accueil"
           style={{
-            padding: 12,
-            background: '#fff4e5',
-            borderBottom: '1px solid #ffcb8c',
-            fontSize: 12,
-            color: '#716043',
+            padding: T.space3,
+            background: T.warningBg,
+            borderBottom: `1px solid ${T.warningFg}44`,
+            fontSize: T.fontSizeBase,
+            color: T.warningFg,
+            lineHeight: 1.5,
           }}
         >
-          <strong>Nouveau : ton assistant IA CEREMA.</strong>
-          <br />
-          Clique sur un bloc pour voir les actions disponibles selon le contexte.
-          <button
-            type="button"
-            onClick={dismissOnboarding}
-            style={{
-              marginTop: 8,
-              padding: '4px 12px',
-              background: '#b34000',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 4,
-              cursor: 'pointer',
-              fontSize: 11,
-              fontFamily: 'inherit',
-            }}
-          >
-            Compris
-          </button>
+          <strong style={{ display: 'block', marginBottom: T.space1 }}>
+            Bienvenue.
+          </strong>
+          Selectionnez un element du document (carte, titre, paragraphe) : les
+          actions utiles s'affichent ici. Vous pouvez aussi decrire ce que vous
+          voulez ajouter, en francais.
+          <div style={{ marginTop: T.space2 }}>
+            <button
+              ref={onboardingBtnRef}
+              type="button"
+              className="cerema-btn"
+              onClick={dismissOnboarding}
+              style={{
+                padding: `${T.space1}px ${T.space3}px`,
+                background: T.warningFg,
+                color: T.white,
+                border: 'none',
+                borderRadius: T.radiusMd,
+                cursor: 'pointer',
+                fontSize: T.fontSizeSm,
+                fontFamily: 'inherit',
+                fontWeight: T.fontWeightMedium,
+              }}
+            >
+              Compris
+            </button>
+          </div>
         </div>
       )}
 
       {/* Contexte selection */}
       <div
         style={{
-          padding: '10px 16px',
-          background: '#fff',
-          borderBottom: '1px solid #ececfa',
-          fontSize: 12,
+          padding: `${T.space2}px ${T.space4}px`,
+          background: T.white,
+          borderBottom: `1px solid ${T.blueMarianneBorder}`,
+          fontSize: T.fontSizeBase,
         }}
+        aria-live="polite"
       >
         {selectedBlock ? (
           <>
-            <div style={{ color: '#666', fontSize: 11 }}>Selection :</div>
-            <div style={{ fontWeight: 600, color: '#000091' }}>
-              📌 {friendlyKind(selectedBlock.type)}
+            <div style={{ color: T.textMuted, fontSize: T.fontSizeSm }}>
+              Element selectionne :
+            </div>
+            <div
+              style={{
+                fontWeight: T.fontWeightBold,
+                color: T.blueMarianne,
+                display: 'flex',
+                alignItems: 'center',
+                gap: T.space1,
+                marginTop: 2,
+              }}
+            >
+              <IconSelection />
+              {friendlyKind(selectedBlock.type)}
             </div>
           </>
         ) : (
-          <div style={{ color: '#666', fontStyle: 'italic' }}>
-            Aucune selection · actions assemblage
+          <div style={{ color: T.textMuted, fontStyle: 'italic' }}>
+            Aucun element selectionne — actions generales du livrable ci-dessous.
           </div>
         )}
       </div>
 
       {/* Body scrollable */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
-        {error && (
+      <div
+        className="cerema-panel-content"
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: `${T.space3}px ${T.space4}px`,
+        }}
+      >
+        {/* Conflit 409 : bandeau inline (fin des alert()) */}
+        {conflictErr && (
           <div
+            role="alert"
             style={{
-              padding: 10,
-              background: '#fbebeb',
-              border: '1px solid #f4a8a8',
-              borderRadius: 4,
-              fontSize: 12,
-              color: '#a01010',
-              marginBottom: 12,
+              padding: T.space3,
+              background: T.warningBg,
+              border: `1px solid ${T.warningFg}44`,
+              borderRadius: T.radiusMd,
+              fontSize: T.fontSizeBase,
+              color: T.warningFg,
+              marginBottom: T.space3,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: T.space2,
             }}
           >
-            {error}
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: T.space2 }}>
+              <IconAlert color={T.warningFg} />
+              <span>
+                Ce document a ete modifie ailleurs (autre onglet ou collegue).
+                Rechargez la page pour repartir de la derniere version.
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: T.space2 }}>
+              <button
+                type="button"
+                className="cerema-btn"
+                onClick={handleReloadConflict}
+                style={{
+                  padding: `${T.space1}px ${T.space3}px`,
+                  background: T.warningFg,
+                  color: T.white,
+                  border: 'none',
+                  borderRadius: T.radiusMd,
+                  cursor: 'pointer',
+                  fontSize: T.fontSizeSm,
+                  fontFamily: 'inherit',
+                  fontWeight: T.fontWeightMedium,
+                }}
+              >
+                Recharger la page
+              </button>
+              <button
+                type="button"
+                className="cerema-btn"
+                onClick={() => setConflictErr(false)}
+                style={{
+                  padding: `${T.space1}px ${T.space3}px`,
+                  background: 'transparent',
+                  color: T.warningFg,
+                  border: `1px solid ${T.warningFg}`,
+                  borderRadius: T.radiusMd,
+                  cursor: 'pointer',
+                  fontSize: T.fontSizeSm,
+                  fontFamily: 'inherit',
+                }}
+              >
+                Ignorer
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Erreur generique : role=alert (aria-live) */}
+        {errorMsg && !conflictErr && (
+          <div
+            role="alert"
+            style={{
+              padding: T.space3,
+              background: T.errorBg,
+              border: `1px solid ${T.errorFg}44`,
+              borderRadius: T.radiusMd,
+              fontSize: T.fontSizeBase,
+              color: T.errorFg,
+              marginBottom: T.space3,
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: T.space2,
+            }}
+          >
+            <IconAlert />
+            <div style={{ flex: 1 }}>{errorMsg}</div>
+            <button
+              type="button"
+              onClick={() => setErrorMsg(null)}
+              aria-label="Fermer le message d'erreur"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: T.errorFg,
+                cursor: 'pointer',
+                padding: 0,
+                fontSize: T.fontSizeLg,
+                lineHeight: 1,
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {/* Skeleton loader */}
+        {suggestions === null && !errorMsg && (
+          <div aria-busy="true" aria-label="Chargement des suggestions">
+            {[0, 1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="cerema-skel"
+                style={{ height: 32, marginBottom: T.space2 }}
+              />
+            ))}
           </div>
         )}
 
         {/* Actions rapides */}
-        {suggestions === null && !error && (
-          <div style={{ fontSize: 12, color: '#666', fontStyle: 'italic' }}>
-            Chargement...
-          </div>
-        )}
-
         {suggestions && suggestions.length > 0 && (
-          <div style={{ marginBottom: 16 }}>
+          <div
+            role="region"
+            aria-live="polite"
+            aria-label="Actions rapides disponibles"
+            style={{ marginBottom: T.space4 }}
+          >
             <div
               style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: '#3a3a3a',
+                fontSize: T.fontSizeSm,
+                fontWeight: T.fontWeightBold,
+                color: T.textSecondary,
                 textTransform: 'uppercase',
-                marginBottom: 8,
-                letterSpacing: 0.5,
+                marginBottom: T.space2,
+                letterSpacing: T.letterSpacingWide,
               }}
             >
               Actions rapides
@@ -496,38 +771,40 @@ export function AgentPanel({
                 <button
                   key={sug.id}
                   type="button"
+                  className="cerema-btn cerema-action"
                   disabled={!!executing}
                   onClick={() => executeSuggestion(sug)}
+                  aria-label={sug.label + (sug.hint ? ' (necessite assistant complet)' : '')}
                   style={{
                     display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 8,
-                    padding: '8px 10px',
-                    marginBottom: 6,
+                    alignItems: 'center',
+                    gap: T.space2,
+                    padding: `${T.space2}px ${T.space3}px`,
+                    marginBottom: T.space1 + 2,
                     width: '100%',
-                    background: isExec ? '#000091' : '#fff',
-                    color: isExec ? '#fff' : '#161616',
-                    border: '1px solid #ccc',
-                    borderRadius: 4,
-                    fontSize: 12,
+                    background: isExec ? T.blueMarianne : T.white,
+                    color: isExec ? T.white : T.textPrimary,
+                    border: `1px solid ${T.borderDefault}`,
+                    borderRadius: T.radiusMd,
+                    fontSize: T.fontSizeBase,
                     cursor: executing ? 'wait' : 'pointer',
                     fontFamily: 'inherit',
-                    textAlign: 'left',
+                    textAlign: 'left' as const,
+                    lineHeight: 1.4,
                   }}
                 >
-                  <span style={{ color: isExec ? '#fff' : '#000091', flexShrink: 0 }}>
-                    ▸
-                  </span>
+                  <IconChevronRight color={isExec ? T.white : T.blueMarianne} />
                   <span style={{ flex: 1 }}>{sug.label}</span>
                   {sug.hint && (
                     <span
+                      title="Cette action necessite l'assistant complet (chat principal)"
                       style={{
-                        fontSize: 10,
-                        color: isExec ? '#fff' : '#888',
+                        fontSize: T.fontSizeXs,
+                        color: isExec ? T.white : T.textMuted,
                         fontStyle: 'italic',
                       }}
                     >
-                      ↗
+                      →chat
                     </span>
                   )}
                 </button>
@@ -536,84 +813,156 @@ export function AgentPanel({
           </div>
         )}
 
-        {/* Chat NL free-form */}
+        {/* Zone chat NL — desactivee jusqu'a livraison iter 2 (fin jargon dev) */}
         <div
           style={{
-            paddingTop: 12,
-            borderTop: '1px solid #ececfa',
-            marginBottom: 12,
+            paddingTop: T.space3,
+            borderTop: `1px solid ${T.blueMarianneBorder}`,
+            marginBottom: T.space3,
           }}
         >
           <div
             style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: '#3a3a3a',
+              fontSize: T.fontSizeSm,
+              fontWeight: T.fontWeightBold,
+              color: T.textSecondary,
               textTransform: 'uppercase',
-              marginBottom: 6,
-              letterSpacing: 0.5,
+              marginBottom: T.space1 + 2,
+              letterSpacing: T.letterSpacingWide,
             }}
           >
-            Ou decris ton besoin
+            Ou decrivez votre besoin
           </div>
           <textarea
             value={freeInput}
             onChange={(e) => setFreeInput(e.target.value)}
             rows={3}
-            placeholder="Ex : Ajoute une carte du 4e arrondissement avec le TRI DGPR..."
+            disabled
+            aria-label="Zone de description en francais (activation prochaine)"
+            placeholder="Ex : Ajouter une carte de Marseille 4e avec le perimetre TRI inondation, ou un chiffre cle : 12 000 logements exposes."
             style={{
               width: '100%',
-              padding: 8,
-              fontSize: 12,
-              border: '1px solid #ccc',
-              borderRadius: 4,
+              padding: T.space2,
+              fontSize: T.fontSizeBase,
+              border: `1px solid ${T.borderDefault}`,
+              borderRadius: T.radiusMd,
               fontFamily: 'inherit',
-              resize: 'vertical',
-              boxSizing: 'border-box',
+              resize: 'vertical' as const,
+              boxSizing: 'border-box' as const,
+              background: T.bgAlt,
+              color: T.textMuted,
+              cursor: 'not-allowed',
             }}
           />
-          <div style={{ fontSize: 10, color: '#666', marginTop: 4 }}>
-            Iter 2 (V2.5) : chat NL streaming SSE. Pour l'instant, utilise
-            les actions rapides ou le chat principal.
+          <div
+            style={{
+              fontSize: T.fontSizeXs,
+              color: T.textMuted,
+              marginTop: T.space1,
+              fontStyle: 'italic',
+            }}
+          >
+            Zone activee prochainement. En attendant : utilisez les actions
+            rapides ci-dessus, ou l'assistant complet accessible depuis le
+            bandeau superieur.
           </div>
         </div>
 
-        {/* Historique + Undo */}
+        {/* Historique + Undo actionnable */}
         {history.length > 0 && (
-          <div style={{ paddingTop: 12, borderTop: '1px solid #ececfa' }}>
+          <div
+            role="log"
+            aria-live="polite"
+            aria-label="Historique des actions realisees"
+            style={{
+              paddingTop: T.space3,
+              borderTop: `1px solid ${T.blueMarianneBorder}`,
+            }}
+          >
             <div
               style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: '#3a3a3a',
+                fontSize: T.fontSizeSm,
+                fontWeight: T.fontWeightBold,
+                color: T.textSecondary,
                 textTransform: 'uppercase',
-                marginBottom: 6,
-                letterSpacing: 0.5,
+                marginBottom: T.space1 + 2,
+                letterSpacing: T.letterSpacingWide,
               }}
             >
               Historique ({history.length})
             </div>
-            {history.map((h, i) => (
+            {history.map((h) => (
               <div
                 key={h.id}
+                className="cerema-history-item"
                 style={{
-                  padding: '6px 8px',
-                  marginBottom: 4,
-                  background: '#fff',
-                  borderRadius: 4,
-                  fontSize: 11,
+                  padding: `${T.space1 + 2}px ${T.space2}px`,
+                  marginBottom: T.space1,
+                  background: T.white,
+                  borderRadius: T.radiusMd,
+                  fontSize: T.fontSizeSm,
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 6,
+                  gap: T.space1 + 2,
                 }}
               >
-                <span style={{ color: '#1f8d4d' }}>✓</span>
-                <span style={{ flex: 1, color: '#3a3a3a' }}>{h.label}</span>
-                <span style={{ color: '#999', fontSize: 10 }}>
+                <IconCheck />
+                <span
+                  style={{
+                    flex: 1,
+                    color: T.textSecondary,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={h.label}
+                >
+                  {h.label}
+                </span>
+                <span style={{ color: T.textDisabled, fontSize: T.fontSizeXs }}>
                   {timeSince(h.at)}
                 </span>
+                {h.reversible && h.reversal_tool && (
+                  <button
+                    type="button"
+                    className="cerema-btn cerema-undo-btn"
+                    onClick={() => executeUndo(h)}
+                    disabled={!!executing}
+                    aria-label={`Annuler : ${h.label}`}
+                    title="Annuler cette action"
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: executing ? 'wait' : 'pointer',
+                      padding: 2,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: T.radiusSm,
+                    }}
+                  >
+                    <IconUndo />
+                  </button>
+                )}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Empty state historique : discret pedagogique */}
+        {history.length === 0 && suggestions && suggestions.length > 0 && !executing && (
+          <div
+            style={{
+              paddingTop: T.space3,
+              borderTop: `1px solid ${T.blueMarianneBorder}`,
+              fontSize: T.fontSizeXs,
+              color: T.textMuted,
+              fontStyle: 'italic',
+              lineHeight: 1.5,
+            }}
+          >
+            Chaque action realisee ici apparaitra dans un journal reversible en
+            un clic.
           </div>
         )}
       </div>
@@ -624,25 +973,6 @@ export function AgentPanel({
 // ============================================================================
 // Helpers
 // ============================================================================
-
-function friendlyKind(type: string): string {
-  const map: Record<string, string> = {
-    interactiveMap: 'Carte interactive',
-    kpiGrid: 'Bandeau chiffres cles',
-    kpiBadge: 'Chiffre cle',
-    customHeading: 'Titre',
-    customQuote: 'Citation',
-    narrativeText: 'Paragraphe',
-    legend: 'Legende',
-    separator: 'Separateur',
-    chart: 'Graphique',
-    scene3d: 'Scene 3D',
-    dataTable: 'Tableau',
-    mediaEmbed: 'Media',
-    iframeGrist: 'Widget Grist',
-  };
-  return map[type] || type;
-}
 
 function mapKindToBlockNoteType(kind: string): string {
   const map: Record<string, string> = {
@@ -669,4 +999,18 @@ function timeSince(at: number): string {
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}min`;
   return `${Math.floor(m / 60)}h`;
+}
+
+/**
+ * Rend les labels historique plus lisibles pour Marie :
+ * "Fond de carte : plan-ign-v2" -> "Fond de carte : Plan IGN (standard)".
+ * Iter 1 : parse simple. Iter 2 : structuration cote backend HistoryEntry.
+ */
+function friendlyHistoryLabel(rawLabel: string): string {
+  // Cas connu : "Fond de carte : <slug>"
+  const basemapMatch = rawLabel.match(/^Fond de carte\s*:\s*(.+)$/i);
+  if (basemapMatch) {
+    return `Fond de carte : ${friendlyBasemap(basemapMatch[1].trim())}`;
+  }
+  return rawLabel;
 }

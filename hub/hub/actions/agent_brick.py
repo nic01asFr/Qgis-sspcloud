@@ -221,7 +221,7 @@ def _suggestions_for_component_scope(
         ),
         Suggestion(
             id="basemap_ign",
-            label="Passer au fond Plan IGN v2",
+            label="Utiliser le fond de carte Plan IGN",
             prompt="Change le fond de carte pour Plan IGN v2",
             tool="cmp_set_basemap",
             tool_args={"basemap_id": "plan-ign-v2"},
@@ -259,7 +259,7 @@ def _suggestions_for_assembly_scope(
         return _filter_by_allowed([
             Suggestion(
                 id="insert_kpi_after",
-                label="Ajouter des chiffres cles apres",
+                label="Ajouter des chiffres cles en dessous",
                 prompt="Ajoute un bloc chiffres cles apres celui-ci",
                 tool="asy_insert_block",
                 tool_args={
@@ -270,7 +270,7 @@ def _suggestions_for_assembly_scope(
             ),
             Suggestion(
                 id="insert_heading_after",
-                label="Ajouter un titre de section apres",
+                label="Ajouter un sous-titre en dessous",
                 prompt="Ajoute un titre H2 apres ce bloc",
                 tool="asy_insert_block",
                 tool_args={
@@ -281,14 +281,14 @@ def _suggestions_for_assembly_scope(
             ),
             Suggestion(
                 id="delete_block",
-                label="Retirer ce bloc",
+                label="Supprimer cet element",
                 prompt="Retire ce bloc du document",
                 tool="asy_delete_block",
                 tool_args={"block_id": selected_block_id},
             ),
             Suggestion(
                 id="insert_narrative_after",
-                label="Ajouter un paragraphe apres",
+                label="Ajouter un paragraphe en dessous",
                 prompt="Ajoute un paragraphe narratif apres",
                 tool="asy_insert_block",
                 tool_args={
@@ -303,7 +303,7 @@ def _suggestions_for_assembly_scope(
         return _filter_by_allowed([
             Suggestion(
                 id="add_intro",
-                label="Ajouter une section introduction",
+                label="Commencer par une introduction",
                 prompt="Ajoute une section d'introduction en haut",
                 tool="asy_insert_block",
                 tool_args={
@@ -313,7 +313,7 @@ def _suggestions_for_assembly_scope(
             ),
             Suggestion(
                 id="add_map",
-                label="Ajouter une carte interactive",
+                label="Inserer une carte du territoire",
                 prompt="Ajoute un bloc carte interactive",
                 tool="asy_insert_block",
                 tool_args={
@@ -323,7 +323,7 @@ def _suggestions_for_assembly_scope(
             ),
             Suggestion(
                 id="add_kpi_grid",
-                label="Ajouter un bandeau de chiffres cles",
+                label="Inserer un encart chiffres cles",
                 prompt="Ajoute un bandeau KPI",
                 tool="asy_insert_block",
                 tool_args={
@@ -333,7 +333,7 @@ def _suggestions_for_assembly_scope(
             ),
             Suggestion(
                 id="asy_get_context",
-                label="Voir la structure du document",
+                label="Voir le plan du livrable",
                 prompt="Montre-moi la structure",
                 tool="asy_get_context",
                 tool_args={},
