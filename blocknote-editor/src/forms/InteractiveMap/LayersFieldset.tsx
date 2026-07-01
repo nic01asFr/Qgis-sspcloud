@@ -314,23 +314,16 @@ export function LayersFieldset({
             );
           })}
 
-          {/* V1.13.5 F8 : escape hatch smart escalation — bouton "+ Ajouter une
-              couche" qui pre-remplit l'assistant IA contextuel. Pattern Notion :
-              Marie ne navigue pas un menu, elle clique une action. */}
+          {/* V1.17 : bascule sur onglet Assistant du panel unifie via bridge
+              window.__switchPanelTab('assistant'). Fin du bridge V1.14.1
+              window.__openAssistantWithPrompt (couple avec AssistantCard
+              deprecate). */}
           <button
             type="button"
             onClick={() => {
-              const fn = (window as any).__openAssistantWithPrompt;
+              const fn = (window as any).__switchPanelTab;
               if (typeof fn === 'function') {
-                fn('Je voudrais ajouter une couche supplementaire a cette carte.');
-              } else {
-                // Fallback : pas d'assistant IA disponible (V1.13.5),
-                // afficher message d'aide
-                alert(
-                  "Pour ajouter une couche, demande a l'assistant CEREMA dans " +
-                  "le chat (icone bulle en bas a droite). Decris la couche " +
-                  "souhaitee (par exemple : 'ajoute le perimetre TRI inondation')."
-                );
+                fn('assistant');
               }
             }}
             style={{

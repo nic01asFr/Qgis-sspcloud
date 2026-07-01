@@ -20,6 +20,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { T, agentPanelCss, friendlyKind, friendlyBasemap } from './design/tokens';
+import { EditPanel, type EditableBlock } from './EditPanel';
 
 type Suggestion = {
   id: string;
@@ -163,6 +164,20 @@ function IconAlert({ color = T.errorFg }: { color?: string }) {
 // Composant principal
 // ============================================================================
 
+/**
+ * Sprint V1.17 (2026-07-01) : AgentPanel devient BlockContextPanel unifie
+ * avec 2 onglets Assistant / Parametres.
+ *
+ * Onglet Assistant (defaut) = comportement AgentPanel V1.16 (suggestions +
+ * historique + undo + textarea disabled).
+ *
+ * Onglet Parametres = EditPanel rendu inline (form JSON per kind). Active
+ * quand un bloc est selectionne. Ouvert automatiquement quand l'user clique
+ * "Modifier" depuis un bloc custom (bridge window.__openEditPanel redirige
+ * vers activeTab=parameters + selectedBlock).
+ */
+type PanelTab = 'assistant' | 'parameters';
+
 export function AgentPanel({
   sid,
   aid,
@@ -170,6 +185,12 @@ export function AgentPanel({
   editor,
   onActionApplied,
   onRequestReload,
+  activeTab,
+  onTabChange,
+  editingBlock,
+  versionNumSource,
+  onEditPanelSaved,
+  onEditPanelClose,
 }: {
   sid: string;
   aid: string;
@@ -177,6 +198,14 @@ export function AgentPanel({
   editor: any;
   onActionApplied?: (result: ActionResult) => void;
   onRequestReload?: () => void;
+  // V1.17 : state onglet lifted au niveau App pour permettre bridge global
+  // window.__openEditPanel -> setActiveTab('parameters') + setEditingBlock.
+  activeTab: PanelTab;
+  onTabChange: (tab: PanelTab) => void;
+  editingBlock: EditableBlock | null;
+  versionNumSource: number;
+  onEditPanelSaved: (newProps: Record<string, any>) => void;
+  onEditPanelClose: () => void;
 }) {
   useEnsureAgentPanelCss();
 
@@ -541,8 +570,106 @@ export function AgentPanel({
         </button>
       </div>
 
-      {/* Onboarding tooltip (first-visit) */}
-      {!firstSeen && (
+      {/* V1.17 : TabBar Assistant / Parametres */}
+      <div
+        role="tablist"
+        aria-label="Selection du mode d'edition"
+        style={{
+          display: 'flex',
+          background: T.white,
+          borderBottom: `1px solid ${T.blueMarianneBorder}`,
+        }}
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'assistant'}
+          className="cerema-btn"
+          onClick={() => onTabChange('assistant')}
+          style={{
+            flex: 1,
+            padding: `${T.space2}px ${T.space3}px`,
+            background: 'transparent',
+            border: 'none',
+            borderBottom: `2px solid ${activeTab === 'assistant' ? T.blueMarianne : 'transparent'}`,
+            color: activeTab === 'assistant' ? T.blueMarianne : T.textMuted,
+            fontSize: T.fontSizeBase,
+            fontWeight: activeTab === 'assistant' ? T.fontWeightBold : T.fontWeightRegular,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            transition: `border-color ${T.transitionFast}, color ${T.transitionFast}`,
+          }}
+        >
+          Assistant
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'parameters'}
+          className="cerema-btn"
+          disabled={!editingBlock}
+          onClick={() => onTabChange('parameters')}
+          title={
+            editingBlock
+              ? 'Editer les parametres de l\'element selectionne'
+              : 'Selectionnez un element du document pour editer ses parametres'
+          }
+          style={{
+            flex: 1,
+            padding: `${T.space2}px ${T.space3}px`,
+            background: 'transparent',
+            border: 'none',
+            borderBottom: `2px solid ${activeTab === 'parameters' ? T.blueMarianne : 'transparent'}`,
+            color: !editingBlock
+              ? T.textDisabled
+              : activeTab === 'parameters'
+                ? T.blueMarianne
+                : T.textMuted,
+            fontSize: T.fontSizeBase,
+            fontWeight: activeTab === 'parameters' ? T.fontWeightBold : T.fontWeightRegular,
+            cursor: !editingBlock ? 'not-allowed' : 'pointer',
+            fontFamily: 'inherit',
+            transition: `border-color ${T.transitionFast}, color ${T.transitionFast}`,
+          }}
+        >
+          Parametres
+        </button>
+      </div>
+
+      {/* V1.17 : Onglet Parametres = EditPanel inline */}
+      {activeTab === 'parameters' && editingBlock && (
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <EditPanel
+            block={editingBlock}
+            sid={sid}
+            versionNumSource={versionNumSource}
+            onSaved={onEditPanelSaved}
+            onClose={onEditPanelClose}
+            mode="inline"
+          />
+        </div>
+      )}
+
+      {activeTab === 'parameters' && !editingBlock && (
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: T.space4,
+            fontSize: T.fontSizeBase,
+            color: T.textMuted,
+            fontStyle: 'italic',
+            textAlign: 'center',
+          }}
+        >
+          Selectionnez un element du document pour editer ses parametres.
+        </div>
+      )}
+
+      {/* Onboarding tooltip (first-visit) — onglet Assistant uniquement */}
+      {activeTab === 'assistant' && !firstSeen && (
         <div
           role="region"
           aria-label="Message d'accueil"
@@ -585,7 +712,8 @@ export function AgentPanel({
         </div>
       )}
 
-      {/* Contexte selection */}
+      {/* Contexte selection (onglet Assistant uniquement) */}
+      {activeTab === 'assistant' && (
       <div
         style={{
           padding: `${T.space2}px ${T.space4}px`,
@@ -597,21 +725,55 @@ export function AgentPanel({
       >
         {selectedBlock ? (
           <>
-            <div style={{ color: T.textMuted, fontSize: T.fontSizeSm }}>
-              Element selectionne :
-            </div>
             <div
               style={{
-                fontWeight: T.fontWeightBold,
-                color: T.blueMarianne,
                 display: 'flex',
                 alignItems: 'center',
-                gap: T.space1,
-                marginTop: 2,
+                justifyContent: 'space-between',
+                gap: T.space2,
               }}
             >
-              <IconSelection />
-              {friendlyKind(selectedBlock.type)}
+              <div style={{ flex: 1 }}>
+                <div style={{ color: T.textMuted, fontSize: T.fontSizeSm }}>
+                  Element selectionne :
+                </div>
+                <div
+                  style={{
+                    fontWeight: T.fontWeightBold,
+                    color: T.blueMarianne,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: T.space1,
+                    marginTop: 2,
+                  }}
+                >
+                  <IconSelection />
+                  {friendlyKind(selectedBlock.type)}
+                </div>
+              </div>
+              {editingBlock && (
+                <button
+                  type="button"
+                  className="cerema-btn cerema-action"
+                  onClick={() => onTabChange('parameters')}
+                  aria-label="Editer les parametres de cet element"
+                  title="Editer les parametres"
+                  style={{
+                    padding: `${T.space1}px ${T.space2}px`,
+                    background: T.white,
+                    color: T.blueMarianne,
+                    border: `1px solid ${T.blueMarianne}`,
+                    borderRadius: T.radiusMd,
+                    fontSize: T.fontSizeSm,
+                    fontWeight: T.fontWeightMedium,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Parametres
+                </button>
+              )}
             </div>
           </>
         ) : (
@@ -620,8 +782,10 @@ export function AgentPanel({
           </div>
         )}
       </div>
+      )}
 
-      {/* Body scrollable */}
+      {/* Body scrollable (onglet Assistant uniquement) */}
+      {activeTab === 'assistant' && (
       <div
         className="cerema-panel-content"
         style={{
@@ -966,6 +1130,7 @@ export function AgentPanel({
           </div>
         )}
       </div>
+      )}
     </aside>
   );
 }

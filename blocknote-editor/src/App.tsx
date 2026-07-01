@@ -230,6 +230,12 @@ function BlockNoteContent({
   const [selectedBlock, setSelectedBlock] = useState<
     { block_id: string; type: string; props?: Record<string, any> } | null
   >(null);
+  // Sprint V1.17 (2026-07-01) : Panel unifie 2 onglets Assistant / Parametres.
+  // Bridge global window.__openEditPanel -> active tab Parametres (fin du drawer
+  // overlay). editingBlock reste la source de verite pour EditPanel inline.
+  const [panelActiveTab, setPanelActiveTab] = useState<'assistant' | 'parameters'>(
+    'assistant',
+  );
 
   const editor = useCreateBlockNote({
     schema: qgisBlockNoteSchema,
@@ -295,11 +301,21 @@ function BlockNoteContent({
   // BlockNote createReactBlockSpec ne permet pas de passer un callback en
   // prop direct -> bridge global pour eviter prop drilling complexe.
   useEffect(() => {
+    // V1.17 : bridge redirige vers onglet Parametres du panel unifie au lieu
+    // d'ouvrir un drawer overlay separe. editingBlock = source de verite pour
+    // EditPanel rendu inline dans onglet.
     (window as any).__openEditPanel = (block: EditableBlock) => {
       setEditingBlock(block);
+      setPanelActiveTab('parameters');
+    };
+    // V1.17 : bascule programmatique d'onglet — utilise par LayersFieldset
+    // (bouton "+ Ajouter une couche") pour rediriger vers l'onglet Assistant.
+    (window as any).__switchPanelTab = (tab: 'assistant' | 'parameters') => {
+      setPanelActiveTab(tab);
     };
     return () => {
       delete (window as any).__openEditPanel;
+      delete (window as any).__switchPanelTab;
     };
   }, []);
 
@@ -381,15 +397,22 @@ function BlockNoteContent({
           selectedBlock={selectedBlock}
           editor={editor}
           onActionApplied={handleAgentActionApplied}
+          activeTab={panelActiveTab}
+          onTabChange={setPanelActiveTab}
+          editingBlock={editingBlock}
+          versionNumSource={versionNumSource}
+          onEditPanelSaved={(newProps) => {
+            handleEditPanelSaved(newProps);
+            // Apres save : bascule sur Assistant pour continuer l'edition doc
+            setEditingBlock(null);
+            setPanelActiveTab('assistant');
+          }}
+          onEditPanelClose={() => {
+            setEditingBlock(null);
+            setPanelActiveTab('assistant');
+          }}
         />
       </div>
-      <EditPanel
-        block={editingBlock}
-        sid={sid}
-        versionNumSource={versionNumSource}
-        onClose={() => setEditingBlock(null)}
-        onSaved={handleEditPanelSaved}
-      />
       <SaveStatusBar
         status={displayStatus}
         onForceOverwrite={handleForceOverwrite}

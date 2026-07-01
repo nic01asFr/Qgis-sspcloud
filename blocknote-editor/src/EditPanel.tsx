@@ -61,6 +61,14 @@ interface EditPanelProps {
   versionNumSource: number | null;
   onClose: () => void;
   onSaved: (newProps: Record<string, any>) => void;
+  /**
+   * Sprint V1.17 fusion (2026-07-01) : mode d'affichage.
+   * - 'drawer' (defaut, V1.10 legacy) : overlay droit 420px + backdrop
+   * - 'inline' (V1.17) : integre dans BlockContextPanel onglet Parametres,
+   *   pas de position:fixed, pas de backdrop, pas de header/close (le
+   *   panel parent gere son propre header/close).
+   */
+  mode?: 'drawer' | 'inline';
 }
 
 type SaveStatus =
@@ -97,6 +105,7 @@ export function EditPanel({
   versionNumSource,
   onClose,
   onSaved,
+  mode = 'drawer',
 }: EditPanelProps) {
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [status, setStatus] = useState<SaveStatus>({ type: 'idle' });
@@ -169,13 +178,142 @@ export function EditPanel({
     }
   };
 
-  // v1.11 Phase B : choisir mode popup ou drawer selon le block type
-  const mode = getPanelMode(block.type);
+  // V1.17 : mode inline (dans BlockContextPanel onglet Parametres) court-circuite
+  // le mode popup/drawer historique (V1.10-V1.16). Rendu simplifie sans overlay.
+  if (mode === 'inline') {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          fontFamily: 'Marianne, system-ui, sans-serif',
+          background: '#fff',
+        }}
+      >
+        <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: '#3a3a3a',
+              textTransform: 'uppercase',
+              marginBottom: 12,
+              letterSpacing: 0.5,
+            }}
+          >
+            Parametres — {label}
+          </div>
+          {isIframe && (
+            <div
+              style={{
+                padding: 12,
+                background: '#fff5e6',
+                border: '1px solid #ffcb8c',
+                borderRadius: 4,
+                fontSize: 12,
+                color: '#7a4400',
+                marginBottom: 12,
+              }}
+            >
+              <strong>Lecture seule.</strong>
+              <p style={{ margin: '6px 0 0', lineHeight: 1.5, fontSize: 11 }}>
+                Ce composant depend d'un manifest QGIS. Pour le modifier,
+                utilisez l'assistant complet accessible depuis le bandeau
+                superieur.
+              </p>
+            </div>
+          )}
+          {!isIframe && block.type === 'kpiGrid' && (
+            <KpiGridForm data={formData} onChange={setFormData} />
+          )}
+          {!isIframe && block.type === 'kpiBadge' && (
+            <KpiBadgeForm data={formData} onChange={setFormData} />
+          )}
+          {!isIframe && block.type === 'customHeading' && (
+            <HeadingForm data={formData} onChange={setFormData} />
+          )}
+          {!isIframe && block.type === 'customQuote' && (
+            <QuoteForm data={formData} onChange={setFormData} />
+          )}
+          {!isIframe && block.type === 'narrativeText' && (
+            <NarrativeTextForm data={formData} onChange={setFormData} />
+          )}
+          {!isIframe && block.type === 'legend' && (
+            <LegendForm data={formData} onChange={setFormData} />
+          )}
+          {!isIframe && block.type === 'separator' && (
+            <SeparatorForm data={formData} onChange={setFormData} />
+          )}
+          {!isIframe && block.type === 'interactiveMap' && (
+            <InteractiveMapForm data={formData} onChange={setFormData} />
+          )}
+        </div>
+        <footer
+          style={{
+            padding: 12,
+            borderTop: '1px solid #ececfa',
+            background: '#f6f6f6',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          {status.type === 'saving' && (
+            <div style={{ fontSize: 11, color: '#0063cb' }}>
+              Enregistrement en cours...
+            </div>
+          )}
+          {status.type === 'saved' && (
+            <div style={{ fontSize: 11, color: '#18753c' }}>
+              Enregistre (version {status.versionNum})
+            </div>
+          )}
+          {status.type === 'error' && (
+            <div style={{ fontSize: 11, color: '#ce0500' }}>
+              {status.message}
+            </div>
+          )}
+          {status.type === 'conflict' && (
+            <div style={{ fontSize: 11, color: '#b34000' }}>
+              Ce composant a ete modifie ailleurs. Rechargez la page pour
+              repartir de la derniere version.
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            {isDom && (
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={status.type === 'saving' || !cid}
+                style={{
+                  padding: '6px 14px',
+                  fontSize: 12,
+                  border: 'none',
+                  background: '#000091',
+                  color: '#fff',
+                  borderRadius: 4,
+                  cursor: status.type === 'saving' ? 'wait' : 'pointer',
+                  fontWeight: 600,
+                  opacity: !cid ? 0.5 : 1,
+                }}
+              >
+                Enregistrer
+              </button>
+            )}
+          </div>
+        </footer>
+      </div>
+    );
+  }
+
+  // v1.11 Phase B (legacy) : choisir mode popup ou drawer selon le block type
+  const legacyMode = getPanelMode(block.type);
   const anchor = block.anchorRect;
 
   // Style positionnement selon mode
   const panelStyle: React.CSSProperties =
-    mode === 'popup' && anchor
+    legacyMode === 'popup' && anchor
       ? {
           position: 'fixed',
           // Popup s'affiche AU-DESSUS du block (top - panel_height - gap)
@@ -220,7 +358,7 @@ export function EditPanel({
         style={{
           position: 'fixed',
           inset: 0,
-          background: mode === 'popup' ? 'transparent' : 'rgba(0,0,0,0.3)',
+          background: legacyMode === 'popup' ? 'transparent' : 'rgba(0,0,0,0.3)',
           zIndex: 998,
         }}
       />
