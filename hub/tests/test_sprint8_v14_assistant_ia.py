@@ -153,29 +153,31 @@ class TestEndpointsAssist:
             assert sug_id in src, f"suggestion {sug_id} absente"
 
     def test_action_endpoint_whitelist_strict(self):
-        """Action endpoint refuse tools hors whitelist cmp_*."""
-        import inspect
-        from hub.main import component_assist_action_endpoint
-        src = inspect.getsource(component_assist_action_endpoint)
-        assert "ALLOWED_TOOLS" in src
-        assert "cmp_set_tooltip" in src
-        # Reject 400 si tool inconnu
-        assert "400" in src or "HTTPException" in src
+        """V1.15 : whitelist est maintenant dans hub.actions.CMP_ALLOWED_TOOLS.
 
-    def test_action_endpoint_enforces_sid_cid_from_url(self):
-        """Enforce scope : sid + cid pris de l'URL, pas du payload.
+        L'endpoint delegue a apply_component_patch qui verifie la whitelist.
+        """
+        from hub.actions import CMP_ALLOWED_TOOLS
+        # V1.14.1 avait 5 tools, V1.15 en a 12 (extension backlog etude B)
+        assert len(CMP_ALLOWED_TOOLS) >= 5
+        for t in ["cmp_get_context", "cmp_set_tooltip", "cmp_set_zone",
+                  "cmp_set_source_citation", "cmp_add_layer"]:
+            assert t in CMP_ALLOWED_TOOLS, f"tool {t} absent whitelist V1.15"
 
-        V1.14.1 hotfix : refacto endpoint pour appel direct modules hub locaux
-        (comp_mod.insert_component) au lieu de tools cmp_* qui font HTTP self-call.
-        sid + cid sont forces dans new_manifest avant Component.model_validate.
+    def test_action_endpoint_delegates_to_hub_actions(self):
+        """V1.15 : endpoint refactorise pour appel direct hub.actions.
+
+        Fin de la dette V1.14.1 (196 LOC dupliquees).
+        Le sid+cid sont enforce dans apply_component_patch via new_manifest.
         """
         import inspect
         from hub.main import component_assist_action_endpoint
         src = inspect.getsource(component_assist_action_endpoint)
-        # Pattern V1.14.1 : new_manifest sid/id forces depuis URL sid/cid
-        assert 'new_manifest' in src
-        assert '"sid": sid' in src or "'sid': sid" in src
-        assert '"id": cid' in src or "'id': cid" in src
+        # V1.15 : delegation a hub.actions
+        assert "apply_component_patch" in src
+        assert "hub.actions" in src
+        # OCC handling
+        assert "ConcurrentUpdateError" in src
 
 
 class TestAssistantCardTsx:
