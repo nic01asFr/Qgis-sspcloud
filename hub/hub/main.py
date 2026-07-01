@@ -3893,6 +3893,176 @@ async def get_component_endpoint(
     }
 
 
+@app.get("/studies/{sid}/components/{cid}/assist/suggestions")
+async def component_assist_suggestions_endpoint(
+    sid: str, cid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Sprint 2.5 V2.5 A2c — Suggestions contextuelles pour Assistant IA composant.
+
+    Retourne 5 suggestions courtes (imperatif < 50 char) contextualisees au
+    kind du composant (POC : hardcoded par kind, dynamiques via LLM en iter 2).
+
+    Pattern Notion AI : Marie voit chips au mount du drawer, clique une
+    action concrete plutot que de taper en NL. Etude C UX 2 modes :
+    "smart escalation" (Marie ne choisit jamais mode, action choisit).
+
+    Format reponse :
+    {
+        "suggestions": [
+            {"id": "add_layer_tri", "label": "Ajouter le perimetre TRI",
+             "prompt": "...", "action": "add_layer_tri"},
+            ...
+        ],
+        "component_kind": "interactive_map",
+        "cid": "b1c2d3e4f5a6",
+    }
+    """
+    _check_components_enabled()
+    from hub import components as comp_mod
+    latest = await comp_mod.get_component_latest(cid)
+    if not latest or latest["sid"] != sid:
+        raise HTTPException(404, "Composant introuvable")
+    if latest["owner"] != user["username"]:
+        raise HTTPException(403, "Pas owner")
+
+    kind = latest.get("kind", "interactive_map")
+
+    # Sprint 2.5 POC : suggestions hardcoded par kind. Iter 2 : suggestions
+    # dynamiques via LLM pre-pass caches (cid, params_hash) TTL 1h.
+    _SUGGESTIONS_BY_KIND = {
+        "interactive_map": [
+            {
+                "id": "add_layer_tri",
+                "label": "Ajouter le perimetre TRI inondation",
+                "prompt": "Ajoute le perimetre TRI Georisques inondation a cette carte",
+                "hint": "Necessite l'agent IA complet (workspace QGIS)",
+            },
+            {
+                "id": "center_marseille_4e",
+                "label": "Centrer sur Marseille 4e arr.",
+                "prompt": "Centre la carte sur Marseille 4e arrondissement (INSEE 13204)",
+                "tool": "cmp_set_zone",
+                "tool_args": {"kind": "commune", "insee": "13204"},
+            },
+            {
+                "id": "tooltip_adresse",
+                "label": "Au survol, afficher l'adresse",
+                "prompt": "Configure la bulle au survol pour afficher l'adresse du batiment",
+                "tool": "cmp_set_tooltip",
+                "tool_args_partial": {"field": "adresse"},
+                "requires_layer_selection": True,
+            },
+            {
+                "id": "cite_tri_dgpr",
+                "label": "Citer la source TRI DGPR",
+                "prompt": "Cite la source TRI (Territoires Risque Inondation) DGPR",
+                "tool": "cmp_set_source_citation",
+                "tool_args": {"datasource_id": "tri_limites"},
+            },
+            {
+                "id": "basemap_ign",
+                "label": "Passer au fond Plan IGN v2",
+                "prompt": "Change le fond de carte pour le Plan IGN v2 officiel francais",
+                "tool": "cmp_set_basemap",
+                "tool_args": {"basemap_id": "plan-ign-v2"},
+            },
+        ],
+        # Autres kinds ajoutes iter 2 (kpi_grid, chart, etc.)
+    }
+
+    suggestions = _SUGGESTIONS_BY_KIND.get(kind, [])
+    return {
+        "suggestions": suggestions,
+        "component_kind": kind,
+        "cid": cid,
+        "sid": sid,
+        "assistant_available": True,
+    }
+
+
+@app.post("/studies/{sid}/components/{cid}/assist/action")
+async def component_assist_action_endpoint(
+    sid: str, cid: str,
+    payload: dict,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Sprint 2.5 V2.5 A2c — Execute une action tool cmp_* directement.
+
+    Endpoint bornΘ : uniquement les tools cmp_* whitelistes profil
+    component_assist.yaml. Enforcement du scope composant : cid dans URL
+    matche automatiquement les tools cmp_*.
+
+    Payload :
+    - `tool`: nom du tool cmp_* (ex: "cmp_set_zone")
+    - `args`: dict d'args pour le tool (sid + cid injectes)
+
+    Format reponse :
+    {"success": true, "result": {...}, "version_num_after": N}
+    ou HTTP 400 si tool hors whitelist / args invalides.
+    HTTP 409 si conflict OCC (Marie a modifie entre-temps).
+
+    Sprint 2.5 POC minimal : appel synchrone tool + return result. Iter 2 :
+    audit_trail redaction + streaming SSE pour tools longs + retry LLM.
+    """
+    _check_components_enabled()
+    from hub import components as comp_mod
+    latest = await comp_mod.get_component_latest(cid)
+    if not latest or latest["sid"] != sid:
+        raise HTTPException(404, "Composant introuvable")
+    if latest["owner"] != user["username"]:
+        raise HTTPException(403, "Pas owner")
+
+    tool = payload.get("tool")
+    args = payload.get("args") or {}
+
+    # Whitelist stricte : uniquement les tools cmp_* Sprint 2.5 A2b.
+    ALLOWED_TOOLS = {
+        "cmp_get_context",
+        "cmp_set_tooltip",
+        "cmp_set_zone",
+        "cmp_set_source_citation",
+        "cmp_add_layer",
+    }
+    if tool not in ALLOWED_TOOLS:
+        raise HTTPException(
+            400,
+            f"Tool '{tool}' non autorise pour l'assistant composant. "
+            f"Tools disponibles : {sorted(ALLOWED_TOOLS)}",
+        )
+
+    # Enforce scope : sid + cid sont injectes depuis l'URL, pas depuis
+    # le payload user (evite injection de sid/cid arbitraire).
+    args["sid"] = sid
+    args["cid"] = cid
+
+    # Import lazy des tools cmp_* pour eviter cycle
+    from agent import native_tools_v2 as nt
+
+    tool_fn = getattr(nt, tool, None)
+    if tool_fn is None:
+        raise HTTPException(500, f"Tool '{tool}' manquant dans native_tools_v2")
+
+    try:
+        result = await tool_fn(**args)
+    except HTTPException:
+        raise
+    except TypeError as exc:
+        raise HTTPException(400, f"Args invalides pour {tool} : {exc}")
+    except Exception as exc:
+        log.warning("component_assist_action tool=%s err=%s", tool, exc)
+        raise HTTPException(500, f"Erreur execution tool : {exc}")
+
+    return {
+        "success": True,
+        "tool": tool,
+        "result": result,
+        "version_num_after": (
+            result.get("version_num") if isinstance(result, dict) else None
+        ),
+    }
+
+
 @app.get("/studies/{sid}/components/{cid}/history")
 async def component_history_endpoint(
     sid: str, cid: str,

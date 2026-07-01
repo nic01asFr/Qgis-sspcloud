@@ -20,6 +20,7 @@ import { TextField, TextareaField, SelectField, NumberField, FieldSection } from
 import { ZoneFieldset, type ZoneConfig } from './InteractiveMap/ZoneFieldset';
 import { LayersFieldset, type LayerOverride } from './InteractiveMap/LayersFieldset';
 import { DatasourceAutocomplete } from './InteractiveMap/DatasourceAutocomplete';
+import { AssistantCard } from './InteractiveMap/AssistantCard';
 
 const BASEMAP_OPTIONS = [
   { value: 'osm', label: 'OpenStreetMap (default)' },
@@ -69,6 +70,9 @@ export function InteractiveMapForm({
     <>
       {/* V1.13.5 Sprint 1.5 F7 : reordonner sections selon logique metier Marie
           (Zone → Couches → Apparence → Titre → Sources, vs V1.13 ordre Pydantic) */}
+
+      {/* Sprint 2.5 V2.5 A2d : AssistantCard en HAUT du drawer (Notion-like) */}
+      <AssistantCard sid={sid} cid={cid} />
 
       <ZoneFieldset
         zone={zone}
