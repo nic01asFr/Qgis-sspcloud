@@ -198,6 +198,28 @@ a:hover{color:var(--blue-france)}
   </div>
 </header>
 
+{# F17 (Sprint 1.4 Vague 1 Equipe B) — Banniere DSFR jaune si version obsolete.
+   Variable Jinja `publication_obsolete` = dict {version, superseded_by, latest_url}
+   posee par _render_assembly_html_with_publication_context quand la version
+   rendue est superseded_by une version plus recente. Le user voit un avertissement
+   clair et un lien vers la version courante. #}
+{% if publication_obsolete %}
+<aside role="alert" class="publication-obsolete-banner"
+       style="max-width:1200px;margin:16px auto;padding:14px 20px;
+              background:#fff4c2;border-left:4px solid #daa520;
+              border-radius:0 4px 4px 0;color:#3a2f00">
+  <p style="margin:0;font-size:13.5px;line-height:1.5">
+    <strong style="color:#8b6a00">Version obsolete</strong> —
+    Cette page presente la version {{ publication_obsolete.version }} de la publication.
+    Une version plus recente (v{{ publication_obsolete.superseded_by }}) est disponible.
+    {% if publication_obsolete.latest_url %}
+    <a href="{{ publication_obsolete.latest_url|e }}"
+       style="color:#8b6a00;font-weight:600">Consulter la derniere version -></a>
+    {% endif %}
+  </p>
+</aside>
+{% endif %}
+
 <section class="story-hero">
   <div class="story-hero-inner">
     <p class="story-hero-eyebrow">{{ assembly.kind|replace('_', ' ')|e }}</p>
