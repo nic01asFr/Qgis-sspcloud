@@ -22,6 +22,7 @@ import { EditPanel, type EditableBlock } from './EditPanel';
 import { AgentPanel } from './AgentPanel';
 import { updateAssembly } from './api';
 import type { AssemblyFetchResponse } from './types';
+import { useEditorStore } from './store/editorStore';
 
 function parseRouteParams(): { sid: string; aid: string } {
   const match = window.location.pathname.match(
@@ -224,18 +225,19 @@ function BlockNoteContent({
     assembly.metadata?.version_num || 1,
   );
   const [overrideStatus, setOverrideStatus] = useState<SaveStatus | null>(null);
-  // Sprint 4 v1.10.0 (8.18) : drawer Edit Panel
-  const [editingBlock, setEditingBlock] = useState<EditableBlock | null>(null);
-  // Sprint V1.15 (2026-07-01) : AgentPanel Docs-like context selection
-  const [selectedBlock, setSelectedBlock] = useState<
-    { block_id: string; type: string; props?: Record<string, any> } | null
-  >(null);
-  // Sprint V1.17 (2026-07-01) : Panel unifie 2 onglets Assistant / Parametres.
-  // Bridge global window.__openEditPanel -> active tab Parametres (fin du drawer
-  // overlay). editingBlock reste la source de verite pour EditPanel inline.
-  const [panelActiveTab, setPanelActiveTab] = useState<'assistant' | 'parameters'>(
-    'assistant',
-  );
+  // Sprint V1.17.3 R1+S8 (2026-07-05) : state UI migre vers Zustand store.
+  // Remplace les 3 useState V1.10-V1.17 (editingBlock, selectedBlock,
+  // panelActiveTab) qui polluaient App.tsx par un store centralise testable
+  // et StrictMode-safe.
+  const editingBlock = useEditorStore((s) => s.editingBlock);
+  const selectedBlock = useEditorStore((s) => s.selectedBlock);
+  const panelActiveTab = useEditorStore((s) => s.panelActiveTab);
+  const setEditingBlock = useEditorStore((s) => s.setEditingBlock);
+  const setSelectedBlock = useEditorStore((s) => s.setSelectedBlock);
+  const setPanelActiveTab = useEditorStore((s) => s.setPanelActiveTab);
+  const openEditPanel = useEditorStore((s) => s.openEditPanel);
+  const switchPanelTab = useEditorStore((s) => s.switchPanelTab);
+  const closeEditPanel = useEditorStore((s) => s.closeEditPanel);
 
   const editor = useCreateBlockNote({
     schema: qgisBlockNoteSchema,
@@ -301,23 +303,21 @@ function BlockNoteContent({
   // BlockNote createReactBlockSpec ne permet pas de passer un callback en
   // prop direct -> bridge global pour eviter prop drilling complexe.
   useEffect(() => {
-    // V1.17 : bridge redirige vers onglet Parametres du panel unifie au lieu
-    // d'ouvrir un drawer overlay separe. editingBlock = source de verite pour
-    // EditPanel rendu inline dans onglet.
-    (window as any).__openEditPanel = (block: EditableBlock) => {
-      setEditingBlock(block);
-      setPanelActiveTab('parameters');
-    };
-    // V1.17 : bascule programmatique d'onglet — utilise par LayersFieldset
-    // (bouton "+ Ajouter une couche") pour rediriger vers l'onglet Assistant.
-    (window as any).__switchPanelTab = (tab: 'assistant' | 'parameters') => {
-      setPanelActiveTab(tab);
-    };
+    // V1.17.3 R1 (2026-07-05) : les bridges globaux window.__* deviennent
+    // de simples SHIMS qui delegent au store Zustand. Pattern conserve pour
+    // backward compat V1.17 des custom blocks (blocks/edit-handler.ts) et
+    // forms/InteractiveMap/LayersFieldset.tsx qui les appellent encore.
+    // Migration blocks/*.tsx et forms/*.tsx vers useEditorStore = V1.18+.
+    //
+    // Anti-pattern React elimine cote App.tsx : le state est desormais dans
+    // le store Zustand, pas des useState locaux. StrictMode-safe.
+    (window as any).__openEditPanel = openEditPanel;
+    (window as any).__switchPanelTab = switchPanelTab;
     return () => {
       delete (window as any).__openEditPanel;
       delete (window as any).__switchPanelTab;
     };
-  }, []);
+  }, [openEditPanel, switchPanelTab]);
 
   // Sprint V1.15 : selection change -> contexte AgentPanel (debounce dans panel).
   // BlockNote v0.22 expose editor.onSelectionChange qui firent au changement
@@ -403,14 +403,9 @@ function BlockNoteContent({
           versionNumSource={versionNumSource}
           onEditPanelSaved={(newProps) => {
             handleEditPanelSaved(newProps);
-            // Apres save : bascule sur Assistant pour continuer l'edition doc
-            setEditingBlock(null);
-            setPanelActiveTab('assistant');
+            closeEditPanel();
           }}
-          onEditPanelClose={() => {
-            setEditingBlock(null);
-            setPanelActiveTab('assistant');
-          }}
+          onEditPanelClose={closeEditPanel}
         />
       </div>
       <SaveStatusBar

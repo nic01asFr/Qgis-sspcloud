@@ -1,7 +1,7 @@
 {
   "name": "qgis-sspcloud-blocknote-editor",
   "private": true,
-  "version": "1.17.2",
+  "version": "1.17.3",
   "description": "Editeur block-based BlockNote pour qgis-sspcloud (D-QGIS-010 Vague E2)",
   "type": "module",
   "scripts": {
@@ -16,7 +16,8 @@
     "@blocknote/mantine": "^0.22.0",
     "@blocknote/react": "^0.22.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
