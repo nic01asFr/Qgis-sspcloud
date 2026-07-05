@@ -17,10 +17,10 @@
  * pas ajouter/supprimer de layers depuis ce form (passe par QGIS Desktop
  * ou l'agent IA).
  */
-import { useEffect, useState } from 'react';
 import { TextField, NumberField, FieldSection } from '../fields';
 import { SymbologyFieldset, type ClassificationConfig } from './SymbologyFieldset';
 import { InteractionsFieldset, type InteractionsConfig } from './InteractionsFieldset';
+import { useComponentSourceLayers } from '../../hooks/queries';
 
 export type SourceLayer = {
   id: string;
@@ -125,43 +125,16 @@ export function LayersFieldset({
   layersOverride: LayerOverride[];
   onChange: (next: LayerOverride[]) => void;
 }) {
-  const [layers, setLayers] = useState<SourceLayer[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!sid || !cid) return;
-    setLoading(true);
-    setError(null);
-    // Sprint 1.5 V1.13.5 F2 : AbortController pour eviter race condition
-    // (bug trouve test user Marie : erreur rouge stale affichee meme apres
-    // fetch successful d'un re-mount sid/cid).
-    const ctrl = new AbortController();
-    fetch(`/studies/${sid}/components/${cid}/source_layers`, {
-      credentials: 'include',
-      signal: ctrl.signal,
-    })
-      .then((r) => {
-        if (!r.ok) throw new Error(`source_layers ${r.status}`);
-        return r.json();
-      })
-      .then((res) => {
-        if (ctrl.signal.aborted) return;
-        setLayers(res.layers);
-        setError(null);
-      })
-      .catch((e) => {
-        if (ctrl.signal.aborted) return;
-        // F2 : seulement set error si pas d'AbortError
-        if (e?.name !== 'AbortError') {
-          setError(String(e?.message || e));
-        }
-      })
-      .finally(() => {
-        if (!ctrl.signal.aborted) setLoading(false);
-      });
-    return () => ctrl.abort();
-  }, [sid, cid]);
+  // Sprint V1.18 S3 (2026-07-05) : fetch source_layers migre vers TanStack
+  // Query useComponentSourceLayers. Le hook fait le stale-while-revalidate
+  // et le cache 5min (scene_manifest peu volatile). Elimine AbortController
+  // manuel + race condition F2 V1.13.5 (deja gere par TanStack Query internal).
+  const layersQuery = useComponentSourceLayers(sid, cid);
+  const layers = (layersQuery.data?.layers as SourceLayer[] | undefined) ?? null;
+  const loading = layersQuery.isLoading;
+  const error = layersQuery.error
+    ? String((layersQuery.error as Error).message || layersQuery.error)
+    : null;
 
   return (
     <FieldSection title={`Couches ${layers ? `(${layers.length})` : ''}`}>
