@@ -206,12 +206,24 @@ class TestEndpointsAssemblyEtape5:
         assert "execute_action" in src
         assert "ConcurrentUpdateError" in src
 
-    def test_v114_endpoint_still_delegates_via_actions(self):
-        """V1.14.1 refactorise mais toujours fonctionnel (backward compat)."""
+    def test_v114_endpoints_removed_v1_17_1(self):
+        """Sprint V1.17.1 R5 : endpoints /components/{cid}/assist/* supprimes.
+
+        La logique cmp_* est desormais integree dans le panel unifie V1.17
+        via routing body.cid dans /assemblies/{aid}/assist/action (voir
+        assembly_assist_action_endpoint qui accepte cid optionnel).
+        """
         import inspect
-        from hub.main import component_assist_action_endpoint
-        src = inspect.getsource(component_assist_action_endpoint)
-        assert "apply_component_patch" in src
+        # Les endpoints legacy ne doivent plus etre importables
+        with pytest.raises(ImportError):
+            from hub.main import component_assist_suggestions_endpoint  # noqa: F401
+        with pytest.raises(ImportError):
+            from hub.main import component_assist_action_endpoint  # noqa: F401
+        # Le routing cmp_* passe par assembly_assist_action_endpoint
+        from hub.main import assembly_assist_action_endpoint
+        src = inspect.getsource(assembly_assist_action_endpoint)
+        assert "AgentBrick" in src
+        assert "execute_action" in src
 
 
 class TestSprint9Coherence:
@@ -228,8 +240,7 @@ class TestSprint9Coherence:
             ProfileConfig, get_allowed_native_tools, get_data_scope,
         )
         from hub.main import (
-            component_assist_suggestions_endpoint,
-            component_assist_action_endpoint,
+            # V1.17.1 R5 : component_assist_* endpoints supprimes.
             assembly_assist_suggestions_endpoint,
             assembly_assist_action_endpoint,
         )
@@ -242,8 +253,6 @@ class TestSprint9Coherence:
             apply_assembly_patch,
             AgentBrick, Suggestion,
             ProfileConfig, get_allowed_native_tools, get_data_scope,
-            component_assist_suggestions_endpoint,
-            component_assist_action_endpoint,
             assembly_assist_suggestions_endpoint,
             assembly_assist_action_endpoint,
         ])
