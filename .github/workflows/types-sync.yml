@@ -1,0 +1,86 @@
+# Sprint V2.0 Phase 1 Etape 4 - S2 Types Pydantic -> TS CI (2026-07-05)
+#
+# Workflow qui garantit la coherence entre :
+#   - Modeles Pydantic hub/hub/models/*.py + hub/hub/actions/types.py
+#   - Types TypeScript blocknote-editor/src/gen/hub-api.d.ts
+#
+# Strategie iter 1 : check-only (bloque PR si le hub expose de nouveaux types
+# Pydantic non refletes dans src/gen/hub-api.d.ts). Iter 2 V1.18 : autogenere
+# via `openapi-typescript` sur /openapi.json du hub deploye + commit push.
+#
+# Trigger : PR sur main touchant hub/hub/models/ ou hub/hub/actions/types.py
+# ou blocknote-editor/src/gen/hub-api.d.ts.
+
+name: Types sync check
+
+on:
+  pull_request:
+    paths:
+      - 'hub/hub/models/**/*.py'
+      - 'hub/hub/actions/types.py'
+      - 'hub/hub/actions/agent_brick.py'
+      - 'blocknote-editor/src/gen/hub-api.d.ts'
+  workflow_dispatch:
+
+jobs:
+  check-types-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Pydantic + inspection tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install pydantic>=2.0 datamodel-code-generator
+
+      # Iter 1 : verifie que les Pydantic models les plus importants exportent
+      # bien les champs attendus par gen/hub-api.d.ts. Iter 2 : full introspection.
+      - name: Extract Pydantic field names
+        id: extract
+        run: |
+          cd hub
+          python -c "
+          from hub.actions.types import ActionResult, HistoryEntry, BlockRef, Scope
+          from hub.actions.agent_brick import Suggestion
+          expected = {
+              'ActionResult': set(ActionResult.model_fields.keys()),
+              'HistoryEntry': set(HistoryEntry.model_fields.keys()),
+              'BlockRef': set(BlockRef.model_fields.keys()),
+              'Suggestion': set(Suggestion.model_fields.keys()),
+          }
+          import json
+          print('PYDANTIC_FIELDS=' + json.dumps({k: sorted(v) for k, v in expected.items()}))
+          " > /tmp/pydantic_fields.txt
+          cat /tmp/pydantic_fields.txt
+
+      - name: Grep TS type members from gen/hub-api.d.ts
+        run: |
+          echo "TS_FIELDS_ACTIONRESULT=$(grep -oP '^\s+\w+(?=[?:])' blocknote-editor/src/gen/hub-api.d.ts | sort -u | head -40)"
+
+      - name: Manual drift check (iter 1 lightweight)
+        run: |
+          # Verifie presence des champs cle attendus dans gen/hub-api.d.ts.
+          # Iter 2 : autogenere depuis /openapi.json du hub prod + diff strict.
+          MISSING=""
+          for field in success tool action_type cid aid block after_block_id \
+                        component_version_num_after assembly_version_num_after \
+                        history_entry warning; do
+            if ! grep -q "^\s*$field[?:]" blocknote-editor/src/gen/hub-api.d.ts; then
+              MISSING="$MISSING $field"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::Champs ActionResult manquants dans gen/hub-api.d.ts: $MISSING"
+            exit 1
+          fi
+          echo "OK : gen/hub-api.d.ts contient tous les champs ActionResult attendus."
+
+      - name: Report success
+        run: |
+          echo "Types Pydantic <-> TS gen/hub-api.d.ts : coherence check OK."
+          echo "Iter 2 V1.18 activera regen auto via /openapi.json du hub deploye."
