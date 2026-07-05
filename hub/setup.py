@@ -21,5 +21,8 @@ setup(
         # Sprint 1.5 Wave 1 (S9) : compaction rolling delta assemblies_index.
         # Rolling delta jsondiff aggregate versions > 30j -> 1 snapshot compact.
         "jsondiff>=1.10",
+        # Sprint 1.4 Vague 1 Equipe B (2026-07-05) - F16/F15 publication.
+        "cryptography>=41.0",  # F16 bundle ZIP + signature Ed25519
+        "weasyprint>=60.0",    # F15 export PDF headless
     ],
 )

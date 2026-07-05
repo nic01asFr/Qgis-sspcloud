@@ -838,6 +838,14 @@ async def lifespan(app: FastAPI):
     await auth._build_jwks_cache()
     if _STUDIES_AVAILABLE:
         await studies.init_db()
+        # F17 Sprint 1.4 Vague 1 Equipe B : table publications (versioning
+        # URL stable + banniere obsolescence). Init idempotent, indep de
+        # assemblies_index (permet d'evoluer sans casser le schema legacy).
+        try:
+            from hub import publications as _pub_mod
+            await _pub_mod.init_db()
+        except Exception as _exc:
+            log.warning("publications.init_db failed (degraded) : %s", _exc)
         # Sprint UX-3 (2026-06-21) : migration idempotente etude -> projet 1:N.
         # Pour chaque study existante sans entree dans study_projects, on cree
         # 1 default project. Le copy effectif du .qgz legacy est defere a la
@@ -6071,8 +6079,38 @@ async def publish_assembly_endpoint(
         except Exception as exc:
             log.error("update_published_info : %s", exc)
 
+    # 5. F17 Sprint 1.4 Vague 1 Equipe B : versioning URL stable
+    # Enregistre la publication dans la table `publications`. Slug par defaut
+    # = `assembly-{aid}`. La version est auto-incrementee et les rows
+    # precedentes sont marquees superseded_by = new_version -> banniere
+    # obsolescence dans le template. Body optionnel : {change_summary}.
+    publication_info = None
+    if published_url:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        change_summary = body.get("change_summary") if isinstance(body, dict) else None
+        try:
+            from hub import publications as _pub_mod
+            latest_asm = await asm_mod.get_assembly_latest(aid)
+            asm_version_num = int(latest_asm.get("version_num", 1)) if latest_asm else 1
+            publication_info = await _pub_mod.register_publication(
+                slug=slug,
+                aid=aid,
+                aid_version_num=asm_version_num,
+                sid=sid,
+                owner=user["username"],
+                kind="assembly",
+                change_summary=change_summary,
+                integrity_hash=(chain_dict.get("integrity_hash")
+                                or chain_dict.get("signed_hash")),
+            )
+        except Exception as exc:
+            log.warning("register_publication F17 : %s", exc)
+
     # Renvoie résultat structuré (toujours 200, état détaillé dans body)
-    return {
+    resp = {
         "id": aid,
         "published": published_url is not None,
         "published_url": published_url,
@@ -6095,6 +6133,334 @@ async def publish_assembly_endpoint(
             },
         },
     }
+    if publication_info:
+        hub_base = (_HUB_URL or _SELF_URL or "").rstrip("/")
+        resp["publication"] = {
+            "slug": publication_info["slug"],
+            "version": publication_info["version"],
+            "stable_url": f"{hub_base}/p/{publication_info['slug']}" if hub_base else None,
+            "versioned_url": (f"{hub_base}/p/{publication_info['slug']}/v{publication_info['version']}"
+                              if hub_base else None),
+            "change_summary": publication_info.get("change_summary"),
+        }
+    return resp
+
+
+# ── F17 Sprint 1.4 Vague 1 Equipe B : versioning URL stable ───────────────────
+
+@app.get("/p/{slug}")
+async def resolve_latest_publication_endpoint(slug: str):
+    """F17 : URL stable qui redirige HTTP 302 vers la derniere version.
+
+    Cette route est publique (pas d'auth) : elle sert le meme role qu'une
+    URL DOI - jamais changer, toujours pointer vers l'etat courant du
+    livrable. La ressource cible (v{n}) est immutable ; seule la
+    redirection change quand une nouvelle version est publiee.
+
+    404 si aucune publication n'existe pour ce slug.
+    """
+    from hub import publications as _pub_mod
+    latest = await _pub_mod.get_latest(slug)
+    if not latest:
+        raise HTTPException(404, f"Publication '{slug}' introuvable")
+    version = latest["version"]
+    return RedirectResponse(url=f"/p/{slug}/v{version}", status_code=302)
+
+
+@app.get("/p/{slug}/v{version}", response_class=HTMLResponse)
+async def render_versioned_publication_endpoint(slug: str, version: int):
+    """F17 : rend la version immutable N d'une publication.
+
+    - Cherche la row (slug, version) dans `publications`
+    - Si `superseded_by` NOT NULL -> injecte `publication_obsolete` dans le
+      contexte Jinja pour afficher la banniere jaune DSFR + lien vers latest.
+    - Le rendu HTML est recalcule a partir de aid + aid_version_num (le
+      manifest PVC est source de verite pour le contenu immutable).
+
+    404 si (slug, version) n'existe pas.
+    """
+    from hub import publications as _pub_mod
+    pub = await _pub_mod.get_version(slug, version)
+    if not pub:
+        raise HTTPException(404, f"Publication '{slug}' v{version} introuvable")
+
+    sid = pub["sid"]
+    aid = pub["aid"]
+    owner = pub["owner"]
+
+    # Rendu HTML de la version cible. On reutilise _render_assembly_html
+    # (latest version en PVC). Note : v1 ne stocke pas de snapshot HTML
+    # immutable par version — c'est un compromis pragmatique. Etape future :
+    # servir le HTML rendu au moment T de la publication (S3 immutable).
+    try:
+        html, _chain = await _render_assembly_html(sid, aid, owner)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Rendu impossible : {exc}")
+
+    # Si superseded, injecte la banniere obsolescence via post-processing
+    # (le template Jinja utilise deja `publication_obsolete`).
+    if pub.get("superseded_by"):
+        hub_base = (_HUB_URL or _SELF_URL or "").rstrip("/")
+        latest_url = f"{hub_base}/p/{slug}" if hub_base else f"/p/{slug}"
+        # Injection minimale de la banniere en HTML apres le </header>
+        # (les rendus deja mis en cache PVC n'ont pas re-evalue le contexte
+        # Jinja avec `publication_obsolete`).
+        from html import escape as _esc
+        banner = (
+            f'<aside role="alert" class="publication-obsolete-banner" '
+            f'style="max-width:1200px;margin:16px auto;padding:14px 20px;'
+            f'background:#fff4c2;border-left:4px solid #daa520;'
+            f'border-radius:0 4px 4px 0;color:#3a2f00">'
+            f'<p style="margin:0;font-size:13.5px;line-height:1.5">'
+            f'<strong style="color:#8b6a00">Version obsolete</strong> - '
+            f'Cette page presente la version {_esc(str(pub["version"]))} '
+            f'de la publication. Une version plus recente '
+            f'(v{_esc(str(pub["superseded_by"]))}) est disponible. '
+            f'<a href="{_esc(latest_url)}" '
+            f'style="color:#8b6a00;font-weight:600">'
+            f'Consulter la derniere version -&gt;</a></p></aside>'
+        )
+        if "</header>" in html:
+            html = html.replace("</header>", "</header>\n" + banner, 1)
+        else:
+            html = banner + html
+    return HTMLResponse(content=html)
+
+
+@app.get("/p/{slug}/versions")
+async def list_publication_versions_endpoint(slug: str):
+    """F17 : historique complet des versions d'un slug (JSON)."""
+    from hub import publications as _pub_mod
+    versions = await _pub_mod.list_versions(slug)
+    if not versions:
+        raise HTTPException(404, f"Publication '{slug}' introuvable")
+    return {"slug": slug, "count": len(versions), "versions": versions}
+
+
+# ── F16 Sprint 1.4 Vague 1 Equipe B : bundle ZIP autonome + Ed25519 ──────────
+
+@app.post("/studies/{sid}/assemblies/{aid}/export-bundle")
+async def export_bundle_endpoint(
+    sid: str, aid: str, request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """F16 : construit un ZIP autonome et l'upload sur S3.
+
+    ZIP contient : manifest.json, rendered/index.html, components/*.json,
+    audit_chain.json, integrity.txt (Ed25519), README.txt.
+
+    Retourne le ZIP en download direct (`application/zip`) + upload
+    parallele sur S3 pour catalogue permanent. Le header
+    `X-Bundle-Integrity-Hash` porte le hash pour verification cliente.
+    """
+    _check_assemblies_enabled()
+    from hub import assemblies as asm_mod
+    from hub.publish import bundle as bundle_mod
+
+    latest = await asm_mod.get_assembly_latest(aid)
+    if not latest or latest["sid"] != sid:
+        raise HTTPException(404, "Assemblage introuvable")
+    if latest["owner"] != user["username"]:
+        raise HTTPException(403, "Pas owner de l'assemblage")
+
+    # 1. Rendu HTML + audit_chain (source de verite)
+    try:
+        html, chain_dict = await _render_assembly_html(sid, aid, user["username"])
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Rendu impossible : {exc}")
+
+    # 2. Manifest Assembly (depuis DB latest + PVC)
+    import base64 as _b64, json as _json
+    manifest: dict = {}
+    try:
+        stdout = await _execute_python_in_workspace(
+            user["username"],
+            asm_mod.read_assembly_manifest_pod_code(sid, aid),
+        )
+        if "ASSEMBLY_READ_OK" in stdout:
+            b64 = stdout.split("b64=", 1)[1].split()[0].strip()
+            manifest = _json.loads(_b64.b64decode(b64).decode())
+    except Exception as exc:
+        log.warning("F16 read manifest PVC : %s", exc)
+    if not manifest:
+        manifest = {
+            "id": aid, "sid": sid,
+            "title": latest.get("title", ""),
+            "kind": latest.get("kind", ""),
+            "version": latest.get("version_num", 1),
+        }
+
+    # 3. Composants references : lit chaque manifest PVC
+    from hub import components as comp_mod
+    components: dict[str, dict] = {}
+    for section in (manifest.get("layout") or {}).get("sections", []):
+        for comp_entry in (section.get("components") or []):
+            cid = comp_entry.get("ref") if isinstance(comp_entry, dict) else None
+            if not cid or cid in components:
+                continue
+            try:
+                stdout = await _execute_python_in_workspace(
+                    user["username"],
+                    comp_mod.read_component_manifest_pod_code(sid, cid),
+                )
+                if "COMPONENT_READ_OK" in stdout:
+                    b64_data = stdout.split("b64=", 1)[1].split()[0].strip()
+                    components[cid] = _json.loads(_b64.b64decode(b64_data).decode())
+            except Exception as exc:
+                log.warning("F16 read component %s : %s", cid, exc)
+
+    # 4. Version num publication (F17 integration)
+    version_num_pub = 1
+    try:
+        from hub import publications as _pub_mod
+        latest_pub = await _pub_mod.get_latest(f"assembly-{aid}")
+        if latest_pub:
+            version_num_pub = int(latest_pub["version"])
+    except Exception:
+        pass
+
+    # 5. Build ZIP
+    slug = f"assembly-{aid}"
+    zip_bytes = bundle_mod.build_zip_bundle(
+        manifest=manifest,
+        rendered_html=html,
+        audit_chain=chain_dict,
+        components=components,
+        assets={},
+        version_num=version_num_pub,
+        slug=slug,
+    )
+
+    integrity_hash = (
+        chain_dict.get("integrity_hash")
+        or chain_dict.get("signed_hash")
+        or ""
+    )
+
+    # 6. Upload S3 (best-effort)
+    s3_url = None
+    if _S3_AVAILABLE:
+        try:
+            bundle_slug = f"assembly-{aid}-bundle-v{version_num_pub}"
+            info = s3_publication.publish(
+                owner=user["username"], kind="assembly", slug=bundle_slug,
+                content=zip_bytes,
+                content_type="application/zip",
+                study_id=sid,
+            )
+            s3_url = info.get("url")
+        except Exception as exc:
+            log.warning("F16 S3 upload bundle : %s", exc)
+
+    # 7. Reponse ZIP direct + headers auditabilite
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{slug}-v{version_num_pub}.zip"',
+            "X-Bundle-Integrity-Hash": integrity_hash,
+            "X-Bundle-Version": str(version_num_pub),
+            "X-Bundle-S3-Url": s3_url or "",
+        },
+    )
+
+
+# ── F15 Sprint 1.4 Vague 1 Equipe B : export PDF headless (weasyprint) ───────
+
+@app.post("/studies/{sid}/assemblies/{aid}/publish-pdf")
+async def publish_pdf_endpoint(
+    sid: str, aid: str, request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """F15 : convertit l'assemblage en PDF headless + upload S3.
+
+    Choix produit : weasyprint (leger, print CSS deterministe). MapLibre
+    WebGL est rendu en placeholder raster (bandeau indiquant que la carte
+    est interactive en HTML/ZIP). L'integrity_hash est imprime en pied de
+    page pour auditabilite.
+
+    Retourne PDF en download direct + header `X-PDF-Integrity-Hash`.
+    """
+    _check_assemblies_enabled()
+    from hub import assemblies as asm_mod
+    try:
+        from hub.publish import pdf as pdf_mod
+    except ImportError as exc:
+        raise HTTPException(
+            503, f"weasyprint indisponible : {exc}. "
+            f"Verifier dep systeme Pango/GTK dans l'image hub."
+        )
+
+    latest = await asm_mod.get_assembly_latest(aid)
+    if not latest or latest["sid"] != sid:
+        raise HTTPException(404, "Assemblage introuvable")
+    if latest["owner"] != user["username"]:
+        raise HTTPException(403, "Pas owner de l'assemblage")
+
+    # 1. Rendu HTML + audit_chain
+    try:
+        html, chain_dict = await _render_assembly_html(sid, aid, user["username"])
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, f"Rendu HTML impossible : {exc}")
+
+    integrity_hash = (
+        chain_dict.get("integrity_hash")
+        or chain_dict.get("signed_hash")
+        or "sha256:unknown"
+    )
+
+    # 2. Convertit en PDF
+    try:
+        pdf_bytes = pdf_mod.render_pdf_from_html(
+            html, integrity_hash=integrity_hash,
+        )
+    except Exception as exc:
+        log.error("F15 render_pdf : %s", exc)
+        raise HTTPException(500, f"Rendu PDF echec : {exc}")
+
+    # 3. Version num publication (F17 integration)
+    version_num_pub = 1
+    try:
+        from hub import publications as _pub_mod
+        latest_pub = await _pub_mod.get_latest(f"assembly-{aid}")
+        if latest_pub:
+            version_num_pub = int(latest_pub["version"])
+    except Exception:
+        pass
+
+    # 4. Upload S3 (best-effort)
+    s3_url = None
+    if _S3_AVAILABLE:
+        try:
+            pdf_slug = f"assembly-{aid}-v{version_num_pub}"
+            info = s3_publication.publish(
+                owner=user["username"], kind="pdf", slug=pdf_slug,
+                content=pdf_bytes,
+                content_type="application/pdf",
+                study_id=sid,
+            )
+            s3_url = info.get("url")
+        except Exception as exc:
+            log.warning("F15 S3 upload PDF : %s", exc)
+
+    # 5. Reponse PDF direct
+    filename = f"assembly-{aid}-v{version_num_pub}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-PDF-Integrity-Hash": integrity_hash,
+            "X-PDF-Version": str(version_num_pub),
+            "X-PDF-S3-Url": s3_url or "",
+        },
+    )
 
 
 @app.delete("/studies/{sid}/assemblies/{aid}", status_code=status.HTTP_204_NO_CONTENT)
