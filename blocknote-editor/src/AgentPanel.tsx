@@ -21,6 +21,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { T, agentPanelCss, friendlyKind, friendlyBasemap } from './design/tokens';
 import { EditPanel, type EditableBlock } from './EditPanel';
+import { hubFetch } from './api/hubFetch';
+import { ApiError, ConcurrentUpdateError } from './types/errors';
+import { useAssemblySuggestions } from './hooks/queries';
 
 type Suggestion = {
   id: string;
@@ -257,43 +260,43 @@ export function AgentPanel({
     }
   }, [firstSeen, collapsed]);
 
-  // Fetch suggestions debounce 250ms sur changement selection
+  // Sprint V1.18 S3 (2026-07-05) : suggestions fetch migre vers TanStack Query
+  // useAssemblySuggestions. Le hook fait AbortController + cache stale 30s +
+  // rollback rejet automatique. Le debounce 250ms sur selection reste local
+  // pour eviter le hammering du hub au deplacement rapide du curseur.
+  const [debouncedSelectedBlockId, setDebouncedSelectedBlockId] = useState<
+    string | null
+  >(selectedBlock?.block_id ?? null);
   useEffect(() => {
-    if (!sid || !aid || collapsed) return;
     if (debounceRef.current !== null) {
       window.clearTimeout(debounceRef.current);
     }
-    const ctrl = new AbortController();
     debounceRef.current = window.setTimeout(() => {
-      const qs = selectedBlock?.block_id
-        ? `?selected_block_id=${encodeURIComponent(selectedBlock.block_id)}`
-        : '';
-      fetch(`/studies/${sid}/assemblies/${aid}/assist/suggestions${qs}`, {
-        credentials: 'include',
-        signal: ctrl.signal,
-      })
-        .then((r) => {
-          if (!r.ok) throw new Error(`assist/suggestions ${r.status}`);
-          return r.json();
-        })
-        .then((data) => {
-          if (!ctrl.signal.aborted) {
-            setSuggestions(data.suggestions || []);
-            setErrorMsg(null);
-          }
-        })
-        .catch((e: any) => {
-          if (ctrl.signal.aborted || e?.name === 'AbortError') return;
-          setErrorMsg(String(e?.message || e));
-        });
+      setDebouncedSelectedBlockId(selectedBlock?.block_id ?? null);
     }, 250);
     return () => {
-      ctrl.abort();
       if (debounceRef.current !== null) {
         window.clearTimeout(debounceRef.current);
       }
     };
-  }, [sid, aid, selectedBlock?.block_id, collapsed]);
+  }, [selectedBlock?.block_id]);
+
+  const suggestionsQuery = useAssemblySuggestions(
+    sid,
+    aid,
+    debouncedSelectedBlockId,
+    { enabled: !collapsed },
+  );
+
+  // Sync data vers state local existant (evite refactor UI en aval)
+  useEffect(() => {
+    if (suggestionsQuery.data) {
+      setSuggestions(suggestionsQuery.data.suggestions || []);
+      setErrorMsg(null);
+    } else if (suggestionsQuery.error) {
+      setErrorMsg(String((suggestionsQuery.error as Error).message || suggestionsQuery.error));
+    }
+  }, [suggestionsQuery.data, suggestionsQuery.error]);
 
   const applyLiveUpdate = (result: ActionResult) => {
     try {
@@ -356,26 +359,22 @@ export function AgentPanel({
       if (isCmp && (opts?.cid || selectedBlock?.props?.cid)) {
         body.cid = opts?.cid || selectedBlock?.props?.cid;
       }
-      const resp = await fetch(
+      // Sprint V1.18 R3 : hubFetch hydrate erreurs typees (ApiError sous-classes).
+      // silent=true car on gere l'affichage inline (setErrorMsg / setConflictErr).
+      return await hubFetch<ActionResult>(
         `/studies/${sid}/assemblies/${aid}/assist/action`,
-        {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body),
-        },
+        { method: 'POST', json: body, silent: true },
       );
-      if (resp.status === 409) {
+    } catch (err) {
+      if (err instanceof ConcurrentUpdateError) {
         setConflictErr(true);
         return null;
       }
-      if (!resp.ok) {
-        const errBody = await resp.json().catch(() => ({}));
-        throw new Error(errBody.detail || `HTTP ${resp.status}`);
+      if (err instanceof ApiError) {
+        setErrorMsg(err.message);
+        return null;
       }
-      return (await resp.json()) as ActionResult;
-    } catch (e: any) {
-      setErrorMsg(String(e?.message || e));
+      setErrorMsg(String(err));
       return null;
     } finally {
       setExecuting(null);

@@ -1,30 +1,36 @@
 {
   "name": "qgis-sspcloud-blocknote-editor",
   "private": true,
-  "version": "1.17.4",
-  "description": "Editeur block-based BlockNote pour qgis-sspcloud (D-QGIS-010 Vague E2)",
+  "version": "1.18.0",
+  "description": "Editeur block-based BlockNote pour qgis-sspcloud (D-QGIS-010 Vague E2 + V1.18 Sprint 1.2 robustesse UI)",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "build:strict": "tsc -b && vite build",
     "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "gen:types": "openapi-typescript http://localhost:8000/openapi.json -o src/gen/hub-api.d.ts"
   },
   "dependencies": {
     "@blocknote/core": "^0.22.0",
     "@blocknote/mantine": "^0.22.0",
     "@blocknote/react": "^0.22.0",
+    "@tanstack/react-query": "^5.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "sonner": "^1.7.0",
     "zustand": "^4.5.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "jsdom": "^25.0.0",
     "openapi-typescript": "^7.4.0",
     "typescript": "^5.5.3",
-    "vite": "^5.4.0"
+    "vite": "^5.4.0",
+    "vitest": "^2.0.0"
   }
 }

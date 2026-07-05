@@ -7,8 +7,27 @@
  */
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { Toaster } from 'sonner';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import './editor-layout.css';
+
+// Sprint V1.18 S3 : QueryClient global editeur.
+// staleTime defaut 30s ; les hooks queries.ts overrident si besoin
+// (source_layers 5min, suggestions 30s, etc).
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+    mutations: {
+      retry: 0,
+    },
+  },
+});
 
 // Sprint 3 P2 (8.14) : monitoring client errors
 // Capture les erreurs JavaScript non-gerees + promesses rejetees + envoie
@@ -55,6 +74,22 @@ window.addEventListener('unhandledrejection', (event) => {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <App />
+        {/* Sprint V1.18 R3 : sonner Toaster global (top-right, DSFR-like). */}
+        <Toaster
+          position="top-right"
+          richColors
+          closeButton
+          toastOptions={{
+            style: {
+              fontFamily: 'Marianne, system-ui, sans-serif',
+              fontSize: 13,
+            },
+          }}
+        />
+      </QueryClientProvider>
+    </ErrorBoundary>
   </React.StrictMode>,
 );

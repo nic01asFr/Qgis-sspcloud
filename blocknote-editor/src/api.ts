@@ -4,8 +4,15 @@
  * Vague E2 Commit E2 (D-QGIS-010) : fetch read-only.
  * Auth via cookie OIDC same-origin (la page /editor/... est servie par
  * le hub authentifié, donc cookie propagé en iframe/embed).
+ *
+ * Sprint V1.18 Vague 1 Equipe C R3 (2026-07-05) : migre vers hubFetch qui
+ * hydrate les erreurs typees (ApiError sous-classes) au lieu de throw Error
+ * generique. Les callers qui veulent afficher un statut inline (conflict UI
+ * dans autosave) attrapent ConcurrentUpdateError explicitement.
  */
 import type { AssemblyFetchResponse, ComponentManifest } from './types';
+import { hubFetch } from './api/hubFetch';
+import { ApiError, ConcurrentUpdateError } from './types/errors';
 
 const API_BASE = ''; // same-origin
 
@@ -13,25 +20,16 @@ export async function fetchAssembly(
   sid: string,
   aid: string,
 ): Promise<AssemblyFetchResponse> {
-  const url = `${API_BASE}/studies/${sid}/assemblies/${aid}`;
-  const res = await fetch(url, { credentials: 'include' });
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`Fetch assembly ${aid} : HTTP ${res.status} — ${detail.slice(0, 200)}`);
-  }
-  return await res.json();
+  return hubFetch<AssemblyFetchResponse>(
+    `${API_BASE}/studies/${sid}/assemblies/${aid}`,
+  );
 }
 
 export async function fetchComponent(
   sid: string,
   cid: string,
 ): Promise<ComponentManifest> {
-  const url = `${API_BASE}/studies/${sid}/components/${cid}`;
-  const res = await fetch(url, { credentials: 'include' });
-  if (!res.ok) {
-    throw new Error(`Fetch component ${cid} : HTTP ${res.status}`);
-  }
-  const data = await res.json();
+  const data = await hubFetch<any>(`${API_BASE}/studies/${sid}/components/${cid}`);
   // Retourne le manifest (la response wrapper a metadata + manifest)
   return data.manifest || data;
 }
@@ -44,18 +42,10 @@ export async function createComponent(
   sid: string,
   manifest: any,
 ): Promise<{ id: string }> {
-  const url = `${API_BASE}/studies/${sid}/components`;
-  const res = await fetch(url, {
+  return hubFetch<{ id: string }>(`${API_BASE}/studies/${sid}/components`, {
     method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(manifest),
+    json: manifest,
   });
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`Create component : HTTP ${res.status} — ${detail.slice(0, 200)}`);
-  }
-  return await res.json();
 }
 
 /**
@@ -94,32 +84,28 @@ export async function updateComponent(
   if (versionNumSource !== null) {
     body.version_num_source = versionNumSource;
   }
-  const url = `${API_BASE}/studies/${sid}/components/${cid}`;
-  const res = await fetch(url, {
-    method: 'PUT',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (res.status === 409) {
-    const data = await res.json().catch(() => ({}));
-    const detail = data.detail || data;
-    return {
-      ok: false,
-      conflict: {
-        currentVersionNum: detail.current_version_num || 0,
-        sourceVersionNum: detail.source_version_num || 0,
-      },
-      error: detail.message || 'Conflit version composant',
-    };
+  try {
+    const data = await hubFetch<any>(
+      `${API_BASE}/studies/${sid}/components/${cid}`,
+      { method: 'PUT', json: body, silent: true },
+    );
+    return { ok: true, newVersionNum: data.version_num, cid: data.id };
+  } catch (err) {
+    if (err instanceof ConcurrentUpdateError) {
+      return {
+        ok: false,
+        conflict: {
+          currentVersionNum: err.current,
+          sourceVersionNum: err.source,
+        },
+        error: err.message || 'Conflit version composant',
+      };
+    }
+    if (err instanceof ApiError) {
+      return { ok: false, error: `HTTP ${err.statusCode} — ${err.message}` };
+    }
+    return { ok: false, error: String(err) };
   }
-  if (!res.ok) {
-    const text = await res.text();
-    return { ok: false, error: `HTTP ${res.status} — ${text.slice(0, 200)}` };
-  }
-  const data = await res.json();
-  return { ok: true, newVersionNum: data.version_num, cid: data.id };
 }
 
 /**
@@ -149,30 +135,26 @@ export async function updateAssembly(
   if (versionNumSource !== null) {
     body.version_num_source = versionNumSource;
   }
-  const url = `${API_BASE}/studies/${sid}/assemblies/${aid}`;
-  const res = await fetch(url, {
-    method: 'PUT',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (res.status === 409) {
-    const data = await res.json().catch(() => ({}));
-    const detail = data.detail || data;
-    return {
-      ok: false,
-      conflict: {
-        currentVersionNum: detail.current_version_num || 0,
-        sourceVersionNum: detail.source_version_num || 0,
-      },
-      error: detail.message || 'Conflit version',
-    };
+  try {
+    const data = await hubFetch<any>(
+      `${API_BASE}/studies/${sid}/assemblies/${aid}`,
+      { method: 'PUT', json: body, silent: true },
+    );
+    return { ok: true, newVersionNum: data.version_num };
+  } catch (err) {
+    if (err instanceof ConcurrentUpdateError) {
+      return {
+        ok: false,
+        conflict: {
+          currentVersionNum: err.current,
+          sourceVersionNum: err.source,
+        },
+        error: err.message || 'Conflit version',
+      };
+    }
+    if (err instanceof ApiError) {
+      return { ok: false, error: `HTTP ${err.statusCode} — ${err.message}` };
+    }
+    return { ok: false, error: String(err) };
   }
-  if (!res.ok) {
-    const text = await res.text();
-    return { ok: false, error: `HTTP ${res.status} — ${text.slice(0, 200)}` };
-  }
-  const data = await res.json();
-  return { ok: true, newVersionNum: data.version_num };
 }
