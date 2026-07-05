@@ -4029,6 +4029,92 @@ async def assembly_assist_action_endpoint(
     return result.model_dump(mode="json", exclude_none=True)
 
 
+# S5 Wave 1 (Sprint 1.5) — SSE streaming variante de assist/action
+@app.post("/studies/{sid}/assemblies/{aid}/assist/action-stream")
+async def assembly_assist_action_stream_endpoint(
+    sid: str, aid: str,
+    payload: dict,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Version SSE streaming de assist/action.
+
+    Meme contract d'input que /assist/action (tool, args, cid, versions).
+    Retourne un flux text/event-stream d'events typees :
+
+    - event: progress  -> data: {phase, message}
+    - event: patch     -> data: {partial patch} (optionnel V1.15 iter 1)
+    - event: done      -> data: ActionResult complet
+    - event: error     -> data: {code, message, details, status_code}
+
+    Le client (blocknote panel V1.15) consomme via EventSource + AbortController.
+    Pattern reutilise `StreamingResponse` + async generator existant
+    (cf. main.py:1824-1837 _proxy_to_geoai).
+    """
+    _check_assemblies_enabled()
+    from hub import assemblies as asm_mod
+    from hub import components as comp_mod
+    from hub.actions import AgentBrick, Scope, CMP_ALLOWED_TOOLS
+
+    tool = payload.get("tool")
+    args = payload.get("args") or {}
+    asy_v = payload.get("assembly_version_source")
+    cmp_v = payload.get("component_version_source")
+    cid_in_payload = payload.get("cid")
+
+    scope_cid = None
+    if tool in CMP_ALLOWED_TOOLS:
+        scope_cid = cid_in_payload
+        if not scope_cid:
+            raise HTTPException(
+                400,
+                f"Tool cmp_* '{tool}' requiert 'cid' dans le payload",
+            )
+
+    brick = AgentBrick(
+        execute_python=_execute_python_in_workspace,
+        asm_mod=asm_mod,
+        comp_mod=comp_mod,
+    )
+    scope = Scope(
+        kind="assembly",
+        sid=sid, aid=aid, cid=scope_cid,
+        owner=user["username"],
+        profile_id="assembly_assist",
+    )
+    version_source = cmp_v if tool in CMP_ALLOWED_TOOLS else asy_v
+
+    async def event_stream():
+        # Format SSE : "event: <name>\ndata: <json>\n\n"
+        try:
+            async for evt in brick.execute_action_stream(
+                tool=tool, args=args, scope=scope,
+                version_num_source=version_source,
+            ):
+                name = evt.get("event", "message")
+                data = json.dumps(evt.get("data", {}), ensure_ascii=False)
+                yield f"event: {name}\ndata: {data}\n\n"
+        except asyncio.CancelledError:
+            # AbortController cote client -> cleanup propre, pas d'erreur
+            log.debug("assist/action-stream annule par le client")
+            raise
+        except Exception as exc:
+            log.exception("assist/action-stream generator crash")
+            err_payload = json.dumps(
+                {"code": "stream_error", "message": str(exc)},
+                ensure_ascii=False,
+            )
+            yield f"event: error\ndata: {err_payload}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # desactive proxy buffering (nginx)
+            "Connection": "keep-alive",
+        },
+    )
+
 
 @app.get("/studies/{sid}/components/{cid}/history")
 async def component_history_endpoint(
@@ -7204,6 +7290,127 @@ async def delete_session(session_id: str, user: dict = Depends(auth.get_current_
         raise HTTPException(status_code=404, detail="Session introuvable")
     _active_sessions.pop(user["username"], None)
     await sessions.delete_session(session_id)
+
+
+# ── S7 Wave 1 — Sprint 1.5 : cascade parent-child sessions ────────────────────
+
+@app.post("/sessions/{session_id}/parent")
+async def set_session_parent_endpoint(
+    session_id: str,
+    payload: dict,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Definit un parent sur la session (child = session_id).
+
+    Body : `{"parent_session_id": "<id>"}`
+
+    Auth : le user doit etre owner de la session enfant. Le parent peut
+    appartenir a un autre user (partage cross-user autorise, l'audit
+    trail garde trace via _save + INSERT-only history externe).
+
+    Erreurs :
+    - 404 si child ou parent introuvables
+    - 400 si self-loop ou cycle transitivite
+    """
+    parent_id = (payload or {}).get("parent_session_id")
+    if not parent_id or not isinstance(parent_id, str):
+        raise HTTPException(400, "parent_session_id requis dans le body")
+
+    # Auth : child owner only
+    child = await sessions.get_session(session_id, user["username"])
+    if not child:
+        raise HTTPException(404, "Session enfant introuvable ou pas owner")
+
+    try:
+        await sessions.set_session_parent(session_id, parent_id)
+    except sessions.SessionNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except sessions.CircularParentError as exc:
+        raise HTTPException(400, str(exc))
+    return {
+        "session_id": session_id,
+        "parent_session_id": parent_id,
+        "ancestors": await sessions.get_session_ancestors(session_id),
+    }
+
+
+@app.get("/sessions/{session_id}/ancestors")
+async def get_session_ancestors_endpoint(
+    session_id: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Retourne la chaine d'ancetres de la session (S7 Wave 1)."""
+    s = await sessions.get_session(session_id, user["username"])
+    if not s:
+        raise HTTPException(404, "Session introuvable ou pas owner")
+    return {
+        "session_id": session_id,
+        "ancestors": await sessions.get_session_ancestors(session_id),
+    }
+
+
+# ── S9 Wave 1 — Sprint 1.5 : compaction rolling delta jsondiff ────────────────
+
+@app.post("/internal/compact-deltas")
+async def compact_deltas_endpoint(
+    request: Request,
+    payload: dict | None = None,
+):
+    """Endpoint interne : compact rolling delta d'un ou plusieurs assemblages.
+
+    Auth : Secret K8s interne uniquement (via _is_inter_pod_authorized).
+    La route est deja dans la whitelist /internal du middleware OIDC
+    (auth.py _OIDC_MIDDLEWARE_INTER_POD), donc le check ci-dessous est
+    une defense en profondeur (belt-and-suspenders).
+
+    Body :
+      - `aid`: str (optionnel, sinon tous les aid distincts)
+      - `max_age_days`: int (defaut 30)
+
+    Response : `{"compacted": {aid: n_rows, ...}, "total_rows": N}`
+    """
+    # Defense en profondeur : re-verifie la cle inter-pod meme si middleware
+    # doit deja avoir bloque. Motif : eviter tout leak si config middleware
+    # change.
+    if not await auth._is_inter_pod_authorized(request):
+        raise HTTPException(403, "Endpoint reserve inter-pod (HUB_API_KEY)")
+
+    from hub import assemblies as asm_mod
+    body = payload or {}
+    try:
+        max_age_days = int(body.get("max_age_days", 30))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "max_age_days doit etre un entier")
+    if max_age_days < 1:
+        raise HTTPException(400, "max_age_days doit etre >= 1")
+
+    aid_filter = body.get("aid")
+    aids: list[str] = []
+    if aid_filter:
+        aids = [str(aid_filter)]
+    else:
+        # Recupere tous les aid distincts d'assemblies_index.
+        import aiosqlite as _aiosql
+        from hub import studies as studies_mod
+        async with _aiosql.connect(studies_mod._DB_PATH) as db:
+            cur = await db.execute(
+                "SELECT DISTINCT aid FROM assemblies_index"
+            )
+            aids = [r[0] for r in await cur.fetchall()]
+
+    compacted: dict[str, int] = {}
+    for aid in aids:
+        try:
+            n = await asm_mod.compact_assembly_deltas(aid, max_age_days=max_age_days)
+            if n > 0:
+                compacted[aid] = n
+        except Exception as exc:
+            log.warning("compact-deltas aid=%s: %s", aid, exc)
+    return {
+        "compacted": compacted,
+        "total_rows": sum(compacted.values()),
+        "max_age_days": max_age_days,
+    }
 
 
 # ── Admin ──────────────────────────────────────────────────────────────────────
