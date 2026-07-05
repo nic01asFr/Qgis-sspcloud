@@ -18,5 +18,8 @@ setup(
         # dans hub/vendor/scene_manifest.py utilise Pydantic v2. FastAPI le
         # tire deja en transitive, on le pin ici pour visibilite explicite.
         "pydantic>=2.0",
+        # Sprint 1.4 Vague 1 Equipe B (2026-07-05) - F16/F15 publication.
+        "cryptography>=41.0",  # F16 bundle ZIP + signature Ed25519
+        "weasyprint>=60.0",    # F15 export PDF headless
     ],
 )
