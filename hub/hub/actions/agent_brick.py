@@ -175,6 +175,91 @@ class AgentBrick:
             )
         raise ToolNotAllowedError(f"Tool '{tool}' non implemente")
 
+    # ------------------------------------------------------------------
+    # S5 Wave 1 (Sprint 1.5) — Streaming SSE
+    # ------------------------------------------------------------------
+
+    async def execute_action_stream(
+        self,
+        *,
+        tool: str,
+        args: dict[str, Any],
+        scope: Scope,
+        version_num_source: int | None = None,
+    ):
+        """Version streaming d'execute_action, yield events pour SSE.
+
+        Backward-compat : execute_action() reste synchrone (retour ActionResult)
+        pour ne pas casser les consumers existants. Cette methode est ADDITIVE.
+
+        Yield format : dict `{event: str, data: dict}`
+        - `{'event': 'progress', 'data': {'phase': str, 'message': str}}`
+        - `{'event': 'patch', 'data': {...patch partiel...}}` (optionnel)
+        - `{'event': 'done', 'data': {...ActionResult.model_dump()...}}`
+        - `{'event': 'error', 'data': {'code': str, 'message': str, 'details': dict}}`
+
+        V1.15 iter 1 : sequentiel (yield progress avant/apres l'appel bloquant).
+        V2.5 : streaming reel via cascade LLM + tool_calls incremental.
+        """
+        from hub.actions.errors import ActionError, ConcurrentUpdateError
+
+        yield {
+            "event": "progress",
+            "data": {
+                "phase": "validating",
+                "message": f"Validation whitelist tool '{tool}'",
+            },
+        }
+        try:
+            yield {
+                "event": "progress",
+                "data": {
+                    "phase": "executing",
+                    "message": f"Execution {tool} sur {scope.kind}",
+                },
+            }
+            result = await self.execute_action(
+                tool=tool, args=args, scope=scope,
+                version_num_source=version_num_source,
+            )
+            yield {
+                "event": "progress",
+                "data": {"phase": "persisting", "message": "Persistence OK"},
+            }
+            yield {
+                "event": "done",
+                "data": result.model_dump(mode="json", exclude_none=True),
+            }
+        except ConcurrentUpdateError as exc:
+            yield {
+                "event": "error",
+                "data": {
+                    "code": "concurrent_update",
+                    "message": exc.message,
+                    "details": exc.details,
+                    "status_code": exc.status_code,
+                },
+            }
+        except ActionError as exc:
+            yield {
+                "event": "error",
+                "data": {
+                    "code": exc.__class__.__name__,
+                    "message": exc.message,
+                    "status_code": exc.status_code,
+                },
+            }
+        except Exception as exc:
+            log.exception("execute_action_stream unexpected error")
+            yield {
+                "event": "error",
+                "data": {
+                    "code": "internal_error",
+                    "message": str(exc),
+                    "status_code": 500,
+                },
+            }
+
 
 # ============================================================================
 # Helper : extraction whitelist native_tools depuis profile YAML
