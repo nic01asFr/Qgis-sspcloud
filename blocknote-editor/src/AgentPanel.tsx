@@ -21,6 +21,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { T, agentPanelCss, friendlyKind, friendlyBasemap } from './design/tokens';
 import { EditPanel, type EditableBlock } from './EditPanel';
+import { hubFetch } from './api/hubFetch';
+import { ApiError, ConcurrentUpdateError } from './types/errors';
 
 type Suggestion = {
   id: string;
@@ -356,26 +358,22 @@ export function AgentPanel({
       if (isCmp && (opts?.cid || selectedBlock?.props?.cid)) {
         body.cid = opts?.cid || selectedBlock?.props?.cid;
       }
-      const resp = await fetch(
+      // Sprint V1.18 R3 : hubFetch hydrate erreurs typees (ApiError sous-classes).
+      // silent=true car on gere l'affichage inline (setErrorMsg / setConflictErr).
+      return await hubFetch<ActionResult>(
         `/studies/${sid}/assemblies/${aid}/assist/action`,
-        {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body),
-        },
+        { method: 'POST', json: body, silent: true },
       );
-      if (resp.status === 409) {
+    } catch (err) {
+      if (err instanceof ConcurrentUpdateError) {
         setConflictErr(true);
         return null;
       }
-      if (!resp.ok) {
-        const errBody = await resp.json().catch(() => ({}));
-        throw new Error(errBody.detail || `HTTP ${resp.status}`);
+      if (err instanceof ApiError) {
+        setErrorMsg(err.message);
+        return null;
       }
-      return (await resp.json()) as ActionResult;
-    } catch (e: any) {
-      setErrorMsg(String(e?.message || e));
+      setErrorMsg(String(err));
       return null;
     } finally {
       setExecuting(null);

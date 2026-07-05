@@ -7,7 +7,9 @@
  */
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { Toaster } from 'sonner';
 import App from './App';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import './editor-layout.css';
 
 // Sprint 3 P2 (8.14) : monitoring client errors
@@ -55,6 +57,20 @@ window.addEventListener('unhandledrejection', (event) => {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+      {/* Sprint V1.18 R3 : sonner Toaster global (top-right, DSFR-like). */}
+      <Toaster
+        position="top-right"
+        richColors
+        closeButton
+        toastOptions={{
+          style: {
+            fontFamily: 'Marianne, system-ui, sans-serif',
+            fontSize: 13,
+          },
+        }}
+      />
+    </ErrorBoundary>
   </React.StrictMode>,
 );
