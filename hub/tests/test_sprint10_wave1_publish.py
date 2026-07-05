@@ -280,7 +280,10 @@ class TestF15PdfModule:
 
     def test_render_pdf_from_html_produit_pdf_valide(self):
         """render_pdf_from_html doit produire un PDF (magic bytes %PDF)."""
-        pytest.importorskip("weasyprint")
+        try:
+            import weasyprint  # noqa: F401
+        except (ImportError, OSError) as exc:
+            pytest.skip(f"weasyprint indisponible (dev Windows sans Pango) : {exc}")
         from hub.publish import pdf
         html = (
             "<html><head><title>Test</title></head>"
@@ -294,7 +297,10 @@ class TestF15PdfModule:
 
     def test_render_pdf_injecte_integrity_hash(self):
         """L'integrity_hash doit apparaitre dans le PDF (footer auditabilite)."""
-        pytest.importorskip("weasyprint")
+        try:
+            import weasyprint  # noqa: F401
+        except (ImportError, OSError) as exc:
+            pytest.skip(f"weasyprint indisponible (dev Windows sans Pango) : {exc}")
         from hub.publish import pdf
         html = "<html><body><h1>Marker</h1></body></html>"
         pdf_bytes = pdf.render_pdf_from_html(
