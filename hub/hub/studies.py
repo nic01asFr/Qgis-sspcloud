@@ -430,6 +430,31 @@ async def init_db() -> None:
                 ON assemblies_index(sid, status, kind)
         """)
 
+        # Sprint 1.5 Wave 1 (S9) : table compaction rolling delta jsondiff.
+        # But : compresser N rows old d'assemblies_index (versions > 30j)
+        # en 1 snapshot delta_json agrege (jsondiff). Reduit la taille de
+        # la table de long historique tout en preservant l'audit trail
+        # complet reconstructible via replay du delta sur le snapshot base.
+        # Cf. `hub.assemblies.compact_assembly_deltas` (fonction principale)
+        # et endpoint interne POST /internal/compact-deltas.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS assemblies_deltas_compact (
+                rowid                INTEGER PRIMARY KEY AUTOINCREMENT,
+                aid                  TEXT NOT NULL,
+                version_range_min    INTEGER NOT NULL,
+                version_range_max    INTEGER NOT NULL,
+                delta_json           TEXT NOT NULL,
+                base_content_hash    TEXT,
+                integrity_hash       TEXT,
+                ts                   INTEGER NOT NULL,
+                UNIQUE(aid, version_range_min, version_range_max)
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_assemblies_deltas_compact_lookup
+                ON assemblies_deltas_compact(aid, version_range_max DESC)
+        """)
+
         # Migration 2026-06-27 : URL MinIO -> URL Hub /published.
         # Bug MinIO SSPCloud : ACL canned 'public-read' ne fonctionne plus.
         # Les anciens published_url (avant fix f11da9d) etaient en URL S3

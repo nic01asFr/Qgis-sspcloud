@@ -18,5 +18,8 @@ setup(
         # dans hub/vendor/scene_manifest.py utilise Pydantic v2. FastAPI le
         # tire deja en transitive, on le pin ici pour visibilite explicite.
         "pydantic>=2.0",
+        # Sprint 1.5 Wave 1 (S9) : compaction rolling delta assemblies_index.
+        # Rolling delta jsondiff aggregate versions > 30j -> 1 snapshot compact.
+        "jsondiff>=1.10",
     ],
 )

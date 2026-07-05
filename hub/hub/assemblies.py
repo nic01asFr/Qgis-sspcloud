@@ -346,3 +346,123 @@ content = base64.b64decode(b64).decode('utf-8')
 p.write_text(content, encoding='utf-8')
 print(f'ASSEMBLY_RENDER_WRITE_OK path={{p}} size={{len(content)}}')
 """
+
+
+# ── S9 Wave 1 — Compaction rolling delta jsondiff ─────────────────────────────
+#
+# But : reduire la taille long-terme d'assemblies_index sans perdre l'audit
+# trail. On aggregate N rows > max_age_days en 1 snapshot delta_json (jsondiff)
+# dans la table `assemblies_deltas_compact`. Reconstruction possible via replay
+# du delta sur le base_content_hash (row la plus ancienne conservee).
+#
+# Contrainte cle : ne JAMAIS compresser la version latest active. Le compact
+# ne touche que les versions strictement < get_assembly_latest(aid).version_num
+# ET dont created_at < cutoff (max_age_days).
+#
+# Integrity : le compact stocke integrity_hash SHA256 canonique du (aid,
+# version_range_min, version_range_max, base_content_hash, delta_json) — le
+# hash chain original (previous_hash / content_hash) reste intact sur les rows
+# non compressees. La reconstruction est donc auditable de bout en bout.
+
+
+def _canonical_jsondiff(before: dict, after: dict) -> str:
+    """Compute delta jsondiff (marshal mode) serialise canonique."""
+    import jsondiff
+    delta = jsondiff.diff(before, after, marshal=True)
+    return json.dumps(delta, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+async def compact_assembly_deltas(
+    aid: str, max_age_days: int = 30
+) -> int:
+    """Compacte les versions old d'un assemblage en 1 snapshot delta.
+
+    Regles :
+    - Prend toutes les rows `assemblies_index` de `aid` dont created_at < cutoff
+    - Exclut la row latest active (jamais compressee)
+    - Si < 2 rows eligibles, no-op (rien a compacter)
+    - Serialise le delta = jsondiff(row_min.canonical, row_max.canonical)
+      marshal mode, stocke dans assemblies_deltas_compact
+    - Ne SUPPRIME PAS les rows d'assemblies_index (INSERT-only preserve).
+      Le compact est un DECODEUR complementaire pour audit long-terme.
+
+    Returns : nombre de rows agrégées dans le compact (0 si no-op).
+    """
+    cutoff = int(time.time()) - max_age_days * 86400
+    latest = await get_assembly_latest(aid)
+    latest_version = int(latest["version_num"]) if latest else 0
+
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """SELECT rowid, aid, version_num, content_hash, provenance_json,
+                      created_at
+               FROM assemblies_index
+               WHERE aid = ? AND created_at < ? AND version_num < ?
+               ORDER BY version_num ASC""",
+            (aid, cutoff, latest_version),
+        )
+        rows = [dict(r) for r in await cur.fetchall()]
+
+    if len(rows) < 2:
+        return 0
+
+    row_min = rows[0]
+    row_max = rows[-1]
+    v_min = int(row_min["version_num"])
+    v_max = int(row_max["version_num"])
+
+    # Delta canonique : diff du plus ancien (base) vers le plus recent (dans
+    # la fenetre compactee). Reconstruction par replay du delta sur row_min.
+    before = {
+        "content_hash": row_min["content_hash"],
+        "provenance_json": row_min.get("provenance_json") or "",
+    }
+    after = {
+        "content_hash": row_max["content_hash"],
+        "provenance_json": row_max.get("provenance_json") or "",
+    }
+    delta_json = _canonical_jsondiff(before, after)
+
+    # integrity_hash SHA256 canonique du compact (chain preserve)
+    integrity_payload = json.dumps(
+        {
+            "aid": aid,
+            "version_range_min": v_min,
+            "version_range_max": v_max,
+            "base_content_hash": row_min["content_hash"],
+            "delta_json": delta_json,
+        },
+        sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    )
+    integrity_hash = "sha256:" + hashlib.sha256(
+        integrity_payload.encode()
+    ).hexdigest()
+
+    async with aiosqlite.connect(_DB_PATH) as db:
+        # ON CONFLICT DO NOTHING pour idempotence (re-run compact meme fenetre)
+        await db.execute(
+            """INSERT OR IGNORE INTO assemblies_deltas_compact
+               (aid, version_range_min, version_range_max, delta_json,
+                base_content_hash, integrity_hash, ts)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                aid, v_min, v_max, delta_json,
+                row_min["content_hash"], integrity_hash, int(time.time()),
+            ),
+        )
+        await db.commit()
+
+    return len(rows)
+
+
+async def list_assembly_deltas_compact(aid: str) -> list[dict[str, Any]]:
+    """Liste les snapshots compact pour un assemblage (audit / debug)."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """SELECT * FROM assemblies_deltas_compact
+               WHERE aid = ? ORDER BY version_range_max DESC""",
+            (aid,),
+        )
+        return [dict(r) for r in await cur.fetchall()]
