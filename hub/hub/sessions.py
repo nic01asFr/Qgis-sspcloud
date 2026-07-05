@@ -209,19 +209,40 @@ async def init_db() -> None:
                 pod_name TEXT NOT NULL,
                 svc_name TEXT NOT NULL,
                 mcp_url TEXT NOT NULL,
-                api_url TEXT NOT NULL
+                api_url TEXT NOT NULL,
+                parent_session_id TEXT
             )
         """)
+        # Migration additive Sprint 1.5 (S7 Wave 1) : parent_session_id pour
+        # cascade parent-child (traversal ancestors). ALTER idempotent, ignore
+        # "duplicate column" si la table pre-existait sans cette colonne.
+        try:
+            await db.execute(
+                "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT"
+            )
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "duplicate column" not in msg and "already exists" not in msg:
+                raise
         await db.commit()
 
 
 async def _save(s: dict) -> None:
+    # S7 Wave 1 : preserve parent_session_id sur INSERT OR REPLACE.
+    # Comme create_session ne peuple pas ce champ, on merge avec la valeur
+    # actuelle si presente (evite d'ecraser un parent deja pose).
+    payload = dict(s)
+    if "parent_session_id" not in payload:
+        payload["parent_session_id"] = None
+        existing = await _get(payload["id"])
+        if existing and existing.get("parent_session_id"):
+            payload["parent_session_id"] = existing["parent_session_id"]
     async with aiosqlite.connect(_DB_PATH) as db:
         await db.execute("""
             INSERT OR REPLACE INTO sessions
-            (id, owner, status, created_at, last_active, pod_name, svc_name, mcp_url, api_url)
-            VALUES (:id, :owner, :status, :created_at, :last_active, :pod_name, :svc_name, :mcp_url, :api_url)
-        """, s)
+            (id, owner, status, created_at, last_active, pod_name, svc_name, mcp_url, api_url, parent_session_id)
+            VALUES (:id, :owner, :status, :created_at, :last_active, :pod_name, :svc_name, :mcp_url, :api_url, :parent_session_id)
+        """, payload)
         await db.commit()
 
 
@@ -746,3 +767,83 @@ async def cleanup_loop() -> None:
                 print(f"[sessions] {n} workspace(s) idle endormi(s)")
         except Exception as exc:
             print(f"[sessions] cleanup erreur: {exc}")
+
+
+# ── S7 Wave 1 — Cascade parent-child ──────────────────────────────────────────
+#
+# Vision : une session enfant heritee (child) peut declarer sa session parente
+# pour permettre traversal des ancestors (audit, propagation lifecycle, etc.).
+# La colonne parent_session_id est optionnelle (NULL = session racine).
+
+class SessionNotFoundError(Exception):
+    """Session cible d'un set_session_parent introuvable."""
+
+
+class CircularParentError(Exception):
+    """Detection d'un cycle parent-child (self-loop ou boucle transitivite)."""
+
+
+async def set_session_parent(
+    child_session_id: str, parent_session_id: str
+) -> None:
+    """Definit parent_session_id sur une session enfant.
+
+    Verifications :
+    - Les 2 sessions doivent exister
+    - Pas de self-loop (child != parent)
+    - Pas de cycle transitif (parent ne doit pas etre descendant de child)
+
+    Idempotent : re-set la meme relation ne change rien.
+    """
+    if child_session_id == parent_session_id:
+        raise CircularParentError(
+            f"Session {child_session_id} ne peut etre son propre parent"
+        )
+    child = await _get(child_session_id)
+    if not child:
+        raise SessionNotFoundError(f"Session enfant {child_session_id} introuvable")
+    parent = await _get(parent_session_id)
+    if not parent:
+        raise SessionNotFoundError(f"Session parente {parent_session_id} introuvable")
+    # Detection cycle : traverse ancestors du parent, si child_session_id
+    # apparait -> cycle. On borne la profondeur pour eviter boucle infinie
+    # sur DB corrompue.
+    ancestors_of_parent = await get_session_ancestors(parent_session_id)
+    if child_session_id in ancestors_of_parent:
+        raise CircularParentError(
+            f"Cycle detecte : {parent_session_id} est deja descendant de "
+            f"{child_session_id}"
+        )
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "UPDATE sessions SET parent_session_id = ? WHERE id = ?",
+            (parent_session_id, child_session_id),
+        )
+        await db.commit()
+
+
+async def get_session_ancestors(session_id: str) -> list[str]:
+    """Retourne la chaine d'ancetres (parent, grand-parent, ...).
+
+    Ordre : du parent direct au plus lointain ancetre. Session racine
+    retourne []. Bornage max_depth=32 pour protection anti-cycle si la
+    DB est corrompue (garde-fou defensif).
+    """
+    ancestors: list[str] = []
+    seen: set[str] = {session_id}
+    current = session_id
+    max_depth = 32
+    for _ in range(max_depth):
+        s = await _get(current)
+        if not s:
+            break
+        parent = s.get("parent_session_id")
+        if not parent:
+            break
+        if parent in seen:
+            # cycle DB corrompu : stop propre plutot que boucle infinie
+            break
+        ancestors.append(parent)
+        seen.add(parent)
+        current = parent
+    return ancestors
