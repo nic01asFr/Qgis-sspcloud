@@ -239,11 +239,25 @@ function BlockNoteContent({
   const switchPanelTab = useEditorStore((s) => s.switchPanelTab);
   const closeEditPanel = useEditorStore((s) => s.closeEditPanel);
 
+  // Chantier 1 V1.20.1 : Dictionnaire FR + placeholder pattern Docs LaSuite.
+  // Marie voit un placeholder discret "Commencez a ecrire ou tapez '/'" au
+  // lieu de l'anglais BlockNote par defaut. Placeholder aligne avec Docs
+  // pour un ressenti uniforme cross-outils Etat.
   const editor = useCreateBlockNote({
     schema: qgisBlockNoteSchema,
     initialContent: initialBlocks.length > 0 ? initialBlocks : [
-      { type: 'paragraph', content: 'Assembly vide.' },
+      { type: 'paragraph', content: '' },
     ],
+    // BlockNote v0.22 : dictionary permet de surcharger les libelles UI.
+    // Focus sur placeholders + slash menu FR.
+    dictionary: {
+      placeholders: {
+        default: "Commencez a ecrire ou tapez '/' pour ajouter un composant",
+        heading: 'Titre',
+        bulletListItem: 'Liste a puces',
+        numberedListItem: 'Liste numerotee',
+      },
+    } as any,
   });
 
   const handleVersionUpdate = useCallback(

@@ -1,23 +1,15 @@
 /**
- * KpiGrid custom block — Vague E2 Commit F1 (D-QGIS-010).
+ * KpiGrid - edition inline pattern Docs (Chantier 1 V1.20.1).
+ *
+ * Chaque KPI value + label + unit editables inline. palette + columnsMin
+ * restent dans Parametres. Ajout/suppression KPI = suggestions Assistant.
  *
  * Mapping ComponentKind 'kpi_grid' -> BlockNote block 'kpiGrid'.
- * Pattern de référence pour les autres custom blocks DOM (F2-F3).
- *
- * Props mapping `block.props` ↔ `Component.params` :
- *   cid           : référence vers Component existant (12 hex)
- *   kpisJson      : JSON string [{value, label, unit?, color?}]
- *                   (BlockNote propSchema accepte string/number/boolean
- *                    pas dict/array, on stocke JSON serialisé)
- *   palette       : 'monochrome' | 'rainbow' (default monochrome)
- *   columnsMin    : px largeur min des chips (default 140)
- *
- * Rendu : grid CSS auto-fit + chips colorés gradient bleu marianne monochrome.
- * Aligné avec helper hub _pre_render_component_html() côté Jinja2.
+ * Props kpisJson JSON serialise (BlockNote propSchema accepte pas array).
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
-import { openEditPanel } from './edit-handler';
+import { InlineEditable } from './InlineEditable';
 
 const COLOR_MAP: Record<string, string> = {
   'marianne-red': 'linear-gradient(135deg,#e1000f,#aa0000)',
@@ -27,8 +19,8 @@ const COLOR_MAP: Record<string, string> = {
 };
 
 const MONOCHROME_GRADIENTS = [
-  'linear-gradient(135deg,#000091,#0063cb)',  // bleu foncé
-  'linear-gradient(135deg,#1212a1,#1d75d0)',  // légèrement plus clair
+  'linear-gradient(135deg,#000091,#0063cb)',
+  'linear-gradient(135deg,#1212a1,#1d75d0)',
   'linear-gradient(135deg,#2424b0,#3d87d4)',
   'linear-gradient(135deg,#3636bf,#5099d7)',
 ];
@@ -46,33 +38,41 @@ export const KpiGridBlock = createReactBlockSpec(
     propSchema: {
       ...defaultProps,
       cid: { default: '' },
-      kpisJson: { default: '[]' }, // JSON serialisé (BlockNote propSchema limit)
+      kpisJson: { default: '[]' },
       palette: { default: 'monochrome' },
       columnsMin: { default: 140 },
     },
     content: 'none' as const,
   },
   {
-    render: ({ block }) => {
+    render: ({ block, editor }) => {
       const { kpisJson, palette, columnsMin } = block.props;
       let kpis: KpiItem[] = [];
       try {
         kpis = JSON.parse(kpisJson as string);
       } catch (e) {
-        // KPIs JSON malformés, afficher fallback
         return (
           <div style={{ padding: 20, color: '#888', fontStyle: 'italic' }}>
-            kpi_grid : JSON invalide (cf. props.kpisJson)
+            Erreur de format des chiffres cles. Ouvrez les Parametres pour
+            corriger.
           </div>
         );
       }
 
+      const updateKpi = (idx: number, key: keyof KpiItem, next: string) => {
+        const nextKpis = kpis.map((k, i) =>
+          i === idx ? { ...k, [key]: next } : k,
+        );
+        editor.updateBlock(block, {
+          props: {
+            ...block.props,
+            kpisJson: JSON.stringify(nextKpis),
+          },
+        } as any);
+      };
+
       return (
         <div
-          onClick={(e) => {
-            e.stopPropagation();
-            openEditPanel(block as any, e.nativeEvent);
-          }}
           style={{
             display: 'grid',
             gridTemplateColumns: `repeat(auto-fit, minmax(${columnsMin}px, 1fr))`,
@@ -104,21 +104,41 @@ export const KpiGridBlock = createReactBlockSpec(
                 }}
               >
                 <div style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.1 }}>
-                  {k.value}
-                  {k.unit && (
-                    <span
-                      style={{
-                        fontSize: 14,
-                        fontWeight: 500,
-                        marginLeft: 4,
-                      }}
-                    >
-                      {k.unit}
-                    </span>
-                  )}
+                  <InlineEditable
+                    as="span"
+                    value={String(k.value ?? '')}
+                    placeholder="0"
+                    ariaLabel={`Valeur du chiffre cle ${i + 1}`}
+                    onChange={(next) => updateKpi(i, 'value', next)}
+                    style={{ color: '#fff' }}
+                  />
+                  <InlineEditable
+                    as="span"
+                    value={String(k.unit || '')}
+                    placeholder=""
+                    ariaLabel={`Unite du chiffre cle ${i + 1}`}
+                    onChange={(next) => updateKpi(i, 'unit', next)}
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 500,
+                      marginLeft: 4,
+                      color: '#fff',
+                    }}
+                  />
                 </div>
-                <div style={{ fontSize: 12, marginTop: 6, opacity: 0.92 }}>
-                  {k.label}
+                <div style={{ marginTop: 6 }}>
+                  <InlineEditable
+                    as="div"
+                    value={String(k.label || '')}
+                    placeholder="Libelle"
+                    ariaLabel={`Libelle du chiffre cle ${i + 1}`}
+                    onChange={(next) => updateKpi(i, 'label', next)}
+                    style={{
+                      fontSize: 12,
+                      opacity: 0.92,
+                      color: '#fff',
+                    }}
+                  />
                 </div>
               </div>
             );

@@ -1,15 +1,12 @@
 /**
- * Legend custom block — Vague E2 Commit F3 (D-QGIS-010).
+ * Legend - edition inline pattern Docs (Chantier 1 V1.20.1).
  *
- * Mapping ComponentKind 'legend' -> BlockNote block 'legend'.
- * Chips couleur + items + source datée (DSFR sobre).
- *
- * V1 : format 'chips' uniquement (formats gradient_bar / proportional
- * réservés aux légendes auto-dérivées des cartes Vague E2 Commit 10).
+ * title + source + chaque item.label editables inline. color + count restent
+ * dans Parametres (structure JSON complexe).
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
-import { openEditPanel } from './edit-handler';
+import { InlineEditable } from './InlineEditable';
 
 interface LegendItem {
   label: string;
@@ -30,7 +27,7 @@ export const LegendBlock = createReactBlockSpec(
     content: 'none' as const,
   },
   {
-    render: ({ block }) => {
+    render: ({ block, editor }) => {
       const { itemsJson, title, source } = block.props;
       let items: LegendItem[] = [];
       try {
@@ -38,9 +35,21 @@ export const LegendBlock = createReactBlockSpec(
       } catch (e) {
         items = [];
       }
+      const updateProp = (key: string, next: string) => {
+        editor.updateBlock(block, {
+          props: { ...block.props, [key]: next },
+        } as any);
+      };
+      const updateItemLabel = (idx: number, next: string) => {
+        const nextItems = items.map((it, i) =>
+          i === idx ? { ...it, label: next } : it,
+        );
+        editor.updateBlock(block, {
+          props: { ...block.props, itemsJson: JSON.stringify(nextItems) },
+        } as any);
+      };
       return (
         <div
-          onClick={(e) => { e.stopPropagation(); openEditPanel(block as any, e.nativeEvent); }}
           style={{
             padding: '12px 16px',
             background: '#fafafa',
@@ -51,18 +60,19 @@ export const LegendBlock = createReactBlockSpec(
             margin: '12px 0',
           }}
         >
-          {title && (
-            <div
-              style={{
-                fontWeight: 600,
-                color: '#000091',
-                marginBottom: 8,
-                fontSize: 13,
-              }}
-            >
-              {title}
-            </div>
-          )}
+          <InlineEditable
+            as="div"
+            value={String(title || '')}
+            placeholder="Titre de la legende…"
+            ariaLabel="Modifier le titre de la legende"
+            onChange={(next) => updateProp('title', next)}
+            style={{
+              fontWeight: 600,
+              color: '#000091',
+              marginBottom: 8,
+              fontSize: 13,
+            }}
+          />
           <div
             style={{
               display: 'flex',
@@ -86,29 +96,41 @@ export const LegendBlock = createReactBlockSpec(
                     border: '1px solid rgba(0,0,0,.1)',
                   }}
                 />
-                <span>
-                  {item.label}
-                  {item.count !== undefined && (
-                    <em style={{ color: '#888', marginLeft: 4 }}>
-                      ({item.count})
-                    </em>
-                  )}
-                </span>
+                <InlineEditable
+                  as="span"
+                  value={String(item.label || '')}
+                  placeholder="Etiquette…"
+                  ariaLabel={`Modifier l'etiquette ${i + 1}`}
+                  onChange={(next) => updateItemLabel(i, next)}
+                />
+                {item.count !== undefined && (
+                  <em style={{ color: '#888', marginLeft: 4 }}>
+                    ({item.count})
+                  </em>
+                )}
               </span>
             ))}
           </div>
-          {source && (
-            <div
-              style={{
-                marginTop: 8,
-                fontSize: 11,
-                color: '#666',
-                fontStyle: 'italic',
-              }}
-            >
-              Source : {source}
-            </div>
-          )}
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 11,
+              color: '#666',
+              fontStyle: 'italic',
+              display: 'flex',
+              gap: 4,
+            }}
+          >
+            <span aria-hidden="true">Source :</span>
+            <InlineEditable
+              as="span"
+              value={String(source || '')}
+              placeholder="Ajouter une source…"
+              ariaLabel="Modifier la source"
+              onChange={(next) => updateProp('source', next)}
+              style={{ fontStyle: 'italic' }}
+            />
+          </div>
         </div>
       );
     },

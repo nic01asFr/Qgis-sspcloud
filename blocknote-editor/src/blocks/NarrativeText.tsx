@@ -1,10 +1,12 @@
 /**
- * NarrativeText - rollback v1.10 pattern (v1.12.4).
- * Voir CustomHeading.tsx pour explication rollback.
+ * NarrativeText — edition inline multiline pattern Docs (Chantier 1 V1.20.1).
+ *
+ * Le contenu markdown est edite directement dans le doc. Bold/italic/link via
+ * toolbar flottante BubbleMenu native BlockNote (a activer separement).
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
-import { openEditPanel } from './edit-handler';
+import { InlineEditable } from './InlineEditable';
 
 export const NarrativeTextBlock = createReactBlockSpec(
   {
@@ -17,11 +19,10 @@ export const NarrativeTextBlock = createReactBlockSpec(
     content: 'none' as const,
   },
   {
-    render: ({ block }) => {
+    render: ({ block, editor }) => {
       const { content } = block.props;
       return (
         <div
-          onClick={(e) => { e.stopPropagation(); openEditPanel(block as any, e.nativeEvent); }}
           style={{
             fontSize: '15.5px',
             lineHeight: 1.7,
@@ -31,11 +32,21 @@ export const NarrativeTextBlock = createReactBlockSpec(
             background: '#fff',
             borderLeft: '3px solid #e5e5e5',
             borderRadius: '0 4px 4px 0',
-            whiteSpace: 'pre-wrap',
-            cursor: 'pointer',
           }}
         >
-          {String(content || '').slice(0, 2000)}
+          <InlineEditable
+            as="div"
+            value={String(content || '')}
+            placeholder="Décrivez votre analyse ou votre observation…"
+            multiline
+            ariaLabel="Modifier le paragraphe narratif"
+            onChange={(next) => {
+              editor.updateBlock(block, {
+                props: { ...block.props, content: next },
+              } as any);
+            }}
+            style={{ whiteSpace: 'pre-wrap', display: 'block' }}
+          />
         </div>
       );
     },

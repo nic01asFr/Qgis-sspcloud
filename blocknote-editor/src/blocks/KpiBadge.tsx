@@ -1,15 +1,13 @@
 /**
- * KpiBadge custom block — Vague E2 Commit F2 (D-QGIS-010).
+ * KpiBadge - edition inline pattern Docs (Chantier 1 V1.20.1).
  *
- * Mapping ComponentKind 'kpi_badge' -> BlockNote block 'kpiBadge'.
- * Un seul KPI inline horizontal compact (vs kpi_grid pour N KPIs).
+ * value + label + unit + source editables inline. color reste dans Parametres.
  *
- * Aligné avec helper hub _kpi_badge_partial.j2 (compact -40% hauteur
- * livré Vague E2 Commit 2 polish DSFR P5).
+ * Aligne avec helper hub _kpi_badge_partial.j2 (compact -40% hauteur).
  */
 import { createReactBlockSpec } from '@blocknote/react';
 import { defaultProps } from '@blocknote/core';
-import { openEditPanel } from './edit-handler';
+import { InlineEditable } from './InlineEditable';
 
 const COLOR_MAP: Record<string, string> = {
   'marianne-red': 'linear-gradient(135deg,#e1000f,#aa0000)',
@@ -33,12 +31,16 @@ export const KpiBadgeBlock = createReactBlockSpec(
     content: 'none' as const,
   },
   {
-    render: ({ block }) => {
+    render: ({ block, editor }) => {
       const { value, label, unit, color, source } = block.props;
       const gradient = COLOR_MAP[String(color)] || COLOR_MAP['info-blue'];
+      const updateProp = (key: string, next: string) => {
+        editor.updateBlock(block, {
+          props: { ...block.props, [key]: next },
+        } as any);
+      };
       return (
         <div
-          onClick={(e) => { e.stopPropagation(); openEditPanel(block as any, e.nativeEvent); }}
           style={{
             padding: '20px 28px',
             background: gradient,
@@ -58,29 +60,58 @@ export const KpiBadgeBlock = createReactBlockSpec(
               fontWeight: 700,
               lineHeight: 1,
               letterSpacing: '-0.5px',
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: 2,
             }}
           >
-            {value}
-            {unit && <span style={{ marginLeft: 2 }}>{unit}</span>}
+            <InlineEditable
+              as="span"
+              value={String(value || '')}
+              placeholder="0"
+              ariaLabel="Modifier la valeur"
+              onChange={(next) => updateProp('value', next)}
+              style={{ color: '#fff' }}
+            />
+            <InlineEditable
+              as="span"
+              value={String(unit || '')}
+              placeholder="unite"
+              ariaLabel="Modifier l'unite"
+              onChange={(next) => updateProp('unit', next)}
+              style={{ fontSize: 24, color: '#fff', opacity: 0.9 }}
+            />
           </div>
-          <div
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <InlineEditable
+              as="div"
+              value={String(label || '')}
+              placeholder="Libelle de l'indicateur"
+              ariaLabel="Modifier le libelle"
+              onChange={(next) => updateProp('label', next)}
+              style={{
+                fontSize: 13,
+                opacity: 0.95,
+                textTransform: 'uppercase',
+                letterSpacing: '0.8px',
+                fontWeight: 600,
+                color: '#fff',
+              }}
+            />
+          </div>
+          <InlineEditable
+            as="div"
+            value={String(source || '')}
+            placeholder="Source (optionnel)…"
+            ariaLabel="Modifier la source"
+            onChange={(next) => updateProp('source', next)}
             style={{
-              fontSize: 13,
-              opacity: 0.95,
-              textTransform: 'uppercase',
-              letterSpacing: '0.8px',
-              fontWeight: 600,
-              flex: 1,
-              minWidth: 140,
+              fontSize: 10,
+              opacity: source ? 0.75 : 0.5,
+              fontStyle: 'italic',
+              color: '#fff',
             }}
-          >
-            {label}
-          </div>
-          {source && (
-            <div style={{ fontSize: 10, opacity: 0.75, fontStyle: 'italic' }}>
-              {source}
-            </div>
-          )}
+          />
         </div>
       );
     },
