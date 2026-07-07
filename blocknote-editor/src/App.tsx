@@ -239,25 +239,17 @@ function BlockNoteContent({
   const switchPanelTab = useEditorStore((s) => s.switchPanelTab);
   const closeEditPanel = useEditorStore((s) => s.closeEditPanel);
 
-  // Chantier 1 V1.20.1 : Dictionnaire FR + placeholder pattern Docs LaSuite.
-  // Marie voit un placeholder discret "Commencez a ecrire ou tapez '/'" au
-  // lieu de l'anglais BlockNote par defaut. Placeholder aligne avec Docs
-  // pour un ressenti uniforme cross-outils Etat.
+  // Chantier 1 V1.20.1 : placeholder inline via composant InlineEditable
+  // (pattern Docs LaSuite implemente directement dans les custom blocks).
+  // V1.20.3 fix : dictionary FR partiel retire, BlockNote v0.22 plante sur
+  // 'drag_handle_label' undefined quand le dictionary manque des cles du
+  // side menu. Un dictionary FR complet sera livre V1.21 avec extraction
+  // packages design tokens.
   const editor = useCreateBlockNote({
     schema: qgisBlockNoteSchema,
     initialContent: initialBlocks.length > 0 ? initialBlocks : [
       { type: 'paragraph', content: '' },
     ],
-    // BlockNote v0.22 : dictionary permet de surcharger les libelles UI.
-    // Focus sur placeholders + slash menu FR.
-    dictionary: {
-      placeholders: {
-        default: "Commencez a ecrire ou tapez '/' pour ajouter un composant",
-        heading: 'Titre',
-        bulletListItem: 'Liste a puces',
-        numberedListItem: 'Liste numerotee',
-      },
-    } as any,
   });
 
   const handleVersionUpdate = useCallback(
