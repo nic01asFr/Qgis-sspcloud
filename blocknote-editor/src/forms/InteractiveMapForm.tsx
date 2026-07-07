@@ -20,9 +20,12 @@ import { TextField, TextareaField, SelectField, NumberField, FieldSection } from
 import { ZoneFieldset, type ZoneConfig } from './InteractiveMap/ZoneFieldset';
 import { LayersFieldset, type LayerOverride } from './InteractiveMap/LayersFieldset';
 import { DatasourceAutocomplete } from './InteractiveMap/DatasourceAutocomplete';
+import { useRequestAgentAssist } from '../store/editorStore';
 // V1.17 : AssistantCard V1.14.1 deprecate — le panel unifie onglet Assistant
 // couvre desormais les suggestions cmp_* scope composant. Le user bascule
 // depuis Parametres vers Assistant via TabBar au sommet du panel.
+// Chantier 2 V1.20.2 : sections collapsible + boutons Assistant contextuels
+// (useRequestAgentAssist push contexte prompt + bascule tab Assistant).
 
 const BASEMAP_OPTIONS = [
   { value: 'osm', label: 'OpenStreetMap (default)' },
@@ -54,6 +57,7 @@ export function InteractiveMapForm({
 }) {
   const sid = getSidFromUrl();
   const cid: string | undefined = data.cid;
+  const requestAgentAssist = useRequestAgentAssist();
 
   // Zone d'etude V1.13 : data.zone (nested) ou fallback champs plats V1.12
   const zone: ZoneConfig = data.zone || {
@@ -87,7 +91,20 @@ export function InteractiveMapForm({
         onChange={(next) => onChange({ ...data, layers_override: next })}
       />
 
-      <FieldSection title="Apparence">
+      <FieldSection
+        title="Apparence"
+        collapsible
+        defaultOpen={false}
+        badge={data.basemap_id ? data.basemap_id.replace('-', ' ') : undefined}
+        onAgentAssist={() =>
+          requestAgentAssist({
+            section: 'apparence',
+            kind: 'interactive_map',
+            cid,
+            hint: "Aidez-moi a choisir le fond de carte et la hauteur adaptes pour ce livrable.",
+          })
+        }
+      >
         <SelectField
           label="Fond de carte"
           value={data.basemap_id || 'osm'}
@@ -106,7 +123,20 @@ export function InteractiveMapForm({
         />
       </FieldSection>
 
-      <FieldSection title="Titre et description">
+      <FieldSection
+        title="Titre et description"
+        collapsible
+        defaultOpen={!data.title}
+        badge={data.title ? '✓' : undefined}
+        onAgentAssist={() =>
+          requestAgentAssist({
+            section: 'titre',
+            kind: 'interactive_map',
+            cid,
+            hint: "Redigez un titre et une description clairs pour cette carte.",
+          })
+        }
+      >
         <TextField
           label="Titre de la carte"
           value={data.title || ''}
@@ -128,7 +158,20 @@ export function InteractiveMapForm({
         />
       </FieldSection>
 
-      <FieldSection title="Source et avertissement">
+      <FieldSection
+        title="Source et avertissement"
+        collapsible
+        defaultOpen={false}
+        badge={data.source || data.datasource_id ? '✓' : undefined}
+        onAgentAssist={() =>
+          requestAgentAssist({
+            section: 'source',
+            kind: 'interactive_map',
+            cid,
+            hint: "Trouvez la source officielle et rediger un avertissement PPRi/reglementaire adapte.",
+          })
+        }
+      >
         <DatasourceAutocomplete
           datasourceId={data.datasource_id || undefined}
           sourceFreeText={data.source || ''}

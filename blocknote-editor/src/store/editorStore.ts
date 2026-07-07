@@ -34,16 +34,35 @@ export interface SelectedBlockContext {
   props?: Record<string, any>;
 }
 
+/**
+ * Contexte de prompt push depuis un bouton "Assistant" contextuel
+ * (Chantier 2 V1.20.2). Ex : {section: "layers", kind: "interactive_map",
+ * hint: "configurer les couches de cette carte"}.
+ */
+export interface PromptContext {
+  section: string;
+  kind?: string;
+  hint?: string;
+  cid?: string;
+}
+
 interface EditorState {
   // === State fluctuant UI panel ===
   panelActiveTab: PanelTab;
   editingBlock: EditableBlock | null;
   selectedBlock: SelectedBlockContext | null;
+  /**
+   * Chantier 2 V1.20.2 : contexte prompt push depuis boutons "Assistant"
+   * dans les sections forms. Consomme par AgentPanel (affiche + insere
+   * dans le textarea).
+   */
+  promptContext: PromptContext | null;
 
   // === Actions ===
   setPanelActiveTab: (tab: PanelTab) => void;
   setEditingBlock: (block: EditableBlock | null) => void;
   setSelectedBlock: (ctx: SelectedBlockContext | null) => void;
+  setPromptContext: (ctx: PromptContext | null) => void;
 
   /**
    * Ouvre l'onglet Parametres avec le bloc a editer.
@@ -65,16 +84,25 @@ interface EditorState {
    * dans EditPanel inline.
    */
   closeEditPanel: () => void;
+
+  /**
+   * Chantier 2 V1.20.2 : bascule sur l'onglet Assistant avec un contexte
+   * prompt precharge. Utilise par les boutons "Assistant" contextuels dans
+   * les sections forms. Compose switchPanelTab + setPromptContext.
+   */
+  requestAgentAssist: (ctx: PromptContext) => void;
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
   panelActiveTab: 'assistant',
   editingBlock: null,
   selectedBlock: null,
+  promptContext: null,
 
   setPanelActiveTab: (tab) => set({ panelActiveTab: tab }),
   setEditingBlock: (block) => set({ editingBlock: block }),
   setSelectedBlock: (ctx) => set({ selectedBlock: ctx }),
+  setPromptContext: (ctx) => set({ promptContext: ctx }),
 
   openEditPanel: (block) =>
     set({ editingBlock: block, panelActiveTab: 'parameters' }),
@@ -83,6 +111,9 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   closeEditPanel: () =>
     set({ editingBlock: null, panelActiveTab: 'assistant' }),
+
+  requestAgentAssist: (ctx) =>
+    set({ promptContext: ctx, panelActiveTab: 'assistant' }),
 }));
 
 /**
@@ -94,3 +125,6 @@ export const useEditorStore = create<EditorState>((set) => ({
 export const usePanelActiveTab = () => useEditorStore((s) => s.panelActiveTab);
 export const useEditingBlock = () => useEditorStore((s) => s.editingBlock);
 export const useSelectedBlock = () => useEditorStore((s) => s.selectedBlock);
+export const usePromptContext = () => useEditorStore((s) => s.promptContext);
+export const useRequestAgentAssist = () =>
+  useEditorStore((s) => s.requestAgentAssist);

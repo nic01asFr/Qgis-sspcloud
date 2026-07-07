@@ -23,6 +23,9 @@ import { T, agentPanelCss, friendlyKind, friendlyBasemap } from './design/tokens
 import { EditPanel, type EditableBlock } from './EditPanel';
 import { hubFetch } from './api/hubFetch';
 import { ApiError, ConcurrentUpdateError } from './types/errors';
+// Chantier 2 V1.20.2 : promptContext push depuis boutons "Assistant"
+// contextuels dans les sections forms (useRequestAgentAssist).
+import { usePromptContext, useEditorStore } from './store/editorStore';
 import { useAssemblySuggestions } from './hooks/queries';
 
 type Suggestion = {
@@ -237,6 +240,13 @@ export function AgentPanel({
   const [freeInput, setFreeInput] = useState('');
   const debounceRef = useRef<number | null>(null);
   const onboardingBtnRef = useRef<HTMLButtonElement>(null);
+  // Chantier 2 V1.20.2 : consommation promptContext push depuis les boutons
+  // "Assistant" contextuels dans les sections forms. Le hint s'affiche dans
+  // une banniere contextuelle (le textarea reste disabled tant que le chat
+  // NL streaming SSE V2.5 n'est pas livre). Le user voit le contexte + peut
+  // dismisser.
+  const promptContext = usePromptContext();
+  const clearPromptContext = useEditorStore((s) => s.setPromptContext);
 
   const toggleCollapse = () => {
     const next = !collapsed;
@@ -793,6 +803,68 @@ export function AgentPanel({
           padding: `${T.space3}px ${T.space4}px`,
         }}
       >
+        {/* Chantier 2 V1.20.2 : banniere contexte prompt push depuis
+            un bouton "Assistant" contextuel dans une section forms.
+            Marie voit d'ou vient la demande + peut dismisser. */}
+        {promptContext && (
+          <div
+            role="status"
+            style={{
+              padding: T.space2,
+              marginBottom: T.space3,
+              background: T.blueMarianneLight,
+              border: `1px solid ${T.blueMarianne}33`,
+              borderRadius: T.radiusMd,
+              fontSize: T.fontSizeSm,
+              color: T.blueMarianne,
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: T.space2,
+            }}
+          >
+            <span aria-hidden="true">⚡</span>
+            <div style={{ flex: 1, lineHeight: 1.5 }}>
+              <div>
+                Demande contextuelle :{' '}
+                <strong>{friendlyKind(promptContext.kind || '')}</strong>
+                {promptContext.section && (
+                  <>
+                    {' '}· section <em>{promptContext.section}</em>
+                  </>
+                )}
+              </div>
+              {promptContext.hint && (
+                <div
+                  style={{
+                    marginTop: T.space1,
+                    fontSize: T.fontSizeSm,
+                    color: T.textSecondary,
+                    fontStyle: 'italic',
+                  }}
+                >
+                  « {promptContext.hint} »
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => clearPromptContext(null)}
+              aria-label="Retirer le contexte"
+              title="Retirer le contexte"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                color: T.blueMarianne,
+                padding: 0,
+                lineHeight: 1,
+                fontSize: T.fontSizeMd,
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
         {/* Conflit 409 : bandeau inline (fin des alert()) */}
         {conflictErr && (
           <div
