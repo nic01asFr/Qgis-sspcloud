@@ -69,6 +69,16 @@ async def init_db() -> None:
                 status TEXT NOT NULL DEFAULT 'active'
             )
         """)
+        # V1.20.4 : colonne origin pour distinguer les etudes reelles user
+        # des templates demo et tests smoke E2E (audit UX : 'V1.5 Smoke E2E
+        # Marie persona' polluait la liste des etudes 'reelles'). Migration
+        # idempotente. Valeurs : 'user' (defaut) | 'demo' | 'test'.
+        try:
+            await db.execute(
+                "ALTER TABLE studies ADD COLUMN origin TEXT NOT NULL DEFAULT 'user'"
+            )
+        except Exception:
+            pass  # colonne deja presente (idempotent)
         await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_studies_owner ON studies(owner)
         """)
@@ -601,7 +611,22 @@ async def create_study(
     name: str,
     profile: str = "standard",
     project_path: str | None = None,
+    origin: str = "user",
 ) -> dict:
+    """Cree une etude.
+
+    V1.20.4 : nouveau parametre `origin` = 'user' (defaut) | 'demo' | 'test'.
+    - 'user' : etude reelle produite par un agent CEREMA
+    - 'demo' : template pre-remplie a des fins pedagogiques (badge DEMO
+      visible dans la liste des etudes)
+    - 'test' : etude technique (smoke E2E, CI, dev) - masquee du bureau user
+      par defaut
+
+    Le titre n'est PLUS pre-rempli automatiquement : le user doit choisir
+    un titre a la creation (fin du carry-over 'Demo Vague E2 v1.6.6').
+    """
+    if origin not in ("user", "demo", "test"):
+        raise ValueError(f"origin invalide : {origin!r} (attendu user|demo|test)")
     sid = _new_id()
     now = int(time.time())
     name_safe = _safe_name(name)
@@ -615,14 +640,15 @@ async def create_study(
         "created_at":      now,
         "last_active":     now,
         "status":          "active",
+        "origin":          origin,
     }
     async with aiosqlite.connect(_DB_PATH) as db:
         await db.execute("""
             INSERT INTO studies
             (id, owner, name, profile, project_path, conversation_id,
-             created_at, last_active, status)
+             created_at, last_active, status, origin)
             VALUES (:id, :owner, :name, :profile, :project_path, :conversation_id,
-                    :created_at, :last_active, :status)
+                    :created_at, :last_active, :status, :origin)
         """, study)
         await db.commit()
     return study
@@ -642,20 +668,31 @@ async def get_study(sid: str, owner: str | None = None) -> dict | None:
     return s
 
 
-async def list_studies(owner: str, include_archived: bool = False) -> list[dict]:
+async def list_studies(
+    owner: str,
+    include_archived: bool = False,
+    include_test: bool = False,
+) -> list[dict]:
+    """Liste les etudes d'un owner.
+
+    V1.20.4 : par defaut, filtre les etudes origin='test' (smoke E2E CI/dev)
+    qui polluaient la liste user reelle. include_test=True pour admin/debug.
+    Les etudes origin='demo' restent visibles (avec badge DEMO cote UI).
+    """
     async with aiosqlite.connect(_DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        if include_archived:
-            rows = await (await db.execute(
-                "SELECT * FROM studies WHERE owner = ? ORDER BY last_active DESC",
-                (owner,)
-            )).fetchall()
-        else:
-            rows = await (await db.execute(
-                "SELECT * FROM studies WHERE owner = ? AND status = 'active' "
-                "ORDER BY last_active DESC",
-                (owner,)
-            )).fetchall()
+        params: list = [owner]
+        clauses = ["owner = ?"]
+        if not include_archived:
+            clauses.append("status = 'active'")
+        if not include_test:
+            clauses.append("(origin IS NULL OR origin != 'test')")
+        sql = (
+            "SELECT * FROM studies WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY last_active DESC"
+        )
+        rows = await (await db.execute(sql, params)).fetchall()
     return [dict(r) for r in rows]
 
 

@@ -190,10 +190,7 @@ a:hover{color:var(--blue-france)}
       <span class="dsfr-operator">CEREMA · QGIS Service</span>
     </div>
     <div class="dsfr-context">
-      Audience : <strong>{{ assembly.audience|e }}</strong>
-      {% if (audit_chain.integrity_hash or audit_chain.signed_hash) %}
-        · <code style="font-size:10px">{{ (audit_chain.integrity_hash or audit_chain.signed_hash)[:23] }}…</code>
-      {% endif %}
+      Diffusion : <strong>{{ classification_labels.get(assembly.audience, assembly.audience)|e }}</strong>
     </div>
   </div>
 </header>
@@ -222,12 +219,12 @@ a:hover{color:var(--blue-france)}
 
 <section class="story-hero">
   <div class="story-hero-inner">
-    <p class="story-hero-eyebrow">{{ assembly.kind|replace('_', ' ')|e }}</p>
+    <p class="story-hero-eyebrow">{{ assembly_kind_labels.get(assembly.kind, assembly.kind|replace('_', ' '))|e }}</p>
     <h1 class="story-hero-title">{{ assembly.title|e }}</h1>
     {% if assembly.description %}
     <p class="story-hero-desc">{{ assembly.description|e }}</p>
     {% endif %}
-    <span class="story-hero-audience">{{ assembly.audience|e }}</span>
+    <span class="story-hero-audience">{{ classification_labels.get(assembly.audience, assembly.audience)|e }}</span>
   </div>
 </section>
 
@@ -237,7 +234,7 @@ a:hover{color:var(--blue-france)}
               background:#fff5e6;border-left:4px solid #ff6f00;border-radius:0 4px 4px 0">
   <p style="margin:0;font-size:13px;color:#161616">
     <strong style="color:#ff6f00">Document interne CEREMA</strong> —
-    Audience : <strong>{{ assembly.audience|e }}</strong>.
+    Diffusion : <strong>{{ classification_labels.get(assembly.audience, assembly.audience)|e }}</strong>.
     {% if assembly.audience == 'cerema_internal' %}
     Diffusion limitée aux collègues CEREMA et partenaires officiels.
     {% elif assembly.audience == 'restricted' %}
@@ -299,41 +296,50 @@ a:hover{color:var(--blue-france)}
 {% endfor %}
 
 {% if audit_chain %}
+{# V1.20.4 : chaîne d'audit repliable (details/summary) — retire du corps
+   du livrable la plomberie technique (sha256, integrity_hash, composants
+   count) qui parasitait la lecture COPIL. Ouvrable par les curieux. #}
 <section class="audit-chain-block" id="audit-chain">
   <div class="audit-chain-inner">
-    <h2 class="audit-chain-title">🔗 Chaîne d'audit</h2>
-    <div class="audit-chain-grid">
-      <div class="audit-chain-item">
-        <div class="audit-chain-item-label">Signed Hash (SHA256)</div>
-        <div class="audit-chain-item-value">
-          <code>{{ (audit_chain.integrity_hash or audit_chain.signed_hash)[:30]|e }}…</code>
+    <details class="audit-chain-details" style="border:1px solid #e5e5e5;border-radius:6px;background:#fafafa">
+      <summary style="cursor:pointer;padding:14px 18px;font-size:13px;font-weight:600;color:#3a3a3a;list-style:none">
+        Détails techniques (traçabilité et intégrité)
+      </summary>
+      <div style="padding:0 18px 18px">
+        <div class="audit-chain-grid">
+          <div class="audit-chain-item">
+            <div class="audit-chain-item-label">Signed Hash (SHA256)</div>
+            <div class="audit-chain-item-value">
+              <code>{{ (audit_chain.integrity_hash or audit_chain.signed_hash)[:30]|e }}…</code>
+            </div>
+          </div>
+          <div class="audit-chain-item">
+            <div class="audit-chain-item-label">Composants référencés</div>
+            <div class="audit-chain-item-value">{{ audit_chain.components_refs|length }}</div>
+          </div>
+          <div class="audit-chain-item">
+            <div class="audit-chain-item-label">Scene Manifests</div>
+            <div class="audit-chain-item-value">{{ audit_chain.scene_hashes|length }}</div>
+          </div>
+          <div class="audit-chain-item">
+            <div class="audit-chain-item-label">Recettes utilisées</div>
+            <div class="audit-chain-item-value">
+              {% if audit_chain.recipes_used %}
+                {{ audit_chain.recipes_used|join(' · ') }}
+              {% else %}—{% endif %}
+            </div>
+          </div>
         </div>
+        <p class="audit-chain-meta">
+          Cette publication a été générée à partir de {{ audit_chain.components_refs|length }}
+          composant{{ 's' if audit_chain.components_refs|length > 1 else '' }} et
+          {{ audit_chain.scene_hashes|length }} Scene Manifest{{ 's' if audit_chain.scene_hashes|length > 1 else '' }}.
+          Le <code>integrity_hash</code> SHA256 canonique permet de vérifier l'intégrité
+          de la chaîne d'audit. Propriétaire : <strong>{{ audit_chain.owner|e }}</strong>,
+          généré le {{ audit_chain.created_at|format_datetime_fr }}.
+        </p>
       </div>
-      <div class="audit-chain-item">
-        <div class="audit-chain-item-label">Composants référencés</div>
-        <div class="audit-chain-item-value">{{ audit_chain.components_refs|length }}</div>
-      </div>
-      <div class="audit-chain-item">
-        <div class="audit-chain-item-label">Scene Manifests</div>
-        <div class="audit-chain-item-value">{{ audit_chain.scene_hashes|length }}</div>
-      </div>
-      <div class="audit-chain-item">
-        <div class="audit-chain-item-label">Recipes utilisées</div>
-        <div class="audit-chain-item-value">
-          {% if audit_chain.recipes_used %}
-            {{ audit_chain.recipes_used|join(' · ') }}
-          {% else %}—{% endif %}
-        </div>
-      </div>
-    </div>
-    <p class="audit-chain-meta">
-      Cette publication a été générée à partir de {{ audit_chain.components_refs|length }}
-      composant{{ 's' if audit_chain.components_refs|length > 1 else '' }} et
-      {{ audit_chain.scene_hashes|length }} Scene Manifest{{ 's' if audit_chain.scene_hashes|length > 1 else '' }}.
-      Le <code>integrity_hash</code> SHA256 canonique permet de vérifier l'intégrité
-      de la chaîne d'audit. Owner : <strong>{{ audit_chain.owner|e }}</strong>,
-      généré le {{ audit_chain.created_at|e if audit_chain.created_at is string else audit_chain.created_at.isoformat() }}.
-    </p>
+    </details>
   </div>
 </section>
 {% endif %}
@@ -359,14 +365,11 @@ a:hover{color:var(--blue-france)}
     <div class="dsfr-footer-col">
       <h3>Méthodologie</h3>
       <ul>
-        <li>Audience publication : <strong>{{ assembly.audience|e }}</strong></li>
+        <li>Diffusion : <strong>{{ classification_labels.get(assembly.audience, assembly.audience)|e }}</strong></li>
         {% if audit_chain.recipes_used %}
-        <li>Recipes : {{ audit_chain.recipes_used|join(', ')|e }}</li>
+        <li>Recettes : {{ audit_chain.recipes_used|join(', ')|e }}</li>
         {% endif %}
         <li>Plateforme : <strong>QGIS Service CEREMA / SSPCloud</strong></li>
-        {% if (audit_chain.integrity_hash or audit_chain.signed_hash) %}
-        <li><code style="font-size:10px">{{ (audit_chain.integrity_hash or audit_chain.signed_hash)[:24]|e }}…</code></li>
-        {% endif %}
       </ul>
     </div>
     {% if footer.cerema_mentions_legales %}

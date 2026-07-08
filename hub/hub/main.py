@@ -1156,6 +1156,12 @@ _maplibre_jinja = _jinja2_lib.Environment(
     autoescape=False,  # composants/assemblages gèrent leur propre escape via |e
 ) if _HUB_HUB_DIR.is_dir() else None
 
+# V1.20.4 : filtre Jinja date FR pour livrable publie (footer chaine
+# d'audit). Enregistre sur _maplibre_jinja seulement (le renderer story).
+if _maplibre_jinja is not None:
+    from hub.models.classification import format_datetime_fr as _fmt_dt_fr
+    _maplibre_jinja.filters["format_datetime_fr"] = _fmt_dt_fr
+
 PROFILE_LABELS = {
     "standard": "Standard", "geoai_analyst": "IA Vision",
     "risk_analyst": "Risques", "db_analyst": "Données / DB",
@@ -2138,8 +2144,16 @@ async def create_study(
         body = {}
     name = body.get("name", "").strip() or "Étude sans nom"
     profile = body.get("profile", "standard")
+    # V1.20.4 : parametre origin optionnel ('user' par defaut). L'agent MCP
+    # et les tests smoke E2E CI/dev peuvent passer origin='test' ou 'demo'
+    # pour signaler que l'etude ne pollue pas la liste user reelle.
+    origin = body.get("origin", "user")
+    if origin not in ("user", "demo", "test"):
+        origin = "user"
 
-    s = await studies.create_study(user["username"], name=name, profile=profile)
+    s = await studies.create_study(
+        user["username"], name=name, profile=profile, origin=origin,
+    )
     # Initialiser le layout sur le pod (mkdir + meta.json)
     try:
         await _execute_python_in_workspace(
@@ -4970,37 +4984,95 @@ async def assembly_history_endpoint(
 
 
 def _markdown_to_html_basique(md: str) -> str:
-    """Convertit markdown simple en HTML (H1-H3 + paragraphes).
+    """Convertit markdown simple en HTML (H1-H3 + paragraphes + inline).
 
-    Pas de dépendance externe (Marked.js etc.). Suffisant pour
-    narrative_text V1. Conversions : ## titre → <h2>, paragraphes
-    multi-lignes joints.
+    V1.20.4 : ajout **gras**, *italique*, [lien](url), listes `- item`,
+    <code>. Motive par livrable COPIL : les paragraphes narratifs
+    utilisaient couramment **texte** apparaissant en clair dans le
+    livrable publie (Frictions #3, #7). Sans dependance externe.
+
+    Regles :
+    - `## titre` -> <h2>, `# titre` -> <h1>, `### titre` -> <h3>
+    - `- item` (lignes consecutives) -> <ul><li>item</li></ul>
+    - Inline (escape d'abord puis substitution sur texte escape) :
+        **bold**  -> <strong>bold</strong>
+        *italic*  -> <em>italic</em>
+        `code`    -> <code>code</code>
+        [txt](url) -> <a href="url" ...>txt</a>  (url http/https/mailto uniquement)
     """
     import html as _h
+    import re as _re
+
+    _LINK_RE = _re.compile(r"\[([^\]\n]+?)\]\((https?://[^\s)]+|mailto:[^\s)]+)\)")
+    _BOLD_RE = _re.compile(r"\*\*([^*\n]+?)\*\*")
+    _ITALIC_RE = _re.compile(r"(?<!\*)\*([^*\n]+?)\*(?!\*)")
+    _CODE_RE = _re.compile(r"`([^`\n]+?)`")
+
+    def _inline(txt: str) -> str:
+        """Applique inline markdown sur texte deja HTML-escape."""
+        # Ordre important : code d'abord (les * dans backticks preserves)
+        # Ensuite links (l'ancre est sur texte + url deja escape)
+        # Puis gras (** avant * pour eviter que ** capture par italic)
+        out = _CODE_RE.sub(lambda m: f"<code>{m.group(1)}</code>", txt)
+        out = _LINK_RE.sub(
+            lambda m: (
+                f'<a href="{m.group(2)}" '
+                'rel="noopener noreferrer" target="_blank">'
+                f"{m.group(1)}</a>"
+            ),
+            out,
+        )
+        out = _BOLD_RE.sub(lambda m: f"<strong>{m.group(1)}</strong>", out)
+        out = _ITALIC_RE.sub(lambda m: f"<em>{m.group(1)}</em>", out)
+        return out
+
     lines = (md or "").split("\n")
-    rendered = []
+    rendered: list[str] = []
     in_para: list[str] = []
+    in_list: list[str] = []
 
     def _flush_para():
         if in_para:
-            rendered.append(f'<p>{_h.escape(" ".join(in_para))}</p>')
+            joined = _h.escape(" ".join(in_para))
+            rendered.append(f"<p>{_inline(joined)}</p>")
             in_para.clear()
+
+    def _flush_list():
+        if in_list:
+            items = "".join(
+                f"<li>{_inline(_h.escape(it))}</li>" for it in in_list
+            )
+            rendered.append(f"<ul>{items}</ul>")
+            in_list.clear()
 
     for ln in lines:
         s = ln.strip()
         if s.startswith("### "):
+            _flush_list()
             _flush_para()
-            rendered.append(f"<h3>{_h.escape(s[4:])}</h3>")
+            rendered.append(f"<h3>{_inline(_h.escape(s[4:]))}</h3>")
         elif s.startswith("## "):
+            _flush_list()
             _flush_para()
-            rendered.append(f"<h2 style='color:#000091'>{_h.escape(s[3:])}</h2>")
+            rendered.append(
+                f"<h2 style='color:#000091'>{_inline(_h.escape(s[3:]))}</h2>"
+            )
         elif s.startswith("# "):
+            _flush_list()
             _flush_para()
-            rendered.append(f"<h1 style='color:#000091'>{_h.escape(s[2:])}</h1>")
+            rendered.append(
+                f"<h1 style='color:#000091'>{_inline(_h.escape(s[2:]))}</h1>"
+            )
+        elif s.startswith("- "):
+            _flush_para()
+            in_list.append(s[2:])
         elif not s:
+            _flush_list()
             _flush_para()
         else:
+            _flush_list()
             in_para.append(s)
+    _flush_list()
     _flush_para()
     return "".join(rendered)
 
@@ -5709,6 +5781,13 @@ async def _render_assembly_html(
     try:
         tpl_short = template_name.replace("maplibre_renderer/", "")
         tpl = _maplibre_jinja.get_template(tpl_short)
+        # V1.20.4 : injecte les mappings labels FR pour le template
+        # (fin de l'exposition de slugs techniques `cerema_internal` +
+        # `storymap_narrative_dsfr` au lecteur COPIL).
+        from hub.models.classification import (
+            CLASSIFICATION_LABELS_FR as _CLS_LABELS,
+            ASSEMBLY_KIND_LABELS_FR as _KIND_LABELS,
+        )
         html = tpl.render(
             assembly=asm.model_dump(mode="json"),
             sections=[s.model_dump(mode="json") for s in asm.layout.sections],
@@ -5716,6 +5795,8 @@ async def _render_assembly_html(
             rendered_components_kinds=rendered_components_kinds,
             audit_chain=chain.model_dump(mode="json"),
             footer=asm.footer.model_dump(mode="json"),
+            classification_labels=_CLS_LABELS,
+            assembly_kind_labels=_KIND_LABELS,
         )
         return html, chain.model_dump(mode="json")
     except Exception as exc:
@@ -5991,6 +6072,85 @@ async def clone_assembly_endpoint(
     }
 
 
+async def _check_publish_ready(sid: str, aid: str, username: str) -> list[dict]:
+    """V1.20.4 : verifie les composants avant publication.
+
+    Retourne la liste des composants incomplets sous forme de dicts :
+    [{'cid': str, 'kind': str, 'title': str, 'missing': list[str]}]
+
+    Politique actuelle (Sprint V1.20.4 - livrable COPIL propre) :
+    - `interactive_map` : title != 'Nouvelle carte' et non-vide,
+      source.scene_hash present (sinon carte pointera vers rien)
+    - `narrative_text` : signale les `**...**` non-fermes (bloque le rendu
+      markdown) - non-bloquant pour l'instant, juste avertissement
+
+    Si la liste retournee est non-vide, le caller doit refuser la publication
+    avec un message pedagogique listant les corrections a apporter.
+    """
+    from hub import assemblies as asm_mod
+    from hub import components as comp_mod
+    from hub.models import Assembly
+    import base64 as _b64_pr, json as _json_pr
+
+    latest = await asm_mod.get_assembly_latest(aid)
+    if not latest or latest["sid"] != sid or latest["owner"] != username:
+        return []  # authz/404 sera gere par le render call suivant
+
+    try:
+        stdout = await _execute_python_in_workspace(
+            username, asm_mod.read_assembly_manifest_pod_code(sid, aid),
+        )
+    except Exception:
+        return []
+    if "ASSEMBLY_READ_OK" not in stdout:
+        return []
+    b64 = stdout.split("b64=", 1)[1].split()[0].strip()
+    manifest = _json_pr.loads(_b64_pr.b64decode(b64).decode())
+    try:
+        asm = Assembly.model_validate(manifest)
+    except Exception:
+        return []
+
+    issues: list[dict] = []
+    seen_cids: set[str] = set()
+    for section in asm.layout.sections:
+        for comp_entry in (section.components or []):
+            cid_raw = (
+                comp_entry.dict() if hasattr(comp_entry, 'dict') else comp_entry
+            )
+            cid = cid_raw.get("ref") if isinstance(cid_raw, dict) else None
+            if not cid or cid in seen_cids:
+                continue
+            seen_cids.add(cid)
+            try:
+                comp_stdout = await _execute_python_in_workspace(
+                    username, comp_mod.read_component_manifest_pod_code(sid, cid),
+                )
+                if "COMPONENT_READ_OK" not in comp_stdout:
+                    continue
+                b64_data = comp_stdout.split("b64=", 1)[1].split()[0].strip()
+                comp = _json_pr.loads(_b64_pr.b64decode(b64_data).decode())
+            except Exception:
+                continue
+            kind = comp.get("kind", "")
+            title = (comp.get("title") or "").strip()
+            missing: list[str] = []
+            if kind == "interactive_map":
+                if not title or title.lower() in ("nouvelle carte", "new map"):
+                    missing.append("titre explicite (autre que 'Nouvelle carte')")
+                source = comp.get("source") or {}
+                if not (source.get("scene_hash") or source.get("sid")):
+                    missing.append("source de donnees liee (couche QGIS)")
+            if missing:
+                issues.append({
+                    "cid": cid,
+                    "kind": kind,
+                    "title": title or "(sans titre)",
+                    "missing": missing,
+                })
+    return issues
+
+
 @app.post("/studies/{sid}/assemblies/{aid}/publish")
 async def publish_assembly_endpoint(
     sid: str, aid: str, request: Request,
@@ -5998,11 +6158,52 @@ async def publish_assembly_endpoint(
 ):
     """Publie l'assemblage sur S3 + calcule audit_chain + indexe published_url.
 
-    Body optionnel : {audience?: 'public'|'cerema_internal'|'restricted'|'confidential'}
+    Body optionnel : {audience?: 'public'|'cerema_internal'|'restricted'|'confidential',
+                      force?: bool}
     """
     _check_assemblies_enabled()
     from hub import assemblies as asm_mod
     from hub import s3_publication
+
+    # V1.20.4 : validation pre-publish - refuse si des cartes ne sont pas
+    # configurees (titre par defaut 'Nouvelle carte' ou source vide).
+    # Bypass via body {"force": true} pour cas urgents (l'agent peut
+    # l'utiliser explicitement si le user insiste).
+    try:
+        _body = await request.json()
+    except Exception:
+        _body = {}
+    if not _body.get("force"):
+        issues = await _check_publish_ready(sid, aid, user["username"])
+        if issues:
+            details = []
+            for it in issues:
+                details.append(
+                    f"- Composant '{it['title']}' ({it['kind']}) : "
+                    + ", ".join(it["missing"])
+                )
+            msg = (
+                "Publication refusee : "
+                f"{len(issues)} composant"
+                + ("s" if len(issues) > 1 else "")
+                + " n'"
+                + ("ont" if len(issues) > 1 else "a")
+                + " pas ete configure"
+                + ("s" if len(issues) > 1 else "")
+                + ". Ouvrez l'editeur (bouton ⚙ Modifier) et donnez un titre "
+                + "clair + une source aux cartes concernees avant de publier :\n"
+                + "\n".join(details)
+                + "\n\nSi vous voulez publier malgre tout (brouillon interne), "
+                + "renvoyez la requete avec {'force': true}."
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "publish_not_ready",
+                    "message": msg,
+                    "issues": issues,
+                },
+            )
 
     # Render + audit_chain
     html, chain_dict = await _render_assembly_html(sid, aid, user["username"])
@@ -7156,6 +7357,129 @@ async def delete_study_recipe(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+def _render_publication_404_html(owner: str, kind: str, slug: str) -> HTMLResponse:
+    """V1.20.4 : page 404 DSFR humaine pour une publication introuvable.
+
+    Marie clique un lien qui a expire/change/typo -> page utile avec :
+    - Message clair 'publication introuvable'
+    - Nom cherche
+    - CTA 'Voir toutes les publications de {owner}' -> /published/{owner}/
+    - CTA 'Retour a mon espace' si owner match utilisateur courant
+    """
+    body = f"""<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="utf-8"/>
+<title>Publication introuvable — CEREMA · QGIS Service</title>
+<style>
+  body {{ margin:0; font-family: Marianne, system-ui, sans-serif; background:#f6f6f6; color:#161616 }}
+  .wrap {{ max-width:640px; margin:64px auto; padding:32px; background:#fff; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,.06) }}
+  h1 {{ color:#000091; font-size:26px; margin:0 0 12px }}
+  .lead {{ color:#3a3a3a; font-size:15px; line-height:1.55; margin:0 0 20px }}
+  .details {{ background:#f5f5fe; padding:14px 18px; border-radius:6px; font-size:13px; color:#3a3a3a; margin:16px 0 24px }}
+  .details code {{ background:#fff; padding:2px 6px; border-radius:3px }}
+  .actions {{ display:flex; gap:12px; flex-wrap:wrap }}
+  a.btn {{ display:inline-block; padding:10px 18px; background:#000091; color:#fff; text-decoration:none; border-radius:4px; font-size:14px; font-weight:600 }}
+  a.btn.secondary {{ background:#fff; color:#000091; border:1px solid #000091 }}
+  .banner {{ background:#000091; color:#fff; padding:10px 16px; font-size:13px; font-weight:600 }}
+  .banner span {{ opacity:.7; font-weight:400 }}
+</style>
+</head><body>
+<div class="banner">CEREMA <span>· QGIS Service</span></div>
+<div class="wrap">
+<h1>Publication introuvable</h1>
+<p class="lead">La publication que vous cherchez n'existe pas ou n'est plus disponible.
+Elle a peut-être été supprimée, ou le lien contient une erreur de frappe.</p>
+<div class="details">
+Recherché : <code>{kind}/{slug}</code><br>
+Propriétaire : <code>{owner}</code>
+</div>
+<div class="actions">
+<a class="btn" href="/published/{owner}/">Voir les publications de {owner}</a>
+<a class="btn secondary" href="/workspace">Retour à mon espace</a>
+</div>
+</div></body></html>"""
+    return HTMLResponse(content=body, status_code=404)
+
+
+@app.get("/published/{owner}/", response_class=HTMLResponse)
+async def list_published_owner(owner: str) -> HTMLResponse:
+    """V1.20.4 : index HTML DSFR des publications d'un owner.
+
+    Avant : `/published/{owner}/` renvoyait `{Not Found}` JSON.
+    Maintenant : liste HTML DSFR des publications (via catalogue S3),
+    accessible sans auth (les publications sont publiques par nature de
+    l'URL, l'audience est gerée cote render).
+    """
+    if not _S3_AVAILABLE:
+        raise HTTPException(503, "Publication S3 indisponible")
+    try:
+        catalog = s3_publication.get_catalog(owner)
+    except Exception:
+        catalog = []
+    items = catalog or []
+    # Import local pour eviter fuite label si module non charge
+    from hub.models.classification import (
+        CLASSIFICATION_LABELS_FR as _CLS,
+        ASSEMBLY_KIND_LABELS_FR as _KIND,
+        format_datetime_fr as _fdt,
+    )
+
+    def _row(item: dict) -> str:
+        title = (item.get("title") or item.get("slug") or "Sans titre")[:120]
+        slug = item.get("slug") or ""
+        kind = item.get("kind") or "storymap"
+        kind_label = _KIND.get(kind, kind.replace("_", " "))
+        audience = item.get("audience") or ""
+        aud_label = _CLS.get(audience, audience)
+        published_at = _fdt(item.get("published_at") or item.get("created_at"))
+        url = f"/published/{owner}/{kind}/{slug}"
+        return f"""
+    <a class="pub-row" href="{url}">
+      <div class="pub-row-title">{title}</div>
+      <div class="pub-row-meta">
+        <span class="pub-badge">{kind_label}</span>
+        <span class="pub-audience">{aud_label}</span>
+        <span class="pub-date">{published_at}</span>
+      </div>
+    </a>"""
+
+    rows_html = "\n".join(_row(it) for it in items) if items else (
+        '<p class="empty">Aucune publication disponible pour l\'instant.</p>'
+    )
+
+    body = f"""<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="utf-8"/>
+<title>Publications de {owner} — CEREMA · QGIS Service</title>
+<style>
+  body {{ margin:0; font-family: Marianne, system-ui, sans-serif; background:#f6f6f6; color:#161616 }}
+  .banner {{ background:#000091; color:#fff; padding:10px 16px; font-size:13px; font-weight:600 }}
+  .banner span {{ opacity:.7; font-weight:400 }}
+  .wrap {{ max-width:900px; margin:32px auto; padding:24px }}
+  h1 {{ color:#000091; font-size:28px; margin:0 0 8px }}
+  .subtitle {{ color:#666; font-size:14px; margin:0 0 28px }}
+  .pub-row {{ display:block; background:#fff; border:1px solid #ececfe; border-radius:6px; padding:16px 20px; margin-bottom:10px; text-decoration:none; color:#161616; transition:box-shadow .15s }}
+  .pub-row:hover {{ box-shadow:0 2px 8px rgba(0,0,145,.12); border-color:#000091 }}
+  .pub-row-title {{ font-size:15px; font-weight:600; color:#000091; margin-bottom:6px }}
+  .pub-row-meta {{ display:flex; gap:12px; font-size:12px; color:#666; flex-wrap:wrap }}
+  .pub-badge {{ background:#ececfe; color:#000091; padding:2px 8px; border-radius:10px; font-weight:600 }}
+  .empty {{ padding:32px; text-align:center; color:#888; background:#fff; border-radius:6px; border:1px dashed #ddd }}
+  .footer-nav {{ margin-top:32px; text-align:center }}
+  .footer-nav a {{ color:#000091; text-decoration:none; font-size:13px }}
+</style>
+</head><body>
+<div class="banner">CEREMA <span>· QGIS Service</span></div>
+<div class="wrap">
+<h1>Publications de {owner}</h1>
+<p class="subtitle">{len(items)} publication{'s' if len(items) > 1 else ''} disponible{'s' if len(items) > 1 else ''}</p>
+{rows_html}
+<div class="footer-nav">
+  <a href="/workspace">Retour à mon espace de travail</a>
+</div>
+</div></body></html>"""
+    return HTMLResponse(content=body, status_code=200)
+
+
 @app.get("/published/{owner}/{slug}")
 @app.get("/published/{owner}/{kind}/{slug}")
 async def serve_published(
@@ -7196,14 +7520,16 @@ async def serve_published(
     except Exception as exc:
         raise HTTPException(503, f"S3 inaccessible: {exc}")
     if not meta:
-        raise HTTPException(404, f"Publication '{kind}/{safe_slug}' introuvable")
+        # V1.20.4 : 404 DSFR humaine au lieu de JSON brut. Le user qui clique
+        # un lien peri me/expire voit une page utilisable (CTA retour).
+        return _render_publication_404_html(owner, kind, safe_slug)
 
     try:
         content = s3_publication.read(owner, kind, safe_slug)
     except Exception as exc:
         raise HTTPException(503, f"Lecture S3 échouée: {exc}")
     if content is None:
-        raise HTTPException(404, "Contenu disparu entre HEAD et GET")
+        return _render_publication_404_html(owner, kind, safe_slug)
 
     # Injection mini-header CEREMA pour les storymaps HTML.
     # Ajoute une banniere fixe haut de page (32px) avec : "CEREMA QGIS",

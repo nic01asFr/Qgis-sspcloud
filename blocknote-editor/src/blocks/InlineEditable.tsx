@@ -135,6 +135,9 @@ export function InlineEditable({
       role="textbox"
       aria-label={ariaLabel || placeholder}
       aria-multiline={multiline || undefined}
+      // V1.20.4 : correcteur orthographique FR force (accents/typos livrable propre)
+      spellCheck
+      lang="fr"
       // Empeche BlockNote de traiter les clics/keydown pour lui
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}

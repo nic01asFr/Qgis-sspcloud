@@ -54,6 +54,8 @@ export function TextField({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         style={inputStyle}
+        spellCheck
+        lang="fr"
       />
       {hint && (
         <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>{hint}</div>
@@ -83,6 +85,8 @@ export function TextareaField({
         onChange={(e) => onChange(e.target.value)}
         rows={rows}
         style={{ ...inputStyle, fontFamily: 'monospace', resize: 'vertical' }}
+        spellCheck
+        lang="fr"
       />
       {hint && (
         <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>{hint}</div>

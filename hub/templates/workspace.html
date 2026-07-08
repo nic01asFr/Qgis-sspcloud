@@ -184,19 +184,23 @@
     </span>
   </div>
   <p class="section-desc">
-    Une étude regroupe ton dossier de travail : carte QGIS, données,
-    conversations avec l'agent, et livrables.
+    Une étude regroupe votre dossier de travail : carte QGIS, données,
+    conversations avec l'assistant, et livrables.
   </p>
 
   {% if studies %}
   <div class="study-grid">
     {% for s in studies %}
-    <div class="study-card{% if s.id == active_study_id %} is-active{% endif %}">
+    <div class="study-card{% if s.id == active_study_id %} is-active{% endif %}{% if s.origin == 'demo' %} is-demo{% endif %}">
       <div class="study-card-header">
         <h3 class="study-name" title="{{ s.name }}">
           {% if s.id == active_study_id %}🪟{% else %}📁{% endif %} {{ s.name }}
         </h3>
         {% if s.id == active_study_id %}<span class="active-badge">ACTIVE</span>{% endif %}
+        {% if s.origin == 'demo' %}
+        <span class="active-badge" style="background:#f5a623;color:#3a2a00"
+              title="Étude créée depuis un modèle de démonstration">DÉMO</span>
+        {% endif %}
       </div>
       <div class="study-meta">
         {% if s.project_count and s.project_count > 0 %}
@@ -221,7 +225,7 @@
         </form>
         {% endif %}
         <form method="POST" action="/workspace/study/{{ s.id }}/archive"
-              onsubmit="return confirm('Archiver cette étude ? Tu pourras toujours en créer une nouvelle.');">
+              onsubmit="return confirm('Archiver cette étude ? Vous pourrez toujours en créer une nouvelle.');">
           <button type="submit" class="fr-btn fr-btn--tertiary fr-btn--sm"
                   title="Archiver cette étude (réversible, le dossier reste sur le PVC)">
             Archiver
@@ -234,7 +238,7 @@
   {% else %}
   <div class="empty-state" style="margin-bottom:18px">
     <span class="icon">📂</span>
-    Aucune étude pour l'instant. Démarre ta première étude ci-dessous.
+    Aucune étude pour l'instant. Démarrez votre première étude ci-dessous.
   </div>
   {% endif %}
 
@@ -246,7 +250,7 @@
       <span>Démarrer une nouvelle étude</span>
     </h3>
     <p class="new-study-desc">
-      Choisis un nom descriptif pour la repérer facilement.
+      Choisissez un nom descriptif pour la repérer facilement.
     </p>
     <form method="POST" action="/workspace/study/new" class="new-study-form">
       <input id="new-study-name" name="name" type="text" required
@@ -254,25 +258,34 @@
              class="fr-input">
       <button type="submit" class="fr-btn">+ Créer l'étude</button>
     </form>
+    {# V1.20.4 : les chips 'Idees' pre-remplissent juste le nom d'etude
+       (vierge). Un futur sprint pourra proposer des templates 'demo' pre-
+       peuples si l'agent demande explicitement (bouton dedie 'Ouvrir un
+       exemple de risque inondation') pour eviter le carry-over des titres
+       techniques 'Demo Vague E2' dans les etudes reelles. #}
     <div class="tpl-chips">
       <span style="font-size:.75rem;color:var(--text-mention-grey);align-self:center;margin-right:2px">
-        Idées :
+        Idées de sujet :
       </span>
       <button type="button" class="tpl-chip"
-              onclick="document.getElementById('new-study-name').value='Risque inondation '">
-        🌊 Risque inondation
+              title="Cliquez pour pré-remplir le champ nom, puis complétez et validez"
+              onclick="document.getElementById('new-study-name').value='Risque inondation '; document.getElementById('new-study-name').focus();">
+        Risque inondation
       </button>
       <button type="button" class="tpl-chip"
-              onclick="document.getElementById('new-study-name').value='Cadastre solaire '">
-        ☀ Cadastre solaire
+              title="Cliquez pour pré-remplir le champ nom, puis complétez et validez"
+              onclick="document.getElementById('new-study-name').value='Cadastre solaire '; document.getElementById('new-study-name').focus();">
+        Cadastre solaire
       </button>
       <button type="button" class="tpl-chip"
-              onclick="document.getElementById('new-study-name').value='Densité bâti '">
-        🏘 Densité bâti
+              title="Cliquez pour pré-remplir le champ nom, puis complétez et validez"
+              onclick="document.getElementById('new-study-name').value='Densité bâti '; document.getElementById('new-study-name').focus();">
+        Densité bâti
       </button>
       <button type="button" class="tpl-chip"
-              onclick="document.getElementById('new-study-name').value='Détection SAM3 '">
-        🛰 Détection IA (SAM3)
+              title="Cliquez pour pré-remplir le champ nom, puis complétez et validez"
+              onclick="document.getElementById('new-study-name').value='Détection SAM3 '; document.getElementById('new-study-name').focus();">
+        Détection IA (SAM3)
       </button>
     </div>
   </div>
