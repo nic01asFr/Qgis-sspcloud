@@ -643,6 +643,19 @@ export class GeoMap extends HTMLElement {
     this._layerIds = [];
     this._params = {};
     this._hostContext = {};
+    // Upgrade dance : si une property JS a ete assignee sur l'element AVANT
+    // que la classe ne soit registree (cas frequent quand le module est
+    // charge en type="module" defer et qu'un script inline injecte
+    // catalog_layers via el.params = {...}), l'expando est masquee par le
+    // getter/setter defini sur la classe. On la recupere ici et on la
+    // ré-applique via le setter pour qu'elle prenne effet.
+    for (const propName of ["params", "hostContext"]) {
+      if (Object.prototype.hasOwnProperty.call(this, propName)) {
+        const value = this[propName];
+        delete this[propName];
+        this[propName] = value;
+      }
+    }
   }
 
   connectedCallback() {
