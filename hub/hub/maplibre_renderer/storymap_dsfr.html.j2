@@ -26,8 +26,12 @@
 <meta name="description" content="{{ (assembly.description or assembly.title)|e }}">
 
 {# MapLibre GL JS pour composants interactive_map inline (fix 2026-06-28) #}
-<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css">
-<script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.js"></script>
+{# V1.20.5 (2026-07-08) : lib cerema-geo-components v0.1.0-alpha (Passerelle/sdk/js).
+   Web Components <geo-map> + <geo-timeline> + <geo-legend> disponibles.
+   Chargement en ES module, auto-registration Custom Elements. #}
+<script type="module" src="/static/geo-components.js"></script>
 
 {# Chart.js v4 pour composants chart inline (Vague A Commit 3 2026-06-29) #}
 <script src="https://unpkg.com/chart.js@4.4.0/dist/chart.umd.js"></script>

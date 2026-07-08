@@ -1,0 +1,37 @@
+{# Partial _timeline — V1.20.5 (2026-07-08)
+
+   Composant controller pilotant une carte via binding declaratif.
+   Utilise le Web Component <geo-timeline> de cerema-geo-components v0.1.0-alpha
+   (Passerelle/sdk/js/geo-components, vendorise dans hub/hub/static/).
+
+   Variables :
+   - cid : str (composant id 12 hex)
+   - title : str (label affiche a gauche du slider)
+   - min : number ou date ISO
+   - max
+   - step : number (default 1)
+   - value : number (initial, default = min)
+   - target : str (id HTML du <geo-map> a piloter)
+   - field : str (attribut GeoJSON a filtrer, default 'annee')
+   - format : str ('year' | 'date-fr', default 'year')
+   - play_speed : str ('0.5x' | '1x' | '2x' | '4x', default '1x')
+
+   Pattern binding : le WC emet un CustomEvent 'geo:bind' bubble+composed
+   qui remonte au document. L'orchestrateur GeoBindings singleton route vers
+   le <geo-map id="{{ target }}"> qui applique setFilter(field, value).
+#}
+
+<geo-timeline
+  id="{{ cid[:8] }}"
+  data-cid="{{ cid }}"
+  min="{{ min | default(1900) }}"
+  max="{{ max | default(2024) }}"
+  step="{{ step | default(1) }}"
+  {% if value is defined %}value="{{ value }}"{% endif %}
+  field="{{ field | default('annee') }}"
+  target="{{ target | default('') }}"
+  label="{{ title | default('Annee') | e }}"
+  format="{{ format | default('year') }}"
+  play-speed="{{ play_speed | default('1x') }}"
+  style="display:block;margin:12px 0"
+></geo-timeline>

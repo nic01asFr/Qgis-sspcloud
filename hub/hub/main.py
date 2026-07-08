@@ -940,6 +940,18 @@ if _BLOCKNOTE_STATIC_DIR.exists():
         name="blocknote_editor_static",
     )
     log.info("BlockNote editor bundle mounted: %s", _BLOCKNOTE_STATIC_DIR)
+
+# V1.20.5 (2026-07-08) : lib cerema-geo-components v0.1.0-alpha (Passerelle
+# sdk/js/geo-components), vendorisee dans hub/hub/static/. Consommee par
+# storymap_dsfr.html.j2 + _interactive_map_partial.j2 + _timeline_partial.j2.
+_GEO_COMPONENTS_STATIC_DIR = Path(__file__).parent / "static"
+if _GEO_COMPONENTS_STATIC_DIR.exists():
+    app.mount(
+        "/static",
+        StaticFiles(directory=str(_GEO_COMPONENTS_STATIC_DIR)),
+        name="hub_static",
+    )
+    log.info("Hub static mounted: %s", _GEO_COMPONENTS_STATIC_DIR)
 else:
     log.warning(
         "BlockNote editor bundle ABSENT (%s). Build via 'npm run build' "
@@ -5484,8 +5496,36 @@ async def _pre_render_component_html(
 
         elif kind == "interactive_map":
             ctx = await _build_interactive_map_ctx(comp_manifest, sid, username, cid)
-            tpl = _maplibre_jinja.get_template("_interactive_map_partial.j2")
+            # V1.20.5 (2026-07-08) : feature flag pour bascule progressive vers
+            # <geo-map> Web Component (cerema-geo-components v0.1.0-alpha).
+            # Set env USE_GEO_COMPONENTS=1 pour activer le partial v2 qui
+            # produit un <geo-map> au lieu du bloc MapLibre inline.
+            # Le partial v1 reste par defaut pour rollback safe.
+            _use_gc = os.getenv("USE_GEO_COMPONENTS", "0").strip() in ("1", "true", "yes")
+            partial_name = (
+                "_interactive_map_partial_v2.j2"
+                if _use_gc else "_interactive_map_partial.j2"
+            )
+            tpl = _maplibre_jinja.get_template(partial_name)
             return tpl.render(**ctx)
+
+        elif kind == "timeline":
+            # V1.20.5 (2026-07-08) : composant controller <geo-timeline>
+            # (cerema-geo-components v0.1.0-alpha). Pilote une carte via
+            # binding declaratif CustomEvent 'geo:bind' {prop:'time'}.
+            tpl = _maplibre_jinja.get_template("_timeline_partial.j2")
+            return tpl.render(
+                cid=cid,
+                title=params.get("title") or params.get("label") or "Année",
+                min=params.get("min", 1900),
+                max=params.get("max", 2024),
+                step=params.get("step", 1),
+                value=params.get("value"),
+                target=params.get("target", ""),
+                field=params.get("field", "annee"),
+                format=params.get("format", "year"),
+                play_speed=params.get("play_speed", "1x"),
+            )
 
         elif kind == "chart":
             # A2 (Vague A Commit 3) : Chart.js v4 inline.

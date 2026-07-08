@@ -1,0 +1,108 @@
+{# Partial _interactive_map_v2 — V1.20.5 (2026-07-08)
+
+   REFACTOR de _interactive_map_partial.j2 (299 LOC inline) vers un wrapper
+   minimal autour du Web Component <geo-map> livre dans cerema-geo-components
+   v0.1.0-alpha (vendorise dans hub/hub/static/geo-components.js).
+
+   Objectif : source de verite unique du rendu MapLibre (la lib) au lieu de
+   dupliquer la logique dans un template Jinja de 299 lignes.
+
+   Contrat de donnees : InteractiveMapParams V1.13 (hub/models/component_params.py).
+   Le partial injecte le params dict serialise en JSON dans un attribut
+   `params` du <geo-map>. Le Web Component consomme le contrat directement.
+
+   Variables (identiques au partial v1 pour compatibilite _pre_render_component_html) :
+   - cid : str (composant id 12 hex)
+   - title : str
+   - subtitle, description, source_text, caveat : str optionnels
+   - basemap_id : str (osm|plan-ign-v2|ortho-ign|dsfr-sobre|hillshade-ign|etalab)
+   - center_lng, center_lat, zoom : float
+   - height : int (px)
+   - map_layers_json : str (JSON layers avec geojson + classification precalcule)
+   - legend_items : list (auto-derived by helper hub)
+   - legend_format : str (chips|gradient_bar|proportional)
+
+   Le Web Component <geo-map> gere le rendu MapLibre + trio metier +
+   interactions. Le partial ne fait plus que packager les params.
+#}
+{% set map_id = 'geomap_' + cid[:8] %}
+
+{# Serialisation params V1.13 pour attribut params du <geo-map>. Le helper hub
+   _build_interactive_map_ctx produit ces variables ; on les regroupe en JSON
+   compatible avec le contrat V1.13 attendu par <geo-map>. #}
+{% set gc_params = {
+  "title": title,
+  "subtitle": subtitle | default(''),
+  "description": description | default(''),
+  "source": source_text | default(''),
+  "caveat": caveat | default(''),
+  "basemap_id": basemap_id | default('osm'),
+  "height": height | default(480),
+  "zone": {
+    "kind": "manual",
+    "center_lng": center_lng | float,
+    "center_lat": center_lat | float,
+    "zoom": zoom | float
+  }
+} %}
+
+<geo-map
+  id="{{ map_id }}"
+  data-cid="{{ cid }}"
+  params='{{ gc_params | tojson | safe }}'
+  style="display:block;width:100%"
+>
+  {# Fallback SSR si geo-components.js ne charge pas (JS desactive, CSP,
+     erreur CDN). Le trio metier reste lisible en HTML statique. #}
+  <noscript>
+    <div style="background:#fff;border-radius:6px;overflow:hidden;
+                border:1px solid #e5e5e5">
+      <div style="padding:14px 20px;border-bottom:1px solid #e5e5e5;background:#f6f6f6">
+        <strong style="color:#000091;font-size:15px;display:block">{{ title | e }}</strong>
+        {% if subtitle %}
+        <div style="color:#444;font-size:13px;margin-top:2px">{{ subtitle | e }}</div>
+        {% endif %}
+      </div>
+      {% if description %}
+      <div style="padding:10px 20px;background:#fafbfd;
+                  border-bottom:1px solid #e5e5e5;font-size:13px;color:#333">
+        {{ description | e }}
+      </div>
+      {% endif %}
+      <div style="padding:40px;text-align:center;color:#666">
+        Carte interactive indisponible sans JavaScript.
+      </div>
+      {% if source_text %}
+      <div style="padding:8px 20px;background:#fafafa;
+                  border-top:1px solid #f0f0f0;font-size:11px;color:#666;
+                  font-style:italic">
+        Source : {{ source_text | e }}
+      </div>
+      {% endif %}
+    </div>
+  </noscript>
+</geo-map>
+
+{# Injection catalog_layers (layers Scene Manifest avec geojson) via property
+   JS. Le WC lit son attribut `params` puis merge les layers via property
+   hostContext.catalog_layers. Split params/catalog car layers peut etre gros. #}
+<script>
+(function() {
+  const el = document.getElementById('{{ map_id }}');
+  if (!el) return;
+  const catalog = {{ map_layers_json | safe if map_layers_json else '[]' }};
+  el.hostContext = { catalog_layers: catalog };
+})();
+</script>
+
+{# Legende SSR : rendue en HTML statique sous la carte (au lieu du <geo-legend>
+   qui necessiterait de re-injecter items ; le SSR reste plus performant pour
+   les publications statiques). Alternative future : <geo-legend items="..."/>. #}
+{% if legend_items %}
+<geo-legend
+  format="{{ legend_format | default('chips') }}"
+  title="Légende"
+  position="bottom"
+  items='{{ legend_items | tojson | safe }}'
+></geo-legend>
+{% endif %}

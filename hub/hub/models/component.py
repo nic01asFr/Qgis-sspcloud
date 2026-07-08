@@ -49,6 +49,11 @@ ComponentKind = Literal[
     "heading",           # Titre H1-H4 standalone (vs concat dans narrative_text)
     "quote",             # Citation / pull-quote (sources expertes, témoignages)
     "separator",         # Séparateur horizontal entre blocks
+    # V1.20.5 (2026-07-08) — composants controllers pilotant des cartes via
+    # binding declaratif (pattern app.emit/on Widgets Grist skills/inter-widget.md,
+    # adapte au niveau Custom Element via CustomEvent 'geo:bind').
+    # Lib : cerema-geo-components v0.1.0-alpha (Passerelle/sdk/js/geo-components).
+    "timeline",          # Slider temporel play/pause emet geo:bind {prop:'time'}
 ]
 
 
