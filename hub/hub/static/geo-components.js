@@ -553,9 +553,7 @@ export class GeoBindings {
 
   _route(detail, fromMessage) {
     if (!detail || !detail.target) return;
-    const target = document.querySelector(
-      "#" + CSS.escape(detail.target)
-    );
+    const target = this._resolveTarget(detail.target);
     if (target && typeof target.applyBinding === "function") {
       try {
         target.applyBinding(detail);
@@ -574,6 +572,51 @@ export class GeoBindings {
         "*"
       );
     }
+  }
+
+  /**
+   * Resolution tolerante du target : cherche successivement plusieurs
+   * conventions d'ID pour absorber les differences de nommage entre
+   * projets consommateurs (qgis-sspcloud prefixe geo-map par 'geomap_' + cid[:8],
+   * d'autres pourraient utiliser cid entier ou 'map-' + cid).
+   *
+   * Ordre de resolution :
+   *   1. Match exact sur id HTML : #{target}
+   *   2. data-cid exact : [data-cid="{target}"]
+   *   3. Prefixes courants sur target[:8] : #geomap_{target[:8]}, #map-{target[:8]}
+   *   4. Contient le target (fuzzy) : [id*="{target}"] parmi les geo-map/geo-* connus
+   */
+  _resolveTarget(rawTarget) {
+    if (!rawTarget) return null;
+    const trimmed = String(rawTarget).trim();
+    if (!trimmed) return null;
+
+    // 1. Match exact
+    let el = document.querySelector("#" + CSS.escape(trimmed));
+    if (el) return el;
+
+    // 2. data-cid exact
+    el = document.querySelector('[data-cid="' + trimmed.replace(/"/g, '\\"') + '"]');
+    if (el) return el;
+
+    // 3. Prefixes courants sur les 8 premiers hex du target (convention cid[:8])
+    const short = trimmed.slice(0, 8);
+    for (const prefix of ["geomap_", "map-", "geo-map-"]) {
+      el = document.querySelector("#" + CSS.escape(prefix + short));
+      if (el) return el;
+    }
+
+    // 4. Fuzzy sur les Web Components de la lib qui exposent applyBinding
+    const candidates = document.querySelectorAll(
+      "geo-map, geo-chart, geo-timeline, geo-legend"
+    );
+    for (const c of candidates) {
+      const cid = c.getAttribute("data-cid") || c.id || "";
+      if (cid === trimmed || cid.includes(short) || trimmed.includes(cid)) {
+        return c;
+      }
+    }
+    return null;
   }
 
   /**

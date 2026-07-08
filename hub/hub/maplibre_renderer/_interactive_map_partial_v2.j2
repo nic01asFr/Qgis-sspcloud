@@ -95,31 +95,18 @@
    condition avec map.on("load"). Split params/catalog car layers peut etre gros. #}
 <script>
 (function() {
-  window.__gcInject = window.__gcInject || [];
-  const t0 = performance.now();
   const el = document.getElementById('{{ map_id }}');
-  const trace = { id: '{{ map_id }}', t0, elFound: !!el };
-  if (!el) { window.__gcInject.push({...trace, step: 'no_el'}); return; }
-  try {
-    const catalog = {{ map_layers_json | safe if map_layers_json else '[]' }};
-    trace.catalogLen = catalog.length;
-    trace.catalogFeatures = catalog[0]?.geojson?.features?.length;
-    const paramsWithCatalog = {
-      ...JSON.parse(el.getAttribute('params') || '{}'),
-      _catalog_layers: catalog
-    };
-    trace.paramsKeys = Object.keys(paramsWithCatalog);
-    trace.beforeSetter_isCustom = el.constructor.name;
-    trace.beforeSetter_hasOwnParams = Object.prototype.hasOwnProperty.call(el, 'params');
-    el.params = paramsWithCatalog;
-    trace.afterSetter_hasOwnParams = Object.prototype.hasOwnProperty.call(el, 'params');
-    trace.afterSetter__paramsHasCatalog = !!(el._params?._catalog_layers);
-    trace.afterSetter__paramsKeys = Object.keys(el._params || {});
-    trace.tEnd = performance.now();
-  } catch (e) {
-    trace.error = String(e);
-  }
-  window.__gcInject.push(trace);
+  if (!el) return;
+  const catalog = {{ map_layers_json | safe if map_layers_json else '[]' }};
+  // V1.20.5 : merge catalog_layers dans params via property setter qui
+  // trigger un re-render propre avec toutes les donnees d'un coup.
+  // La lib gere via upgrade dance en connectedCallback la sequence
+  // ou l'expando est posee avant registration du custom element.
+  const paramsWithCatalog = {
+    ...JSON.parse(el.getAttribute('params') || '{}'),
+    _catalog_layers: catalog
+  };
+  el.params = paramsWithCatalog;
 })();
 </script>
 
