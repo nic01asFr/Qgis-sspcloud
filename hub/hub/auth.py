@@ -827,10 +827,12 @@ _OIDC_MIDDLEWARE_PUBLIC = (
     # par asset (browser charge ~10 chunks Vite) -> perf + scaling.
     "/static/blocknote-editor",
     # V1.20.5 (2026-07-08) : lib cerema-geo-components v0.1.0-alpha vendorisee
-    # dans hub/hub/static/. Whitelist /static/ pour servir geo-components.js
+    # dans hub/hub/static/. Whitelist /static pour servir geo-components.js
     # (JS pur statique, aucun secret) sans round-trip OIDC. Consommee par
-    # storymap_dsfr.html.j2 + _interactive_map_partial_v2.j2.
-    "/static/",
+    # storymap_dsfr.html.j2 + _interactive_map_partial_v2.j2. Le middleware
+    # fait path.startswith(p + "/") donc "/static" sans trailing slash matche
+    # "/static/geo-components.js" via "/static/".
+    "/static",
 )
 
 # Routes inter-pods : Bearer HUB_API_KEY = clé hub partagée entre hub et agent
