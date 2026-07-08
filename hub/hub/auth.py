@@ -826,6 +826,11 @@ _OIDC_MIDDLEWARE_PUBLIC = (
     # /static/blocknote-editor evite un round-trip JWT decode + JWKS fetch
     # par asset (browser charge ~10 chunks Vite) -> perf + scaling.
     "/static/blocknote-editor",
+    # V1.20.5 (2026-07-08) : lib cerema-geo-components v0.1.0-alpha vendorisee
+    # dans hub/hub/static/. Whitelist /static/ pour servir geo-components.js
+    # (JS pur statique, aucun secret) sans round-trip OIDC. Consommee par
+    # storymap_dsfr.html.j2 + _interactive_map_partial_v2.j2.
+    "/static/",
 )
 
 # Routes inter-pods : Bearer HUB_API_KEY = clé hub partagée entre hub et agent
