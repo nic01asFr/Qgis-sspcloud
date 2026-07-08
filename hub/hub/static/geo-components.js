@@ -643,23 +643,27 @@ export class GeoMap extends HTMLElement {
     this._layerIds = [];
     this._params = {};
     this._hostContext = {};
-    // Upgrade dance : si une property JS a ete assignee sur l'element AVANT
-    // que la classe ne soit registree (cas frequent quand le module est
-    // charge en type="module" defer et qu'un script inline injecte
-    // catalog_layers via el.params = {...}), l'expando est masquee par le
-    // getter/setter defini sur la classe. On la recupere ici et on la
-    // ré-applique via le setter pour qu'elle prenne effet.
-    for (const propName of ["params", "hostContext"]) {
-      if (Object.prototype.hasOwnProperty.call(this, propName)) {
-        const value = this[propName];
-        delete this[propName];
-        this[propName] = value;
-      }
-    }
   }
 
   connectedCallback() {
     geoBindings.install();
+    // Upgrade dance en connectedCallback (pas constructor) : la spec Custom
+    // Elements appelle attributeChangedCallback APRES le constructor lors de
+    // l'upgrade. Si on faisait la dance dans le constructor, notre restore
+    // via setter serait ecrase par attributeChangedCallback qui reparse
+    // l'attribut string (sans _catalog_layers). connectedCallback tourne
+    // APRES attributeChangedCallback, donc ici on peut sereinement re-appliquer
+    // les expandos posees par le script inline serveur-side (partial v2).
+    // On ecrit directement dans _params/_hostContext pour eviter le double
+    // _render() qu'un passage par le setter provoquerait.
+    for (const propName of ["params", "hostContext"]) {
+      if (Object.prototype.hasOwnProperty.call(this, propName)) {
+        const value = this[propName];
+        delete this[propName];
+        if (propName === "params") this._params = value || {};
+        else this._hostContext = value || {};
+      }
+    }
     this._render();
   }
 
