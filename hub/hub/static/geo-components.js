@@ -283,8 +283,9 @@ function _paintForClassification(classif, fallbackColor) {
  * Gère heatmap, proportional, classification, fill/line/circle par défaut.
  */
 function _buildMapLibreLayer(sceneLayer, override, index) {
-  const layerId = "gc-lyr-" + (sceneLayer.id || index);
-  const sourceId = "gc-src-" + (sceneLayer.id || index);
+  const safeId = _sanitizeId(sceneLayer.id || String(index));
+  const layerId = "gc-lyr-" + safeId;
+  const sourceId = "gc-src-" + safeId;
   const geom = _detectGeomType(sceneLayer.geometry_type);
   const fallbackColor = DEFAULT_PALETTE[index % DEFAULT_PALETTE.length];
   const classif = (override && override.classification) || sceneLayer.classification;
@@ -414,6 +415,18 @@ function _colorPaintPropFor(layerType, what) {
     default:
       return null;
   }
+}
+
+/**
+ * Sanitize un ID pour MapLibre v5 (accepte uniquement [A-Za-z0-9_-]).
+ * Les caractères non-ASCII (accents, cedilles) et espaces sont remplacés
+ * par des underscores. Fix V1.20.5 : scene_manifest QGIS peut produire
+ * des IDs avec accents (ex: "bâtiments__bd_topo_") qui font silencieusement
+ * echouer addSource/addLayer sur MapLibre v5.
+ */
+function _sanitizeId(s) {
+  if (!s) return "unnamed";
+  return String(s).replace(/[^A-Za-z0-9_-]/g, "_");
 }
 
 /**
@@ -835,7 +848,8 @@ export class GeoMap extends HTMLElement {
       orderedLayers.forEach(({ scene: sceneLayer, override, catalogIndex: i }) => {
         if (override && override.visible === false) return;
 
-        const sourceId = "gc-src-" + (sceneLayer.id || i);
+        const safeId = _sanitizeId(sceneLayer.id || String(i));
+        const sourceId = "gc-src-" + safeId;
         try {
           this.map.addSource(sourceId, {
             type: "geojson",
@@ -850,7 +864,7 @@ export class GeoMap extends HTMLElement {
         } catch (e) {
           console.warn(
             "[geo-components] addLayer failed for",
-            sceneLayer.id,
+            sceneLayer.id, "->", safeId,
             e
           );
         }
