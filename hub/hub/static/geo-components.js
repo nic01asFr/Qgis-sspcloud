@@ -826,7 +826,11 @@ export class GeoMap extends HTMLElement {
         return az - bz;
       });
 
-    this.map.on("load", () => {
+    // V1.20.5 patch (2026-07-08) : si le style basemap est deja charge
+    // (typiquement lors d'un re-render apres set params), appliquer les
+    // layers immediatement au lieu d'attendre l'event "load" qui ne
+    // tirera jamais. Sinon on attache le callback normal.
+    const applyLayers = () => {
       // Ajout des layers depuis catalog_layers, avec overrides appliqués
       orderedLayers.forEach(({ scene: sceneLayer, override, catalogIndex: i }) => {
         if (override && override.visible === false) return;
@@ -872,7 +876,15 @@ export class GeoMap extends HTMLElement {
       this.dispatchEvent(new CustomEvent("geo:map-ready", {
         detail: { map: this.map, layerIds: this._layerIds },
       }));
-    });
+    };
+    // V1.20.5 patch : evite race condition apres re-render (setter params
+    // ou hostContext). Si le style basemap est deja charge, applique
+    // immediatement ; sinon attend l'event "load" comme d'habitude.
+    if (this.map.isStyleLoaded && this.map.isStyleLoaded()) {
+      applyLayers();
+    } else {
+      this.map.on("load", applyLayers);
+    }
   }
 
   _wireInteractions(ml, layerId, sceneLayer, override) {

@@ -29,7 +29,12 @@
 
 {# Serialisation params V1.13 pour attribut params du <geo-map>. Le helper hub
    _build_interactive_map_ctx produit ces variables ; on les regroupe en JSON
-   compatible avec le contrat V1.13 attendu par <geo-map>. #}
+   compatible avec le contrat V1.13 attendu par <geo-map>.
+
+   V1.20.5 patch : injection des catalog_layers directement dans params via
+   la cle _catalog_layers (que <geo-map> supporte au meme titre que
+   hostContext.catalog_layers). Evite la race condition entre map.on("load")
+   et le setter hostContext post-render. #}
 {% set gc_params = {
   "title": title,
   "subtitle": subtitle | default(''),
@@ -43,7 +48,8 @@
     "center_lng": center_lng | float,
     "center_lat": center_lat | float,
     "zoom": zoom | float
-  }
+  },
+  "_catalog_layers_ref": true
 } %}
 
 <geo-map
@@ -84,14 +90,21 @@
 </geo-map>
 
 {# Injection catalog_layers (layers Scene Manifest avec geojson) via property
-   JS. Le WC lit son attribut `params` puis merge les layers via property
-   hostContext.catalog_layers. Split params/catalog car layers peut etre gros. #}
+   JS AVANT que _render() ne tourne (setTimeout 0 pour laisser Custom Element
+   se register, puis inject params+catalog_layers en une passe). Evite race
+   condition avec map.on("load"). Split params/catalog car layers peut etre gros. #}
 <script>
 (function() {
   const el = document.getElementById('{{ map_id }}');
   if (!el) return;
   const catalog = {{ map_layers_json | safe if map_layers_json else '[]' }};
-  el.hostContext = { catalog_layers: catalog };
+  // V1.20.5 : merge catalog_layers dans params.params via property setter qui
+  // trigger un re-render propre avec toutes les donnees d'un coup.
+  const paramsWithCatalog = {
+    ...JSON.parse(el.getAttribute('params') || '{}'),
+    _catalog_layers: catalog
+  };
+  el.params = paramsWithCatalog;
 })();
 </script>
 
