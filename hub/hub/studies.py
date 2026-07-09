@@ -2303,12 +2303,29 @@ try:
                                 g = type(g)(g)
                                 g.transform(transform)
                             geom_dict = json.loads(g.asJson())
+                            # V1.20.5 (2026-07-09) : conversion QDate/QDateTime
+                            # en int (annee) au lieu de str(v) = "PyQt5.QtCore.QDate(...)".
+                            # str(QDate) rendait le filter <geo-timeline> inoperant
+                            # cote MapLibre (comparateur '<=' vs string vs int
+                            # ne matche rien -> tous features masques).
+                            try:
+                                from qgis.PyQt.QtCore import QDate as _QDate
+                                from qgis.PyQt.QtCore import QDateTime as _QDateTime
+                            except Exception:
+                                _QDate = None
+                                _QDateTime = None
                             props = {{}}
                             for k in feat.fields().names():
                                 v = feat[k]
                                 if v is None:
                                     continue
                                 if isinstance(v, (bytes, bytearray)):
+                                    continue
+                                if _QDate is not None and isinstance(v, _QDate):
+                                    props[k] = v.year() if v.isValid() else None
+                                    continue
+                                if _QDateTime is not None and isinstance(v, _QDateTime):
+                                    props[k] = v.date().year() if v.isValid() else None
                                     continue
                                 if isinstance(v, (int, float, str, bool)):
                                     props[k] = v
