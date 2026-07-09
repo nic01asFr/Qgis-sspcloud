@@ -783,11 +783,19 @@ export class GeoMap extends HTMLElement {
                    font-family: Marianne, system-ui, sans-serif; }
       .gc-fallback { padding: 40px; text-align: center; color: #666;
                      font-family: Marianne, system-ui, sans-serif; }
+      /* V1.20.6 : slot overlay pour timeline/legende in-map. Positionne
+         absolute sur la carte (au-dessus de la basemap + layers). L'element
+         insere dans ce slot est ancre visuellement a la carte, quel que
+         soit le contexte hote (storymap, widget Grist Atlas, ...). */
+      .gc-overlay { position: absolute; left: 16px; right: 16px; bottom: 16px;
+                    z-index: 5; pointer-events: none; }
+      .gc-overlay ::slotted(*) { pointer-events: auto; }
     `;
     shadow.appendChild(style);
 
     const wrap = document.createElement("div");
     wrap.className = "gc-wrap";
+    wrap.style.position = "relative";
     shadow.appendChild(wrap);
 
     // Trio TITRE + description
@@ -820,7 +828,20 @@ export class GeoMap extends HTMLElement {
     const mapDiv = document.createElement("div");
     mapDiv.className = "gc-map";
     mapDiv.style.height = height + "px";
+    mapDiv.style.position = "relative";
     wrap.appendChild(mapDiv);
+
+    // V1.20.6 : slot overlay (position absolute au-dessus du canvas MapLibre).
+    // Un <geo-timeline slot="overlay"> insere dans le light DOM du <geo-map>
+    // sera rendu en overlay ancre visuellement sur la carte (pattern StoryMap
+    // ESRI / Kepler). Cross-projet : le meme HTML fonctionne dans une storymap
+    // qgis-sspcloud, un widget Grist Atlas, une single page HTML embed.
+    const overlay = document.createElement("div");
+    overlay.className = "gc-overlay";
+    const slot = document.createElement("slot");
+    slot.setAttribute("name", "overlay");
+    overlay.appendChild(slot);
+    mapDiv.appendChild(overlay);
 
     // Trio SOURCE datée
     if (params.source) {
@@ -1193,10 +1214,51 @@ export class GeoTimeline extends HTMLElement {
   connectedCallback() {
     geoBindings.install();
     this._render();
+    // V1.20.6 : auto-anchor overlay in-map. Si mode="overlay" (default) et
+    // que le target resout localement a un <geo-map>, se deplacer dans le
+    // light DOM de la carte avec slot="overlay" pour un rendu ancre visuellement.
+    // Sinon (cross-iframe : target dans un autre document), rester en flow
+    // et compter sur postMessage via GeoBindings.
+    this._autoAnchor();
   }
 
   disconnectedCallback() {
     this._stopPlay();
+  }
+
+  _autoAnchor() {
+    // Deja ancre (setAttribute slot deja fait), pas de re-move.
+    if (this.getAttribute("slot") === "overlay") return;
+    const mode = this.getAttribute("mode") || "overlay";
+    if (mode !== "overlay") return;
+    const rawTarget = this.getAttribute("target");
+    if (!rawTarget) return;
+    // Utilise le resolveur tolerant de GeoBindings (multi-conventions ID).
+    const targetEl = geoBindings._resolveTarget
+      ? geoBindings._resolveTarget(rawTarget)
+      : document.querySelector("#" + CSS.escape(rawTarget));
+    if (!targetEl || targetEl.tagName !== "GEO-MAP") return;
+    // Cacher toute la section source (evite titre "Timeline" orphelin et
+    // gros espace vide). Prefere story-section (ancetre du story-component)
+    // pour supprimer aussi le h2 titre. Fallback : parent direct.
+    let hideCandidate = this.parentElement;
+    while (hideCandidate && hideCandidate !== document.body) {
+      const cls = hideCandidate.className || "";
+      if (typeof cls === "string" && /\bstory-section\b/.test(cls)) break;
+      hideCandidate = hideCandidate.parentElement;
+    }
+    if (hideCandidate && hideCandidate !== document.body) {
+      hideCandidate.setAttribute("data-gc-overlay-source", "1");
+      hideCandidate.style.display = "none";
+    }
+    // Move dans le light DOM du <geo-map> : le slot name="overlay" cote
+    // shadow DOM va le rendre en position absolute sur la carte.
+    this.setAttribute("slot", "overlay");
+    // Cosmetique : override styles pour un look overlay (fond opaque,
+    // shadow subtile) le composant restant lisible sur la basemap.
+    this.style.pointerEvents = "auto";
+    this.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)";
+    targetEl.appendChild(this);  // move DOM : trigger disconnectedCallback + connectedCallback
   }
 
   attributeChangedCallback() {
