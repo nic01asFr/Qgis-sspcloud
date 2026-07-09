@@ -27,7 +27,7 @@
   min="{{ min | default(1900) }}"
   max="{{ max | default(2024) }}"
   step="{{ step | default(1) }}"
-  {% if value is defined %}value="{{ value }}"{% endif %}
+  {% if value is not none %}value="{{ value }}"{% endif %}
   field="{{ field | default('annee') }}"
   target="{{ target | default('') }}"
   label="{{ title | default('Annee') | e }}"
