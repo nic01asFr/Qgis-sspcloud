@@ -1619,7 +1619,21 @@ class QGISAgent:
    1. `list_entity_kinds("component")` ou `list_entity_kinds("assembly")` →
       enum stable, anti-hallucination
    2. `describe_entity_schema("component", kind="narrative_text")` → schema
-      Pydantic + exemple minimal valide
+      Pydantic + exemple canonique V0.3.1 valide.
+      🎯 **Pour kind='interactive_map', UTILISE le parametre `use_case`** pour
+      obtenir un exemple canonique riche adapte au pattern metier :
+      - "diagnostic bati par periode" -> `use_case='diagnostic_temporel'`
+      - "corpus documentaire etude" -> `use_case='corpus_documentaire'`
+      - "carte demographique commune" -> `use_case='choropleth_demographique'`
+      - "heatmap concentration" -> `use_case='heatmap_rag'`
+      - "animation temporelle simple" -> `use_case='timeline_overlay_simple'`
+      - "storymap multi-echelles" -> `use_case='multi_layers_narrative'`
+      - "maquette 3D territoriale" -> `use_case='maquette_3d'`
+      - "validation terrain sur site" -> `use_case='validation_terrain'`
+      - defaut minimal -> `use_case='minimal'`
+      Un exemple riche te permet de produire une config carto complete
+      (classification par periode, popup metier, legende auto, timeline
+      overlay) EN 1 TOUR au lieu du `{basemap, bbox}` minimal generique.
    3. `validate_manifest("component", payload)` → dry-run, fix_hint
       exploitable. Re-valide jusqu'à `valid=true`.
    4. `create_component(sid, manifest)` → reçoit `{id, manifest_url, render_url}`
@@ -1627,6 +1641,13 @@ class QGISAgent:
       `layout.sections[].components = [{"ref": "<cid>"}, ...]`
    6. `render_assembly(sid, aid)` → preview HTML pour validation visuelle
    7. `publish_assembly(sid, aid)` → URL S3 publique + `audit_chain.signed_hash`
+
+   ⚠️ **JAMAIS de manifest `{basemap, bbox}` minimal en prod** pour
+   `interactive_map`. Utilise toujours un pattern canonique adapte via
+   `describe_entity_schema(..., use_case='<pattern>')`. Le composant
+   `passerelle-geo-components@dev` de la lib carto commune ne rend
+   correctement que les manifests V0.3.1 riches (contract SceneManifest
+   V0.3.1 publie sur npm 2026-07-10).
 
    ⚠️ **JAMAIS `audience: "public"`** sans confirmation EXPLICITE user
    (anti-fuite RGPD). Default `cerema_internal`.

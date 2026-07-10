@@ -60,19 +60,36 @@ async def _hub_call(
 # ── Tools méta-cognitifs P0 ───────────────────────────────────────────────────
 
 async def describe_entity_schema(
-    entity_type: str, kind: str | None = None,
+    entity_type: str,
+    kind: str | None = None,
+    use_case: str | None = None,
 ) -> dict[str, Any]:
-    """Décrit le JSON Schema Pydantic + 1 exemple minimal valide.
+    """Decrit le JSON Schema Pydantic + un exemple canonique V0.3.1 valide.
 
-    Anti-hallucination LLM : l'agent connaît la structure exacte attendue
+    Anti-hallucination LLM : l'agent connait la structure exacte attendue
     AVANT de construire une payload pour create_component / create_assembly.
 
-    entity_type ∈ {component, assembly, audit_chain, component_source,
-                   component_rendering, classification, ...}
+    Sprint V0.2 Chantier 2-impl (2026-07-10) : pour kind='interactive_map',
+    le parametre `use_case` retourne un exemple canonique riche adapte au
+    pattern metier au lieu du minimal generique. Debouche le "manifest
+    {basemap, bbox} minimal en prod" reporte par les evaluations.
+
+    entity_type in {component, assembly, audit_chain, component_source,
+                    component_rendering, classification, ...}
     kind : filtre optionnel (ex: 'interactive_map')
+    use_case : pour kind='interactive_map' seulement, un des patterns
+        canoniques : diagnostic_temporel | corpus_documentaire |
+        choropleth_demographique | heatmap_rag | timeline_overlay_simple |
+        multi_layers_narrative | maquette_3d | validation_terrain | minimal
     """
-    params = {"kind": kind} if kind else None
-    return await _hub_call("GET", f"/schema/{entity_type}", params=params)
+    params = {}
+    if kind:
+        params["kind"] = kind
+    if use_case:
+        params["use_case"] = use_case
+    return await _hub_call(
+        "GET", f"/schema/{entity_type}", params=params if params else None,
+    )
 
 
 async def list_entity_kinds(entity_type: str) -> dict[str, Any]:
@@ -1462,10 +1479,18 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
             "name": "describe_entity_schema",
             "description": (
                 "ANTI-HALLUCINATION : retourne le JSON Schema Pydantic + un exemple "
-                "minimal valide d'une entité Sprint Composants V1.5 (component, "
+                "canonique V0.3.1 valide d'une entite Sprint Composants (component, "
                 "assembly, audit_chain, classification...). Appelle CE TOOL AVANT "
                 "de construire ta payload pour create_component / create_assembly. "
-                "Évite les boucles d'erreurs de validation."
+                "Evite les boucles d'erreurs de validation. "
+                "\n\nSprint V0.2 C2-impl : pour kind='interactive_map', utilise le "
+                "parametre use_case pour obtenir un exemple canonique riche adapte "
+                "a ton cas d'usage (diagnostic_temporel, corpus_documentaire, "
+                "choropleth_demographique, heatmap_rag, timeline_overlay_simple, "
+                "multi_layers_narrative, maquette_3d, validation_terrain, minimal). "
+                "Un exemple riche te permet de produire une config carto complete "
+                "(classification par periode, popup metier, legende auto, timeline "
+                "overlay, ...) en 1 tour au lieu du {basemap, bbox} minimal."
             ),
             "parameters": {
                 "type": "object",
@@ -1476,13 +1501,31 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
                                  "classification", "component_source",
                                  "component_rendering", "assembly_layout",
                                  "assembly_section", "assembly_footer"],
-                        "description": "Type d'entité Pydantic à décrire.",
+                        "description": "Type d'entite Pydantic a decrire.",
                     },
                     "kind": {
                         "type": "string",
                         "description": (
                             "Optionnel : filtre par kind (ex: 'interactive_map' "
                             "pour component, 'storymap_narrative_dsfr' pour assembly)."
+                        ),
+                    },
+                    "use_case": {
+                        "type": "string",
+                        "enum": [
+                            "diagnostic_temporel", "corpus_documentaire",
+                            "choropleth_demographique", "heatmap_rag",
+                            "timeline_overlay_simple", "multi_layers_narrative",
+                            "maquette_3d", "validation_terrain", "minimal",
+                        ],
+                        "description": (
+                            "Optionnel, pour kind='interactive_map' uniquement : "
+                            "pattern metier de l'exemple canonique V0.3.1 a "
+                            "retourner. Choisis celui qui correspond a ton "
+                            "intention utilisateur (diagnostic bati par periode "
+                            "-> diagnostic_temporel, corpus doc etudie -> "
+                            "corpus_documentaire, maquette 3D territoriale -> "
+                            "maquette_3d, etc). Par defaut : minimal."
                         ),
                     },
                 },

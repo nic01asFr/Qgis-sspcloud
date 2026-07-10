@@ -1,0 +1,98 @@
+{
+  "$schema": "https://cerema.github.io/geo-components/schemas/scene_manifest/0.3.1.json",
+  "manifest_version": "0.3.1",
+  "produced_at": "2026-07-10T16:00:00+02:00",
+  "provenance": {
+    "producer": "x_zebra",
+    "producer_version": "v0.4.0"
+  },
+  "title": "ZEBRA — validation terrain passages piétons",
+  "subtitle": "Sélection bidirectionnelle Grist ↔ carte",
+  "basemap": {
+    "id": "ortho-ign"
+  },
+  "zone": {
+    "kind": "manual",
+    "bbox": [5.379, 43.289, 5.427, 43.334],
+    "center": [5.40, 43.31],
+    "zoom": 17,
+    "pitch": 0
+  },
+  "layers": [
+    {
+      "id": "passages_pietons_detectes",
+      "name": "Passages piétons détectés (IA)",
+      "role": "primary",
+      "geometry_type": "polygon",
+      "source": {
+        "type": "grist_table",
+        "table": "Pp",
+        "id_field": "id",
+        "sync": "reactive"
+      },
+      "n_features": 267,
+      "bbox": [5.379, 43.289, 5.427, 43.334],
+      "attribute_stats": {
+        "categorie_danger": {
+          "distinct_values": ["conforme", "vigilance", "danger_moyen", "danger_fort", "critique"]
+        }
+      },
+      "style": {
+        "z_index": 10,
+        "opacity": { "kind": "static", "value": 0.85 },
+        "classification": {
+          "color": {
+            "mode": "categorized",
+            "field": "categorie_danger",
+            "categories": [
+              { "value": "conforme", "color": "#5a9f39" },
+              { "value": "vigilance", "color": "#f7b924" },
+              { "value": "danger_moyen", "color": "#e4794a" },
+              { "value": "danger_fort", "color": "#d64d00" },
+              { "value": "critique", "color": "#8b0000" }
+            ],
+            "default": "#9e9e9e"
+          }
+        },
+        "outline": {
+          "enabled": true,
+          "color": "#000000",
+          "width": 0.5
+        }
+      },
+      "interactions": {
+        "popup_template": {
+          "kind": "handlebars",
+          "body": "<h4>PP #{{id}}</h4><p><strong>{{categorie_danger}}</strong></p><p>Rue : {{nom_rue}}</p><p><a href=\"#/pp/{{id}}\">Fiche complète</a></p>"
+        },
+        "tooltip_field": "categorie_danger",
+        "hover_attributes": ["id", "categorie_danger", "nom_rue"],
+        "emits_events": true,
+        "feature_state_selected_field": "id"
+      },
+      "extensions": {
+        "x_zebra": {
+          "grist_bridge_role": "primary_selection",
+          "grist_view_id": "V1"
+        }
+      }
+    }
+  ],
+  "legend": {
+    "mode": "auto",
+    "from_layer": "passages_pietons_detectes",
+    "position": "bottom-left",
+    "format": "chips",
+    "title": "Niveau de danger"
+  },
+  "scalebar": { "position": "bottom-right", "unit": "metric" },
+  "counters": [
+    {
+      "id": "cnt_pp_selected",
+      "bind": "selection",
+      "expr": "filtered_count",
+      "template": "{{count}} sélectionné(s) / 267 total",
+      "position": "top-left"
+    }
+  ]
+}

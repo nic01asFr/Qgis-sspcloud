@@ -3009,16 +3009,25 @@ def _check_components_enabled():
 async def schema_describe_endpoint(
     entity_type: str,
     kind: str | None = None,
+    use_case: str | None = None,
     user: dict = Depends(auth.get_current_user),
 ):
-    """Retourne JSON Schema Pydantic + exemple minimal valide pour
+    """Retourne JSON Schema Pydantic + exemple canonique V0.3.1 valide pour
     entity_type (component, assembly, audit_chain, ...).
+
+    Sprint V0.2 Chantier 2-impl (2026-07-10) : pour kind='interactive_map',
+    le param `use_case` permet de recuperer un exemple canonique riche
+    adapte au pattern metier (diagnostic_temporel, corpus_documentaire,
+    choropleth_demographique, heatmap_rag, timeline_overlay_simple,
+    multi_layers_narrative, maquette_3d, validation_terrain, minimal).
 
     Permet à l'agent IA d'inspecter la structure attendue avant
     d'appeler create_component / create_assembly.
     """
     from hub import schema_introspect as si
-    return si.describe_entity_schema(entity_type, kind=kind)
+    return si.describe_entity_schema(
+        entity_type, kind=kind, use_case=use_case,
+    )
 
 
 # Sprint 3 P2 (8.14) - Monitoring client errors

@@ -1,0 +1,170 @@
+{
+  "$schema": "https://cerema.github.io/geo-components/schemas/scene_manifest/0.3.1.json",
+  "manifest_version": "0.3.1",
+  "produced_at": "2026-07-10T10:00:00+02:00",
+  "provenance": {
+    "producer": "cerema-livrables",
+    "producer_version": "0.4.0",
+    "extensions": {
+      "cerema_livrables": {
+        "mode": "subject",
+        "corpus_version": "2026-07"
+      }
+    }
+  },
+  "title": "Livrables CEREMA — corpus Méditerranée",
+  "source_text": "CeremaDoc via Syracuse RSS + Strate — Licence Ouverte 2.0",
+  "basemap": {
+    "id": "plan-ign-v2"
+  },
+  "zone": {
+    "kind": "manual",
+    "bbox": [3.0, 42.5, 7.5, 44.5],
+    "center": [5.5, 43.5],
+    "zoom": 7
+  },
+  "layers": [
+    {
+      "id": "livrables_emprises",
+      "name": "Emprises documentées",
+      "role": "emprise",
+      "geometry_type": "polygon",
+      "source": {
+        "type": "geojson_path",
+        "path": "/data/publications/cerema-livrables/scenes/subject-corpus-mediterranee.geojson"
+      },
+      "n_features": 24,
+      "bbox": [3.0, 42.5, 7.5, 44.5],
+      "attribute_stats": {
+        "scale": { "distinct_values": ["batiment", "zone", "rue", "ville", "epci"] }
+      },
+      "style": {
+        "z_index": 10,
+        "opacity": { "kind": "static", "value": 0.35 },
+        "classification": {
+          "color": {
+            "mode": "categorized",
+            "field": "scale",
+            "categories": [
+              { "value": "batiment", "color": "#000091" },
+              { "value": "zone", "color": "#1212a3" },
+              { "value": "rue", "color": "#2e2eb5" },
+              { "value": "ville", "color": "#4a4ac7" },
+              { "value": "epci", "color": "#7676d9" }
+            ],
+            "default": "#9e9e9e"
+          }
+        },
+        "outline": {
+          "enabled": true,
+          "color": "#000091",
+          "width": 1.5
+        }
+      },
+      "interactions": {
+        "popup_template": {
+          "kind": "handlebars",
+          "body": "<h4>{{count}} livrable(s) sur {{territoire}}</h4><ul>{{#each members}}<li><a href=\"{{source_url}}\" target=\"_blank\">{{titre}}</a> ({{millesime}}) — {{commanditaire}}</li>{{/each}}</ul>"
+        },
+        "tooltip_field": "titre",
+        "hover_attributes": ["scale", "count", "territoire"],
+        "emits_events": true,
+        "feature_state_selected_field": "group_key"
+      },
+      "extensions": {
+        "cerema_livrables": {
+          "role_semantic": "emprise",
+          "group_key_field": "group_key"
+        }
+      }
+    },
+    {
+      "id": "livrables_points_approx",
+      "name": "Livrables sans emprise vérifiée",
+      "role": "site",
+      "geometry_type": "point",
+      "source": {
+        "type": "geojson_path",
+        "path": "/data/publications/cerema-livrables/scenes/subject-points-approximatifs.geojson"
+      },
+      "n_features": 6,
+      "bbox": [3.5, 42.8, 7.0, 44.0],
+      "style": {
+        "z_index": 15,
+        "opacity": { "kind": "static", "value": 0.9 },
+        "classification": {
+          "color": {
+            "mode": "categorized",
+            "field": "geom_statut",
+            "categories": [
+              { "value": "verifie", "color": "#000091" },
+              { "value": "approximatif", "color": "#e1000f" }
+            ],
+            "default": "#9e9e9e"
+          }
+        },
+        "hollow_point": {
+          "enabled": true,
+          "stroke_color_from_field": "geom_statut",
+          "radius": 8
+        }
+      },
+      "interactions": {
+        "popup_template": {
+          "kind": "handlebars",
+          "body": "<h4>{{titre}}</h4><p>Emprise : <strong>{{geom_statut}}</strong> ({{geom_source}})</p><p>{{count}} livrable(s) groupé(s)</p>"
+        },
+        "tooltip_field": "titre",
+        "emits_events": true
+      }
+    }
+  ],
+  "legend": {
+    "mode": "manual",
+    "items": [
+      { "label": "Bâtiment", "color": "#000091" },
+      { "label": "Zone / ZI", "color": "#1212a3" },
+      { "label": "Rue", "color": "#2e2eb5" },
+      { "label": "Ville", "color": "#4a4ac7" },
+      { "label": "EPCI", "color": "#7676d9" },
+      { "label": "Approximatif (point)", "color": "#e1000f" }
+    ],
+    "position": "bottom-left",
+    "format": "chips",
+    "title": "Échelle documentaire"
+  },
+  "scalebar": {
+    "position": "bottom-right",
+    "unit": "metric"
+  },
+  "extensions": {
+    "cerema_livrables": {
+      "sidebar_items": [
+        {
+          "id": "doc-uuid-1",
+          "titre": "Rapport littoral MTPM 2024",
+          "scale": "epci",
+          "zoom": 10,
+          "domaine": "Risques",
+          "commanditaire": "Métropole TPM",
+          "millesime": 2024,
+          "source_url": "https://doc.cerema.fr/...",
+          "group_key": "epci:200055529",
+          "lon": 5.926, "lat": 43.124,
+          "geom_statut": "verifie"
+        }
+      ],
+      "national": [
+        {
+          "id": "doc-nat-1",
+          "titre": "Guide méthodologique passages piétons",
+          "domaine": "Risques",
+          "commanditaire": "DGITM",
+          "millesime": 2024,
+          "source_url": "https://doc.cerema.fr/..."
+        }
+      ],
+      "count": 42
+    }
+  }
+}

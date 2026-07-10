@@ -1,0 +1,19 @@
+{
+  "$schema": "https://cerema.github.io/geo-components/schemas/scene_manifest/0.3.1.json",
+  "manifest_version": "0.3.1",
+  "produced_at": "2026-07-10T09:00:00+02:00",
+  "provenance": {
+    "producer": "manual",
+    "producer_version": "-"
+  },
+  "title": "Carte minimale",
+  "basemap": {
+    "id": "osm"
+  },
+  "zone": {
+    "kind": "manual",
+    "center": [2.35, 48.86],
+    "zoom": 12
+  },
+  "layers": []
+}

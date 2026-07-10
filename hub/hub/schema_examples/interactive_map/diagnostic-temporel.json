@@ -1,0 +1,160 @@
+{
+  "$schema": "https://cerema.github.io/geo-components/schemas/scene_manifest/0.3.1.json",
+  "manifest_version": "0.3.1",
+  "produced_at": "2026-07-10T09:15:23+02:00",
+  "provenance": {
+    "producer": "qgis-sspcloud",
+    "producer_version": "v1.20.6",
+    "source_project": "/data/studies/c9fef0955a53/projects/72e3da47b1f7/project.qgz",
+    "recipe_used": {
+      "slug": "diagnostic-parc-bati",
+      "version_sha": "sha256:9f8a1e7c4d2b3f5e8a1c9d0e2f3b4a5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a"
+    }
+  },
+  "title": "Parc bâti du 4e arrondissement, par année de construction",
+  "subtitle": "Diagnostic CEREMA – juillet 2026",
+  "description": "Cartographie de l'ensemble du parc bâti du 4e arrondissement de Marseille à partir de la BD TOPO® de l'IGN et de son attribut de date d'apparition. Explore visuellement l'évolution du bâti au fil du temps.",
+  "source_text": "BD TOPO® IGN 2024 — CEREMA, juillet 2026",
+  "caveat": "Étude à vocation pédagogique — chiffres fictifs, non exploitables opérationnellement.",
+  "projection": "mercator",
+  "basemap": {
+    "id": "plan-ign-v2-gris"
+  },
+  "zone": {
+    "kind": "insee_arm",
+    "insee": "13204",
+    "buffer_km": 0.2,
+    "pitch": 0,
+    "bearing": 0
+  },
+  "terrain": {
+    "source_id": "ign-lidar",
+    "encoding": "mapbox",
+    "exaggeration": 1.0,
+    "adapter": "ignmnt",
+    "hillshade": {
+      "opacity": 0.35,
+      "blend_mode": "multiply"
+    }
+  },
+  "layers": [
+    {
+      "id": "batiments_bd_topo",
+      "name": "Bâtiments par période",
+      "role": "primary",
+      "geometry_type": "polygon",
+      "source": {
+        "type": "geojson_path",
+        "path": "/data/studies/c9fef0955a53/scene_store/c52d9d669bf5d09c/layers/batiments_bd_topo.geojson",
+        "crs": "EPSG:4326"
+      },
+      "n_features": 14270,
+      "bbox": [5.379, 43.289, 5.427, 43.334],
+      "attribute_stats": {
+        "date_d_apparition": {
+          "min": 1850,
+          "max": 2024,
+          "null_count": 7550,
+          "distinct_count": 195
+        }
+      },
+      "style": {
+        "visible": true,
+        "z_index": 10,
+        "opacity": {
+          "kind": "reactive",
+          "prop": "time",
+          "matched": 0.85,
+          "before": 0.85,
+          "after": 0.12,
+          "null_value": 0.35
+        },
+        "classification": {
+          "color": {
+            "mode": "graduated",
+            "field": "date_d_apparition",
+            "method": "manual",
+            "breaks": [1900, 1945, 1975, 2000],
+            "palette": "ColorBrewer.PRGn.6",
+            "default": "#9e9e9e",
+            "_compiled_expression": [
+              "step",
+              ["get", "date_d_apparition"],
+              "#7b3294",
+              1900, "#c2a5cf",
+              1945, "#f7f7f7",
+              1975, "#a6dba0",
+              2000, "#008837"
+            ]
+          },
+          "size": { "mode": "single", "value": 8 },
+          "label": { "enabled": false }
+        },
+        "outline": {
+          "enabled": true,
+          "color": "#000091",
+          "width": 0.5
+        }
+      },
+      "interactions": {
+        "popup_template": {
+          "kind": "handlebars",
+          "body": "<h4>Bâtiment {{nature}}</h4><dl><dt>Construction</dt><dd>{{date_d_apparition}}</dd><dt>Usage principal</dt><dd>{{usage_1}}</dd><dt>Logements</dt><dd>{{nombre_de_logements}}</dd><dt>Hauteur</dt><dd>{{hauteur}} m ({{nombre_d_etages}} niveaux)</dd></dl>"
+        },
+        "tooltip_field": "date_d_apparition",
+        "hover_attributes": ["nature", "usage_1", "hauteur", "nombre_de_logements"],
+        "emits_events": true
+      }
+    },
+    {
+      "id": "arrondissement_13204",
+      "name": "4e arrondissement (limite)",
+      "role": "context",
+      "geometry_type": "polygon",
+      "source": {
+        "type": "boundary_admin",
+        "catalog_id": "arrondissements_marseille",
+        "filter": { "insee_arm": "13204" }
+      },
+      "style": {
+        "visible": true,
+        "z_index": 5,
+        "opacity": { "kind": "static", "value": 0.05 },
+        "classification": {
+          "color": { "mode": "single", "value": "#000091" }
+        },
+        "outline": {
+          "enabled": true,
+          "color": "#000091",
+          "width": 2
+        }
+      },
+      "interactions": {
+        "emits_events": false
+      }
+    }
+  ],
+  "legend": {
+    "mode": "auto",
+    "from_layer": "batiments_bd_topo",
+    "position": "bottom-left",
+    "format": "chips",
+    "title": "Période de construction"
+  },
+  "scalebar": {
+    "position": "bottom-right",
+    "unit": "metric"
+  },
+  "north_arrow": {
+    "position": "top-right"
+  },
+  "counters": [
+    {
+      "id": "cnt_bati_filtered",
+      "bind": "time",
+      "expr": "filtered_count",
+      "template": "{{count}} / 14 270 bâtiments ({{pct}} %)",
+      "position": "top-left"
+    }
+  ]
+}

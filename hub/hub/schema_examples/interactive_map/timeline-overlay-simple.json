@@ -1,0 +1,90 @@
+{
+  "$schema": "https://cerema.github.io/geo-components/schemas/scene_manifest/0.3.1.json",
+  "manifest_version": "0.3.1",
+  "produced_at": "2026-07-10T13:00:00+02:00",
+  "provenance": {
+    "producer": "qgis-sspcloud",
+    "producer_version": "v1.20.6"
+  },
+  "title": "Événements historiques territoriaux — animation temporelle",
+  "subtitle": "Timeline overlay sans classification par période",
+  "basemap": {
+    "id": "plan-ign-v2"
+  },
+  "zone": {
+    "kind": "manual",
+    "bbox": [5.2, 43.2, 5.6, 43.4],
+    "center": [5.4, 43.3],
+    "zoom": 10
+  },
+  "layers": [
+    {
+      "id": "evenements_historiques",
+      "name": "Événements datés",
+      "role": "primary",
+      "geometry_type": "point",
+      "source": {
+        "type": "geojson_path",
+        "path": "/data/studies/xyz/scene_store/abc/layers/evenements_historiques.geojson"
+      },
+      "n_features": 145,
+      "bbox": [5.2, 43.2, 5.6, 43.4],
+      "attribute_stats": {
+        "annee": { "min": 1800, "max": 2020, "distinct_count": 89 }
+      },
+      "style": {
+        "z_index": 10,
+        "opacity": {
+          "kind": "reactive",
+          "prop": "time",
+          "matched": 0.9,
+          "before": 0.9,
+          "after": 0.15,
+          "null_value": 0.3
+        },
+        "classification": {
+          "color": {
+            "mode": "single",
+            "value": "#000091"
+          },
+          "size": {
+            "mode": "single",
+            "value": 10
+          }
+        },
+        "hollow_point": {
+          "enabled": true,
+          "radius": 10
+        }
+      },
+      "interactions": {
+        "popup_template": {
+          "kind": "handlebars",
+          "body": "<h4>{{titre}}</h4><p>{{annee}} — {{lieu}}</p><p>{{description}}</p>"
+        },
+        "tooltip_field": "titre",
+        "hover_attributes": ["annee", "lieu"],
+        "emits_events": true
+      }
+    }
+  ],
+  "legend": {
+    "mode": "manual",
+    "items": [
+      { "label": "Événement", "color": "#000091" },
+      { "label": "Hors période slider", "color": "#cccccc" }
+    ],
+    "position": "bottom-left",
+    "format": "chips",
+    "title": "Chronologie"
+  },
+  "counters": [
+    {
+      "id": "cnt_events",
+      "bind": "time",
+      "expr": "filtered_count",
+      "template": "{{count}} événement(s) affiché(s)",
+      "position": "top-left"
+    }
+  ]
+}

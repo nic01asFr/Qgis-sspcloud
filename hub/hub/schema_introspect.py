@@ -15,6 +15,9 @@ Sources :
 
 from __future__ import annotations
 
+import json
+import logging
+from pathlib import Path
 from typing import Any, get_args
 
 from pydantic import ValidationError
@@ -24,6 +27,51 @@ from hub.models import (
     AuditChain, Classification, Component, ComponentKind, ComponentRendering,
     ComponentSource, ConfidenceFactors, LLMProvenance, ComponentProvenance,
 )
+
+log = logging.getLogger(__name__)
+
+
+# Sprint V0.2 Chantier 2-impl (2026-07-10) : contract-book agent MCP.
+# Les 9 exemples canoniques SceneManifest V0.3.1 sont vendorises depuis
+# Passerelle/sdk/js/geo-components/examples/ (source de verite npm publie).
+# Le path de verite est hub/hub/schema_examples/interactive_map/.
+_SCHEMA_EXAMPLES_DIR = Path(__file__).parent / "schema_examples"
+
+_USE_CASE_TO_FILE = {
+    "diagnostic_temporel":     "diagnostic-temporel.json",
+    "corpus_documentaire":     "corpus-documentaire.json",
+    "choropleth_demographique": "choropleth-demographique.json",
+    "heatmap_rag":              "heatmap-rag.json",
+    "timeline_overlay_simple": "timeline-overlay-simple.json",
+    "multi_layers_narrative": "multi-layers-narrative.json",
+    "maquette_3d":            "maquette-3d.json",
+    "validation_terrain":     "validation-terrain-zebra.json",
+    "minimal":                 "minimal.json",
+}
+
+
+def _load_canonical_example(kind: str, use_case: str | None) -> dict | None:
+    """Charge un exemple canonique du contract-book V0.3.1 (Sprint V0.2 C2-impl).
+
+    Retourne None si le kind n'a pas d'exemple canonique ou si le fichier
+    est introuvable (le caller applique un fallback minimal).
+    """
+    if kind != "interactive_map":
+        return None
+    filename = _USE_CASE_TO_FILE.get(use_case or "minimal", "minimal.json")
+    path = _SCHEMA_EXAMPLES_DIR / "interactive_map" / filename
+    if not path.exists():
+        log.warning(
+            "Canonical example not found: %s (use_case=%s, kind=%s)",
+            path, use_case, kind
+        )
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        log.warning("Failed to load canonical example %s: %s", path, e)
+        return None
 
 
 # Registry entity_type → (Pydantic class, kind_literal_or_None)
@@ -113,20 +161,34 @@ def _kind_descriptions(entity_type: str) -> dict[str, str]:
 
 
 def describe_entity_schema(
-    entity_type: str, kind: str | None = None
+    entity_type: str,
+    kind: str | None = None,
+    use_case: str | None = None,
 ) -> dict[str, Any]:
-    """Retourne JSON Schema Pydantic + 1 exemple minimal valide.
+    """Retourne JSON Schema Pydantic + un exemple canonique V0.3.1 valide.
 
-    Permet au LLM de connaître la structure exacte attendue avant de
-    construire un payload via `create_component` / `create_assembly`.
+    Permet au LLM de connaitre la structure exacte attendue AVANT de
+    construire un payload via `create_component` / `create_assembly`,
+    et de recevoir un exemple riche adapte a son cas d'usage plutot
+    qu'un `{basemap, bbox}` minimal generique.
+
+    Sprint V0.2 Chantier 2-impl (2026-07-10) : pour kind='interactive_map',
+    retourne un des 9 exemples canoniques SceneManifest V0.3.1 selon le
+    parametre `use_case` (voir _USE_CASE_TO_FILE). Les fichiers sont
+    vendorises depuis Passerelle (passerelle-geo-components@dev).
 
     Args:
         entity_type: 'component' | 'assembly' | 'audit_chain' | ...
-        kind: filtre optionnel (ex: 'interactive_map') — pour l'instant
-              ignoré (le schema est polymorphe sur kind discriminant)
+        kind: filtre optionnel (ex: 'interactive_map')
+        use_case: pour kind='interactive_map' seulement — un des patterns
+            metier V0.3.1 : diagnostic_temporel | corpus_documentaire |
+            choropleth_demographique | heatmap_rag | timeline_overlay_simple |
+            multi_layers_narrative | maquette_3d | validation_terrain |
+            minimal. Retourne un exemple canonique riche adapte.
 
     Returns:
-        {entity_type, schema: dict, example: dict, kinds_available: list}
+        {entity_type, schema, example, kinds_available, use_cases_available?,
+         filtered_kind?, filtered_use_case?}
     """
     if entity_type not in ENTITY_REGISTRY:
         return {
@@ -142,7 +204,7 @@ def describe_entity_schema(
         return list_entity_kinds(entity_type)
 
     schema = cls.model_json_schema()
-    example = _build_example(entity_type, kind)
+    example = _build_example(entity_type, kind, use_case)
 
     result = {
         "entity_type": entity_type,
@@ -153,13 +215,59 @@ def describe_entity_schema(
         result["kinds_available"] = list(get_args(kind_literal))
         if kind:
             result["filtered_kind"] = kind
+    # Sprint V0.2 C2-impl : lister use_cases dispo pour interactive_map
+    if kind == "interactive_map":
+        result["use_cases_available"] = sorted(_USE_CASE_TO_FILE.keys())
+        if use_case:
+            result["filtered_use_case"] = use_case
     return result
 
 
-def _build_example(entity_type: str, kind: str | None = None) -> dict[str, Any]:
-    """Exemple minimal valide d'une instance — aide LLM à comprendre la forme."""
+def _build_example(
+    entity_type: str,
+    kind: str | None = None,
+    use_case: str | None = None,
+) -> dict[str, Any]:
+    """Exemple valide d'une instance — aide LLM a comprendre la forme.
+
+    Priorite 1 (Sprint V0.2 C2-impl) : exemple canonique V0.3.1 du
+    contract-book vendorise depuis Passerelle si disponible.
+    Priorite 2 : fallback minimal historique (backward-compat V0.2 hub).
+    """
     if entity_type == "component":
         k = kind or "interactive_map"
+        # Priorite 1 : exemple canonique V0.3.1 depuis contract-book
+        canonical = _load_canonical_example(k, use_case)
+        if canonical is not None:
+            # Wrapper Component enveloppant le SceneManifest V0.3.1 canonique
+            # dans le champ params. Le manifest est la source de verite ; la
+            # partie enveloppe (id, source, provenance) reste indicative.
+            return {
+                "id": "abc123def456",
+                "version": 1,
+                "kind": k,
+                "title": canonical.get(
+                    "title", f"Exemple canonique {use_case or 'minimal'}"
+                ),
+                "classification": "cerema_internal",
+                "source": {
+                    "scope": "project",
+                    "sid": "d8a0b9718857",
+                    "pid": "0780d1d825f3",
+                    "scene_hash": "sha256:abc...",
+                },
+                "params": canonical,
+                "rendering": {
+                    "runtime": "maplibre",
+                    "container_size": "responsive",
+                    "theme": "dsfr",
+                },
+                "provenance": {
+                    "created_by": "agent",
+                    "tool_calls_made": [],
+                },
+            }
+        # Priorite 2 : fallback minimal historique
         return {
             "id": "abc123def456",
             "version": 1,

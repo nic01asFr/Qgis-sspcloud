@@ -1,0 +1,90 @@
+{
+  "$schema": "https://cerema.github.io/geo-components/schemas/scene_manifest/0.3.1.json",
+  "manifest_version": "0.3.1",
+  "produced_at": "2026-07-10T11:00:00+02:00",
+  "provenance": {
+    "producer": "x_crm_grist_storymap",
+    "producer_version": "v17.0"
+  },
+  "title": "Concentration adhérents CEREMA par EPCI",
+  "source_text": "Table Grist Organismes — CRM CEREMA V17",
+  "basemap": {
+    "id": "cartodb-positron-nolabels"
+  },
+  "zone": {
+    "kind": "manual",
+    "bbox": [-5.0, 41.3, 9.5, 51.2],
+    "center": [2.5, 46.5],
+    "zoom": 5
+  },
+  "layers": [
+    {
+      "id": "epci_metric_norm",
+      "name": "Concentration adhérents (métrique normalisée)",
+      "role": "primary",
+      "geometry_type": "polygon",
+      "source": {
+        "type": "boundary_admin",
+        "catalog_id": "epci_france"
+      },
+      "n_features": 1245,
+      "bbox": [-5.0, 41.3, 9.5, 51.2],
+      "attribute_stats": {
+        "metric_norm": {
+          "min": 0.0,
+          "max": 1.0,
+          "null_count": 12,
+          "distinct_count": 1233
+        }
+      },
+      "style": {
+        "z_index": 10,
+        "opacity": { "kind": "static", "value": 0.75 },
+        "classification": {
+          "color": {
+            "mode": "expression",
+            "expr": [
+              "interpolate",
+              ["linear"],
+              ["coalesce", ["get", "metric_norm"], 0],
+              0.0, "#f7f7f7",
+              0.25, "#c6dbef",
+              0.5, "#6baed6",
+              0.75, "#2171b5",
+              1.0, "#08306b"
+            ],
+            "default": "#e0e0e0"
+          }
+        },
+        "outline": {
+          "enabled": true,
+          "color": "#ffffff",
+          "width": 0.5
+        }
+      },
+      "interactions": {
+        "popup_template": {
+          "kind": "handlebars",
+          "body": "<h4>{{nom_epci}}</h4><p><strong>{{count_adherents}}</strong> adhérent(s)</p><p>Score : {{metric_norm}}</p>"
+        },
+        "tooltip_field": "nom_epci",
+        "hover_attributes": ["nom_epci", "count_adherents", "metric_norm"],
+        "emits_events": true
+      }
+    }
+  ],
+  "legend": {
+    "mode": "auto",
+    "from_layer": "epci_metric_norm",
+    "position": "bottom-left",
+    "format": "gradient_bar",
+    "title": "Concentration adhérents (0-1)"
+  },
+  "extensions": {
+    "x_crm_grist_storymap": {
+      "grist_table": "Organismes",
+      "metric_field": "score_norm",
+      "join_field": "code_epci"
+    }
+  }
+}

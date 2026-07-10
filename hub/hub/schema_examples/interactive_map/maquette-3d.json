@@ -1,0 +1,153 @@
+{
+  "$schema": "https://cerema.github.io/geo-components/schemas/scene_manifest/0.3.1.json",
+  "manifest_version": "0.3.1",
+  "produced_at": "2026-07-10T15:00:00+02:00",
+  "provenance": {
+    "producer": "atlas",
+    "producer_version": "2.0-atlas",
+    "extensions": {
+      "atlas": {
+        "native_payload_hash": "sha256:d3f7a9b2e4c8d1f6a8b3e5c9f2d4a7b6e1c3f5a9b8d2e4c7f3a6b8d1e5c9f2a4"
+      }
+    }
+  },
+  "title": "Maquette 3D territoriale — Toulouse Capitole",
+  "subtitle": "Bâti + mobilier urbain + terrain LIDAR",
+  "projection": "mercator",
+  "basemap": {
+    "id": "openfreemap-liberty",
+    "toggles": {
+      "labels": true,
+      "buildings_3d": true
+    }
+  },
+  "zone": {
+    "kind": "manual",
+    "center": [1.4437, 43.6043],
+    "zoom": 16,
+    "pitch": 55,
+    "bearing": -18,
+    "max_pitch": 80
+  },
+  "camera_presets": [
+    { "id": "top", "pitch": 0, "bearing": 0, "zoom": 17 },
+    { "id": "3d", "pitch": 55, "bearing": -18, "zoom": 16 },
+    { "id": "street", "pitch": 78, "bearing": 0, "zoom": 18 }
+  ],
+  "terrain": {
+    "source_id": "ign-lidar",
+    "encoding": "mapbox",
+    "exaggeration": 1.2,
+    "adapter": "ignmnt"
+  },
+  "sky": {
+    "enabled": true,
+    "dynamic_sun": true,
+    "sun_datetime": "2026-06-15T14:30:00+02:00",
+    "location_for_suncalc": { "lat": 43.6043, "lng": 1.4437 }
+  },
+  "layers": [
+    {
+      "id": "batiments_capitole",
+      "name": "Bâti extrudé",
+      "role": "primary",
+      "geometry_type": "polygon",
+      "source": {
+        "type": "geojson_path",
+        "path": "/data/atlas/scenes/toulouse-capitole/batiments.geojson"
+      },
+      "n_features": 340,
+      "bbox": [1.435, 43.596, 1.452, 43.612],
+      "attribute_stats": {
+        "hauteur": { "min": 3.5, "max": 42.0, "distinct_count": 156 }
+      },
+      "style": {
+        "z_index": 10,
+        "opacity": { "kind": "static", "value": 0.95 },
+        "classification": {
+          "color": {
+            "mode": "graduated",
+            "field": "hauteur",
+            "method": "linear",
+            "breaks": [10, 20, 30],
+            "palette": "YlOrRd",
+            "default": "#f7b924"
+          }
+        },
+        "extrusion": {
+          "enabled": true,
+          "height_field": "hauteur",
+          "vertical_gradient": true
+        }
+      },
+      "interactions": {
+        "popup_template": {
+          "kind": "handlebars",
+          "body": "<h4>{{nature}}</h4><p>Hauteur : {{hauteur}} m</p>"
+        },
+        "tooltip_field": "hauteur",
+        "emits_events": true
+      }
+    },
+    {
+      "id": "mobilier_points",
+      "name": "Mobilier urbain (points)",
+      "role": "primary",
+      "geometry_type": "point",
+      "source": {
+        "type": "geojson_path",
+        "path": "/data/atlas/scenes/toulouse-capitole/mobilier.geojson"
+      },
+      "n_features": 68,
+      "bbox": [1.435, 43.596, 1.452, 43.612],
+      "attribute_stats": {
+        "category": { "distinct_values": ["lighting", "furniture", "vegetation"] }
+      },
+      "style": {
+        "visible": false,
+        "z_index": 15,
+        "opacity": { "kind": "static", "value": 0.0 },
+        "classification": {
+          "color": { "mode": "single", "value": "#000091" }
+        }
+      },
+      "interactions": { "emits_events": false }
+    }
+  ],
+  "custom_layers": [
+    {
+      "id": "mobilier_urbain_3d",
+      "kind": "gltf_instances",
+      "adapter": "geo-3d-scene",
+      "source_layer_id": "mobilier_points",
+      "params": {
+        "gltf_base_url": "https://nic01asfr.github.io/Widgets-Grist/models/colored/",
+        "gltf_field": "_gltf_url",
+        "rotation_fields": {
+          "x": "_rotationX",
+          "y": "_rotationY",
+          "z": "_rotationZ"
+        },
+        "scale_field": "_scale",
+        "shadow_map": true,
+        "shadow_map_size": 2048,
+        "zoom_gate": 11
+      },
+      "extensions": {
+        "atlas": {
+          "model_set": "colored",
+          "max_instances": 20000
+        }
+      }
+    }
+  ],
+  "legend": {
+    "mode": "auto",
+    "from_layer": "batiments_capitole",
+    "position": "bottom-left",
+    "format": "gradient_bar",
+    "title": "Hauteur bâti (m)"
+  },
+  "scalebar": { "position": "bottom-right", "unit": "metric" },
+  "north_arrow": { "position": "top-right" }
+}

@@ -1,0 +1,84 @@
+{
+  "$schema": "https://cerema.github.io/geo-components/schemas/scene_manifest/0.3.1.json",
+  "manifest_version": "0.3.1",
+  "produced_at": "2026-07-10T12:00:00+02:00",
+  "provenance": {
+    "producer": "x_mobscidat",
+    "producer_version": "v0.3.2"
+  },
+  "title": "Résultats RAG géo-sémantiques MobSciDat",
+  "source_text": "Corpus MobSciDat PEPR MOBIDEC — recherche géo-sémantique",
+  "basemap": {
+    "id": "cartodb-positron-nolabels"
+  },
+  "zone": {
+    "kind": "auto_bounds"
+  },
+  "layers": [
+    {
+      "id": "facts_heatmap",
+      "name": "Densité géo-sémantique (pondérée par score)",
+      "role": "primary",
+      "geometry_type": "point",
+      "source": {
+        "type": "geojson_path",
+        "path": "/api/mobscidat/facts/search-results.geojson"
+      },
+      "n_features": 3247,
+      "bbox": [-5.0, 42.0, 9.0, 51.0],
+      "attribute_stats": {
+        "score": { "min": 0.1, "max": 1.0, "distinct_count": 250 },
+        "confidence": { "min": 0.3, "max": 0.98, "distinct_count": 180 }
+      },
+      "style": {
+        "z_index": 10,
+        "opacity": { "kind": "static", "value": 0.75 },
+        "classification": {
+          "color": {
+            "mode": "expression",
+            "expr": [
+              "interpolate",
+              ["linear"],
+              ["heatmap-density"],
+              0, "rgba(33, 102, 172, 0)",
+              0.2, "#6baed6",
+              0.4, "#4292c6",
+              0.6, "#2171b5",
+              0.8, "#f7b924",
+              1.0, "#d64d00"
+            ]
+          }
+        },
+        "maplibre_paint_override": {
+          "heatmap-weight": ["interpolate", ["linear"], ["get", "score"], 0, 0, 1, 1],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 5, 1, 15, 3],
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 5, 20, 15, 40]
+        }
+      },
+      "interactions": {
+        "popup_template": {
+          "kind": "handlebars",
+          "body": "<h4>{{predicate}}</h4><p>Score : {{score}} — Confiance : {{confidence}}</p><p>{{source_type}}</p>"
+        },
+        "tooltip_field": "predicate",
+        "hover_attributes": ["predicate", "score", "confidence", "source_type"],
+        "emits_events": true
+      },
+      "extensions": {
+        "x_mobscidat": {
+          "layer_type": "heatmap",
+          "weight_field": "score"
+        }
+      }
+    }
+  ],
+  "extensions": {
+    "x_mobscidat": {
+      "modes": {
+        "search": ["facts_heatmap"],
+        "portrait": []
+      },
+      "default_mode": "search"
+    }
+  }
+}
