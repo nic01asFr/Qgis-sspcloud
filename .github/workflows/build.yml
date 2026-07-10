@@ -31,8 +31,15 @@ jobs:
           context: .
           file: Dockerfile.agent
           push: true
+          # Sprint V0.2 (2026-07-10) : ajout tag :main mobile en parallele
+          # de :latest. Sur certains nodes K8s SSPCloud, le cache local du
+          # tag :latest ne se met pas a jour malgre pullPolicy=Always. Le
+          # tag :main (sur commit main) est immutable par identifiant mais
+          # se rafraichit a chaque push main -> force le re-pull sans avoir
+          # a utiliser le sha long.
           tags: |
             ghcr.io/${{ env.OWNER }}/qgis-agent:latest
+            ghcr.io/${{ env.OWNER }}/qgis-agent:main
             ghcr.io/${{ env.OWNER }}/qgis-agent:${{ github.sha }}
 
       # Smoke test post-build : verifie que les imports critiques ne sont pas
@@ -65,8 +72,11 @@ jobs:
           context: .
           file: Dockerfile.hub
           push: true
+          # Sprint V0.2 (2026-07-10) : voir commentaire build-agent ci-dessus
+          # sur le tag :main mobile qui contourne le cache node :latest.
           tags: |
             ghcr.io/${{ env.OWNER }}/qgis-hub:latest
+            ghcr.io/${{ env.OWNER }}/qgis-hub:main
             ghcr.io/${{ env.OWNER }}/qgis-hub:${{ github.sha }}
 
       - name: Smoke test imports
