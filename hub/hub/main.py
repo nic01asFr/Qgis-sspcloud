@@ -5197,13 +5197,63 @@ async def _build_interactive_map_ctx(
         except Exception as exc:
             log.warning("interactive_map scene_manifest read %s : %s", cid, exc)
     elif layers_inline:
-        # Legacy : layers inline + filter visibility V1.13 si defini
-        filtered = [
-            l for l in layers_inline
-            if layers_override_by_id.get(l.get("id"), {}).get("visible") is not False
-        ]
-        bbox_text = f" — {len(filtered)} couche{'s' if len(filtered) > 1 else ''}"
-        map_layers_js = _json2.dumps(filtered)
+        # Legacy V1.13 : layers inline avec { id, geojson, style, ... }
+        # V0.3.1/V0.3.2 (Sprint V0.2 session finale, 2026-07-11 soir) :
+        # layers avec { id, source: {type: geojson_path, path: ...}, style, ... }
+        # Fetch PVC pour geojson_path + injecte inline (SSR autoportant).
+        # Meme logique pour source.type = geojson_url : laisse le client
+        # fetch (URL publique).
+        processed = []
+        for l in layers_inline:
+            src = l.get("source", {}) or {}
+            src_type = src.get("type")
+            has_inline = l.get("geojson") or (src_type == "geojson" and src.get("data"))
+            # V0.3.1 geojson_path : fetch PVC + inline pour SSR autoportant
+            if not has_inline and src_type == "geojson_path" and src.get("path"):
+                try:
+                    path = src["path"]
+                    # Le path est du type /data/studies/{sid}/scene_store/xxx.geojson
+                    # ou /data/studies/{sid}/components/{cid}/xxx.geojson
+                    fetch_code = (
+                        "from pathlib import Path\n"
+                        "import base64, json\n"
+                        f"p = Path({path!r})\n"
+                        "if p.exists() and p.is_file():\n"
+                        "    data = p.read_bytes()\n"
+                        "    b64 = base64.b64encode(data).decode('ascii')\n"
+                        "    print(f'GEOJSON_PATH_READ_OK b64={b64}')\n"
+                        "else:\n"
+                        "    print('GEOJSON_PATH_NOT_FOUND')\n"
+                    )
+                    gj_out = await _execute_python_in_workspace(username, fetch_code)
+                    if "GEOJSON_PATH_READ_OK" in gj_out:
+                        gj_b64 = gj_out.split("b64=", 1)[1].split()[0].strip()
+                        gj_data = _json2.loads(_b64s.b64decode(gj_b64).decode())
+                        # Injecte au format V1.13 (l.geojson) pour compat
+                        # downstream (classification + template).
+                        l = dict(l)
+                        l["geojson"] = gj_data
+                        # Update aussi source.type=geojson + data pour
+                        # que le shim V0.3.1 cote lib alpha.5+ recoive
+                        # une source inline coherente.
+                        l["source"] = {
+                            "type": "geojson",
+                            "data": gj_data,
+                            "crs": src.get("crs", "EPSG:4326"),
+                        }
+                        log.info("V0.3.1 geojson_path inlined for %s (%s features)",
+                                 l.get("id"),
+                                 len((gj_data or {}).get("features", [])))
+                    else:
+                        log.warning("V0.3.1 geojson_path pas trouve : %s", src.get("path"))
+                except Exception as exc:
+                    log.warning("V0.3.1 geojson_path fetch %s : %s", src.get("path"), exc)
+            # Filter visibility V1.13 si defini
+            if layers_override_by_id.get(l.get("id"), {}).get("visible") is False:
+                continue
+            processed.append(l)
+        bbox_text = f" — {len(processed)} couche{'s' if len(processed) > 1 else ''}"
+        map_layers_js = _json2.dumps(processed)
 
     # ── Vague E2 Commit 5 (D-QGIS-009 §5) — Symbologie thematique ──
     # Si params.classification (global V1.12) ou layer.classification_override
