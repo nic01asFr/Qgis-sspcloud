@@ -231,6 +231,9 @@ function _v031ToLegacyShim(params, hostContext) {
     const catalog = [];
     const overrides = [];
     for (const l of params.layers) {
+      // V0.3.2 alpha.5 : propager source complete pour permettre fetch async
+      // universel (geojson_path, geojson_url, wfs, boundary_admin, grist_table, x_*).
+      // Legacy V1.13 catalog_layers.geojson reste pour compat (source.type='geojson' inline).
       const geojson = l.source && l.source.type === "geojson" ? l.source.data : null;
       const style = l.style || {};
       const interactions = l.interactions || {};
@@ -240,6 +243,7 @@ function _v031ToLegacyShim(params, hostContext) {
         name: l.name,
         geometry_type: l.geometry_type,
         geojson,
+        source_v031: l.source,
         n_features: l.n_features,
         bbox: l.bbox,
         classification: classifShim,
@@ -276,6 +280,108 @@ function _v031ToLegacyShim(params, hostContext) {
   }
 
   return { params: shimParams, hostContext: shimHost };
+}
+
+// V0.3.2 alpha.5 (Sprint V0.2 session finale, 2026-07-11) : resolveur
+// universel des 7 types de source du contract V0.3.2. Retourne une Promise
+// qui resout vers un GeoJSON FeatureCollection utilisable par MapLibre.
+// Pattern async : le layer est ajoute immediatement avec source vide, puis
+// setData appele quand la promise resout. Consequence : la carte s'affiche
+// instantanement (fond + controls), features apparaissent async.
+//
+// Types supportes :
+//   - geojson         → source.data (immediat)
+//   - geojson_path    → fetch(path, {credentials:'include'}) same-origin
+//   - geojson_url     → fetch(url) public sans credentials
+//   - wfs             → construct WFS GetFeature URL + fetch
+//   - boundary_admin  → hostContext.boundary_resolver({catalog_id, filter})
+//   - grist_table     → hostContext.grist_resolver({table, id_field, sync})
+//   - x_<prefix>      → hostContext.custom_resolvers[prefix]
+//   - vector/pmtiles  → PAS gere ici (utiliser addSource type=vector direct)
+async function _fetchSourceData(source, hostContext) {
+  if (!source || !source.type) return { type: "FeatureCollection", features: [] };
+  const t = source.type;
+
+  if (t === "geojson") {
+    if (typeof source.data === "string") {
+      // legacy : data peut etre une URL string
+      const resp = await fetch(source.data);
+      if (!resp.ok) throw new Error(`geojson data fetch failed: ${resp.status}`);
+      return resp.json();
+    }
+    return source.data || { type: "FeatureCollection", features: [] };
+  }
+
+  if (t === "geojson_path") {
+    // Path serveur (PVC hub). Fetch same-origin avec cookies OIDC.
+    const url = source.fetch_url || source.path;
+    const resp = await fetch(url, { credentials: "include" });
+    if (!resp.ok) throw new Error(`geojson_path fetch failed: ${resp.status}`);
+    return resp.json();
+  }
+
+  if (t === "geojson_url") {
+    // URL publique. Fetch sans credentials.
+    const resp = await fetch(source.url);
+    if (!resp.ok) throw new Error(`geojson_url fetch failed: ${resp.status}`);
+    return resp.json();
+  }
+
+  if (t === "wfs") {
+    // Construct GetFeature URL avec parametres par defaut V0.3.2.
+    const p = new URLSearchParams({
+      service: "WFS",
+      version: "2.0.0",
+      request: "GetFeature",
+      typeName: source.type_name,
+      outputFormat: "application/json",
+      srsName: "EPSG:4326",
+    });
+    if (source.max_features) p.set("count", String(source.max_features));
+    if (source.filter_cql) p.set("cql_filter", source.filter_cql);
+    const sep = source.url.includes("?") ? "&" : "?";
+    const resp = await fetch(source.url + sep + p.toString());
+    if (!resp.ok) throw new Error(`wfs fetch failed: ${resp.status}`);
+    return resp.json();
+  }
+
+  if (t === "boundary_admin") {
+    // Delegue au hostContext du consommateur.
+    const resolver = hostContext && hostContext.boundary_resolver;
+    if (typeof resolver !== "function") {
+      throw new Error(
+        "boundary_admin requires hostContext.boundary_resolver(source)"
+      );
+    }
+    return await resolver(source);
+  }
+
+  if (t === "grist_table") {
+    // Delegue au widget Grist parent.
+    const resolver = hostContext && hostContext.grist_resolver;
+    if (typeof resolver !== "function") {
+      throw new Error(
+        "grist_table requires hostContext.grist_resolver(source)"
+      );
+    }
+    return await resolver(source);
+  }
+
+  if (typeof t === "string" && t.startsWith("x_")) {
+    // Extension par-projet.
+    const resolvers = (hostContext && hostContext.custom_resolvers) || {};
+    const resolver = resolvers[t];
+    if (typeof resolver !== "function") {
+      throw new Error(
+        `custom source type '${t}' requires hostContext.custom_resolvers['${t}']`
+      );
+    }
+    return await resolver(source);
+  }
+
+  // Types vector/pmtiles/... : geres directement par MapLibre addSource,
+  // pas via ce resolveur.
+  throw new Error(`_fetchSourceData: type '${t}' non supporte comme geojson`);
 }
 
 // V0.3.1 classification : {color: {mode, field, method, breaks, palette,
@@ -1173,6 +1279,40 @@ export class GeoMap extends HTMLElement {
             type: "geojson",
             data: sceneLayer.geojson || { type: "FeatureCollection", features: [] },
           });
+
+          // V0.3.2 alpha.5 : fetch async des sources non-inline
+          // (geojson_path, geojson_url, wfs, boundary_admin, grist_table, x_*).
+          // La carte s'affiche instantanement, features arrivent async.
+          if (sceneLayer.source_v031
+              && sceneLayer.source_v031.type !== "geojson"
+              && !sceneLayer.geojson) {
+            const hostCtx = this._hostContext || {};
+            _fetchSourceData(sceneLayer.source_v031, hostCtx)
+              .then((geojson) => {
+                const src = this.map.getSource(sourceId);
+                if (src && typeof src.setData === "function") {
+                  src.setData(geojson);
+                }
+                this.dispatchEvent(new CustomEvent("geo:source-loaded", {
+                  detail: {
+                    layerId: sceneLayer.id,
+                    features: (geojson.features || []).length,
+                  },
+                }));
+              })
+              .catch((e) => {
+                console.warn(
+                  "[geo-components] fetch source failed for",
+                  sceneLayer.id, "->", sceneLayer.source_v031, e
+                );
+                this.dispatchEvent(new CustomEvent("geo:source-error", {
+                  detail: {
+                    layerId: sceneLayer.id,
+                    error: String(e).slice(0, 200),
+                  },
+                }));
+              });
+          }
 
           // V0.2.0 Chantier 4 : détection type + auto-split polygon+point
           // Analyse la geojson pour détecter FC hétérogène et éviter le bug
