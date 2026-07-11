@@ -516,6 +516,23 @@ async def _maybe_enrich_with_kb_hint(response: str) -> str:
     return response + hint
 
 
+# Regex compilée une fois — matche les URLs internes retournées par les tools
+# MCP du pod workspace (upload_file, export_pdf, etc.). Capture http://localhost
+# ou http://127.0.0.1 avec port arbitraire, suffixe `/api/files/`. La réécriture
+# les transforme en URL hub publique `{HUB_URL}/files/...` que le navigateur
+# de l'user peut atteindre (proxy hub `/files/{path}` -> service K8s workspace).
+_WORKSPACE_URL_RE = re.compile(r"https?://(?:localhost|127\.0\.0\.1):\d+/api/files/")
+
+
+def _rewrite_workspace_urls(payload: str) -> str:
+    """Remplace toute URL pod-interne `localhost:PORT/api/files/X` par
+    `{HUB_URL}/files/X` (URL publique OIDC-auth). Idempotent. Sans réécriture,
+    l'user clique un lien mort depuis Windows (bug 2026-07-11)."""
+    if not payload:
+        return payload
+    return _WORKSPACE_URL_RE.sub(f"{_HUB_URL}/files/", payload)
+
+
 async def _call_mcp_tool(tool_name: str, arguments: dict, username: str = "user") -> str:
     """Wrapper : appelle _call_mcp_tool_raw + enrichit la réponse via la KB
     qgis_tips si une erreur est détectée (hook auto post-erreur)."""
@@ -905,18 +922,12 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
                                 f"![{tool_name}](data:{mime};base64,{b64})"
                             )
                 joined = "\n".join(p for p in parts if p)
-                # Réécriture des URLs internes au pod workspace → URL hub
-                # publique. Le serveur MCP du workspace ignore qu'il est
-                # derrière un proxy ; il retourne `localhost:8080/api/files/X`
-                # qui n'est joignable que depuis l'intérieur du pod. Le hub
-                # expose `/files/{path}` qui proxy vers le service K8s.
-                joined = re.sub(
-                    r"http://localhost:\d+/api/files/",
-                    f"{_HUB_URL}/files/",
-                    joined,
-                )
-                return joined
-            return json.dumps(result)
+                return _rewrite_workspace_urls(joined)
+            # Branche fallback : `content` vide ou non-liste (certains tools
+            # comme `upload_file` retournent un JSON structuré direct dans
+            # `result`). Sans réécriture ici, l'URL localhost:8080 remontait
+            # nue à l'agent puis au navigateur user -> lien mort.
+            return _rewrite_workspace_urls(json.dumps(result))
     except httpx.TimeoutException as e:
         # Erreur de timeout explicite (au lieu de str(e)="" muet sur certaines
         # exceptions httpx) — l'agent et le détecteur infra peuvent réagir.
