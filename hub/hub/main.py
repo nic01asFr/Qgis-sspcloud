@@ -7679,11 +7679,13 @@ async def serve_published(
         "Content-Security-Policy": (
             "default-src 'self' https://unpkg.com https://tile.openstreetmap.org "
             "https://*.minio.lab.sspcloud.fr; "
-            "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://unpkg.com; "
+            "worker-src 'self' blob:; "
+            "child-src 'self' blob:; "
             "style-src 'self' 'unsafe-inline' https://unpkg.com; "
             "img-src * data: blob:; "
             "connect-src 'self' https://*.minio.lab.sspcloud.fr "
-            "https://tile.openstreetmap.org; "
+            "https://tile.openstreetmap.org https://data.geopf.fr https://wxs.ign.fr; "
             "frame-ancestors *"
         ),
         "X-Content-Type-Options": "nosniff",
