@@ -518,19 +518,33 @@ async def _maybe_enrich_with_kb_hint(response: str) -> str:
 
 # Regex compilée une fois — matche les URLs internes retournées par les tools
 # MCP du pod workspace (upload_file, export_pdf, etc.). Capture http://localhost
-# ou http://127.0.0.1 avec port arbitraire, suffixe `/api/files/`. La réécriture
-# les transforme en URL hub publique `{HUB_URL}/files/...` que le navigateur
-# de l'user peut atteindre (proxy hub `/files/{path}` -> service K8s workspace).
-_WORKSPACE_URL_RE = re.compile(r"https?://(?:localhost|127\.0\.0\.1):\d+/api/files/")
+# ou http://127.0.0.1 avec port arbitraire, suivi de :
+#   - `/api/files/X`  (download exports : PDF, GPKG, etc.)
+#   - `/api/upload`   (endpoint d'upload multipart retourné par upload_file)
+# La réécriture transforme en URL hub publique OIDC-auth :
+#   - `/api/files/X`  -> `{HUB_URL}/files/X`   (proxy hub existant)
+#   - `/api/upload`   -> `{HUB_URL}/api/upload` (proxy hub upload)
+# Sans réécriture, l'user clique un lien mort depuis Windows (bug 2026-07-11).
+_WORKSPACE_URL_RE = re.compile(
+    r"https?://(?:localhost|127\.0\.0\.1):\d+(/api/(?:files/[^\s\"'<>)]+|upload))"
+)
 
 
 def _rewrite_workspace_urls(payload: str) -> str:
-    """Remplace toute URL pod-interne `localhost:PORT/api/files/X` par
-    `{HUB_URL}/files/X` (URL publique OIDC-auth). Idempotent. Sans réécriture,
-    l'user clique un lien mort depuis Windows (bug 2026-07-11)."""
+    """Remplace toute URL pod-interne `localhost:PORT/api/...` par l'URL
+    publique du hub. Deux endpoints ciblés : `/api/files/X` (download) et
+    `/api/upload` (upload multipart). Idempotent."""
     if not payload:
         return payload
-    return _WORKSPACE_URL_RE.sub(f"{_HUB_URL}/files/", payload)
+
+    def _repl(m: "re.Match[str]") -> str:
+        p = m.group(1)  # `/api/files/xxx` ou `/api/upload`
+        if p.startswith("/api/files/"):
+            return f"{_HUB_URL}/files/" + p[len("/api/files/"):]
+        # `/api/upload` -> conserve tel quel, le hub le proxifie
+        return f"{_HUB_URL}{p}"
+
+    return _WORKSPACE_URL_RE.sub(_repl, payload)
 
 
 async def _call_mcp_tool(tool_name: str, arguments: dict, username: str = "user") -> str:

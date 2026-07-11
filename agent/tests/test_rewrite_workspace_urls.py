@@ -67,3 +67,30 @@ def test_pas_de_faux_positif_sur_url_publique():
     out = qgis_agent._rewrite_workspace_urls(payload)
     # data.gouv n'est ni localhost ni 127.0.0.1, ne doit pas etre reecrit
     assert out == payload
+
+
+def test_reecriture_api_upload():
+    # Cas reel upload_file : retourne /api/upload endpoint
+    payload = '{"action":"upload_ready","upload_endpoint":"http://localhost:8080/api/upload","method":"POST"}'
+    out = qgis_agent._rewrite_workspace_urls(payload)
+    assert "localhost:8080" not in out
+    assert "/api/upload" in out
+    assert qgis_agent._HUB_URL + "/api/upload" in out
+
+
+def test_reecriture_mixte_upload_et_files_dans_meme_payload():
+    payload = (
+        "Upload : http://localhost:8080/api/upload\n"
+        "Puis download : http://localhost:8080/api/files/rapport.pdf"
+    )
+    out = qgis_agent._rewrite_workspace_urls(payload)
+    assert "localhost" not in out
+    assert "/api/upload" in out  # upload preserve
+    assert "/files/rapport.pdf" in out  # files rewrite -> /files/
+
+
+def test_pas_de_reecriture_endpoint_inconnu():
+    # Un endpoint pas dans la whitelist ne doit pas etre reecrit
+    payload = "http://localhost:8080/api/random_endpoint"
+    out = qgis_agent._rewrite_workspace_urls(payload)
+    assert out == payload  # pas dans le regex, reste tel quel

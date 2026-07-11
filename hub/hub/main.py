@@ -7919,6 +7919,30 @@ async def get_workspace_file(
     return await _proxy_request(request, target_url, session["id"])
 
 
+# ── Upload de fichiers vers le workspace ─────────────────────────────────────
+# Le tool MCP `upload_file` (appelé sans `url`/`content_base64`) retourne un
+# endpoint `http://localhost:8080/api/upload` pod-interne. L'agent réécrit
+# cette URL en `{HUB_URL}/api/upload` (cf. qgis_agent._rewrite_workspace_urls).
+# Ce endpoint proxifie multipart POST vers le service K8s workspace en
+# préservant l'auth OIDC cookie de l'user.
+
+@app.post("/api/upload")
+async def post_workspace_upload(
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Proxy POST multipart vers `{api_url}/api/upload` du pod workspace."""
+    session = await _get_or_create_session(user["username"])
+    api_url = session.get("api_url")
+    if not api_url:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Workspace pod sans API URL configurée",
+        )
+    target_url = f"{api_url}/api/upload"
+    return await _proxy_request(request, target_url, session["id"])
+
+
 # ── Endpoint MCP principal — auto-session ─────────────────────────────────────
 
 @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "PUT", "PATCH"])
