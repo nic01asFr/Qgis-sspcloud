@@ -184,9 +184,138 @@ function _detectMapLibre() {
   return window.maplibregl || null;
 }
 
+// V0.3.1 shim (Sprint V0.2 Chantier 7, 2026-07-10) : le contract publie
+// SceneManifest V0.3.1 impose params.layers[] + params.basemap.id + zone
+// discriminee (insee_arm/commune/manual/study). Le composant historique
+// (V1.13) lit params.layers_override + _hostContext.catalog_layers +
+// params.basemap_id. Ce shim normalise V0.3.1 vers la structure legacy
+// interne sans casser les consommateurs V1.13.
+const _V031_INSEE_ARM_BBOX = {
+  "13204": [5.379, 43.289, 5.427, 43.334],
+  "13201": [5.360, 43.294, 5.394, 43.309],
+  "13202": [5.363, 43.309, 5.393, 43.328],
+  "13203": [5.374, 43.311, 5.408, 43.335],
+  "75104": [2.348, 48.851, 2.365, 48.862],
+  "75105": [2.336, 48.840, 2.362, 48.856],
+  "69381": [4.827, 45.766, 4.848, 45.780]
+};
+
+function _v031ToLegacyShim(params, hostContext) {
+  if (!params || typeof params !== "object") return { params, hostContext };
+  const isV031 = params.manifest_version === "0.3.1" || Array.isArray(params.layers);
+  if (!isV031) return { params, hostContext };
+
+  const shimParams = { ...params };
+  const shimHost = { ...(hostContext || {}) };
+
+  // basemap.id -> basemap_id
+  if (params.basemap && params.basemap.id && !shimParams.basemap_id) {
+    shimParams.basemap_id = params.basemap.id;
+  }
+
+  // zone.insee_arm / zone.commune -> hostContext.commune_bbox (fallback bbox table)
+  if (params.zone && (params.zone.kind === "insee_arm" || params.zone.kind === "commune")) {
+    const bbox = _V031_INSEE_ARM_BBOX[params.zone.insee];
+    if (bbox && !shimHost.commune_bbox) {
+      shimHost.commune_bbox = bbox;
+    }
+  }
+
+  // zone.kind bbox custom : mapper en manual
+  if (params.zone && params.zone.bbox && !params.zone.kind) {
+    shimParams.zone = { ...params.zone, kind: "manual" };
+  }
+
+  // layers[] V0.3.1 -> catalog_layers[] + layers_override[]
+  if (Array.isArray(params.layers) && !shimHost.catalog_layers && !shimParams._catalog_layers) {
+    const catalog = [];
+    const overrides = [];
+    for (const l of params.layers) {
+      const geojson = l.source && l.source.type === "geojson" ? l.source.data : null;
+      const style = l.style || {};
+      const interactions = l.interactions || {};
+      const classifShim = _v031ClassificationShim(style.classification);
+      catalog.push({
+        id: l.id,
+        name: l.name,
+        geometry_type: l.geometry_type,
+        geojson,
+        n_features: l.n_features,
+        bbox: l.bbox,
+        classification: classifShim,
+        outline: style.outline,
+        hollow_point: style.hollow_point
+      });
+      // V0.3.1 opacity.reactive (Sprint V0.2 alpha.4, 2026-07-10) : preserver
+      // la config fade progressif pour applyBinding("time") au lieu du filter
+      // binaire hide/show historique.
+      const opacityStatic = typeof style.opacity === "object"
+        ? (style.opacity.kind === "static" ? style.opacity.value : undefined)
+        : style.opacity;
+      const opacityReactive = (typeof style.opacity === "object"
+                               && style.opacity.kind === "reactive")
+        ? style.opacity
+        : null;
+      overrides.push({
+        layer_id_ref: l.id,
+        visible: style.visible !== false,
+        z_index: style.z_index,
+        opacity: opacityStatic,
+        opacity_reactive: opacityReactive,
+        classification: classifShim,
+        outline: style.outline,
+        hollow_point: style.hollow_point,
+        popup_template: interactions.popup_template,
+        tooltip_field: interactions.tooltip_field,
+        hover_attributes: interactions.hover_attributes,
+        name_override: l.name
+      });
+    }
+    shimHost.catalog_layers = catalog;
+    shimParams.layers_override = [...(params.layers_override || []), ...overrides];
+  }
+
+  return { params: shimParams, hostContext: shimHost };
+}
+
+// V0.3.1 classification : {color: {mode, field, method, breaks, palette,
+// _compiled_expression}, size, label} -> {paint_expression, method, field, ...}
+// attendus par _paintForClassification (V1.13).
+function _v031ClassificationShim(classif) {
+  if (!classif) return null;
+  // Deja au format V1.13 (paint_expression direct) -> passthrough
+  if (classif.paint_expression) return classif;
+  // V0.3.1 nested {color: {...}}
+  const color = classif.color || classif;
+  if (!color || !color.mode) return classif;
+  const out = {
+    method: color.method || color.mode,
+    field: color.field
+  };
+  // Priorite : expression MapLibre pre-compilee dans _compiled_expression
+  if (Array.isArray(color._compiled_expression)) {
+    out.paint_expression = color._compiled_expression;
+  } else if (color.mode === "single" && color.value) {
+    out.paint_expression = color.value;
+  } else if (color.mode === "expression" && Array.isArray(color.expression)) {
+    out.paint_expression = color.expression;
+  }
+  return out;
+}
+
+// V0.3.1 alpha.4 : normalise une position (top-left/bottom-right/...) vers
+// les 4 positions acceptees par MapLibre. Fallback sur defaut si absente ou
+// invalide (avoid warning MapLibre "Position undefined").
+function _mlPosition(pos, fallback) {
+  const valid = ["top-left", "top-right", "bottom-left", "bottom-right"];
+  if (typeof pos === "string" && valid.includes(pos)) return pos;
+  return fallback;
+}
+
 /**
  * Résout la zone d'étude en {center, zoom, bbox} exploitables par MapLibre.
  * Supporte les 3 modes du contrat V1.13 : commune | manual | study.
+ * V0.3.1 : accepte aussi kind='insee_arm' via le shim _v031ToLegacyShim.
  * Pour "commune" et "study", nécessite une résolution externe (fournie via
  * config.resolveZone) sinon fallback sur defaults.
  */
@@ -214,7 +343,7 @@ function _resolveZone(zoneConfig, hostContext) {
     };
   }
 
-  if (kind === "commune" && hostContext?.commune_bbox) {
+  if ((kind === "commune" || kind === "insee_arm") && hostContext?.commune_bbox) {
     const [w, s, e, n] = hostContext.commune_bbox;
     return {
       center: [(w + e) / 2, (s + n) / 2],
@@ -230,12 +359,90 @@ function _resolveZone(zoneConfig, hostContext) {
 /**
  * Détecte le type de géométrie GeoJSON (point/line/fill) pour ajouter la
  * bonne layer MapLibre par défaut si aucune classification n'est fournie.
+ *
+ * V0.2.0 (Chantier 4 Sprint V0.2, 2026-07-10) : ajoute sniff de la geojson
+ * si geometry_type non fourni. Fix bug POINT rendering remonté par
+ * cerema-livrables (points rendus en fill invisibles avant fix).
  */
-function _detectGeomType(geometryTypeHint) {
+function _detectGeomType(geometryTypeHint, geojson) {
   const h = (geometryTypeHint || "").toLowerCase();
   if (h.includes("point")) return "point";
   if (h.includes("line") || h.includes("linestring")) return "line";
+  if (h.includes("polygon")) return "fill";
+  // Sniff depuis geojson si pas de hint typé
+  if (geojson && Array.isArray(geojson.features) && geojson.features.length > 0) {
+    const firstGeom = geojson.features[0].geometry;
+    if (firstGeom && typeof firstGeom.type === "string") {
+      const g = firstGeom.type.toLowerCase();
+      if (g.includes("point")) return "point";
+      if (g.includes("line")) return "line";
+      if (g.includes("polygon")) return "fill";
+    }
+  }
   return "fill";
+}
+
+/**
+ * V0.2.0 (Chantier 4) : détecte si une FeatureCollection est hétérogène
+ * (mélange de polygones et de points). Utile pour auto-splitter en 2 layers
+ * MapLibre distincts (fix bug Livrables).
+ * Retourne { hasPolygon, hasPoint, hasLine, isMixed }.
+ */
+function _analyzeGeojson(geojson) {
+  const result = { hasPolygon: false, hasPoint: false, hasLine: false, isMixed: false };
+  if (!geojson || !Array.isArray(geojson.features)) return result;
+  for (const f of geojson.features) {
+    const t = (f.geometry && f.geometry.type || "").toLowerCase();
+    if (t.includes("polygon")) result.hasPolygon = true;
+    else if (t.includes("point")) result.hasPoint = true;
+    else if (t.includes("line")) result.hasLine = true;
+    if ((result.hasPolygon + result.hasPoint + result.hasLine) > 1) {
+      result.isMixed = true;
+    }
+  }
+  return result;
+}
+
+/**
+ * V0.2.0 (Chantier 4) : construit un layer 'line' outline dérivé du même
+ * source (pattern outline déclaratif V0.3.1 style.outline).
+ * Absorbe le workaround Livrables (LLINE ajouté impératif après geo:map-ready).
+ */
+function _buildOutlineLayer(baseLayerId, sourceId, outlineConfig, opacity) {
+  return {
+    id: baseLayerId + "-outline",
+    type: "line",
+    source: sourceId,
+    paint: {
+      "line-color": outlineConfig.color || "#000091",
+      "line-width": outlineConfig.width ?? 1,
+      "line-opacity": (opacity ?? 1) * 0.9,
+    },
+  };
+}
+
+/**
+ * V0.2.0 (Chantier 4) : construit un layer 'circle' point creux (pattern
+ * V0.3.1 style.hollow_point). Absorbe le workaround Livrables (addPoints
+ * impératif avec stroke coloré par field).
+ */
+function _buildHollowPointLayer(baseLayerId, sourceId, hollowConfig, themedColor, opacity) {
+  const radius = hollowConfig.radius ?? 7;
+  const strokeField = hollowConfig.stroke_color_from_field;
+  return {
+    id: baseLayerId,
+    type: "circle",
+    source: sourceId,
+    paint: {
+      "circle-radius": radius,
+      "circle-color": "rgba(148,163,184,0.15)",
+      "circle-stroke-width": 2,
+      "circle-stroke-color": strokeField
+        ? ["get", strokeField]
+        : (themedColor || "#000091"),
+      "circle-opacity": (opacity ?? 1) * 0.9,
+    },
+  };
 }
 
 /**
@@ -884,6 +1091,12 @@ export class GeoMap extends HTMLElement {
   }
 
   _initMap(ml, container, params) {
+    // V0.3.1 shim (Chantier 7) : normalise SceneManifest V0.3.1 vers la
+    // structure interne V1.13 attendue par le reste du _initMap.
+    const shim = _v031ToLegacyShim(params, this._hostContext);
+    params = shim.params;
+    this._hostContext = shim.hostContext;
+
     // Résolution zone
     const zone = _resolveZone(params.zone, this._hostContext);
 
@@ -897,13 +1110,37 @@ export class GeoMap extends HTMLElement {
       center: zone.center,
       zoom: zone.zoom,
     });
-    this.map.addControl(new ml.NavigationControl({ showCompass: false }), "top-left");
+
+    // V0.3.1 alpha.4 : declaratifs params.scalebar / params.north_arrow.
+    // Sans north_arrow declare, on garde le comportement historique
+    // NavigationControl sans compass. Avec, on affiche compass a la position
+    // demandee. scalebar => ScaleControl natif MapLibre a la position/unit.
+    const northCfg = params.north_arrow;
+    const scaleCfg = params.scalebar;
+    const showCompass = !!northCfg;
+    const northPos = northCfg && northCfg.position ? northCfg.position : "top-left";
+    this.map.addControl(
+      new ml.NavigationControl({ showCompass, visualizePitch: showCompass }),
+      _mlPosition(northPos, "top-left"),
+    );
+    if (scaleCfg) {
+      const unit = scaleCfg.unit === "imperial" ? "imperial" : "metric";
+      const scalePos = _mlPosition(scaleCfg.position, "bottom-right");
+      this.map.addControl(
+        new ml.ScaleControl({ maxWidth: 120, unit }),
+        scalePos,
+      );
+    }
 
     const layersOverride = params.layers_override || [];
     const catalogLayers =
       this._hostContext.catalog_layers || params._catalog_layers || [];
 
     this._layerIds = [];
+    // V0.3.1 (Sprint V0.2 alpha.4) : cache config opacity.reactive par layerId
+    // pour permettre au binding 'time' de faire un fade progressif au lieu
+    // d'un setFilter binaire hide/show. Cle = layer id MapLibre applique.
+    this._reactiveOpacity = {};
 
     // P2 contract-drift V1.13 (review 2026-07-08) : respecter LayerOverride.z_index.
     // Le contrat V1.13 declare z_index (int) pour reordonner les layers a
@@ -936,12 +1173,83 @@ export class GeoMap extends HTMLElement {
             type: "geojson",
             data: sceneLayer.geojson || { type: "FeatureCollection", features: [] },
           });
-          const layerDef = _buildMapLibreLayer(sceneLayer, override, i);
-          this.map.addLayer(layerDef);
-          this._layerIds.push(layerDef.id);
 
-          // Interactions : hover / popup
-          this._wireInteractions(ml, layerDef.id, sceneLayer, override);
+          // V0.2.0 Chantier 4 : détection type + auto-split polygon+point
+          // Analyse la geojson pour détecter FC hétérogène et éviter le bug
+          // POINT invisibles (remontée cerema-livrables).
+          const analysis = _analyzeGeojson(sceneLayer.geojson);
+          const isMixedFC = analysis.isMixed && analysis.hasPolygon && analysis.hasPoint;
+
+          if (isMixedFC) {
+            // FC mixte polygone+point : rendre 2 layers distincts sur même source
+            // - un layer 'fill' avec filter Polygon
+            // - un layer 'circle' avec filter Point
+            const fillLayer = _buildMapLibreLayer(
+              { ...sceneLayer, geometry_type: "polygon" },
+              override, i
+            );
+            fillLayer.filter = ["match", ["geometry-type"], ["Polygon", "MultiPolygon"], true, false];
+            this.map.addLayer(fillLayer);
+            this._layerIds.push(fillLayer.id);
+            this._wireInteractions(ml, fillLayer.id, sceneLayer, override);
+
+            const pointLayer = _buildMapLibreLayer(
+              { ...sceneLayer, geometry_type: "point", id: sceneLayer.id + "-pt" },
+              override, i
+            );
+            pointLayer.filter = ["match", ["geometry-type"], ["Point", "MultiPoint"], true, false];
+            this.map.addLayer(pointLayer);
+            this._layerIds.push(pointLayer.id);
+            this._wireInteractions(ml, pointLayer.id, sceneLayer, override);
+          } else {
+            // Cas standard : 1 seul layer, avec hollow_point si demandé
+            let layerDef;
+            const styleOverride = override || {};
+            if (
+              styleOverride.hollow_point &&
+              styleOverride.hollow_point.enabled &&
+              (_detectGeomType(sceneLayer.geometry_type, sceneLayer.geojson) === "point")
+            ) {
+              // V0.3.1 style.hollow_point : construction directe du circle creux
+              const fallbackColor = DEFAULT_PALETTE[i % DEFAULT_PALETTE.length];
+              const classif = (override && override.classification) || sceneLayer.classification;
+              const themedColor = _paintForClassification(classif, fallbackColor);
+              const opacity = override?.opacity ?? 1.0;
+              layerDef = _buildHollowPointLayer(
+                "gc-lyr-" + safeId, sourceId,
+                styleOverride.hollow_point,
+                themedColor, opacity
+              );
+            } else {
+              layerDef = _buildMapLibreLayer(sceneLayer, override, i);
+            }
+            this.map.addLayer(layerDef);
+            this._layerIds.push(layerDef.id);
+
+            // V0.3.1 alpha.4 : memoriser config opacity.reactive pour fade
+            // progressif via applyBinding('time').
+            if (styleOverride.opacity_reactive) {
+              this._reactiveOpacity[layerDef.id] = styleOverride.opacity_reactive;
+            }
+
+            // V0.3.1 style.outline : ajout automatique layer 'line' sur même source
+            if (
+              styleOverride.outline &&
+              styleOverride.outline.enabled &&
+              (layerDef.type === "fill" || layerDef.type === "fill-extrusion")
+            ) {
+              const opacity = override?.opacity ?? 1.0;
+              const outlineLayer = _buildOutlineLayer(
+                layerDef.id, sourceId,
+                styleOverride.outline, opacity
+              );
+              this.map.addLayer(outlineLayer);
+              this._layerIds.push(outlineLayer.id);
+            }
+
+            // Interactions : hover / popup
+            this._wireInteractions(ml, layerDef.id, sceneLayer, override);
+          }
         } catch (e) {
           console.warn(
             "[geo-components] addLayer failed for",
@@ -950,6 +1258,19 @@ export class GeoMap extends HTMLElement {
           );
         }
       });
+
+      // V0.3.1 alpha.4 : legend.mode='auto' + from_layer -> derive chips
+      // depuis classification._compiled_expression du layer designe et
+      // injecte une <geo-legend> auto-generee dans le shadow DOM du <geo-map>.
+      const legendCfg = params.legend;
+      if (legendCfg && (legendCfg.mode === "auto" || legendCfg.items)) {
+        const items = Array.isArray(legendCfg.items)
+          ? legendCfg.items
+          : this._autoLegendItems(legendCfg, catalogLayers, orderedLayers);
+        if (items && items.length) {
+          this._injectLegend(legendCfg, items);
+        }
+      }
 
       // fitBounds auto sur zone.bbox ou premier layer avec features
       if (zone.bbox) {
@@ -1120,6 +1441,89 @@ export class GeoMap extends HTMLElement {
   /**
    * Point d'entrée de l'orchestrateur bindings. Applique un binding reçu.
    */
+  // V0.3.1 alpha.4 : derive items de legende auto depuis
+  // classification._compiled_expression du layer from_layer.
+  _autoLegendItems(legendCfg, catalogLayers, orderedLayers) {
+    const fromId = legendCfg.from_layer;
+    if (!fromId) return null;
+    const target = orderedLayers.find(o => o.scene && o.scene.id === fromId);
+    if (!target) return null;
+    const classif = (target.override && target.override.classification)
+                    || target.scene.classification;
+    if (!classif) return null;
+    // Support 2 formats : V1.13 paint_expression direct, ou V0.3.1 shimme
+    const expr = classif.paint_expression;
+    if (!Array.isArray(expr) || expr.length < 3) return null;
+    const items = [];
+    if (expr[0] === "step") {
+      // ["step", ["get", field], color0, threshold1, color1, threshold2, color2, ...]
+      const firstColor = expr[2];
+      items.push({ label: "avant " + expr[3], color: firstColor });
+      for (let i = 3; i + 1 < expr.length; i += 2) {
+        const thr = expr[i];
+        const col = expr[i + 1];
+        const next = expr[i + 2];
+        const label = (i + 2 < expr.length)
+          ? thr + "-" + next
+          : "≥ " + thr;
+        items.push({ label, color: col });
+      }
+    } else if (expr[0] === "match") {
+      // ["match", ["get", field], v1, c1, v2, c2, ..., fallback]
+      for (let i = 2; i + 1 < expr.length; i += 2) {
+        items.push({ label: String(expr[i]), color: expr[i + 1] });
+      }
+    }
+    return items;
+  }
+
+  // V0.3.1 alpha.4 : injecte une legende auto-generee dans le shadow DOM.
+  // Utilise le meme rendering que <geo-legend> mais integre inline.
+  _injectLegend(legendCfg, items) {
+    const shadow = this.shadowRoot;
+    if (!shadow) return;
+    const pos = legendCfg.position || "bottom-left";
+    const title = legendCfg.title || "Légende";
+    const wrap = document.createElement("div");
+    wrap.className = "gc-legend";
+    const posStyles = {
+      "top-left":     "top:8px;left:8px;",
+      "top-right":    "top:8px;right:8px;",
+      "bottom-left":  "bottom:8px;left:8px;",
+      "bottom-right": "bottom:44px;right:8px;",
+    };
+    const styleAttr = posStyles[pos] || posStyles["bottom-left"];
+    wrap.setAttribute("style",
+      "position:absolute;" + styleAttr +
+      "background:rgba(255,255,255,0.94);padding:8px 12px;border-radius:4px;" +
+      "box-shadow:0 1px 4px rgba(0,0,0,0.15);font-family:Marianne,system-ui,sans-serif;" +
+      "font-size:11px;color:#333;z-index:5;max-width:260px;"
+    );
+    const t = document.createElement("div");
+    t.setAttribute("style",
+      "color:#000091;text-transform:uppercase;font-size:10px;letter-spacing:0.5px;" +
+      "font-weight:700;margin-bottom:6px;");
+    t.textContent = title;
+    wrap.appendChild(t);
+    for (const it of items) {
+      const chip = document.createElement("div");
+      chip.setAttribute("style",
+        "display:flex;align-items:center;gap:6px;margin:2px 0;");
+      const sw = document.createElement("span");
+      sw.setAttribute("style",
+        "width:14px;height:10px;background:" + it.color + ";" +
+        "border:1px solid rgba(0,0,0,0.15);border-radius:2px;flex-shrink:0;");
+      chip.appendChild(sw);
+      const lbl = document.createElement("span");
+      lbl.textContent = it.label;
+      chip.appendChild(lbl);
+      wrap.appendChild(chip);
+    }
+    // Injecter dans .gc-map pour que la legende suive la carte
+    const mapDiv = shadow.querySelector(".gc-map");
+    if (mapDiv) mapDiv.appendChild(wrap);
+  }
+
   applyBinding(detail) {
     const { prop, value } = detail || {};
     if (!this.map || !prop) return;
@@ -1127,11 +1531,47 @@ export class GeoMap extends HTMLElement {
 
     switch (prop) {
       case "time": {
-        // Filtre temporel : ['<=', ['get', 'annee'], year]
+        // V0.3.1 alpha.4 : si le layer a opacity.reactive prop=time, on
+        // applique un fade progressif (matched/before/after/null_value)
+        // au lieu du filter binaire hide/show V1.13.
         const year = _asYear(value);
-        if (year != null && primaryLayer) {
-          const timeField = detail.field || "annee";
-          this.map.setFilter(primaryLayer, ["<=", ["get", timeField], year]);
+        if (year == null || !primaryLayer) break;
+        const timeField = detail.field || "annee";
+
+        for (const lid of this._layerIds) {
+          const cfg = this._reactiveOpacity[lid];
+          if (cfg && cfg.prop === "time") {
+            // Fade progressif : expression case selon (field vs value)
+            const field = cfg.field || timeField;
+            const matched = cfg.matched ?? 0.85;
+            const before = cfg.before ?? 0.85;
+            const after = cfg.after ?? 0.12;
+            const nullValue = cfg.null_value ?? 0.35;
+            const expr = [
+              "case",
+              ["==", ["typeof", ["get", field]], "null"], nullValue,
+              ["<", ["to-number", ["get", field]], year], before,
+              [">", ["to-number", ["get", field]], year], after,
+              matched,
+            ];
+            const layer = this.map.getLayer(lid);
+            if (!layer) continue;
+            const paintKey =
+              layer.type === "fill" ? "fill-opacity" :
+              layer.type === "line" ? "line-opacity" :
+              layer.type === "circle" ? "circle-opacity" :
+              layer.type === "fill-extrusion" ? "fill-extrusion-opacity" :
+              null;
+            if (paintKey) {
+              try { this.map.setPaintProperty(lid, paintKey, expr); }
+              catch (e) { /* pas critique */ }
+            }
+          } else if (lid === primaryLayer) {
+            // Fallback V1.13 : filter binaire sur le layer primaire
+            try {
+              this.map.setFilter(lid, ["<=", ["get", timeField], year]);
+            } catch (e) { /* ignore */ }
+          }
         }
         break;
       }
