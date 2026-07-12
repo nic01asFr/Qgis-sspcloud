@@ -41,7 +41,7 @@
 // ──────────────────────────────────────────────────────────────────────────
 
 /** Version de la lib. */
-export const LIB_VERSION = "0.1.0-alpha.1";
+export const LIB_VERSION = "0.2.0-alpha.6";
 
 /**
  * Catalogue des 6 basemaps du contrat InteractiveMapParams V1.13.
@@ -202,7 +202,15 @@ const _V031_INSEE_ARM_BBOX = {
 
 function _v031ToLegacyShim(params, hostContext) {
   if (!params || typeof params !== "object") return { params, hostContext };
-  const isV031 = params.manifest_version === "0.3.1" || Array.isArray(params.layers);
+  // alpha.6 : detecter aussi _catalog_layers injecte direct par le partial
+  // Jinja V2 (hub qgis-sspcloud) avec entrees V0.3.1 (presence de style
+  // object dans au moins une entree). Sans cela, le shim court-circuitait
+  // les entrees direct-injected -> classification/opacity/outline ignores.
+  const catalogInjectedV031 = Array.isArray(params._catalog_layers)
+    && params._catalog_layers.some(l => l && typeof l.style === "object" && l.style !== null);
+  const isV031 = params.manifest_version === "0.3.1"
+    || Array.isArray(params.layers)
+    || catalogInjectedV031;
   if (!isV031) return { params, hostContext };
 
   const shimParams = { ...params };
@@ -231,55 +239,101 @@ function _v031ToLegacyShim(params, hostContext) {
     const catalog = [];
     const overrides = [];
     for (const l of params.layers) {
-      // V0.3.2 alpha.5 : propager source complete pour permettre fetch async
-      // universel (geojson_path, geojson_url, wfs, boundary_admin, grist_table, x_*).
-      // Legacy V1.13 catalog_layers.geojson reste pour compat (source.type='geojson' inline).
-      const geojson = l.source && l.source.type === "geojson" ? l.source.data : null;
-      const style = l.style || {};
-      const interactions = l.interactions || {};
-      const classifShim = _v031ClassificationShim(style.classification);
-      catalog.push({
-        id: l.id,
-        name: l.name,
-        geometry_type: l.geometry_type,
-        geojson,
-        source_v031: l.source,
-        n_features: l.n_features,
-        bbox: l.bbox,
-        classification: classifShim,
-        outline: style.outline,
-        hollow_point: style.hollow_point
-      });
-      // V0.3.1 opacity.reactive (Sprint V0.2 alpha.4, 2026-07-10) : preserver
-      // la config fade progressif pour applyBinding("time") au lieu du filter
-      // binaire hide/show historique.
-      const opacityStatic = typeof style.opacity === "object"
-        ? (style.opacity.kind === "static" ? style.opacity.value : undefined)
-        : style.opacity;
-      const opacityReactive = (typeof style.opacity === "object"
-                               && style.opacity.kind === "reactive")
-        ? style.opacity
-        : null;
-      overrides.push({
-        layer_id_ref: l.id,
-        visible: style.visible !== false,
-        z_index: style.z_index,
-        opacity: opacityStatic,
-        opacity_reactive: opacityReactive,
-        classification: classifShim,
-        outline: style.outline,
-        hollow_point: style.hollow_point,
-        popup_template: interactions.popup_template,
-        tooltip_field: interactions.tooltip_field,
-        hover_attributes: interactions.hover_attributes,
-        name_override: l.name
-      });
+      const { catalogEntry, override } = _v031ItemToLegacy(l);
+      catalog.push(catalogEntry);
+      overrides.push(override);
     }
     shimHost.catalog_layers = catalog;
     shimParams.layers_override = [...(params.layers_override || []), ...overrides];
   }
 
+  // alpha.6 (Sprint V0.2, 2026-07-12) : quand le hub injecte _catalog_layers
+  // directement (partial V2 `_interactive_map_partial_v2.j2`), le shim ci-dessus
+  // court-circuite car aucun `params.layers`. Mais les entrees V0.3.1 conservent
+  // leur `style.classification` / `style.opacity.reactive` / `style.outline` qui
+  // ne sont PAS lus par `_buildMapLibreLayer` -> tout tombe sur bleu Marianne uni,
+  // sans classification thematique, sans timeline reactive, sans outline.
+  // On normalise chaque entree V0.3.1 vers le format catalog + on genere
+  // layers_override en parallele. Detection : entree qui a un `style` object.
+  const cat = shimParams._catalog_layers;
+  if (Array.isArray(cat)
+      && cat.length
+      && cat.some(l => l && typeof l.style === "object" && l.style !== null)) {
+    const normalizedCatalog = [];
+    const derivedOverrides = [];
+    for (const l of cat) {
+      // Si l'entree est deja au format legacy (pas de style object), on la
+      // garde telle quelle pour compat retro (Grist widget qui a deja shime).
+      if (!l || typeof l.style !== "object" || l.style === null) {
+        normalizedCatalog.push(l);
+        continue;
+      }
+      const { catalogEntry, override } = _v031ItemToLegacy(l);
+      normalizedCatalog.push(catalogEntry);
+      derivedOverrides.push(override);
+    }
+    shimParams._catalog_layers = normalizedCatalog;
+    // Si params.layers_override deja rempli (V1.13 ou boucle precedente),
+    // on merge sans doublon par layer_id_ref (existing prioritaire).
+    const existing = shimParams.layers_override || [];
+    const existingIds = new Set(existing.map(o => o.layer_id_ref));
+    const merged = existing.concat(
+      derivedOverrides.filter(o => !existingIds.has(o.layer_id_ref))
+    );
+    shimParams.layers_override = merged;
+  }
+
   return { params: shimParams, hostContext: shimHost };
+}
+
+// alpha.6 : extrait d'une entree V0.3.1 layer -> {catalogEntry, override}
+// legacy. Factorise pour etre reutilisable depuis les 2 chemins d'entree
+// du shim (params.layers direct et _catalog_layers injecte).
+function _v031ItemToLegacy(l) {
+  // V0.3.2 alpha.5 : propager source complete pour permettre fetch async
+  // universel (geojson_path, geojson_url, wfs, boundary_admin, grist_table, x_*).
+  // Legacy V1.13 catalog_layers.geojson reste pour compat (source.type='geojson' inline).
+  const geojson = (l.geojson)
+    || (l.source && l.source.type === "geojson" ? l.source.data : null);
+  const style = l.style || {};
+  const interactions = l.interactions || {};
+  const classifShim = _v031ClassificationShim(style.classification);
+  const catalogEntry = {
+    id: l.id,
+    name: l.name,
+    geometry_type: l.geometry_type,
+    geojson,
+    source_v031: l.source,
+    n_features: l.n_features,
+    bbox: l.bbox,
+    classification: classifShim,
+    outline: style.outline,
+    hollow_point: style.hollow_point
+  };
+  // V0.3.1 opacity.reactive : preserver la config fade progressif pour
+  // applyBinding("time") au lieu du filter binaire hide/show historique.
+  const opacityStatic = typeof style.opacity === "object"
+    ? (style.opacity.kind === "static" ? style.opacity.value : undefined)
+    : style.opacity;
+  const opacityReactive = (typeof style.opacity === "object"
+                           && style.opacity.kind === "reactive")
+    ? style.opacity
+    : null;
+  const override = {
+    layer_id_ref: l.id,
+    visible: style.visible !== false,
+    z_index: style.z_index,
+    opacity: opacityStatic,
+    opacity_reactive: opacityReactive,
+    classification: classifShim,
+    outline: style.outline,
+    hollow_point: style.hollow_point,
+    popup_template: interactions.popup_template,
+    tooltip_field: interactions.tooltip_field,
+    hover_attributes: interactions.hover_attributes,
+    name_override: l.name
+  };
+  return { catalogEntry, override };
 }
 
 // V0.3.2 alpha.5 (Sprint V0.2 session finale, 2026-07-11) : resolveur
