@@ -78,13 +78,17 @@
             "palette": "ColorBrewer.PRGn.6",
             "default": "#9e9e9e",
             "_compiled_expression": [
-              "step",
-              ["get", "date_d_apparition"],
-              "#7b3294",
-              1900, "#c2a5cf",
-              1945, "#f7f7f7",
-              1975, "#a6dba0",
-              2000, "#008837"
+              "case",
+              ["==", ["get", "date_d_apparition"], null], "#9e9e9e",
+              [
+                "step",
+                ["to-number", ["slice", ["to-string", ["get", "date_d_apparition"]], 0, 4]],
+                "#7b3294",
+                1900, "#c2a5cf",
+                1945, "#f7f7f7",
+                1975, "#a6dba0",
+                2000, "#008837"
+              ]
             ]
           },
           "size": { "mode": "single", "value": 8 },
