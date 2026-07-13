@@ -1,0 +1,181 @@
+/*
+ * Recipe gallery — chantier G4-b-3c
+ * Galerie de recettes web SSR affichee dans la section RECETTES du desk.
+ * Palette DSFR (bleu Marianne #000091, blanc, gris #f6f6f6, bordure #e5e5e5).
+ * Aucun import externe : polices heritees du desk parent (Marianne DSFR).
+ *
+ * Structure :
+ *   .rct-gallery
+ *     .rct-gallery-header   (titre + compteur)
+ *     .rct-cards            (liste des cards, flex column ; responsive grid)
+ *       .rct-card           (une recipe cliquable — <a href="/desk?session=...">)
+ *         .rct-card-title
+ *         .rct-card-desc
+ *         .rct-card-meta    (badge source + auteur)
+ *         .rct-card-cta     (bouton "Executer")
+ */
+
+.rct-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 4px;
+}
+
+.rct-gallery-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 4px;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.rct-gallery-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #161616;
+  flex: 1;
+}
+
+.rct-count {
+  font-size: 11px;
+  color: #666;
+  background: #f6f6f6;
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
+  padding: 1px 8px;
+  font-weight: 600;
+}
+
+.rct-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* La card entiere est un lien : reset des styles par defaut du navigateur. */
+.rct-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s ease, transform 0.12s ease,
+              box-shadow 0.12s ease;
+}
+
+.rct-card:hover,
+.rct-card:focus-visible {
+  border-color: #000091;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(0, 0, 145, 0.12);
+  outline: none;
+}
+
+.rct-card:focus-visible {
+  outline: 2px solid #000091;
+  outline-offset: 2px;
+}
+
+.rct-card-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #000091;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.rct-card-desc {
+  font-size: 11px;
+  color: #3a3a3a;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.rct-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: #666;
+  margin-top: 2px;
+}
+
+/* Badge de source : bleu clair pour les recipes livrees, orange pour user. */
+.rct-source {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.rct-card[data-source="example"] .rct-source {
+  background: #e3e3fd;
+  color: #000091;
+}
+
+.rct-card[data-source="user"] .rct-source {
+  background: #ffe7d6;
+  color: #d64d00;
+}
+
+.rct-author {
+  color: #666;
+  font-style: italic;
+}
+
+.rct-card-cta {
+  font-size: 10.5px;
+  color: #000091;
+  font-weight: 600;
+  text-align: right;
+  margin-top: 2px;
+  opacity: 0.75;
+  transition: opacity 0.12s ease;
+}
+
+.rct-card:hover .rct-card-cta,
+.rct-card:focus-visible .rct-card-cta {
+  opacity: 1;
+}
+
+.rct-empty {
+  font-size: 11px;
+  color: #666;
+  font-style: italic;
+  padding: 12px 8px;
+  text-align: center;
+  background: #f6f6f6;
+  border: 1px dashed #e5e5e5;
+  border-radius: 4px;
+  margin: 0;
+}
+
+/* Responsive : sur petit ecran (<=600px), on garde la colonne (deja col). */
+@media (max-width: 600px) {
+  .rct-cards {
+    gap: 8px;
+  }
+
+  .rct-card {
+    padding: 10px 12px;
+  }
+}
