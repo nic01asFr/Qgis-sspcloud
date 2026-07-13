@@ -895,6 +895,12 @@ _OIDC_MIDDLEWARE_INTER_POD = (
     # SSE (`event: recipe_error`) et l'user voit un livrable qui ne s'execute
     # jamais. GET /api/recipes-web/list est aussi couvert.
     "/api/recipes-web",
+    # Chantier G5 / G7 (Sprint V0.3) : endpoints bibliotheque briques.
+    # briques_client (G7) + briques_enricher (G6) appellent GET /briques/*
+    # avec Bearer HUB_API_KEY pour composer les sections GLOBAL_RULES +
+    # FORBIDDEN du prompt structure. Sans whitelist -> 401 silencieux
+    # -> prompt LLM sans briques -> anti-hallucination cassee.
+    "/briques",
     # NB : /published a ete deplace dans _OIDC_MIDDLEWARE_PUBLIC (vraie
     # whitelist anonyme). Inter-pod ne suffit pas pour acces tiers internet.
 )
