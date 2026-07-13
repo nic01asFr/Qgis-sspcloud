@@ -1781,14 +1781,21 @@ async def execute_recipe_web_endpoint(
     if executor_choice == "stub":
         qgis_executor = StubQgisExecutor()
     elif executor_choice == "mcp":
-        # Placeholder G4-b-1 — pas de vrai appel MCP. URL/auth via env
-        # quand le câblage JSON-RPC sera prêt (G4-b-2).
+        # G4-b-3a : câblage JSON-RPC prêt. Le vrai executor est activé
+        # uniquement si l'env ``USE_REAL_MCP=1`` — sans ça, on garde le
+        # comportement placeholder G4-b-1 (retrocompat tests offline et
+        # environnements sans BigQgisMCP déployé).
         import os as _os
+        _use_real = (
+            _os.environ.get("USE_REAL_MCP", "").strip().lower()
+            in ("1", "true", "yes", "on")
+        )
         qgis_executor = McpQgisExecutor(
             mcp_url=_os.environ.get(
                 "QGIS_MCP_URL", "http://qgis-mcp-server:8090"
             ),
             mcp_auth=_os.environ.get("QGIS_MCP_AUTH") or None,
+            live=_use_real,
         )
     else:
         raise HTTPException(
