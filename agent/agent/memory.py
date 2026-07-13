@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -161,6 +162,46 @@ async def init() -> None:
                 ON session_tags(key, value);
             CREATE INDEX IF NOT EXISTS idx_tags_session
                 ON session_tags(session_id);
+
+            -- Chantier G10 : journal des livrables (audit trail immuable).
+            -- Chaque execution recipe (recipe_pure) ou publication assembly
+            -- ecrit une entree here. Contrairement aux `session_tags` (qui
+            -- capturent des paires cle=valeur volatiles sur la session), le
+            -- journal materialise le produit fini : quel user, quand, quelle
+            -- recipe, quel output_hash, quelles briques.
+            --
+            -- Rationale : session_tags ne permet pas de repondre efficacement
+            -- a "quels livrables Marie a produits cette semaine ?" — il faut
+            -- joindre 3+ tags avec des GROUP BY couteux. Le journal donne
+            -- une vue directe indexee, prete pour une UI "historique".
+            --
+            -- Insertions UNIQUEMENT via hook interne (recipe_executor_mute,
+            -- futurs publishers) — pas d'endpoint POST. La publication S3
+            -- update les champs `published` et `published_url` a posteriori
+            -- (cf. mark_livrable_published).
+            CREATE TABLE IF NOT EXISTS livrable_journal (
+                livrable_id  TEXT PRIMARY KEY,
+                session_id   TEXT NOT NULL,
+                username     TEXT NOT NULL,
+                kind         TEXT NOT NULL,
+                recipe_id    TEXT,
+                context_kind TEXT,
+                output_hash  TEXT,
+                briques_used TEXT,
+                published    INTEGER DEFAULT 0,
+                published_url TEXT,
+                created_at   INTEGER NOT NULL,
+                metadata     TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_journal_user
+                ON livrable_journal(username, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_journal_recipe
+                ON livrable_journal(recipe_id)
+                WHERE recipe_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_journal_kind
+                ON livrable_journal(kind);
+            CREATE INDEX IF NOT EXISTS idx_journal_session
+                ON livrable_journal(session_id);
         """)
 
         # Migration : pour les DB pre-existantes creees avant l'ajout de
@@ -757,6 +798,152 @@ async def auto_tag_session_from_id(session_id: str) -> dict[str, str]:
     for k, v in parsed.items():
         await set_session_tag(session_id, k, v)
     return parsed
+
+
+# ── Livrable journal (Chantier G10) ──────────────────────────────────────────
+#
+# Trace structuree des livrables produits (execution recipe / publication
+# assembly). Insertion via hook interne uniquement — le journal est
+# immuable cote API : pas d'endpoint POST/DELETE, seulement lecture et
+# update ciblee de `published_url` via `mark_livrable_published`.
+#
+# Le `livrable_id` est un UUID genere a l'insertion — cle stable, non
+# collisionnable avec les identifiants metier (recipe_id, session_id).
+# `output_hash` est le SHA256 deterministe du scene_manifest de sortie
+# (json.dumps sort_keys=True). Deux runs qui produisent le meme manifest
+# porteront le meme hash — utile pour deduplication cote UI.
+
+
+async def journal_livrable(
+    session_id: str,
+    username: str,
+    kind: str,
+    output_hash: str,
+    recipe_id: str | None = None,
+    context_kind: str | None = None,
+    briques_used: list[str] | None = None,
+    metadata: dict | None = None,
+    timestamp: int | None = None,
+) -> str:
+    """Enregistre une entree dans le journal des livrables.
+
+    Retourne le ``livrable_id`` UUID genere. `kind` doit etre l'un de
+    ``recipe_pure`` | ``recipe_polished`` | ``agent_freeform`` (contract
+    ouvert : d'autres valeurs sont acceptees mais moins bien indexees).
+
+    Idempotence : deux appels a la suite avec les memes arguments creent
+    DEUX entrees distinctes (UUID different). Ce choix est deliberatif —
+    chaque execution est un evenement, meme si le manifest est identique
+    au precedent. La deduplication cote UI se fait via `output_hash`.
+    """
+    livrable_id = str(uuid.uuid4())
+    now = timestamp if timestamp is not None else int(time.time())
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO livrable_journal "
+            "(livrable_id, session_id, username, kind, recipe_id, "
+            " context_kind, output_hash, briques_used, published, "
+            " published_url, created_at, metadata) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)",
+            (
+                livrable_id,
+                session_id,
+                username,
+                kind,
+                recipe_id,
+                context_kind,
+                output_hash,
+                json.dumps(briques_used or [], ensure_ascii=False),
+                now,
+                json.dumps(metadata or {}, ensure_ascii=False),
+            ),
+        )
+        await db.commit()
+    return livrable_id
+
+
+def _row_to_livrable(row: aiosqlite.Row) -> dict:
+    """Decode une ligne livrable_journal en dict lisible (JSON re-parse)."""
+    d = dict(row)
+    # briques_used et metadata sont serialises en JSON en base.
+    for k in ("briques_used", "metadata"):
+        raw = d.get(k)
+        if raw:
+            try:
+                d[k] = json.loads(raw)
+            except Exception:
+                # Ligne corrompue : on laisse la string brute plutot que
+                # de casser la lecture. Le journal reste consultable.
+                pass
+        else:
+            d[k] = [] if k == "briques_used" else {}
+    # published booleanise (colonne INTEGER en SQLite).
+    d["published"] = bool(d.get("published"))
+    return d
+
+
+async def list_livrables(
+    username: str | None = None,
+    context_kind: str | None = None,
+    recipe_id: str | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """Liste les entrees journal, ordonnees par created_at DESC.
+
+    Filtres optionnels combinables (AND). Sans filtre, retourne le journal
+    global du pod dans la limite demandee.
+    """
+    clauses: list[str] = []
+    params: list[Any] = []
+    if username is not None:
+        clauses.append("username = ?")
+        params.append(username)
+    if context_kind is not None:
+        clauses.append("context_kind = ?")
+        params.append(context_kind)
+    if recipe_id is not None:
+        clauses.append("recipe_id = ?")
+        params.append(recipe_id)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(limit)
+    sql = (
+        f"SELECT * FROM livrable_journal {where} "
+        f"ORDER BY created_at DESC LIMIT ?"
+    )
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(sql, params)).fetchall()
+    return [_row_to_livrable(r) for r in rows]
+
+
+async def get_livrable(livrable_id: str) -> dict | None:
+    """Retourne le detail d'une entree journal, ou None si inconnue."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        row = await (await db.execute(
+            "SELECT * FROM livrable_journal WHERE livrable_id = ?",
+            (livrable_id,),
+        )).fetchone()
+    return _row_to_livrable(row) if row else None
+
+
+async def mark_livrable_published(
+    livrable_id: str, published_url: str,
+) -> None:
+    """Marque une entree comme publiee et enregistre l'URL S3.
+
+    Ne raise PAS si l'entree est inconnue (silencieux : le hook appelant
+    n'a pas a bloquer la publication S3 si le journal est desynchronise).
+    Un appelant qui veut valider peut appeler `get_livrable` apres.
+    """
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "UPDATE livrable_journal "
+            "SET published = 1, published_url = ? "
+            "WHERE livrable_id = ?",
+            (published_url, livrable_id),
+        )
+        await db.commit()
 
 
 # ── Checkpoints (Commit B — Rollback agent) ───────────────────────────────────
