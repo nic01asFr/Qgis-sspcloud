@@ -12,13 +12,27 @@ Pas de pivot d'archi : chaque enricher est une fonction async pure.
 """
 
 from agent.enrichers.base import EnrichmentResult
-from agent.enrichers import geo_validator, reference_data, recipe_matcher, memory_recall
+from agent.enrichers import (
+    geo_validator,
+    reference_data,
+    recipe_matcher,
+    memory_recall,
+    bbox_enricher,
+    layer_id_enricher,
+    briques_enricher,
+)
 import asyncio
 
 # Ordre = priorité d'affichage dans le prompt. Pas de dépendance entre eux.
+# Les 3 enrichers G6 (bbox, layer_id, brique) sont places en tete du bloc
+# geo-technique : ils cadrent la zone / la donnee / la regle avant que
+# l'agent voie la resolution INSEE ou la recette candidate.
 _ENRICHERS = [
+    bbox_enricher.enrich,
     geo_validator.enrich,
+    layer_id_enricher.enrich,
     reference_data.enrich,
+    briques_enricher.enrich,
     recipe_matcher.enrich,
     memory_recall.enrich,
 ]
