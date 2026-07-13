@@ -1,28 +1,22 @@
 """hub.recipes_web.qgis_executor — Protocol d'exécution des steps run_qgis.
 
-Chantier G4-b-1. Introduit une couche d'abstraction entre le moteur
-`execute_recipe_pure` (déterministe, orchestration) et l'exécution réelle
-des steps `run_qgis` (stub POC ou appel MCP BigQgisMCP live).
+Chantiers G4-b-1 (protocol + stub) puis G4-b-3a (vrai JSON-RPC MCP). Cette
+couche découple le moteur `execute_recipe_pure` (déterministe, orchestration)
+de l'exécution réelle des steps `run_qgis` :
 
-Objectif : permettre au moteur d'accepter une implémentation injectée
-sans que sa logique change. Le POC G4 continue de tourner avec le stub
-(`StubQgisExecutor`), et l'intégration réelle (`McpQgisExecutor`) peut
-être branchée sans toucher au reste du pipeline.
+  - ``StubQgisExecutor`` : POC G4, path ``stub://`` (retrocompat).
+  - ``McpQgisExecutor`` : appelle BigQgisMCP via JSON-RPC 2.0 quand
+    ``live=True``. En mode ``live=False`` (défaut), garde le comportement
+    placeholder G4-b-1 pour ne pas casser les tests offline.
 
 Design
 ------
 - ``QgisExecutor`` (Protocol) : contrat minimal — méthode async
   ``execute(step, context) -> dict`` renvoyant un layer prêt à insérer
   dans ``scene_manifest["layers"]``.
-- ``StubQgisExecutor`` : garde le comportement POC. Le layer produit
-  porte un ``source.path`` préfixé ``stub://`` — signal clair pour le
-  reviewer humain qu'il ne s'agit pas d'une vraie source. Ce choix
-  remplace l'ancien chemin ``/data/scene_store/stub/{layer_id}.geojson``
-  qui prêtait à confusion (path plausible mais fichier inexistant).
-- ``McpQgisExecutor`` : placeholder crédible. Retourne un layer avec un
-  ``source.path`` scene_store réaliste (``/data/scene_store/{layer_id}.geojson``)
-  et deux annotations ``_mcp_*`` traçables. Le vrai appel JSON-RPC MCP
-  BigQgisMCP sera branché dans un chantier suivant (G4-b-2).
+- L'injection se fait via l'argument ``executor`` d'``execute_recipe_pure``
+  ou via le query param ``?executor=<nom>`` de l'endpoint hub. Côté
+  endpoint, l'activation du vrai MCP se fait via l'env ``USE_REAL_MCP=1``.
 
 Ajout d'un nouvel executor
 --------------------------
@@ -30,18 +24,28 @@ Ajout d'un nouvel executor
    context)`` qui renvoie un ``dict`` compatible ``SceneManifest.layers[]``.
 2. La signature du Protocol est vérifiée statiquement par mypy (via
    ``QgisExecutor``) et dynamiquement dans les tests (test_qgis_executor.py).
-3. L'injection se fait via l'argument ``executor`` d'``execute_recipe_pure``
-   ou via le query param ``?executor=<nom>`` de l'endpoint hub.
 """
 
 from __future__ import annotations
 
+import asyncio
+import itertools
 import logging
 from typing import Any, Protocol, runtime_checkable
 
 from hub.recipes_web.models import RecipeStepRunQgis
 
 log = logging.getLogger("hub.recipes_web.qgis_executor")
+
+
+# Codes de retry HTTP considérés comme transitoires (BigQgisMCP redéploie,
+# pod cold-start, upstream saturé). 429 n'est pas dedans : on préfère laisser
+# remonter un rate-limit explicite sans le masquer.
+_RETRYABLE_HTTP_STATUSES: frozenset[int] = frozenset({500, 502, 503, 504})
+
+# Backoff exponentiel simple (en secondes) entre tentatives. La dernière
+# tentative n'est pas suivie d'un sleep — on relève l'erreur.
+_RETRY_BACKOFF_SECONDS: tuple[float, ...] = (1.0, 3.0)
 
 
 @runtime_checkable
@@ -123,38 +127,51 @@ class StubQgisExecutor:
 
 
 class McpQgisExecutor:
-    """Executor destiné à appeler BigQgisMCP via JSON-RPC HTTP.
+    """Executor branchant BigQgisMCP via JSON-RPC 2.0.
 
-    État actuel : **placeholder crédible**. La classe est câblée dans le
-    protocol et le moteur, mais n'effectue pas encore le vrai JSON-RPC.
-    Elle retourne un layer dict simulé avec un chemin scene_store
-    plausible (``/data/scene_store/{layer_id}.geojson``), qui pourra
-    être matérialisé par le vrai pipeline dans un chantier ultérieur.
+    Deux modes cohabitent volontairement :
 
-    Roadmap pour finaliser le vrai appel MCP :
-      1. Traduire ``step`` en 1 à N tool calls MCP :
-         - ``set_study_zone(bbox_or_commune)`` si ``context`` contient
-           ``study_zone_hint`` (bbox / label / code INSEE).
-         - ``smart_load(catalog_id)`` si ``step.outputs["datasource"]``
-           ou ``step.params["catalog_id"]`` est fourni.
-         - ``run_processing(algorithm, params)`` si
-           ``step.algorithm`` est un identifiant Processing QGIS.
-         - ``export_layer(format="geojson", output=path)`` pour
+    - ``live=False`` (défaut) : mode **placeholder G4-b-1**. Retourne un
+      layer dict simulé avec un ``source.path`` scene_store réaliste
+      (``/data/scene_store/{layer_id}.geojson``). Utile pour tests
+      offline et pour le POC de l'endpoint qui n'a pas encore de
+      BigQgisMCP câblé. Backward-compat totale avec G4-b-1.
+    - ``live=True`` (G4-b-3a) : mode **JSON-RPC réel**. La méthode
+      ``execute`` traduit le step en une séquence d'appels MCP :
+
+        1. ``set_study_zone(zone)`` si ``context["study_zone_hint"]``
+           est fourni ;
+        2. ``smart_load(catalog_id)`` si ``outputs["datasource"]`` ou
+           ``params["catalog_id"]`` est présent ;
+        3. ``run_processing(algorithm, params)`` si ``step.algorithm``
+           n'est pas un simple identifiant catalog (heuristique :
+           contient un ``:`` façon ``native:buffer``) ;
+        4. ``export_layer(layer_id, format=geojson, output_path)`` pour
            matérialiser dans le PVC scene_store.
-      2. Encoder chaque appel en JSON-RPC 2.0 selon la spec MCP
-         (``method``, ``params``, ``id``).
-      3. Authentifier via ``self.mcp_auth`` (Bearer token issu du hub
-         scope ou secret Vault).
-      4. Envelopper l'exécution dans un ``try/except`` qui relève
-         ``RecipeStepError`` en cas d'échec MCP.
-      5. Écrire des tests d'intégration contre un serveur MCP live
-         (fixture optionnelle skipable en CI sans MCP dispo).
+
+      Chaque appel utilise JSON-RPC 2.0 (POST ``{mcp_url}/rpc``) et est
+      protégé par retry exponentiel sur les codes transitoires
+      500/502/503/504. Toute erreur (HTTP ou JSON-RPC ``error``) est
+      encapsulée en ``RecipeStepError`` avec ``step_tag`` pour la
+      traçabilité côté moteur.
 
     Paramètres constructor :
-      - ``mcp_url`` : URL du serveur BigQgisMCP (ex.
-        ``http://qgis-mcp-server:8090``).
-      - ``mcp_auth`` : token Bearer optionnel.
-      - ``timeout`` : timeout HTTP en secondes.
+      - ``mcp_url`` : URL du serveur BigQgisMCP.
+      - ``mcp_auth`` : token Bearer optionnel (scope hub ou secret Vault).
+      - ``timeout`` : timeout HTTP en secondes (par appel).
+      - ``live`` : ``False`` = placeholder, ``True`` = vrais tool calls.
+
+    Idempotence
+    -----------
+    ``context["timestamp"] + layer_id`` sert de clé ``run_key`` implicite —
+    passée dans les params MCP en champ ``run_key``. Le serveur MCP
+    peut la déduplique si besoin.
+
+    Thread-safety
+    -------------
+    Le compteur JSON-RPC ``id`` s'appuie sur ``itertools.count`` : atomique
+    sous GIL CPython, donc sûr pour usage concurrent en asyncio (single
+    thread coop). Voir _next_jsonrpc_id.
     """
 
     def __init__(
@@ -162,21 +179,184 @@ class McpQgisExecutor:
         mcp_url: str = "http://qgis-mcp-server:8090",
         mcp_auth: str | None = None,
         timeout: float = 30.0,
+        live: bool = False,
     ) -> None:
         self.mcp_url = mcp_url.rstrip("/")
         self.mcp_auth = mcp_auth
         self.timeout = timeout
+        self.live = live
+        # itertools.count(1) : atomique en CPython (implémenté en C sous GIL).
+        # Sûr pour appels concurrents depuis asyncio.gather sans lock explicite.
+        self._id_counter = itertools.count(1)
+
+    # -- JSON-RPC low-level -------------------------------------------------
+
+    def _next_jsonrpc_id(self) -> int:
+        """Retourne un identifiant JSON-RPC incrémental.
+
+        Utilise itertools.count : opération C-level protégée par le GIL,
+        donc atomique côté asyncio (single-thread coop) et thread-safe
+        au sens Python multi-threading si l'instance est partagée.
+        """
+        return next(self._id_counter)
+
+    async def _mcp_call(
+        self,
+        method: str,
+        params: dict[str, Any],
+        *,
+        step_tag: str = "unknown_step",
+    ) -> Any:
+        """Appelle un tool MCP via JSON-RPC 2.0 avec retry exponentiel.
+
+        - Timeout par tentative : ``self.timeout``.
+        - Retry sur 500/502/503/504 avec backoff (1s, 3s) — max 3 essais.
+        - Toute erreur (HTTP finale, timeout, ou JSON-RPC ``error``) est
+          convertie en ``RecipeStepError`` avec le ``step_tag`` pour la
+          traçabilité côté engine.
+
+        Retourne ``body["result"]`` en cas de succès.
+        """
+        # Import différé de httpx : évite d'importer le client HTTP au load
+        # du module (les tests unitaires du stub ne dépendent pas de httpx).
+        import httpx
+
+        # Import différé de RecipeStepError : évite un cycle
+        # engine → qgis_executor → engine.
+        from hub.recipes_web.engine import RecipeStepError
+
+        rpc_id = self._next_jsonrpc_id()
+        payload = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+            "id": rpc_id,
+        }
+        headers = {"Content-Type": "application/json"}
+        if self.mcp_auth:
+            headers["Authorization"] = f"Bearer {self.mcp_auth}"
+
+        endpoint = f"{self.mcp_url}/rpc"
+        # 1 tentative initiale + len(_RETRY_BACKOFF_SECONDS) retries.
+        max_attempts = 1 + len(_RETRY_BACKOFF_SECONDS)
+        last_error: str = ""
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    response = await client.post(
+                        endpoint, json=payload, headers=headers,
+                    )
+            except httpx.TimeoutException as exc:
+                last_error = f"timeout ({exc})"
+                log.warning(
+                    "MCP %s: tentative %d/%d timeout (%s)",
+                    method, attempt, max_attempts, exc,
+                )
+                # Timeout : on retente si on n'a pas épuisé le budget.
+                if attempt < max_attempts:
+                    await asyncio.sleep(_RETRY_BACKOFF_SECONDS[attempt - 1])
+                    continue
+                raise RecipeStepError(
+                    f"[{step_tag}] MCP '{method}' timeout après "
+                    f"{max_attempts} tentatives : {exc}"
+                ) from exc
+            except httpx.HTTPError as exc:
+                # Erreurs transport (DNS, connexion refusée, TLS...).
+                last_error = f"transport ({exc})"
+                log.warning(
+                    "MCP %s: tentative %d/%d erreur transport (%s)",
+                    method, attempt, max_attempts, exc,
+                )
+                if attempt < max_attempts:
+                    await asyncio.sleep(_RETRY_BACKOFF_SECONDS[attempt - 1])
+                    continue
+                raise RecipeStepError(
+                    f"[{step_tag}] MCP '{method}' erreur transport après "
+                    f"{max_attempts} tentatives : {exc}"
+                ) from exc
+
+            status = response.status_code
+            if status in _RETRYABLE_HTTP_STATUSES:
+                last_error = f"HTTP {status}"
+                log.warning(
+                    "MCP %s: tentative %d/%d HTTP %d (retry)",
+                    method, attempt, max_attempts, status,
+                )
+                if attempt < max_attempts:
+                    await asyncio.sleep(_RETRY_BACKOFF_SECONDS[attempt - 1])
+                    continue
+                raise RecipeStepError(
+                    f"[{step_tag}] MCP '{method}' HTTP {status} après "
+                    f"{max_attempts} tentatives (dernier : {last_error})"
+                )
+
+            if status >= 400:
+                # 4xx : erreur définitive, pas de retry.
+                raise RecipeStepError(
+                    f"[{step_tag}] MCP '{method}' HTTP {status} : "
+                    f"{response.text[:500]}"
+                )
+
+            # 2xx : parse JSON-RPC.
+            try:
+                body = response.json()
+            except ValueError as exc:
+                raise RecipeStepError(
+                    f"[{step_tag}] MCP '{method}' réponse non-JSON : {exc}"
+                ) from exc
+
+            if not isinstance(body, dict):
+                raise RecipeStepError(
+                    f"[{step_tag}] MCP '{method}' body inattendu "
+                    f"(non-dict) : {type(body).__name__}"
+                )
+
+            if "error" in body and body["error"] is not None:
+                err = body["error"]
+                err_code = err.get("code") if isinstance(err, dict) else None
+                err_msg = (
+                    err.get("message") if isinstance(err, dict) else str(err)
+                )
+                raise RecipeStepError(
+                    f"[{step_tag}] MCP '{method}' JSON-RPC error "
+                    f"(code={err_code}) : {err_msg} | params={params!r}"
+                )
+
+            return body.get("result")
+
+        # Ne devrait jamais être atteint (les branches raise couvrent tout),
+        # mais on garde un raise de sécurité pour rassurer mypy.
+        raise RecipeStepError(  # pragma: no cover
+            f"[{step_tag}] MCP '{method}' épuisement retries "
+            f"(dernier : {last_error})"
+        )
+
+    # -- Exécution d'un step ------------------------------------------------
 
     async def execute(
         self,
         step: RecipeStepRunQgis,
         context: dict[str, Any],
     ) -> dict[str, Any]:
+        """Exécute un step run_qgis.
+
+        En mode ``live=False`` : renvoie un layer placeholder (comportement
+        G4-b-1). En mode ``live=True`` : orchestre set_study_zone →
+        smart_load → run_processing → export_layer via JSON-RPC MCP.
+        """
         outputs = step.outputs
         layer_id = outputs["layer_id"]
-        scene_store_dir = context.get("scene_store_dir", "/data/scene_store")
-        # Normalisation : pas de trailing slash.
-        scene_store_dir = str(scene_store_dir).rstrip("/")
+        scene_store_dir = str(
+            context.get("scene_store_dir", "/data/scene_store")
+        ).rstrip("/")
+        classification_field = outputs.get("classification_field")
+        datasource = outputs.get("datasource") or step.params.get("catalog_id")
+        zone_hint = context.get("study_zone_hint")
+
+        # Layer squelette V0.3.x commun aux deux modes. Le path sera
+        # éventuellement remplacé par le retour de export_layer en live.
+        default_path = f"{scene_store_dir}/{layer_id}.geojson"
         layer: dict[str, Any] = {
             "id": layer_id,
             "name": outputs.get("layer_name", layer_id),
@@ -184,9 +364,9 @@ class McpQgisExecutor:
             "geometry_type": outputs.get("geometry_type", "polygon"),
             "source": {
                 "type": "geojson_path",
-                "path": f"{scene_store_dir}/{layer_id}.geojson",
+                "path": default_path,
                 # G3 auto-reprojection garantit 4326 côté rendu ; on annonce
-                # 4326 même si le vrai fichier arrive en Lambert 93.
+                # 4326 même si le fichier est en Lambert 93.
                 "crs": "EPSG:4326",
             },
             "style": {
@@ -197,23 +377,81 @@ class McpQgisExecutor:
                 },
             },
         }
-        classification_field = outputs.get("classification_field")
         if classification_field:
             layer["style"]["classification"]["color"] = {
                 "mode": "graduated",
                 "field": classification_field,
                 "method": "quantile",
             }
-        datasource = outputs.get("datasource") or step.params.get("catalog_id")
         if datasource:
             layer["_mcp_datasource"] = datasource
-        zone_hint = context.get("study_zone_hint")
         if zone_hint is not None:
             layer["_mcp_zone_hint"] = zone_hint
-        log.debug(
-            "McpQgisExecutor placeholder → layer_id=%s scene_store=%s "
-            "(vrai appel JSON-RPC MCP à câbler en G4-b-2)",
-            layer_id, scene_store_dir,
+
+        if not self.live:
+            log.debug(
+                "McpQgisExecutor placeholder → layer_id=%s scene_store=%s "
+                "(mode live=False)", layer_id, scene_store_dir,
+            )
+            return layer
+
+        # ===== Mode live : vrais tool calls MCP =====
+        step_tag = step.id or f"run_qgis_{layer_id}"
+        # Clé d'idempotence : timestamp serveur + layer_id.
+        run_key = f"{context.get('timestamp', 'no-ts')}::{layer_id}"
+
+        # 1. Cadrage de la zone d'étude si connu.
+        if zone_hint is not None:
+            await self._mcp_call(
+                "set_study_zone",
+                {"zone": zone_hint, "run_key": run_key},
+                step_tag=step_tag,
+            )
+
+        # 2. Chargement du catalog datasource si connu.
+        if datasource:
+            await self._mcp_call(
+                "smart_load",
+                {"catalog_id": datasource, "run_key": run_key},
+                step_tag=step_tag,
+            )
+
+        # 3. Processing algo si applicable.
+        # Heuristique : les identifiants avec ':' (native:buffer, qgis:union)
+        # sont des algos Processing ; sinon on considère que ``algorithm``
+        # est un tag catalog (déjà traité par smart_load).
+        if ":" in step.algorithm:
+            await self._mcp_call(
+                "run_processing",
+                {
+                    "algo": step.algorithm,
+                    "params": step.params or {},
+                    "layer_id": layer_id,
+                    "run_key": run_key,
+                },
+                step_tag=step_tag,
+            )
+
+        # 4. Export dans scene_store en GeoJSON.
+        export_result = await self._mcp_call(
+            "export_layer",
+            {
+                "layer_id": layer_id,
+                "format": "geojson",
+                "output_path": default_path,
+                "run_key": run_key,
+            },
+            step_tag=step_tag,
+        )
+
+        # Si le serveur MCP renvoie un ``path`` explicite (idempotence
+        # server-side), on l'adopte ; sinon on garde default_path.
+        if isinstance(export_result, dict) and export_result.get("path"):
+            layer["source"]["path"] = export_result["path"]
+
+        log.info(
+            "McpQgisExecutor live → layer_id=%s exported to %s",
+            layer_id, layer["source"]["path"],
         )
         return layer
 

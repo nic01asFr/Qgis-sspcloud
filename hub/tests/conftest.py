@@ -21,3 +21,15 @@ _AGENT_DIR = _REPO_ROOT / "agent"
 
 if str(_AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(_AGENT_DIR))
+
+
+def pytest_configure(config):
+    """Enregistre les markers custom pour éviter les warnings PytestUnknownMark.
+
+    - ``mcp_live`` : test d'intégration qui frappe un BigQgisMCP réel via
+      l'env ``MCP_LIVE_URL`` — skip par défaut (cf. G4-b-3a).
+    """
+    config.addinivalue_line(
+        "markers",
+        "mcp_live: test d'intégration BigQgisMCP réel (skip sans MCP_LIVE_URL)",
+    )
