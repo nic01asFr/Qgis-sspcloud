@@ -1715,6 +1715,138 @@ async def reload_briques_cache(user: dict = Depends(auth.require_admin)):
     return {"reloaded": True, "total": total}
 
 
+# ── Recipes web — exécution déterministe (chantier G8) ───────────────────────
+# Endpoint mute : appelle execute_recipe_pure (moteur POC G4) sans jamais
+# consulter le LLM. Retourne RecipeWebOutput.model_dump() prêt à publier.
+#
+# Deux modes de body :
+#   - {recipe_id: str, context?: dict}     → charge examples/{recipe_id}.yaml
+#   - {recipe_yaml: str, context?: dict}   → parse la chaîne YAML fournie
+#
+# En G4-b : remplacer examples/ par USER_RECIPES_DIR (racine étude). Ici on
+# reste POC : le catalogue de recipes est le dossier examples/ livré en G4.
+
+
+@app.post("/api/recipes-web/execute")
+async def execute_recipe_web_endpoint(
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Exécute une recipe web en mode `recipe_pure` (mute, no LLM).
+
+    Body JSON :
+      - ``recipe_id`` : slug d'un fichier examples/{slug}.yaml, OU
+      - ``recipe_yaml`` : contenu YAML brut d'une recipe,
+      - ``context`` : dict optionnel (fusionné avec le contexte serveur).
+
+    Le contexte serveur (autoritatif) fournit ``timestamp`` (UTC ISO 8601) —
+    la valeur cliente est ignorée pour préserver l'idempotence : deux appels
+    successifs à la même seconde renvoient le même scene_manifest.
+
+    Réponses :
+      - 200 : ``RecipeWebOutput`` sérialisé (scene_manifest, provenance,
+        briques_used).
+      - 400 : YAML invalide, brique_ref inconnue, catégorie interdite
+        (``RecipeImportError``, ``ValidationError``).
+      - 404 : ``recipe_id`` fourni mais fichier introuvable.
+      - 500 : erreur d'exécution d'un step (``RecipeStepError``).
+    """
+    # Import différé : recipes_web est optionnel (dev sans PyYAML par ex).
+    try:
+        from hub.recipes_web import (
+            RecipeImportError,
+            RecipeStepError,
+            RecipeWeb,
+            execute_recipe_pure,
+            load_recipe_from_yaml,
+        )
+    except ImportError as exc:
+        raise HTTPException(
+            503, f"Module recipes_web indisponible : {exc}"
+        )
+
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(400, f"Body JSON invalide : {exc}")
+
+    recipe_id = (body.get("recipe_id") or "").strip()
+    recipe_yaml = body.get("recipe_yaml")
+    client_ctx = body.get("context") or {}
+    if not isinstance(client_ctx, dict):
+        raise HTTPException(400, "'context' doit être un objet JSON")
+
+    if not recipe_id and not recipe_yaml:
+        raise HTTPException(
+            400, "Fournir 'recipe_id' ou 'recipe_yaml' (au moins un)"
+        )
+
+    # 1. Chargement de la recipe.
+    from pathlib import Path as _P
+    from pydantic import ValidationError as _ValidationError
+
+    try:
+        if recipe_id:
+            examples_dir = (
+                _P(__file__).resolve().parent / "recipes_web" / "examples"
+            )
+            recipe_path = examples_dir / f"{recipe_id}.yaml"
+            if not recipe_path.exists():
+                raise HTTPException(
+                    404,
+                    f"Recipe '{recipe_id}' introuvable dans {examples_dir}",
+                )
+            recipe = load_recipe_from_yaml(recipe_path)
+        else:
+            # Parse YAML brut → dict → Pydantic.
+            try:
+                import yaml
+            except ImportError as exc:  # pragma: no cover
+                raise HTTPException(500, f"PyYAML manquant : {exc}")
+            try:
+                raw = yaml.safe_load(recipe_yaml)
+            except yaml.YAMLError as exc:
+                raise HTTPException(400, f"YAML invalide : {exc}")
+            if not isinstance(raw, dict):
+                raise HTTPException(
+                    400, "Recipe mal formée (racine non dict)"
+                )
+            recipe = RecipeWeb.model_validate(raw)
+    except HTTPException:
+        raise
+    except _ValidationError as exc:
+        raise HTTPException(400, f"Recipe invalide : {exc}")
+    except RecipeImportError as exc:
+        raise HTTPException(400, f"Import brique en échec : {exc}")
+    except Exception as exc:
+        # YAMLError et autres — 400 côté client, la recipe est mal formée.
+        raise HTTPException(400, f"Recipe illisible : {exc}")
+
+    # 2. Contexte : timestamp autoritatif serveur (idempotence à la seconde
+    # près, cf. SPEC.md §context). On merge d'abord la charge client puis
+    # on écrase timestamp — le client n'est jamais authoritatif sur le temps.
+    from datetime import datetime, timezone
+    server_timestamp = datetime.now(timezone.utc).replace(
+        microsecond=0
+    ).isoformat().replace("+00:00", "Z")
+    exec_context: dict = dict(client_ctx)
+    exec_context["timestamp"] = server_timestamp
+    exec_context.setdefault("user_message", client_ctx.get("user_message"))
+
+    # 3. Exécution.
+    try:
+        output = await execute_recipe_pure(recipe, exec_context)
+    except RecipeImportError as exc:
+        raise HTTPException(400, f"Import brique en échec : {exc}")
+    except RecipeStepError as exc:
+        raise HTTPException(500, f"Step en échec : {exc}")
+    except Exception as exc:
+        log.exception("execute_recipe_pure a levé une exception non gérée")
+        raise HTTPException(500, f"Erreur exécution recipe : {exc}")
+
+    return output.model_dump()
+
+
 # ── GeoAI — proxy vers pod GPU (SAM3, DeepForest, OmniWater) ─────────────────
 # Le hub centralise l'accès au GPU pod via GPURelay (scale 0→1→0 transparent).
 # Les session pods appellent le hub /geoai/* — ils n'ont pas accès direct au GPU.

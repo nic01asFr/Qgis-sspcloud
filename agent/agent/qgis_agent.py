@@ -24,6 +24,7 @@ import httpx
 
 from agent import memory
 from agent import native_tools_v2
+from agent import briques_client
 
 log = logging.getLogger("agent.qgis_agent")
 
@@ -1184,6 +1185,233 @@ _NATIVE_MEMORY_TOOLS: list[dict] = [
 ]
 
 
+# ── Chantier G7 : composeur de prompt structure en sections ───────────────────
+#
+# Le system prompt est decompose en 9 sections nommees (headers `# NOM`)
+# separees par `\n\n---\n\n`. Motivations :
+#   - Clarte pour le LLM : ou lire ses regles vs son role vs son contexte
+#   - Injection automatique des briques bibliotheque G5 (rules_global +
+#     rules_forbidden) au bon endroit
+#   - Refus explicite sur violation d'une regle FORBIDDEN severity=block
+#   - Trace du data_scope courant (composant / assembly / recipe / freeform)
+#
+# La fonction est **pure** : elle prend tous les inputs deja resolus (briques
+# fetchees, scope extrait, contextes stringifies) et retourne le prompt final.
+# Cela permet aux tests unitaires de la piloter sans mock HTTP.
+
+_PROMPT_SEPARATOR = "\n\n---\n\n"
+
+
+def _format_rule_global(brique: dict) -> str:
+    """Formate une brique `rules_global` sous la forme :
+        - {title} ({id}): {rule_text}
+
+    Le llm_hint est append en 2e ligne indentee quand il existe (evite au LLM
+    de devoir aller lire la doc pour interpreter la regle).
+    """
+    bid = brique.get("id", "?")
+    title = brique.get("title", bid)
+    rule_text = (brique.get("rule_text") or "").strip()
+    llm_hint = (brique.get("llm_hint") or "").strip()
+    line = f"- {title} ({bid}): {rule_text}"
+    if llm_hint:
+        line += f"\n  Hint LLM : {llm_hint}"
+    return line
+
+
+def _format_rule_forbidden(brique: dict) -> str:
+    """Formate une brique `rules_forbidden`. Les briques severity=block sont
+    prefixees par le tag `⛔ BLOQUANT ({id})` et incluent le llm_hint en
+    entete de bloc pour que le LLM refuse explicitement toute demande qui
+    viole la regle.
+    """
+    bid = brique.get("id", "?")
+    title = brique.get("title", bid)
+    severity = (brique.get("severity") or "").lower()
+    rule_text = (brique.get("rule_text") or "").strip()
+    llm_hint = (brique.get("llm_hint") or "").strip()
+    if severity == "block":
+        head = f"⛔ BLOQUANT ({bid}) — {title}"
+    else:
+        head = f"[{severity or 'warn'}] {title} ({bid})"
+    body = rule_text
+    if llm_hint:
+        body += f"\nHint LLM : {llm_hint}"
+    return f"{head}\n{body}"
+
+
+def _build_forbidden_section(rules_forbidden: list[dict]) -> str:
+    """Compose la section FORBIDDEN. Les briques severity=block passent en
+    tete, suivies des autres. Ajoute une invite explicite au refus.
+    """
+    if not rules_forbidden:
+        return (
+            "Aucune regle bloquante specifique n'est chargee. Continue en "
+            "appliquant les principes generaux de rigueur (pas d'invention "
+            "de source ou de statistique)."
+        )
+    blocks = [b for b in rules_forbidden if (b.get("severity") or "").lower() == "block"]
+    others = [b for b in rules_forbidden if (b.get("severity") or "").lower() != "block"]
+    lines: list[str] = []
+    lines.append(
+        "Regles bloquantes. Si l'user demande quelque chose qui viole une "
+        "de ces regles, tu DOIS refuser explicitement (phrase claire du "
+        "type \"Je ne peux pas faire cela car <regle>\") plutot que "
+        "d'executer l'action. Aucune negociation possible."
+    )
+    for b in blocks:
+        lines.append(_format_rule_forbidden(b))
+    for b in others:
+        lines.append(_format_rule_forbidden(b))
+    return "\n\n".join(lines)
+
+
+def _build_scope_section(scope: dict | None) -> str:
+    """Compose la section SCOPE depuis les tags extraits par
+    `memory.parse_session_id`. Blocs conditionnels : n'affiche que les cles
+    presentes (sid + optionnellement cid|aid|recipe_id|draft_id).
+    """
+    if not scope:
+        return "context_kind=legacy (aucun scope structure detecte)."
+    parts: list[str] = []
+    kind = scope.get("context_kind", "legacy")
+    parts.append(f"context_kind={kind}")
+    if scope.get("sid"):
+        parts.append(f"sid={scope['sid']}")
+    if scope.get("cid"):
+        parts.append(f"cid={scope['cid']}")
+    if scope.get("aid"):
+        parts.append(f"aid={scope['aid']}")
+    if scope.get("recipe_id"):
+        parts.append(f"recipe_id={scope['recipe_id']}")
+    if scope.get("draft_id"):
+        parts.append(f"draft_id={scope['draft_id']}")
+    header = " · ".join(parts)
+    explain = {
+        "assist_component":  "Tu edites un composant (drawer BlockNote). "
+                             "Reste focalise sur ce cid.",
+        "assist_assembly":   "Tu edites un assemblage (panel V1.15). Reste "
+                             "focalise sur cet aid.",
+        "recipe_run":        "Tu executes une recette. Ne modifie pas la "
+                             "recette, execute-la avec les params fournis.",
+        "recipe_create":     "Tu crees/edites une recette. Focus sur le "
+                             "yaml + tests.",
+        "editor_freeform":   "Editeur libre : latitude maximale, pas de "
+                             "cid/aid impose.",
+        "desk":              "Vue desk classique : contexte etude, "
+                             "workflow ouvert.",
+        "legacy":            "Contexte non-structure (session historique).",
+    }.get(kind, "")
+    if explain:
+        return f"{header}\n{explain}"
+    return header
+
+
+def _build_latitude_section(profile_locked: bool, profile_id: str) -> str:
+    """Compose la section LATITUDE : rappel explicite de ce que l'agent peut
+    ou ne peut pas faire selon `profile_locked`. Rendu court, oriente LLM.
+    """
+    if profile_locked:
+        return (
+            f"Profil `{profile_id}` verrouille par le contexte UI.\n"
+            "- Tu NE peux PAS changer de profil (aucune balise "
+            "<switch_profile>).\n"
+            "- Tu peux utiliser tous les tools MCP alloues a ce profil.\n"
+            "- Tu peux memoriser via <remember>...</remember> (memoire "
+            "long-terme user)."
+        )
+    return (
+        f"Profil actif `{profile_id}`, non-verrouille.\n"
+        "- Tu PEUX emettre une balise <switch_profile>NOM_PROFIL</switch_profile>"
+        " si l'intent user bascule clairement sur un autre champ.\n"
+        "- Tu peux utiliser tous les tools MCP alloues a ce profil.\n"
+        "- Tu peux memoriser via <remember>...</remember>."
+    )
+
+
+def _compose_prompt_sections(
+    *,
+    identity: str,
+    rules_global: list[dict],
+    rules_forbidden: list[dict],
+    scope: dict | None,
+    context: str,
+    use_case: str | None,
+    tools_hint: str | None,
+    profile_locked: bool,
+    profile_id: str,
+    directives: str,
+) -> str:
+    """Compose le system prompt final en 9 sections nommees.
+
+    Ordre canonique (chantier G7) :
+        1. IDENTITY      — persona + role du profile
+        2. GLOBAL_RULES  — briques `rules_global` (invariants a respecter)
+        3. FORBIDDEN     — briques `rules_forbidden` (refus explicite sur violation)
+        4. SCOPE         — data_scope courant depuis session_id
+        5. CONTEXT       — QGIS_ESSENTIALS + etude + memoire recente
+        6. USE_CASE      — recipe/use_case revelee par le session_id
+        7. TOOLS_HINT    — cheat-sheet des tools MCP du profil (optionnel)
+        8. LATITUDE      — capacites/limites du turn selon profile_locked
+        9. DIRECTIVES    — switch/lock + memoire long-terme
+
+    Chaque section est prefixee par un header `# NOM` et separee par `---`.
+    Une section vide affiche `(aucun contenu)` pour que le format reste
+    stable meme sans donnees (utile pour instantanes visuels + tests).
+    """
+
+    def _section(name: str, body: str) -> str:
+        body_stripped = (body or "").strip()
+        if not body_stripped:
+            body_stripped = "(aucun contenu)"
+        return f"# {name}\n\n{body_stripped}"
+
+    # GLOBAL_RULES
+    if rules_global:
+        gr_body = "\n".join(_format_rule_global(b) for b in rules_global)
+    else:
+        gr_body = "(aucune brique rules_global chargee)"
+
+    # FORBIDDEN
+    fb_body = _build_forbidden_section(rules_forbidden)
+
+    # SCOPE
+    scope_body = _build_scope_section(scope)
+
+    # USE_CASE : detection depuis scope (recipe_run -> recipe_id present)
+    if use_case:
+        uc_body = use_case
+    elif scope and scope.get("context_kind") == "recipe_run" and scope.get("recipe_id"):
+        uc_body = (
+            f"Use case detecte : recipe_run (recipe_id={scope['recipe_id']}). "
+            "Execute la recette dans les parametres fournis, sans modifier "
+            "le yaml."
+        )
+    elif scope and scope.get("context_kind") == "recipe_create" and scope.get("recipe_id"):
+        uc_body = (
+            f"Use case detecte : recipe_create (recipe_id={scope['recipe_id']}). "
+            "Focus sur le yaml + tests de la recette."
+        )
+    else:
+        uc_body = "(pas de use_case specifique detecte)"
+
+    # LATITUDE
+    latitude_body = _build_latitude_section(profile_locked, profile_id)
+
+    sections = [
+        _section("IDENTITY", identity),
+        _section("GLOBAL_RULES", gr_body),
+        _section("FORBIDDEN", fb_body),
+        _section("SCOPE", scope_body),
+        _section("CONTEXT", context),
+        _section("USE_CASE", uc_body),
+        _section("TOOLS_HINT", tools_hint or ""),
+        _section("LATITUDE", latitude_body),
+        _section("DIRECTIVES", directives),
+    ]
+    return _PROMPT_SEPARATOR.join(sections).strip()
+
+
 # ── Agent principal ────────────────────────────────────────────────────────────
 
 class QGISAgent:
@@ -2028,10 +2256,36 @@ ne vient pas d'un outil cette session, la supprimer.
             self._LOCKED_PROFILE_NOTE if self.profile_locked
             else self._SWITCH_INSTRUCTIONS
         )
-        return (
-            f"{profile_prompt}\n{self._QGIS_ESSENTIALS}\n\n{ctx}{enrich_section}"
-            f"{switch_block}{self._REMEMBER_INSTRUCTIONS}"
-        ).strip()
+        directives = f"{switch_block}{self._REMEMBER_INSTRUCTIONS}"
+
+        # Chantier G7 : fetch briques bibliotheque G5 (fail-soft, cache 60s).
+        # Sections GLOBAL_RULES + FORBIDDEN du prompt seront vides si le hub
+        # est down ou le fetch echoue -> l'agent continue de fonctionner.
+        try:
+            rules_global, rules_forbidden = await briques_client.fetch_briques_rules(
+                _HUB_URL, _HUB_KEY,
+            )
+        except Exception as exc:
+            log.warning("briques : exception fetch inattendue (%s) -> vide", exc)
+            rules_global, rules_forbidden = [], []
+
+        # Extraction du data_scope depuis le session_id (helper sync, cheap).
+        scope = memory.parse_session_id(self.session_id)
+
+        # Composition finale via le composeur pur (section-based).
+        context_block = f"{self._QGIS_ESSENTIALS}\n\n{ctx}{enrich_section}"
+        return _compose_prompt_sections(
+            identity=profile_prompt,
+            rules_global=rules_global,
+            rules_forbidden=rules_forbidden,
+            scope=scope,
+            context=context_block,
+            use_case=None,  # infere depuis scope si pertinent
+            tools_hint=None,  # cheat-sheet deja incluse dans CONTEXT via QGIS_ESSENTIALS
+            profile_locked=self.profile_locked,
+            profile_id=self.profile_id,
+            directives=directives,
+        )
 
     async def chat_stream(
         self,
