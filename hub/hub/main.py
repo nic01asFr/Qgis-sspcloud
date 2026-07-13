@@ -1766,16 +1766,21 @@ async def reload_briques_cache(user: dict = Depends(auth.require_admin)):
 async def execute_recipe_web_endpoint(
     request: Request,
     executor: str = "stub",
+    mode: str = "pure",
     user: dict = Depends(auth.get_current_user),
 ):
-    """Exécute une recipe web en mode `recipe_pure` (mute, no LLM).
+    """Exécute une recipe web.
 
     Body JSON :
       - ``recipe_id`` : slug d'un fichier examples/{slug}.yaml, OU
       - ``recipe_yaml`` : contenu YAML brut d'une recipe,
       - ``context`` : dict optionnel (fusionné avec le contexte serveur).
 
-    Query param :
+    Query params :
+      - ``mode`` : ``pure`` (défaut, backward-compat, aucun LLM) ou
+        ``polished`` (chantier G4-b-3b : polish narrative_text via LLM
+        SSPCloud). Le mode ``polished`` exige ``OPENAI_API_KEY`` +
+        ``OPENAI_BASE_URL`` côté serveur — 400 sinon.
       - ``executor`` : ``stub`` (défaut, POC G4) ou ``mcp`` (placeholder
         G4-b-1 en attendant le vrai câblage JSON-RPC BigQgisMCP). Toute
         autre valeur → 400. Le mode ``mcp`` nécessite un serveur MCP
@@ -1802,7 +1807,9 @@ async def execute_recipe_web_endpoint(
             RecipeImportError,
             RecipeStepError,
             RecipeWeb,
+            SspCloudLlmClient,
             StubQgisExecutor,
+            execute_recipe_polished,
             execute_recipe_pure,
             load_recipe_from_yaml,
         )
@@ -1810,6 +1817,27 @@ async def execute_recipe_web_endpoint(
         raise HTTPException(
             503, f"Module recipes_web indisponible : {exc}"
         )
+
+    # Résolution du mode (chantier G4-b-3b). `pure` = strict déterministe
+    # (défaut, backward-compat). `polished` = pipeline optionnel de polish
+    # narratif via LLM SSPCloud. En mode polished, `OPENAI_API_KEY` et
+    # `OPENAI_BASE_URL` sont obligatoires côté serveur (400 sinon).
+    mode_choice = (mode or "pure").strip().lower()
+    if mode_choice not in ("pure", "polished"):
+        raise HTTPException(
+            400,
+            f"mode inconnu : '{mode_choice}' "
+            "(valeurs supportées : 'pure', 'polished')",
+        )
+    llm_client_for_polish = None
+    if mode_choice == "polished":
+        llm_client_for_polish = SspCloudLlmClient()
+        if not llm_client_for_polish.is_configured:
+            raise HTTPException(
+                400,
+                "mode 'polished' demandé mais LLM SSPCloud non configuré "
+                "côté serveur (OPENAI_API_KEY / OPENAI_BASE_URL manquants)",
+            )
 
     # Résolution de l'executor injecté (défaut : stub, backward-compat POC).
     executor_choice = (executor or "stub").strip().lower()
@@ -1909,10 +1937,20 @@ async def execute_recipe_web_endpoint(
     exec_context.setdefault("user_message", client_ctx.get("user_message"))
 
     # 3. Exécution (executor injecté selon query param).
+    #    Mode `pure` : execute_recipe_pure (no LLM).
+    #    Mode `polished` : execute_recipe_polished (polish narrative_text
+    #    borné, backward-compat total sur les données géographiques).
     try:
-        output = await execute_recipe_pure(
-            recipe, exec_context, executor=qgis_executor,
-        )
+        if mode_choice == "polished":
+            output = await execute_recipe_polished(
+                recipe, exec_context,
+                executor=qgis_executor,
+                llm_client=llm_client_for_polish,
+            )
+        else:
+            output = await execute_recipe_pure(
+                recipe, exec_context, executor=qgis_executor,
+            )
     except RecipeImportError as exc:
         raise HTTPException(400, f"Import brique en échec : {exc}")
     except RecipeStepError as exc:
@@ -6881,6 +6919,185 @@ async def publish_assembly_endpoint(
             "change_summary": publication_info.get("change_summary"),
         }
     return resp
+
+
+# ── Chantier G4-b-3d : bridge frontend « Publier ce livrable » ───────────────
+#
+# Objectif : le stream SSE `recipe_done` (agent, recipe_executor_mute) porte un
+# `publish_hint` que la storymap frontend consomme pour afficher un bouton
+# « Publier ». Ce bouton POST vers /api/livrable/publish. Ici on route le hint
+# vers l'endpoint publish existant (assemblage ou composant) puis on notifie
+# l'agent qui met a jour la ligne du journal livrables (fail-soft).
+#
+# Contrat de publish_hint minimal accepte :
+#   - {sid, aid, ...}  -> route vers publish_assembly_endpoint
+#   - {sid, cid, ...}  -> route vers publish_component_endpoint
+# Champs optionnels : force, change_summary, audience.
+
+class _HintFakeRequest:
+    """Shim ASGI-less pour re-jouer .json() a partir d'un body pre-materialise.
+
+    publish_assembly_endpoint / publish_component_endpoint appellent
+    ``await request.json()`` pour lire les options ; on leur donne un objet
+    minimal qui expose la meme methode. On ne construit pas un vrai
+    starlette.requests.Request car son constructeur exige un scope ASGI
+    complet (state, headers, receive...) dont on n'a pas besoin ici.
+    """
+
+    def __init__(self, body: dict):
+        self._body = body
+
+    async def json(self):
+        return self._body
+
+
+async def _publish_from_hint(publish_hint: dict, username: str) -> str:
+    """Route un ``publish_hint`` vers l'endpoint publish existant approprie.
+
+    Renvoie l'URL publique hub du livrable. Leve ``ValueError`` si le hint
+    est incomplet, ``RuntimeError`` si la publication n'a pas produit
+    d'URL (les erreurs partielles - S3, PVC - remontent au caller comme
+    diagnostics dans la reponse de l'endpoint sous-jacent, mais si aucune
+    URL n'est produite on considere l'operation ratee).
+    """
+    if not isinstance(publish_hint, dict):
+        raise ValueError("publish_hint doit etre un dict")
+    sid = publish_hint.get("sid")
+    aid = publish_hint.get("aid")
+    cid = publish_hint.get("cid")
+    if not sid or (not aid and not cid):
+        raise ValueError(
+            "publish_hint incomplet : sid et (aid ou cid) requis"
+        )
+
+    fake_body: dict = {}
+    if "force" in publish_hint:
+        fake_body["force"] = bool(publish_hint["force"])
+    if publish_hint.get("change_summary"):
+        fake_body["change_summary"] = publish_hint["change_summary"]
+    if publish_hint.get("audience"):
+        fake_body["audience"] = publish_hint["audience"]
+
+    fake_request = _HintFakeRequest(fake_body)
+    user_stub = {"username": username}
+
+    if aid:
+        result = await publish_assembly_endpoint(
+            sid=sid, aid=aid, request=fake_request, user=user_stub,  # type: ignore[arg-type]
+        )
+    else:
+        result = await publish_component_endpoint(
+            sid=sid, cid=cid, request=fake_request, user=user_stub,  # type: ignore[arg-type]
+        )
+
+    published_url = None
+    if isinstance(result, dict):
+        published_url = (
+            result.get("published_url")
+            or (result.get("publication") or {}).get("stable_url")
+        )
+    if not published_url:
+        raise RuntimeError(
+            "publication_incomplete : published_url absent dans la reponse"
+        )
+    return published_url
+
+
+@app.post("/api/livrable/publish")
+async def publish_livrable_endpoint(
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Bridge frontend : publie un livrable a partir du ``publish_hint`` yield
+    par ``recipe_executor_mute.stream_recipe_execution`` (event ``recipe_done``).
+
+    Body attendu (JSON) :
+        {
+          "livrable_id": "<uuid entree livrable_journal>",
+          "publish_hint": {sid, aid|cid, kind?, audience?, force?, change_summary?},
+          "session_id": "<optionnel, contexte log>"
+        }
+
+    Flux :
+    1. Publie via ``_publish_from_hint`` (assembly ou component existant).
+    2. Notifie l'agent (POST /journal/livrables/{lid}/mark_published) en
+       fire-and-forget : l'echec (agent down, timeout) log un warning mais
+       ne casse pas la reponse - le user a deja son URL publique.
+
+    Retour : ``{published_url, livrable_id, journal_synced}``.
+    """
+    from pydantic import BaseModel, ValidationError
+
+    class PublishLivrableIn(BaseModel):
+        livrable_id: str
+        publish_hint: dict
+        session_id: str | None = None
+
+    try:
+        raw = await request.json()
+    except Exception as exc:
+        raise HTTPException(400, f"body JSON invalide : {exc}")
+    try:
+        payload = PublishLivrableIn(**(raw or {}))
+    except ValidationError as exc:
+        # 400 explicite avec le detail des champs manquants
+        raise HTTPException(400, f"payload invalide : {exc.errors()}")
+
+    if not payload.livrable_id.strip():
+        raise HTTPException(400, "livrable_id ne peut pas etre vide")
+
+    # 1. Publie via mecanique existante
+    try:
+        published_url = await _publish_from_hint(
+            payload.publish_hint, user["username"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except HTTPException:
+        # Publish endpoint sous-jacent a leve 400/403/404 : on le propage
+        raise
+    except Exception as exc:
+        log.error(
+            "publish_livrable %s : publication a echoue : %s",
+            payload.livrable_id, exc,
+        )
+        raise HTTPException(
+            500, f"publication a echoue : {type(exc).__name__}"
+        )
+
+    # 2. Update journal cote agent (fire-and-forget)
+    journal_synced = False
+    if _AGENT_URL:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.post(
+                    f"{_AGENT_URL}/journal/livrables/{payload.livrable_id}"
+                    "/mark_published",
+                    json={"published_url": published_url},
+                    headers={"User-Agent": "kube-probe/hub"},
+                )
+                journal_synced = r.status_code == 200
+                if not journal_synced:
+                    log.warning(
+                        "mark_livrable_published %s : agent HTTP %s",
+                        payload.livrable_id, r.status_code,
+                    )
+        except Exception as exc:
+            log.warning(
+                "mark_livrable_published %s fail-soft : %s",
+                payload.livrable_id, exc,
+            )
+    else:
+        log.debug(
+            "AGENT_URL non configure : skip journal sync pour livrable %s",
+            payload.livrable_id,
+        )
+
+    return {
+        "published_url": published_url,
+        "livrable_id": payload.livrable_id,
+        "journal_synced": journal_synced,
+    }
 
 
 # ── F17 Sprint 1.4 Vague 1 Equipe B : versioning URL stable ───────────────────
