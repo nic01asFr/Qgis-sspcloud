@@ -1730,6 +1730,7 @@ async def reload_briques_cache(user: dict = Depends(auth.require_admin)):
 @app.post("/api/recipes-web/execute")
 async def execute_recipe_web_endpoint(
     request: Request,
+    executor: str = "stub",
     user: dict = Depends(auth.get_current_user),
 ):
     """Exécute une recipe web en mode `recipe_pure` (mute, no LLM).
@@ -1739,6 +1740,14 @@ async def execute_recipe_web_endpoint(
       - ``recipe_yaml`` : contenu YAML brut d'une recipe,
       - ``context`` : dict optionnel (fusionné avec le contexte serveur).
 
+    Query param :
+      - ``executor`` : ``stub`` (défaut, POC G4) ou ``mcp`` (placeholder
+        G4-b-1 en attendant le vrai câblage JSON-RPC BigQgisMCP). Toute
+        autre valeur → 400. Le mode ``mcp`` nécessite un serveur MCP
+        accessible + configuration à câbler en G4-b-2 ; à ce stade il
+        renvoie un layer plausible pointant vers ``/data/scene_store/``
+        mais sans vrai fichier.
+
     Le contexte serveur (autoritatif) fournit ``timestamp`` (UTC ISO 8601) —
     la valeur cliente est ignorée pour préserver l'idempotence : deux appels
     successifs à la même seconde renvoient le même scene_manifest.
@@ -1747,22 +1756,45 @@ async def execute_recipe_web_endpoint(
       - 200 : ``RecipeWebOutput`` sérialisé (scene_manifest, provenance,
         briques_used).
       - 400 : YAML invalide, brique_ref inconnue, catégorie interdite
-        (``RecipeImportError``, ``ValidationError``).
+        (``RecipeImportError``, ``ValidationError``), ou executor inconnu.
       - 404 : ``recipe_id`` fourni mais fichier introuvable.
       - 500 : erreur d'exécution d'un step (``RecipeStepError``).
     """
     # Import différé : recipes_web est optionnel (dev sans PyYAML par ex).
     try:
         from hub.recipes_web import (
+            McpQgisExecutor,
             RecipeImportError,
             RecipeStepError,
             RecipeWeb,
+            StubQgisExecutor,
             execute_recipe_pure,
             load_recipe_from_yaml,
         )
     except ImportError as exc:
         raise HTTPException(
             503, f"Module recipes_web indisponible : {exc}"
+        )
+
+    # Résolution de l'executor injecté (défaut : stub, backward-compat POC).
+    executor_choice = (executor or "stub").strip().lower()
+    if executor_choice == "stub":
+        qgis_executor = StubQgisExecutor()
+    elif executor_choice == "mcp":
+        # Placeholder G4-b-1 — pas de vrai appel MCP. URL/auth via env
+        # quand le câblage JSON-RPC sera prêt (G4-b-2).
+        import os as _os
+        qgis_executor = McpQgisExecutor(
+            mcp_url=_os.environ.get(
+                "QGIS_MCP_URL", "http://qgis-mcp-server:8090"
+            ),
+            mcp_auth=_os.environ.get("QGIS_MCP_AUTH") or None,
+        )
+    else:
+        raise HTTPException(
+            400,
+            f"executor inconnu : '{executor_choice}' "
+            "(valeurs supportées : 'stub', 'mcp')",
         )
 
     try:
@@ -1833,9 +1865,11 @@ async def execute_recipe_web_endpoint(
     exec_context["timestamp"] = server_timestamp
     exec_context.setdefault("user_message", client_ctx.get("user_message"))
 
-    # 3. Exécution.
+    # 3. Exécution (executor injecté selon query param).
     try:
-        output = await execute_recipe_pure(recipe, exec_context)
+        output = await execute_recipe_pure(
+            recipe, exec_context, executor=qgis_executor,
+        )
     except RecipeImportError as exc:
         raise HTTPException(400, f"Import brique en échec : {exc}")
     except RecipeStepError as exc:
