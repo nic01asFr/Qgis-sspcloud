@@ -5163,6 +5163,69 @@ def _markdown_to_html_basique(md: str) -> str:
     return "".join(rendered)
 
 
+def _apply_auto_reprojection(
+    gj_data: dict,
+    layer_id: str,
+    source_hint: str,
+) -> tuple[dict, bool]:
+    """Auto-reprojection defensive GeoJSON -> EPSG:4326 avant inline SSR.
+
+    Chantier G3 + finition V2/V3 (2026-07-13). Utilise dans les deux
+    chemins d'inline de _build_interactive_map_ctx :
+      - Chemin A : layers_inline avec source.type=geojson_path
+      - Chemin B : scene_manifest lu depuis PVC (scene_store)
+
+    Comportement :
+      * Import tardif de hub.geo_utils (fail-soft si pyproj absent).
+      * Detecte le CRS via crs.properties.name (GeoJSON legacy).
+      * Si CRS != EPSG:4326, reprojette vers EPSG:4326.
+      * En cas d'echec pyproj/CRSError : log warning, renvoie l'input tel
+        quel (fail-soft, meilleure UX degradee que 500).
+      * Retire toujours le champ crs top-level (RFC 7946 : 4326 implicite).
+
+    Args:
+        gj_data: FeatureCollection GeoJSON.
+        layer_id: id du layer, pour logs.
+        source_hint: chemin/URL source, pour logs.
+
+    Returns:
+        Tuple (gj_data_out, reprojected). ``reprojected=True`` uniquement
+        si une transformation a effectivement eu lieu (permet a l'appelant
+        de forcer source.crs = "EPSG:4326").
+    """
+    reprojected = False
+    if not isinstance(gj_data, dict):
+        return gj_data, False
+    try:
+        from hub import geo_utils
+        declared_crs = geo_utils.detect_geojson_crs(gj_data)
+        if declared_crs and declared_crs != "EPSG:4326":
+            try:
+                gj_data = geo_utils.reproject_geojson_to_4326(gj_data, declared_crs)
+                reprojected = True
+                log.info(
+                    "Auto-reprojection %s -> EPSG:4326 pour layer %s (%d features, %s)",
+                    declared_crs,
+                    layer_id,
+                    len(gj_data.get("features", [])),
+                    source_hint,
+                )
+            except Exception as exc:
+                log.warning(
+                    "Auto-reprojection %s echouee pour layer %s (%s) : %s -- inline as-is",
+                    declared_crs, layer_id, source_hint, exc,
+                )
+    except Exception as exc:
+        log.warning(
+            "hub.geo_utils indisponible pour layer %s (%s) : %s -- inline as-is",
+            layer_id, source_hint, exc,
+        )
+    # RFC 7946 : WGS84 implicite, retire toujours le champ crs top-level.
+    if isinstance(gj_data, dict):
+        gj_data.pop("crs", None)
+    return gj_data, reprojected
+
+
 async def _build_interactive_map_ctx(
     comp_manifest: dict,
     sid: str,
@@ -5231,6 +5294,18 @@ async def _build_interactive_map_ctx(
                                 geojson = _json2.loads(_b64s.b64decode(gj_b64).decode())
                         except Exception as _e:
                             log.warning("read scene_layer %s : %s", lid, _e)
+                    # V2 (2026-07-13) : le scene_store PVC n'impose PAS EPSG:4326
+                    # en amont. Les couches ecrites par le workspace QGIS sont
+                    # potentiellement en Lambert 93 natif (BD TOPO, RGE ALTI).
+                    # Meme traitement defensif que le Chemin A, sinon rendu au
+                    # large de l'Afrique dans MapLibre. Aucune modif de source
+                    # (chemin B n'expose pas de layer.source vers le consumer).
+                    if isinstance(geojson, dict):
+                        geojson, _ = _apply_auto_reprojection(
+                            geojson,
+                            layer_id=lid,
+                            source_hint=str(geojson_path or "scene_manifest"),
+                        )
                     if geojson:
                         layer_dict = {
                             "id": lid,
@@ -5294,49 +5369,30 @@ async def _build_interactive_map_ctx(
                     if "GEOJSON_PATH_READ_OK" in gj_out:
                         gj_b64 = gj_out.split("b64=", 1)[1].split()[0].strip()
                         gj_data = _json2.loads(_b64s.b64decode(gj_b64).decode())
-                        # Chantier G3 (2026-07-13) — auto-reprojection si CRS != 4326.
+                        # Chantier G3 + finition V2 (2026-07-13) — helper unifie.
                         # Les couches BD TOPO / RGE ALTI IGN sont fournies en
                         # Lambert 93 natif (EPSG:2154). MapLibre attend WGS84,
                         # donc sans reprojection le rendu part au large de
                         # l'Afrique et affiche 0 feature dans la bbox reelle.
-                        try:
-                            from hub import geo_utils
-                            declared_crs = geo_utils.detect_geojson_crs(gj_data)
-                            if declared_crs and declared_crs != "EPSG:4326":
-                                try:
-                                    gj_data = geo_utils.reproject_geojson_to_4326(
-                                        gj_data, declared_crs
-                                    )
-                                    log.info(
-                                        "V0.3.1 auto-reprojection %s -> EPSG:4326 pour layer %s (%d features)",
-                                        declared_crs,
-                                        l.get("id", "?"),
-                                        len(gj_data.get("features", [])),
-                                    )
-                                except Exception as exc:
-                                    log.warning(
-                                        "Auto-reprojection %s echouee pour %s : %s -- inline as-is",
-                                        declared_crs, src.get("path"), exc,
-                                    )
-                        except Exception as exc:
-                            log.warning(
-                                "hub.geo_utils indisponible pour %s : %s -- inline as-is",
-                                src.get("path"), exc,
-                            )
-                        # RFC 7946 : 4326 implicite, retire le champ crs top-level.
-                        if isinstance(gj_data, dict):
-                            gj_data.pop("crs", None)
+                        gj_data, _reprojected = _apply_auto_reprojection(
+                            gj_data,
+                            layer_id=l.get("id", "?"),
+                            source_hint=str(src.get("path", "?")),
+                        )
                         # Injecte au format V1.13 (l.geojson) pour compat
                         # downstream (classification + template).
                         l = dict(l)
                         l["geojson"] = gj_data
-                        # Update aussi source.type=geojson + data pour
-                        # que le shim V0.3.1 cote lib alpha.5+ recoive
-                        # une source inline coherente.
+                        # V3 (2026-07-13) : apres reprojection reussie, force
+                        # source.crs = "EPSG:4326" pour ne pas mentir a un
+                        # consumer alpha.5/6 qui trusterait ce champ (sinon il
+                        # reprojeterait a nouveau cote client et casserait).
+                        # Sinon on preserve le CRS declare par l'appelant.
+                        forced_crs = "EPSG:4326" if _reprojected else src.get("crs", "EPSG:4326")
                         l["source"] = {
                             "type": "geojson",
                             "data": gj_data,
-                            "crs": src.get("crs", "EPSG:4326"),
+                            "crs": forced_crs,
                         }
                         log.info("V0.3.1 geojson_path inlined for %s (%s features)",
                                  l.get("id"),
