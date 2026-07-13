@@ -878,6 +878,17 @@ _OIDC_MIDDLEWARE_INTER_POD = (
     # /internal/profiles/{id}/full : agent recupere agent_system_prompt
     # complet (filtre dans /profiles/{id} public).
     "/internal",
+    # Fix consolidation 2026-07-13 : /admin/* doit être joignable via Bearer
+    # HUB_API_KEY pour le call portail -> hub `configure_agent_after_deploy`
+    # (POST /admin/agent-config). Sans cette whitelist, TOUT nouvel onboarding
+    # user via portail échoue silencieusement en background depuis fd51f0a
+    # (15 juin) : la row `deployments` reçoit `status="ok"` (car sauvée AVANT
+    # le call config-agent), mais l'agent tourne sans LLM_API_KEY -> l'user
+    # voit le bandeau "clé LLM manquante" à vie sans possibilité de refresh.
+    # L'endpoint /admin/agent-config fait déjà son propre check ADMIN_TOKEN
+    # avant d'accepter la config, même niveau de protection.
+    # Bug jumeau `/studies` fixé 2026-06-19 (d09ed60) ; oubli complété ici.
+    "/admin",
     # NB : /published a ete deplace dans _OIDC_MIDDLEWARE_PUBLIC (vraie
     # whitelist anonyme). Inter-pod ne suffit pas pour acces tiers internet.
 )
