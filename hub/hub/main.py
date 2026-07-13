@@ -1329,6 +1329,41 @@ async def _desk_context() -> dict:
                 ctx["recent_treatments"] = dedup[:6]
         except Exception:
             pass
+
+    # ── Chantier G4-b-3c : galerie de recettes web (SSR) ────────────────────
+    # Le desk affiche une galerie de cards dans la section RECETTES. On
+    # charge le catalogue directement via `registry.list_recipes(scope="all")`
+    # (pas de self-call HTTP) et on enrichit chaque recipe avec le
+    # ``session_hint`` deep-link ``study:{sid}:recipe:{id}`` — clique sur la
+    # card = navigation vers `/desk?session=<hint>` qui declenchera le mode
+    # mute G8 en aval. Le sid utilise est l'etude active du contexte ; s'il
+    # n'y en a pas, on remplace par ``no-active-study`` (la card reste
+    # cliquable mais l'aval traitera comme un warning).
+    try:
+        from hub.recipes_web import registry as _rw_registry_ctx
+        _sid_hint = ctx.get("active_study_id") or "no-active-study"
+        _recipes_ctx: list[dict] = []
+        for _r in _rw_registry_ctx.list_recipes(scope="all"):
+            _r2 = dict(_r)  # copie defensive : on n'ecrit pas dans le cache
+            _r2["session_hint"] = (
+                f"study:{_sid_hint}:recipe:{_r2.get('id')}"
+            )
+            # Description synthetique (le YAML V0.3.1 n'a pas encore de
+            # champ description ; on derive une ligne courte a partir du
+            # title + des use_cases pour la card).
+            _uc = _r2.get("use_cases") or []
+            if _uc:
+                _r2["description"] = (
+                    f"Recette web V0.3.1 · usage : {', '.join(_uc)}"
+                )
+            else:
+                _r2["description"] = "Recette deterministe web V0.3.1"
+            _recipes_ctx.append(_r2)
+        ctx["recipes"] = _recipes_ctx
+    except Exception as _exc:
+        log.warning("_desk_context recipes gallery : %s", _exc)
+        ctx["recipes"] = []
+
     return ctx
 
 
@@ -1941,6 +1976,65 @@ async def reload_recipes_web_endpoint(
         )
     total = _rw_registry.reload_cache()
     return {"reloaded": True, "total": total, "counts": _rw_registry.counts()}
+
+
+@app.get("/api/recipes-web/gallery")
+async def gallery_recipes_web_endpoint(
+    request: Request,
+    study_id: str | None = None,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Galerie de recettes web pour l'UI desk (chantier G4-b-3c).
+
+    Retourne le catalogue unifie examples + user enrichi de metadonnees
+    d'affichage :
+
+      - ``description`` : ligne courte pour la card (heritee ou fallback)
+      - ``session_hint`` : identifiant de session deep-link
+        ``study:{study_id}:recipe:{recipe_id}`` ; clique sur la card =
+        navigation vers ``/desk?session=<hint>``, ce qui declenchera le
+        mode mute G8 en aval (session pod prise en compte de la recipe).
+
+    Le ``study_id`` est passe en query string : c'est un contexte
+    d'affichage cote UI, pas une contrainte de filtrage — toutes les
+    recipes disponibles sont listees quel que soit le study_id.
+
+    Reponse 200 :
+      ``{"recipes": [{id, title, author, description, use_cases,
+                       source, session_hint}, ...],
+         "total": N}``
+    """
+    try:
+        from hub.recipes_web import registry as _rw_registry
+    except ImportError as exc:
+        raise HTTPException(
+            503, f"Module recipes_web indisponible : {exc}"
+        )
+
+    sid = (study_id or "no-active-study").strip() or "no-active-study"
+    entries = _rw_registry.list_recipes(scope="all")
+    out: list[dict] = []
+    for r in entries:
+        rid = r.get("id")
+        title = r.get("title") or rid
+        # Fallback description : le YAML V0.3.1 n'a pas encore de champ
+        # description. On synthetise une ligne courte a partir du title +
+        # des use_cases pour donner du contexte a l'user dans la card.
+        use_cases = r.get("use_cases") or []
+        if use_cases:
+            desc = f"Recette web V0.3.1 · usage : {', '.join(use_cases)}"
+        else:
+            desc = "Recette deterministe web V0.3.1"
+        out.append({
+            "id":            rid,
+            "title":         title,
+            "author":        r.get("author"),
+            "description":   desc,
+            "use_cases":     use_cases,
+            "source":        r.get("source"),
+            "session_hint":  f"study:{sid}:recipe:{rid}",
+        })
+    return {"recipes": out, "total": len(out)}
 
 
 # ── GeoAI — proxy vers pod GPU (SAM3, DeepForest, OmniWater) ─────────────────
