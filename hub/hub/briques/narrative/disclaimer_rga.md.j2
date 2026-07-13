@@ -1,0 +1,25 @@
+{# Brique disclaimer RGA — usage : dans un diagnostic parc bâti temporel #}
+{# Variables attendues : {{ zone_label }}, {{ pct_ancien_avant_1948 }} (optionnel) #}
+
+## Vulnérabilité RGA du bâti ancien
+
+**Note méthodologique** :
+Les bâtiments construits avant 1948 sur {{ zone_label }} présentent une
+vulnérabilité potentielle au **retrait-gonflement des argiles (RGA)** :
+
+- **Fondations superficielles** (peu profondes, sensibles aux mouvements de sol argileux)
+- **Matériaux hétérogènes** (moellons, torchis, briques anciennes non standardisées)
+- **Absence de norme parasismique et anti-tassement** (normes DTU postérieures)
+
+{% if pct_ancien_avant_1948 is defined %}
+Sur la zone étudiée, **{{ "%.1f"|format(pct_ancien_avant_1948) }} %** du parc bâti
+est concerné par cette période de construction.
+{% endif %}
+
+Une **étude géotechnique localisée** est recommandée pour tout projet de
+réhabilitation ou d'aménagement structurel affectant ces bâtiments.
+
+**Ce disclaimer ne remplace pas** :
+- Le zonage aléa RGA officiel (données Géorisques BRGM)
+- La consultation du PLU / PPR local en vigueur
+- L'expertise d'un bureau d'études géotechnique agréé

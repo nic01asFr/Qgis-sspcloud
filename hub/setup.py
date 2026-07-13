@@ -24,5 +24,9 @@ setup(
         # Sprint 1.4 Vague 1 Equipe B (2026-07-05) - F16/F15 publication.
         "cryptography>=41.0",  # F16 bundle ZIP + signature Ed25519
         "weasyprint>=60.0",    # F15 export PDF headless
+        # Chantier G3 (2026-07-13) : auto-reprojection GeoJSON Lambert 93 ->
+        # WGS84 dans _build_interactive_map_ctx (hub/geo_utils.py). Import
+        # tardif + fail-soft si absent.
+        "pyproj>=3.5",
     ],
 )

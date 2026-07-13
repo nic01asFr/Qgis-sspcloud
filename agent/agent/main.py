@@ -979,6 +979,52 @@ async def get_messages(session_id: str):
     return await memory.get_session_messages(session_id)
 
 
+# ── Session tags (Chantier G1) ────────────────────────────────────────────────
+# Convention session_id structuree + tags SQLite indexes pour lookup inverse
+# ("toutes les sessions taggees composant X"). Cf. memory.parse_session_id.
+
+@app.get("/sessions/{session_id}/tags")
+async def session_get_tags(session_id: str):
+    """Retourne les tags persistes + le parse de la convention session_id.
+
+    - ``tags``   : dict {key: value} lu depuis SQLite (source de verite).
+    - ``parsed`` : dict {context_kind, sid?, cid?, ...} deduit du session_id
+                   (utile pour un client qui recoit une session non taggee
+                   encore et veut inferer son contexte immediatement).
+    """
+    tags = await memory.get_session_tags(session_id)
+    parsed = memory.parse_session_id(session_id)
+    return {"tags": tags, "parsed": parsed}
+
+
+@app.post("/sessions/{session_id}/tags")
+async def session_set_tag(session_id: str, request: Request):
+    """Pose/remplace un tag sur la session. Body JSON ``{key, value}``.
+
+    Utilise par le desk / drawer BlockNote pour attacher explicitement le
+    contexte UI (cid, aid, use_case, etc.) quand le session_id ne le porte
+    pas encore (transition douce depuis les UUIDs legacy).
+    """
+    body = await request.json()
+    key = body.get("key")
+    value = body.get("value")
+    if not key or value is None:
+        raise HTTPException(400, "key et value requis")
+    await memory.set_session_tag(session_id, str(key), str(value))
+    return {"ok": True, "session_id": session_id, "key": key, "value": value}
+
+
+@app.get("/sessions/by-tag")
+async def sessions_by_tag(key: str, value: str, limit: int = 50):
+    """Lookup inverse : quelles sessions portent (key, value) ? Triees desc.
+
+    Ex : ``/sessions/by-tag?key=cid&value=abc`` retourne toutes les sessions
+    du composant ``abc`` (drawer BlockNote), plus recente en tete.
+    """
+    sessions = await memory.find_sessions_by_tag(key, value, limit=limit)
+    return {"sessions": sessions, "key": key, "value": value}
+
+
 # ── Checkpoints / Rollback (Commit B) ──────────────────────────────────────────
 
 @app.get("/sessions/{session_id}/checkpoints")

@@ -1,0 +1,20 @@
+id: no_hallucination_sources
+category: forbidden
+version: 1.0
+title: "Ne jamais inventer une source ou un dispositif réglementaire"
+applies_to: [narrative_text, interactive_map, all]
+severity: block
+rule_text: |
+  Interdiction absolue d'inventer :
+  - Une couche de données (ex: "PPR Tartifness" observé le 2026-07-13 alors qu'aucun tel PPR n'existe)
+  - Un dispositif réglementaire (PPRi, PPRt, PPR-RGA, PLU, SCoT, etc.) qui n'est pas
+    documenté dans le catalog datasources ou attesté dans le contexte projet.
+  - Une statistique chiffrée qui n'a pas été calculée par un tool call.
+llm_hint: |
+  Si tu veux nommer un dispositif (PPR, catalog datasource, dataset officiel),
+  vérifie sa présence dans le catalog. Si absent, demande à l'user OU refuse
+  l'action. Préférer "cette recommandation nécessite consultation du PPR local
+  s'il existe" plutôt qu'inventer un nom.
+enforced_by:
+  - "prompt système section FORBIDDEN (chantier G7)"
+  - "validation `_check_publish_ready` extension (chantier P2)"

@@ -67,6 +67,11 @@ try:
     _STUDIES_AVAILABLE = True
 except ImportError:
     _STUDIES_AVAILABLE = False
+try:
+    from hub import briques_loader
+    _BRIQUES_AVAILABLE = True
+except ImportError:
+    _BRIQUES_AVAILABLE = False
 
 log = logging.getLogger("hub.main")
 
@@ -1648,6 +1653,66 @@ async def get_template(name: str, user: dict = Depends(auth.get_current_user)):
         raise HTTPException(404, f"Fichier introuvable: {rel}")
     with open(path, "r", encoding="utf-8") as f:
         return Response(content=f.read(), media_type="text/x-python; charset=utf-8")
+
+
+# ── Briques — bibliothèque de briques réutilisables (chantier G5) ─────────────
+# Cadre l'agent LLM (règles GLOBAL_RULES + FORBIDDEN, chantier G7) et compose
+# les livrables (chantier G4). Loader in-memory, cache, hot-reload admin.
+
+
+@app.get("/briques")
+async def list_briques_all(user: dict = Depends(auth.get_current_user)):
+    """Liste toutes les briques, groupées par catégorie (métadonnées légères)."""
+    if not _BRIQUES_AVAILABLE:
+        raise HTTPException(503, "Bibliothèque briques non disponible")
+    cache = briques_loader.load_all_briques()
+    categories: dict[str, list[dict]] = {}
+    for cat in briques_loader.VALID_CATEGORIES:
+        categories[cat] = briques_loader.list_briques(cat)
+    total = sum(len(v) for v in cache.values())
+    return {"total": total, "categories": categories}
+
+
+@app.get("/briques/{category}")
+async def list_briques_by_category(category: str,
+                                   user: dict = Depends(auth.get_current_user)):
+    """Liste les briques d'une catégorie (métadonnées légères, sans source_content)."""
+    if not _BRIQUES_AVAILABLE:
+        raise HTTPException(503, "Bibliothèque briques non disponible")
+    if category not in briques_loader.VALID_CATEGORIES:
+        raise HTTPException(
+            404,
+            f"Catégorie '{category}' inconnue. Valides : "
+            f"{', '.join(briques_loader.VALID_CATEGORIES)}",
+        )
+    return briques_loader.list_briques(category)
+
+
+@app.get("/briques/{category}/{brique_id}")
+async def get_brique_detail(category: str, brique_id: str,
+                            user: dict = Depends(auth.get_current_user)):
+    """Retourne le contenu complet d'une brique (incluant `source_content`)."""
+    if not _BRIQUES_AVAILABLE:
+        raise HTTPException(503, "Bibliothèque briques non disponible")
+    if category not in briques_loader.VALID_CATEGORIES:
+        raise HTTPException(
+            404,
+            f"Catégorie '{category}' inconnue. Valides : "
+            f"{', '.join(briques_loader.VALID_CATEGORIES)}",
+        )
+    brique = briques_loader.get_brique(category, brique_id)
+    if brique is None:
+        raise HTTPException(404, f"Brique '{category}/{brique_id}' introuvable")
+    return brique
+
+
+@app.post("/admin/briques/reload")
+async def reload_briques_cache(user: dict = Depends(auth.require_admin)):
+    """Force le rechargement du cache briques (dev / après ajout expert métier)."""
+    if not _BRIQUES_AVAILABLE:
+        raise HTTPException(503, "Bibliothèque briques non disponible")
+    total = briques_loader.reload_cache()
+    return {"reloaded": True, "total": total}
 
 
 # ── GeoAI — proxy vers pod GPU (SAM3, DeepForest, OmniWater) ─────────────────
@@ -5098,6 +5163,69 @@ def _markdown_to_html_basique(md: str) -> str:
     return "".join(rendered)
 
 
+def _apply_auto_reprojection(
+    gj_data: dict,
+    layer_id: str,
+    source_hint: str,
+) -> tuple[dict, bool]:
+    """Auto-reprojection defensive GeoJSON -> EPSG:4326 avant inline SSR.
+
+    Chantier G3 + finition V2/V3 (2026-07-13). Utilise dans les deux
+    chemins d'inline de _build_interactive_map_ctx :
+      - Chemin A : layers_inline avec source.type=geojson_path
+      - Chemin B : scene_manifest lu depuis PVC (scene_store)
+
+    Comportement :
+      * Import tardif de hub.geo_utils (fail-soft si pyproj absent).
+      * Detecte le CRS via crs.properties.name (GeoJSON legacy).
+      * Si CRS != EPSG:4326, reprojette vers EPSG:4326.
+      * En cas d'echec pyproj/CRSError : log warning, renvoie l'input tel
+        quel (fail-soft, meilleure UX degradee que 500).
+      * Retire toujours le champ crs top-level (RFC 7946 : 4326 implicite).
+
+    Args:
+        gj_data: FeatureCollection GeoJSON.
+        layer_id: id du layer, pour logs.
+        source_hint: chemin/URL source, pour logs.
+
+    Returns:
+        Tuple (gj_data_out, reprojected). ``reprojected=True`` uniquement
+        si une transformation a effectivement eu lieu (permet a l'appelant
+        de forcer source.crs = "EPSG:4326").
+    """
+    reprojected = False
+    if not isinstance(gj_data, dict):
+        return gj_data, False
+    try:
+        from hub import geo_utils
+        declared_crs = geo_utils.detect_geojson_crs(gj_data)
+        if declared_crs and declared_crs != "EPSG:4326":
+            try:
+                gj_data = geo_utils.reproject_geojson_to_4326(gj_data, declared_crs)
+                reprojected = True
+                log.info(
+                    "Auto-reprojection %s -> EPSG:4326 pour layer %s (%d features, %s)",
+                    declared_crs,
+                    layer_id,
+                    len(gj_data.get("features", [])),
+                    source_hint,
+                )
+            except Exception as exc:
+                log.warning(
+                    "Auto-reprojection %s echouee pour layer %s (%s) : %s -- inline as-is",
+                    declared_crs, layer_id, source_hint, exc,
+                )
+    except Exception as exc:
+        log.warning(
+            "hub.geo_utils indisponible pour layer %s (%s) : %s -- inline as-is",
+            layer_id, source_hint, exc,
+        )
+    # RFC 7946 : WGS84 implicite, retire toujours le champ crs top-level.
+    if isinstance(gj_data, dict):
+        gj_data.pop("crs", None)
+    return gj_data, reprojected
+
+
 async def _build_interactive_map_ctx(
     comp_manifest: dict,
     sid: str,
@@ -5166,6 +5294,18 @@ async def _build_interactive_map_ctx(
                                 geojson = _json2.loads(_b64s.b64decode(gj_b64).decode())
                         except Exception as _e:
                             log.warning("read scene_layer %s : %s", lid, _e)
+                    # V2 (2026-07-13) : le scene_store PVC n'impose PAS EPSG:4326
+                    # en amont. Les couches ecrites par le workspace QGIS sont
+                    # potentiellement en Lambert 93 natif (BD TOPO, RGE ALTI).
+                    # Meme traitement defensif que le Chemin A, sinon rendu au
+                    # large de l'Afrique dans MapLibre. Aucune modif de source
+                    # (chemin B n'expose pas de layer.source vers le consumer).
+                    if isinstance(geojson, dict):
+                        geojson, _ = _apply_auto_reprojection(
+                            geojson,
+                            layer_id=lid,
+                            source_hint=str(geojson_path or "scene_manifest"),
+                        )
                     if geojson:
                         layer_dict = {
                             "id": lid,
@@ -5229,17 +5369,30 @@ async def _build_interactive_map_ctx(
                     if "GEOJSON_PATH_READ_OK" in gj_out:
                         gj_b64 = gj_out.split("b64=", 1)[1].split()[0].strip()
                         gj_data = _json2.loads(_b64s.b64decode(gj_b64).decode())
+                        # Chantier G3 + finition V2 (2026-07-13) — helper unifie.
+                        # Les couches BD TOPO / RGE ALTI IGN sont fournies en
+                        # Lambert 93 natif (EPSG:2154). MapLibre attend WGS84,
+                        # donc sans reprojection le rendu part au large de
+                        # l'Afrique et affiche 0 feature dans la bbox reelle.
+                        gj_data, _reprojected = _apply_auto_reprojection(
+                            gj_data,
+                            layer_id=l.get("id", "?"),
+                            source_hint=str(src.get("path", "?")),
+                        )
                         # Injecte au format V1.13 (l.geojson) pour compat
                         # downstream (classification + template).
                         l = dict(l)
                         l["geojson"] = gj_data
-                        # Update aussi source.type=geojson + data pour
-                        # que le shim V0.3.1 cote lib alpha.5+ recoive
-                        # une source inline coherente.
+                        # V3 (2026-07-13) : apres reprojection reussie, force
+                        # source.crs = "EPSG:4326" pour ne pas mentir a un
+                        # consumer alpha.5/6 qui trusterait ce champ (sinon il
+                        # reprojeterait a nouveau cote client et casserait).
+                        # Sinon on preserve le CRS declare par l'appelant.
+                        forced_crs = "EPSG:4326" if _reprojected else src.get("crs", "EPSG:4326")
                         l["source"] = {
                             "type": "geojson",
                             "data": gj_data,
-                            "crs": src.get("crs", "EPSG:4326"),
+                            "crs": forced_crs,
                         }
                         log.info("V0.3.1 geojson_path inlined for %s (%s features)",
                                  l.get("id"),
