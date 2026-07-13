@@ -159,7 +159,7 @@ def _load_category(category: str) -> list[dict[str, Any]]:
                     brique_id = brique_id[: -len(suffix)]
         data.setdefault("id", brique_id)
         data.setdefault("category", category)
-        data["path"] = str(path.relative_to(_BRIQUES_DIR))
+        data["path"] = path.relative_to(_BRIQUES_DIR).as_posix()
         try:
             data["source_content"] = path.read_text(encoding="utf-8")
         except Exception as exc:
