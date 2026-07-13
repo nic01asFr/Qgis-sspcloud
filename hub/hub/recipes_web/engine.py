@@ -1,19 +1,20 @@
 """hub.recipes_web.engine — Moteur d'exécution POC des recipes web.
 
-Chantier G4-POC. Mode `recipe_pure` uniquement : déterministe strict,
-aucun appel LLM. Le mode `recipe_polished` est documenté dans SPEC.md
-comme extension future.
+Chantier G4-POC + G4-b-1. Mode `recipe_pure` uniquement : déterministe
+strict, aucun appel LLM. Le mode `recipe_polished` est documenté dans
+SPEC.md comme extension future.
 
 Points d'attention :
   - `produced_at` provient toujours de `context["timestamp"]` — jamais
     de `datetime.now()` ou `time.time()`, sinon l'idempotence saute.
-  - `run_qgis` est simulé : produit un layer stub. L'intégration MCP
-    réelle sera l'objet de G4-b.
+  - `run_qgis` est délégué à un `QgisExecutor` (voir `qgis_executor.py`).
+    Le comportement POC (stub) est préservé par défaut ; injection d'un
+    `McpQgisExecutor` possible pour brancher BigQgisMCP.
   - Toute erreur d'import ou de step est fatale (levée immédiate).
 
 API :
   - `load_recipe_from_yaml(path) -> RecipeWeb`
-  - `execute_recipe_pure(recipe, context) -> RecipeWebOutput`
+  - `execute_recipe_pure(recipe, context, executor=None) -> RecipeWebOutput`
   - `RecipeImportError`, `RecipeStepError`
 """
 
@@ -33,6 +34,7 @@ from hub.recipes_web.models import (
     RecipeWeb,
     RecipeWebOutput,
 )
+from hub.recipes_web.qgis_executor import QgisExecutor, StubQgisExecutor
 
 log = logging.getLogger("hub.recipes_web.engine")
 
@@ -140,39 +142,6 @@ def _deep_merge_defaults(
         # sinon : target garde sa valeur (les defaults n'écrasent pas).
 
 
-def _stub_layer_from_run_qgis(step: RecipeStepRunQgis) -> dict[str, Any]:
-    """Produit un layer stub V0.3.1 depuis un step run_qgis (POC)."""
-    outputs = step.outputs
-    layer_id = outputs["layer_id"]
-    layer: dict[str, Any] = {
-        "id": layer_id,
-        "name": outputs.get("layer_name", layer_id),
-        "role": outputs.get("role", "primary"),
-        "geometry_type": outputs.get("geometry_type", "polygon"),
-        "source": {
-            "type": "geojson_path",
-            "path": f"/data/scene_store/stub/{layer_id}.geojson",
-            "crs": "EPSG:4326",
-        },
-        "style": {
-            "visible": True,
-            "z_index": 10,
-            "classification": {
-                "color": {"mode": "single", "value": "#000091"},
-            },
-        },
-    }
-    classification_field = outputs.get("classification_field")
-    if classification_field:
-        layer["style"]["classification"]["color"] = {
-            "mode": "graduated",
-            "field": classification_field,
-            "method": "quantile",
-        }
-        layer["_stub_classification_field"] = classification_field
-    return layer
-
-
 def _default_slot_for(category: str) -> str:
     """Slot par défaut selon la catégorie de la brique."""
     if category == "narrative":
@@ -255,13 +224,20 @@ def _inject_into_manifest(
 
 
 async def execute_recipe_pure(
-    recipe: RecipeWeb, context: dict[str, Any]
+    recipe: RecipeWeb,
+    context: dict[str, Any],
+    executor: QgisExecutor | None = None,
 ) -> RecipeWebOutput:
     """Exécute une recipe web en mode `recipe_pure` (déterministe, no LLM).
 
     `context` doit fournir au minimum :
       - `timestamp` (str, ex. "2026-07-13T10:00:00+02:00") — utilisé comme
         `produced_at` du manifest. Sans lui : "1970-01-01T00:00:00+00:00".
+
+    `executor` : implémentation `QgisExecutor` chargée d'exécuter les
+    steps `run_qgis`. Par défaut `StubQgisExecutor()` (backward-compat
+    avec le POC G4). Injecter `McpQgisExecutor(...)` pour brancher
+    BigQgisMCP.
 
     Retourne un `RecipeWebOutput` contenant :
       - `scene_manifest` prêt à publier ;
@@ -270,6 +246,8 @@ async def execute_recipe_pure(
     """
     ctx = context or {}
     timestamp = ctx.get("timestamp") or "1970-01-01T00:00:00+00:00"
+    if executor is None:
+        executor = StubQgisExecutor()
 
     # 1. Pré-validation des imports globaux — fail fast.
     briques_used: list[str] = []
@@ -316,8 +294,11 @@ async def execute_recipe_pure(
         step_tag = step.id or f"{step.kind}_{idx}"
 
         if isinstance(step, RecipeStepRunQgis):
-            log.info("[recipe %s] run_qgis stub → %s", recipe.id, step_tag)
-            layer = _stub_layer_from_run_qgis(step)
+            log.info(
+                "[recipe %s] run_qgis via %s → %s",
+                recipe.id, type(executor).__name__, step_tag,
+            )
+            layer = await executor.execute(step, ctx)
             manifest["layers"].append(layer)
             steps_order.append(step_tag)
             continue
