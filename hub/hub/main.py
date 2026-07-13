@@ -1730,6 +1730,7 @@ async def reload_briques_cache(user: dict = Depends(auth.require_admin)):
 @app.post("/api/recipes-web/execute")
 async def execute_recipe_web_endpoint(
     request: Request,
+    executor: str = "stub",
     user: dict = Depends(auth.get_current_user),
 ):
     """Exécute une recipe web en mode `recipe_pure` (mute, no LLM).
@@ -1739,6 +1740,14 @@ async def execute_recipe_web_endpoint(
       - ``recipe_yaml`` : contenu YAML brut d'une recipe,
       - ``context`` : dict optionnel (fusionné avec le contexte serveur).
 
+    Query param :
+      - ``executor`` : ``stub`` (défaut, POC G4) ou ``mcp`` (placeholder
+        G4-b-1 en attendant le vrai câblage JSON-RPC BigQgisMCP). Toute
+        autre valeur → 400. Le mode ``mcp`` nécessite un serveur MCP
+        accessible + configuration à câbler en G4-b-2 ; à ce stade il
+        renvoie un layer plausible pointant vers ``/data/scene_store/``
+        mais sans vrai fichier.
+
     Le contexte serveur (autoritatif) fournit ``timestamp`` (UTC ISO 8601) —
     la valeur cliente est ignorée pour préserver l'idempotence : deux appels
     successifs à la même seconde renvoient le même scene_manifest.
@@ -1747,22 +1756,45 @@ async def execute_recipe_web_endpoint(
       - 200 : ``RecipeWebOutput`` sérialisé (scene_manifest, provenance,
         briques_used).
       - 400 : YAML invalide, brique_ref inconnue, catégorie interdite
-        (``RecipeImportError``, ``ValidationError``).
+        (``RecipeImportError``, ``ValidationError``), ou executor inconnu.
       - 404 : ``recipe_id`` fourni mais fichier introuvable.
       - 500 : erreur d'exécution d'un step (``RecipeStepError``).
     """
     # Import différé : recipes_web est optionnel (dev sans PyYAML par ex).
     try:
         from hub.recipes_web import (
+            McpQgisExecutor,
             RecipeImportError,
             RecipeStepError,
             RecipeWeb,
+            StubQgisExecutor,
             execute_recipe_pure,
             load_recipe_from_yaml,
         )
     except ImportError as exc:
         raise HTTPException(
             503, f"Module recipes_web indisponible : {exc}"
+        )
+
+    # Résolution de l'executor injecté (défaut : stub, backward-compat POC).
+    executor_choice = (executor or "stub").strip().lower()
+    if executor_choice == "stub":
+        qgis_executor = StubQgisExecutor()
+    elif executor_choice == "mcp":
+        # Placeholder G4-b-1 — pas de vrai appel MCP. URL/auth via env
+        # quand le câblage JSON-RPC sera prêt (G4-b-2).
+        import os as _os
+        qgis_executor = McpQgisExecutor(
+            mcp_url=_os.environ.get(
+                "QGIS_MCP_URL", "http://qgis-mcp-server:8090"
+            ),
+            mcp_auth=_os.environ.get("QGIS_MCP_AUTH") or None,
+        )
+    else:
+        raise HTTPException(
+            400,
+            f"executor inconnu : '{executor_choice}' "
+            "(valeurs supportées : 'stub', 'mcp')",
         )
 
     try:
@@ -1787,14 +1819,15 @@ async def execute_recipe_web_endpoint(
 
     try:
         if recipe_id:
-            examples_dir = (
-                _P(__file__).resolve().parent / "recipes_web" / "examples"
-            )
-            recipe_path = examples_dir / f"{recipe_id}.yaml"
-            if not recipe_path.exists():
+            # G4-b-2 : chercher via registry (examples + USER_RECIPES_DIR),
+            # user gagne en cas d'homonymie.
+            from hub.recipes_web import registry as _rw_registry
+            recipe_path = _rw_registry.find_recipe_path(recipe_id)
+            if recipe_path is None:
                 raise HTTPException(
                     404,
-                    f"Recipe '{recipe_id}' introuvable dans {examples_dir}",
+                    f"Recipe '{recipe_id}' introuvable "
+                    f"(ni examples/, ni USER_RECIPES_DIR)",
                 )
             recipe = load_recipe_from_yaml(recipe_path)
         else:
@@ -1833,9 +1866,11 @@ async def execute_recipe_web_endpoint(
     exec_context["timestamp"] = server_timestamp
     exec_context.setdefault("user_message", client_ctx.get("user_message"))
 
-    # 3. Exécution.
+    # 3. Exécution (executor injecté selon query param).
     try:
-        output = await execute_recipe_pure(recipe, exec_context)
+        output = await execute_recipe_pure(
+            recipe, exec_context, executor=qgis_executor,
+        )
     except RecipeImportError as exc:
         raise HTTPException(400, f"Import brique en échec : {exc}")
     except RecipeStepError as exc:
@@ -1845,6 +1880,67 @@ async def execute_recipe_web_endpoint(
         raise HTTPException(500, f"Erreur exécution recipe : {exc}")
 
     return output.model_dump()
+
+
+# ── Recipes Web : list + admin reload (chantier G4-b-2) ──────────────────────
+# Catalogue unifie examples embarques + USER_RECIPES_DIR (PVC user).
+# Voir hub/hub/recipes_web/registry.py pour la logique de scan + cache 60s.
+
+
+@app.get("/api/recipes-web/list")
+async def list_recipes_web_endpoint(
+    request: Request,
+    scope: str = "all",
+    user: dict = Depends(auth.get_current_user),
+):
+    """Liste les recipes web disponibles pour l'user.
+
+    Query params :
+      - ``scope`` : ``"all"`` (defaut) | ``"examples"`` | ``"user"``
+
+    Reponse 200 :
+      ``{"recipes": [{id, title, author, use_cases, output_kind, path, source}, ...],
+         "counts": {"examples": N, "user": M, "total": N+M}}``
+
+    Le champ ``source`` vaut ``"example"`` (embarquee avec le hub) ou ``"user"``
+    (dossier USER_RECIPES_DIR, typiquement PVC ``/home/onyxia/work/user-recipes``).
+    """
+    if scope not in ("all", "examples", "user"):
+        raise HTTPException(
+            400,
+            f"scope invalide : '{scope}' (attendu 'all' | 'examples' | 'user')",
+        )
+    try:
+        from hub.recipes_web import registry as _rw_registry
+    except ImportError as exc:
+        raise HTTPException(
+            503, f"Module recipes_web indisponible : {exc}"
+        )
+    recipes = _rw_registry.list_recipes(scope=scope)
+    return {
+        "recipes": recipes,
+        "counts": _rw_registry.counts(),
+    }
+
+
+@app.post("/admin/recipes-web/reload")
+async def reload_recipes_web_endpoint(
+    request: Request,
+    user: dict = Depends(auth.require_admin),
+):
+    """Force un reload du cache registry (admin uniquement).
+
+    Utile en dev / apres depot d'un nouveau YAML dans USER_RECIPES_DIR sans
+    attendre l'expiration du TTL 60s. Retourne le nombre d'entrees rechargees.
+    """
+    try:
+        from hub.recipes_web import registry as _rw_registry
+    except ImportError as exc:
+        raise HTTPException(
+            503, f"Module recipes_web indisponible : {exc}"
+        )
+    total = _rw_registry.reload_cache()
+    return {"reloaded": True, "total": total, "counts": _rw_registry.counts()}
 
 
 # ── GeoAI — proxy vers pod GPU (SAM3, DeepForest, OmniWater) ─────────────────
