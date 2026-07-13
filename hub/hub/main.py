@@ -5229,6 +5229,38 @@ async def _build_interactive_map_ctx(
                     if "GEOJSON_PATH_READ_OK" in gj_out:
                         gj_b64 = gj_out.split("b64=", 1)[1].split()[0].strip()
                         gj_data = _json2.loads(_b64s.b64decode(gj_b64).decode())
+                        # Chantier G3 (2026-07-13) — auto-reprojection si CRS != 4326.
+                        # Les couches BD TOPO / RGE ALTI IGN sont fournies en
+                        # Lambert 93 natif (EPSG:2154). MapLibre attend WGS84,
+                        # donc sans reprojection le rendu part au large de
+                        # l'Afrique et affiche 0 feature dans la bbox reelle.
+                        try:
+                            from hub import geo_utils
+                            declared_crs = geo_utils.detect_geojson_crs(gj_data)
+                            if declared_crs and declared_crs != "EPSG:4326":
+                                try:
+                                    gj_data = geo_utils.reproject_geojson_to_4326(
+                                        gj_data, declared_crs
+                                    )
+                                    log.info(
+                                        "V0.3.1 auto-reprojection %s -> EPSG:4326 pour layer %s (%d features)",
+                                        declared_crs,
+                                        l.get("id", "?"),
+                                        len(gj_data.get("features", [])),
+                                    )
+                                except Exception as exc:
+                                    log.warning(
+                                        "Auto-reprojection %s echouee pour %s : %s -- inline as-is",
+                                        declared_crs, src.get("path"), exc,
+                                    )
+                        except Exception as exc:
+                            log.warning(
+                                "hub.geo_utils indisponible pour %s : %s -- inline as-is",
+                                src.get("path"), exc,
+                            )
+                        # RFC 7946 : 4326 implicite, retire le champ crs top-level.
+                        if isinstance(gj_data, dict):
+                            gj_data.pop("crs", None)
                         # Injecte au format V1.13 (l.geojson) pour compat
                         # downstream (classification + template).
                         l = dict(l)
