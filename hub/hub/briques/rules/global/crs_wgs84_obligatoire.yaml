@@ -1,0 +1,17 @@
+id: crs_wgs84_obligatoire
+category: global
+version: 1.0
+title: "CRS EPSG:4326 obligatoire pour rendu web"
+applies_to: [interactive_map]
+severity: error
+rule_text: |
+  Toute donnée servant un composant `interactive_map` doit être en EPSG:4326 (WGS84).
+  Les données IGN natives (BD TOPO, RGE ALTI) sont en EPSG:2154 (Lambert 93). Elles
+  DOIVENT être reprojetées vers 4326 avant d'être inlined ou référencées par
+  `source.type: geojson_path`.
+llm_hint: |
+  Si l'user te demande de créer une carte depuis une couche BD TOPO ou RGE ALTI,
+  vérifie ou impose la reprojection vers EPSG:4326. Ne pas ignorer ce point.
+enforced_by:
+  - "hub._build_interactive_map_ctx auto-reprojection (chantier G3)"
+  - "recipe pipeline step `reproject`"

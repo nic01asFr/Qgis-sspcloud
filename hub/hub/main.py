@@ -67,6 +67,11 @@ try:
     _STUDIES_AVAILABLE = True
 except ImportError:
     _STUDIES_AVAILABLE = False
+try:
+    from hub import briques_loader
+    _BRIQUES_AVAILABLE = True
+except ImportError:
+    _BRIQUES_AVAILABLE = False
 
 log = logging.getLogger("hub.main")
 
@@ -1648,6 +1653,66 @@ async def get_template(name: str, user: dict = Depends(auth.get_current_user)):
         raise HTTPException(404, f"Fichier introuvable: {rel}")
     with open(path, "r", encoding="utf-8") as f:
         return Response(content=f.read(), media_type="text/x-python; charset=utf-8")
+
+
+# ── Briques — bibliothèque de briques réutilisables (chantier G5) ─────────────
+# Cadre l'agent LLM (règles GLOBAL_RULES + FORBIDDEN, chantier G7) et compose
+# les livrables (chantier G4). Loader in-memory, cache, hot-reload admin.
+
+
+@app.get("/briques")
+async def list_briques_all(user: dict = Depends(auth.get_current_user)):
+    """Liste toutes les briques, groupées par catégorie (métadonnées légères)."""
+    if not _BRIQUES_AVAILABLE:
+        raise HTTPException(503, "Bibliothèque briques non disponible")
+    cache = briques_loader.load_all_briques()
+    categories: dict[str, list[dict]] = {}
+    for cat in briques_loader.VALID_CATEGORIES:
+        categories[cat] = briques_loader.list_briques(cat)
+    total = sum(len(v) for v in cache.values())
+    return {"total": total, "categories": categories}
+
+
+@app.get("/briques/{category}")
+async def list_briques_by_category(category: str,
+                                   user: dict = Depends(auth.get_current_user)):
+    """Liste les briques d'une catégorie (métadonnées légères, sans source_content)."""
+    if not _BRIQUES_AVAILABLE:
+        raise HTTPException(503, "Bibliothèque briques non disponible")
+    if category not in briques_loader.VALID_CATEGORIES:
+        raise HTTPException(
+            404,
+            f"Catégorie '{category}' inconnue. Valides : "
+            f"{', '.join(briques_loader.VALID_CATEGORIES)}",
+        )
+    return briques_loader.list_briques(category)
+
+
+@app.get("/briques/{category}/{brique_id}")
+async def get_brique_detail(category: str, brique_id: str,
+                            user: dict = Depends(auth.get_current_user)):
+    """Retourne le contenu complet d'une brique (incluant `source_content`)."""
+    if not _BRIQUES_AVAILABLE:
+        raise HTTPException(503, "Bibliothèque briques non disponible")
+    if category not in briques_loader.VALID_CATEGORIES:
+        raise HTTPException(
+            404,
+            f"Catégorie '{category}' inconnue. Valides : "
+            f"{', '.join(briques_loader.VALID_CATEGORIES)}",
+        )
+    brique = briques_loader.get_brique(category, brique_id)
+    if brique is None:
+        raise HTTPException(404, f"Brique '{category}/{brique_id}' introuvable")
+    return brique
+
+
+@app.post("/admin/briques/reload")
+async def reload_briques_cache(user: dict = Depends(auth.require_admin)):
+    """Force le rechargement du cache briques (dev / après ajout expert métier)."""
+    if not _BRIQUES_AVAILABLE:
+        raise HTTPException(503, "Bibliothèque briques non disponible")
+    total = briques_loader.reload_cache()
+    return {"reloaded": True, "total": total}
 
 
 # ── GeoAI — proxy vers pod GPU (SAM3, DeepForest, OmniWater) ─────────────────
