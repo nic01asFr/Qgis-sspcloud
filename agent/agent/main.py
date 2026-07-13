@@ -1086,6 +1086,43 @@ async def sessions_by_tag(key: str, value: str, limit: int = 50):
     return {"sessions": sessions, "key": key, "value": value}
 
 
+# ── Journal livrables (Chantier G10) ─────────────────────────────────────────
+# Endpoints lecture-seule pour brancher une UI "historique livrables".
+# L'ecriture se fait via hook interne (recipe_executor_mute + futurs
+# publishers). Pas de POST/DELETE ici : le journal est immuable, seul
+# `mark_livrable_published` (interne) modifie une entree.
+
+
+@app.get("/journal/livrables")
+async def journal_list(
+    user: str | None = None,
+    context_kind: str | None = None,
+    recipe_id: str | None = None,
+    limit: int = 50,
+):
+    """Liste les entrees du journal livrables, filtre + trie DESC created_at.
+
+    Filtres AND combinables. Sans filtre, retourne le journal global du pod
+    (utile pour un ecran admin ou pour un user unique par pod).
+    """
+    entries = await memory.list_livrables(
+        username=user,
+        context_kind=context_kind,
+        recipe_id=recipe_id,
+        limit=limit,
+    )
+    return {"livrables": entries}
+
+
+@app.get("/journal/livrables/{livrable_id}")
+async def journal_detail(livrable_id: str):
+    """Detail d'une entree journal (metadata + output_hash + briques)."""
+    entry = await memory.get_livrable(livrable_id)
+    if entry is None:
+        raise HTTPException(404, "Livrable inconnu")
+    return entry
+
+
 # ── Checkpoints / Rollback (Commit B) ──────────────────────────────────────────
 
 @app.get("/sessions/{session_id}/checkpoints")

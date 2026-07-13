@@ -32,8 +32,10 @@ Sur erreur (recipe absente, YAML invalide, engine KO) :
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 from typing import Any, AsyncIterator
 
 import httpx
@@ -280,3 +282,48 @@ async def stream_recipe_execution(
         )
     except Exception as exc:  # pragma: no cover
         log.debug("set_session_tag execution_mode : %s", exc)
+
+    # 7. Journal livrable (Chantier G10) — fire-and-forget.
+    #
+    # On enregistre l'execution reussie dans le journal des livrables. En cas
+    # d'echec (SQLite locked, DATA_DIR non monte, table absente), on log un
+    # warning et on continue : le stream a deja emis recipe_done, l'user a
+    # son livrable. Le journal est un audit trail, pas une dependance dure.
+    try:
+        parsed = memory.parse_session_id(session_id)
+        username = os.getenv("ONYXIA_USER", "user")
+        n_layers = len(scene.get("layers") or [])
+        if not n_layers:
+            for comp in scene.get("components", []) or []:
+                inline = comp.get("inline") or {}
+                n_layers = len(inline.get("layers") or [])
+                if n_layers:
+                    break
+        n_briques = len(output.get("briques_used") or [])
+        recipe_title = scene.get("title") or recipe_id
+        # Hash SHA256 deterministe du scene_manifest (sort_keys=True) : deux
+        # runs qui produisent le meme manifest ont le meme output_hash.
+        output_hash = hashlib.sha256(
+            json.dumps(scene, sort_keys=True, ensure_ascii=False).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        await memory.journal_livrable(
+            session_id=session_id,
+            username=username,
+            kind="recipe_pure",
+            output_hash=output_hash,
+            recipe_id=recipe_id,
+            context_kind=parsed.get("context_kind"),
+            briques_used=output.get("briques_used") or [],
+            metadata={
+                "recipe_title": recipe_title,
+                "n_layers": n_layers,
+                "n_briques": n_briques,
+                "output_kind": (scene.get("provenance") or {}).get(
+                    "output_kind"
+                ) or provenance.get("output_kind"),
+            },
+        )
+    except Exception as exc:
+        log.warning("journal_livrable a echoue (best-effort) : %s", exc)

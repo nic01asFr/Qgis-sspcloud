@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -161,6 +162,46 @@ async def init() -> None:
                 ON session_tags(key, value);
             CREATE INDEX IF NOT EXISTS idx_tags_session
                 ON session_tags(session_id);
+
+            -- Chantier G10 : journal des livrables (audit trail immuable).
+            -- Chaque execution recipe (recipe_pure) ou publication assembly
+            -- ecrit une entree here. Contrairement aux `session_tags` (qui
+            -- capturent des paires cle=valeur volatiles sur la session), le
+            -- journal materialise le produit fini : quel user, quand, quelle
+            -- recipe, quel output_hash, quelles briques.
+            --
+            -- Rationale : session_tags ne permet pas de repondre efficacement
+            -- a "quels livrables Marie a produits cette semaine ?" — il faut
+            -- joindre 3+ tags avec des GROUP BY couteux. Le journal donne
+            -- une vue directe indexee, prete pour une UI "historique".
+            --
+            -- Insertions UNIQUEMENT via hook interne (recipe_executor_mute,
+            -- futurs publishers) — pas d'endpoint POST. La publication S3
+            -- update les champs `published` et `published_url` a posteriori
+            -- (cf. mark_livrable_published).
+            CREATE TABLE IF NOT EXISTS livrable_journal (
+                livrable_id  TEXT PRIMARY KEY,
+                session_id   TEXT NOT NULL,
+                username     TEXT NOT NULL,
+                kind         TEXT NOT NULL,
+                recipe_id    TEXT,
+                context_kind TEXT,
+                output_hash  TEXT,
+                briques_used TEXT,
+                published    INTEGER DEFAULT 0,
+                published_url TEXT,
+                created_at   INTEGER NOT NULL,
+                metadata     TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_journal_user
+                ON livrable_journal(username, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_journal_recipe
+                ON livrable_journal(recipe_id)
+                WHERE recipe_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_journal_kind
+                ON livrable_journal(kind);
+            CREATE INDEX IF NOT EXISTS idx_journal_session
+                ON livrable_journal(session_id);
         """)
 
         # Migration : pour les DB pre-existantes creees avant l'ajout de
@@ -759,6 +800,152 @@ async def auto_tag_session_from_id(session_id: str) -> dict[str, str]:
     return parsed
 
 
+# ── Livrable journal (Chantier G10) ──────────────────────────────────────────
+#
+# Trace structuree des livrables produits (execution recipe / publication
+# assembly). Insertion via hook interne uniquement — le journal est
+# immuable cote API : pas d'endpoint POST/DELETE, seulement lecture et
+# update ciblee de `published_url` via `mark_livrable_published`.
+#
+# Le `livrable_id` est un UUID genere a l'insertion — cle stable, non
+# collisionnable avec les identifiants metier (recipe_id, session_id).
+# `output_hash` est le SHA256 deterministe du scene_manifest de sortie
+# (json.dumps sort_keys=True). Deux runs qui produisent le meme manifest
+# porteront le meme hash — utile pour deduplication cote UI.
+
+
+async def journal_livrable(
+    session_id: str,
+    username: str,
+    kind: str,
+    output_hash: str,
+    recipe_id: str | None = None,
+    context_kind: str | None = None,
+    briques_used: list[str] | None = None,
+    metadata: dict | None = None,
+    timestamp: int | None = None,
+) -> str:
+    """Enregistre une entree dans le journal des livrables.
+
+    Retourne le ``livrable_id`` UUID genere. `kind` doit etre l'un de
+    ``recipe_pure`` | ``recipe_polished`` | ``agent_freeform`` (contract
+    ouvert : d'autres valeurs sont acceptees mais moins bien indexees).
+
+    Idempotence : deux appels a la suite avec les memes arguments creent
+    DEUX entrees distinctes (UUID different). Ce choix est deliberatif —
+    chaque execution est un evenement, meme si le manifest est identique
+    au precedent. La deduplication cote UI se fait via `output_hash`.
+    """
+    livrable_id = str(uuid.uuid4())
+    now = timestamp if timestamp is not None else int(time.time())
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO livrable_journal "
+            "(livrable_id, session_id, username, kind, recipe_id, "
+            " context_kind, output_hash, briques_used, published, "
+            " published_url, created_at, metadata) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)",
+            (
+                livrable_id,
+                session_id,
+                username,
+                kind,
+                recipe_id,
+                context_kind,
+                output_hash,
+                json.dumps(briques_used or [], ensure_ascii=False),
+                now,
+                json.dumps(metadata or {}, ensure_ascii=False),
+            ),
+        )
+        await db.commit()
+    return livrable_id
+
+
+def _row_to_livrable(row: aiosqlite.Row) -> dict:
+    """Decode une ligne livrable_journal en dict lisible (JSON re-parse)."""
+    d = dict(row)
+    # briques_used et metadata sont serialises en JSON en base.
+    for k in ("briques_used", "metadata"):
+        raw = d.get(k)
+        if raw:
+            try:
+                d[k] = json.loads(raw)
+            except Exception:
+                # Ligne corrompue : on laisse la string brute plutot que
+                # de casser la lecture. Le journal reste consultable.
+                pass
+        else:
+            d[k] = [] if k == "briques_used" else {}
+    # published booleanise (colonne INTEGER en SQLite).
+    d["published"] = bool(d.get("published"))
+    return d
+
+
+async def list_livrables(
+    username: str | None = None,
+    context_kind: str | None = None,
+    recipe_id: str | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """Liste les entrees journal, ordonnees par created_at DESC.
+
+    Filtres optionnels combinables (AND). Sans filtre, retourne le journal
+    global du pod dans la limite demandee.
+    """
+    clauses: list[str] = []
+    params: list[Any] = []
+    if username is not None:
+        clauses.append("username = ?")
+        params.append(username)
+    if context_kind is not None:
+        clauses.append("context_kind = ?")
+        params.append(context_kind)
+    if recipe_id is not None:
+        clauses.append("recipe_id = ?")
+        params.append(recipe_id)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(limit)
+    sql = (
+        f"SELECT * FROM livrable_journal {where} "
+        f"ORDER BY created_at DESC LIMIT ?"
+    )
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(sql, params)).fetchall()
+    return [_row_to_livrable(r) for r in rows]
+
+
+async def get_livrable(livrable_id: str) -> dict | None:
+    """Retourne le detail d'une entree journal, ou None si inconnue."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        row = await (await db.execute(
+            "SELECT * FROM livrable_journal WHERE livrable_id = ?",
+            (livrable_id,),
+        )).fetchone()
+    return _row_to_livrable(row) if row else None
+
+
+async def mark_livrable_published(
+    livrable_id: str, published_url: str,
+) -> None:
+    """Marque une entree comme publiee et enregistre l'URL S3.
+
+    Ne raise PAS si l'entree est inconnue (silencieux : le hook appelant
+    n'a pas a bloquer la publication S3 si le journal est desynchronise).
+    Un appelant qui veut valider peut appeler `get_livrable` apres.
+    """
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "UPDATE livrable_journal "
+            "SET published = 1, published_url = ? "
+            "WHERE livrable_id = ?",
+            (published_url, livrable_id),
+        )
+        await db.commit()
+
+
 # ── Checkpoints (Commit B — Rollback agent) ───────────────────────────────────
 
 async def create_checkpoint(
@@ -947,6 +1134,10 @@ async def build_context_summary(
     active_study_treatments: list[dict] | None = None,
     project_state: dict | None = None,
     study_artifacts: dict | None = None,
+    context_kind: str | None = None,
+    scope_ids: dict | None = None,
+    hub_url: str | None = None,
+    hub_key: str | None = None,
 ) -> str:
     """
     Phase 4 : construit un résumé en 3 couches pour l'system prompt LLM.
@@ -963,6 +1154,35 @@ async def build_context_summary(
     Sprint Composants Phase 3b. Compteurs + recent components/assemblies
     de l'étude active pour que l'agent voie ce qui existe déjà et propose
     la next-action contextuelle (pas de recréation à chaque turn).
+
+    context_kind (Chantier G9) : filtre / priorise la couche L2 selon le
+    contexte UI de l'appelant. Valeurs supportées :
+
+    - None ou "desk" : comportement legacy (L2 large, tout inclus).
+    - "assist_component" : L2 focalisé sur ``scope_ids["cid"]`` +
+      historique éditorial récent (fetch hub fail-soft).
+    - "assist_assembly"  : L2 focalisé sur ``scope_ids["aid"]`` +
+      composants référencés par l'assembly.
+    - "recipe_run"       : L2 focalisé sur ``scope_ids["recipe_id"]`` +
+      3 dernières exécutions réussies (via session_tags).
+    - "recipe_create"    : L2 focalisé sur la recipe en édition +
+      composants du user disponibles.
+    - "editor_freeform"  : L2 minimal (juste le draft en cours).
+
+    Toute autre valeur → repli sur le comportement "desk" (fail-soft).
+
+    scope_ids (Chantier G9) : dict issu de
+    ``parse_session_id(session_id)`` + ``get_session_tags(session_id)``.
+    Clés attendues selon le kind : ``cid``, ``aid``, ``recipe_id``,
+    ``draft_id``, ``sid``. Ignoré si ``context_kind`` est None.
+
+    hub_url / hub_key (Chantier G9) : nécessaires pour les fetches
+    complémentaires du client ``hub_scope_client`` (historique composant,
+    composants d'un assembly). Absents → sections d'enrichissement
+    vides mais fail-soft (le prompt reste valide).
+
+    BACKWARD-COMPAT : les appelants qui ne passent aucun des 4 nouveaux
+    paramètres retrouvent exactement le comportement historique.
     """
     # ── Couche 3 (user permanent) ─────────────────────────────────────────
     # Le markdown structuré est le PILIER (pattern CLAUDE.md / ChatGPT memory).
@@ -1150,9 +1370,33 @@ async def build_context_summary(
     else:
         hints = []
 
+    # ── Chantier G9 : filtre / enrichissement L2 par context_kind ────────
+    # Le comportement historique correspond à `context_kind in (None, "desk")`.
+    # Pour les autres kinds, on remplace la vue "étude large" par un bloc
+    # focalisé sur le scope courant (composant, assembly, recipe, draft) et
+    # on rend l'étude sous forme brève (rappel court).
+    kind_l2 = await _l2_by_context_kind(
+        context_kind=context_kind,
+        scope_ids=scope_ids or {},
+        active_study=active_study,
+        hub_url=hub_url,
+        hub_key=hub_key,
+    )
+
     # ── Assemblage 3 couches ──────────────────────────────────────────────
     parts = []
-    if layer2:
+    if kind_l2:
+        # Le bloc scope-aware remplace le titre "Étude en cours" par un titre
+        # plus explicite ; l'ancien layer2 est joint dessous en rappel bref
+        # (utile pour les kinds "assist_*" et "recipe_*" où l'étude reste
+        # partiellement pertinente).
+        parts.append(kind_l2)
+        if layer2 and context_kind not in (None, "desk"):
+            brief = _brief_study_summary(active_study, study_artifacts)
+            if brief:
+                parts.append("=== Rappel étude (bref) ===\n"
+                             + "\n".join(f"- {x}" for x in brief))
+    elif layer2:
         parts.append("=== Étude en cours ===\n" + "\n".join(f"- {x}" for x in layer2))
     if hints:
         parts.append(
@@ -1164,3 +1408,188 @@ async def build_context_summary(
                      + "\n".join(f"- {x}" for x in layer3))
 
     return "\n\n".join(parts) + ("\n" if parts else "")
+
+
+# ── Chantier G9 : helpers L2 par contexte UI ─────────────────────────────────
+
+# Kinds reconnus par _l2_by_context_kind. Toute autre valeur → repli "desk".
+_KNOWN_CONTEXT_KINDS = frozenset({
+    "desk",
+    "assist_component",
+    "assist_assembly",
+    "recipe_run",
+    "recipe_create",
+    "editor_freeform",
+})
+
+
+def _brief_study_summary(
+    active_study: dict | None,
+    study_artifacts: dict | None,
+) -> list[str]:
+    """Résumé bref de l'étude en cours (2-3 lignes max).
+
+    Utilisé quand le L2 principal est scope-aware (composant/assembly/recipe)
+    pour rappeler brièvement l'étude parente sans écraser le focus.
+    """
+    lines: list[str] = []
+    if active_study:
+        name = active_study.get("name") or "?"
+        lines.append(f"Étude parente : « {name} »")
+        if active_study.get("profile"):
+            lines.append(f"Profil étude : {active_study['profile']}")
+    if study_artifacts:
+        c = study_artifacts.get("components") or {}
+        a = study_artifacts.get("assemblies") or {}
+        totals = []
+        if c.get("total"):
+            totals.append(f"{c['total']} composants")
+        if a.get("total"):
+            totals.append(f"{a['total']} assemblies")
+        if totals:
+            lines.append("Livrables existants : " + ", ".join(totals))
+    return lines
+
+
+async def _l2_by_context_kind(
+    context_kind: str | None,
+    scope_ids: dict,
+    active_study: dict | None,
+    hub_url: str | None,
+    hub_key: str | None,
+) -> str:
+    """Construit le bloc L2 filtré / enrichi selon le contexte UI.
+
+    Retourne "" si le comportement legacy doit s'appliquer (context_kind None
+    ou "desk", ou kind inconnu → repli desk). Sinon retourne un bloc markdown
+    formaté (titre === === + puces).
+
+    Fail-soft : si les fetches hub échouent, on continue et on rend un bloc
+    avec seulement les IDs (pas d'historique, pas de composants).
+    """
+    if context_kind is None or context_kind == "desk":
+        return ""
+    if context_kind not in _KNOWN_CONTEXT_KINDS:
+        # Kind inconnu → repli sur legacy (comportement desk).
+        log.warning("_l2_by_context_kind : kind inconnu %r, repli desk",
+                    context_kind)
+        return ""
+
+    sid = scope_ids.get("sid") or (active_study or {}).get("sid") or ""
+
+    if context_kind == "assist_component":
+        cid = scope_ids.get("cid") or "?"
+        lines = [f"Composant actif : {cid}"]
+        history = await _safe_fetch_component_history(hub_url, hub_key, sid, cid)
+        if history:
+            lines.append(f"Historique éditorial ({len(history)} versions récentes) :")
+            for h in history[:5]:
+                ver  = h.get("version") or h.get("v") or "?"
+                summ = h.get("summary") or h.get("title") or h.get("action") or ""
+                auth = h.get("author") or h.get("username") or ""
+                bits = [f"v{ver}"]
+                if auth:
+                    bits.append(auth)
+                if summ:
+                    bits.append(summ[:80])
+                lines.append("  • " + " · ".join(bits))
+        else:
+            lines.append("Historique éditorial : (indisponible ou vide)")
+        return "=== Composant en édition ===\n" + "\n".join(f"- {x}" for x in lines)
+
+    if context_kind == "assist_assembly":
+        aid = scope_ids.get("aid") or "?"
+        lines = [f"Assembly actif : {aid}"]
+        comps = await _safe_fetch_assembly_components(hub_url, hub_key, sid, aid)
+        if comps:
+            lines.append(f"Composants référencés ({len(comps)}) :")
+            for c in comps[:10]:
+                cid   = c.get("cid") or c.get("id") or "?"
+                title = c.get("title") or ""
+                kind  = c.get("kind") or ""
+                bits = [str(cid)[:12]]
+                if kind:
+                    bits.append(kind)
+                if title:
+                    bits.append(f"« {title[:60]} »")
+                lines.append("  • " + " · ".join(bits))
+        else:
+            lines.append("Composants référencés : (indisponible ou vide)")
+        return "=== Assembly en édition ===\n" + "\n".join(f"- {x}" for x in lines)
+
+    if context_kind == "recipe_run":
+        recipe_id = scope_ids.get("recipe_id") or "?"
+        lines = [f"Recipe en exécution : {recipe_id}"]
+        runs = await _safe_fetch_recipe_recent_runs(hub_url, hub_key, recipe_id)
+        if runs:
+            lines.append(f"Exécutions précédentes réussies ({len(runs)}) :")
+            for r in runs[:3]:
+                sid_run = r.get("session_id") or "?"
+                lines.append(f"  • session {sid_run[:24]}")
+        else:
+            lines.append("Exécutions précédentes : (aucune trace mémoire)")
+        return "=== Recipe en cours d'exécution ===\n" + "\n".join(
+            f"- {x}" for x in lines
+        )
+
+    if context_kind == "recipe_create":
+        recipe_id = scope_ids.get("recipe_id") or "?"
+        lines = [
+            f"Recipe en édition : {recipe_id}",
+            "Contexte : édition libre du DAG de la recipe.",
+            "Les composants du user sont disponibles via les tools d'assemblage.",
+        ]
+        return "=== Recipe en édition ===\n" + "\n".join(f"- {x}" for x in lines)
+
+    if context_kind == "editor_freeform":
+        draft_id = scope_ids.get("draft_id") or "?"
+        lines = [
+            f"Draft {draft_id} en cours",
+            "Contexte : édition freeform, L2 minimal (pas d'étude ni de composant lié).",
+        ]
+        return "=== Éditeur freeform ===\n" + "\n".join(f"- {x}" for x in lines)
+
+    # Défensif : ne devrait pas être atteint (frozenset gate en amont).
+    return ""
+
+
+async def _safe_fetch_component_history(
+    hub_url: str | None, hub_key: str | None, sid: str, cid: str,
+) -> list[dict]:
+    """Wrapper fail-soft du client hub_scope_client (import différé)."""
+    try:
+        from agent import hub_scope_client  # noqa: WPS433
+        return await hub_scope_client.fetch_component_history(
+            hub_url or "", hub_key or "", sid, cid,
+        )
+    except Exception as exc:
+        log.warning("_safe_fetch_component_history : erreur (%s)", exc)
+        return []
+
+
+async def _safe_fetch_assembly_components(
+    hub_url: str | None, hub_key: str | None, sid: str, aid: str,
+) -> list[dict]:
+    """Wrapper fail-soft du client hub_scope_client (import différé)."""
+    try:
+        from agent import hub_scope_client  # noqa: WPS433
+        return await hub_scope_client.fetch_assembly_components(
+            hub_url or "", hub_key or "", sid, aid,
+        )
+    except Exception as exc:
+        log.warning("_safe_fetch_assembly_components : erreur (%s)", exc)
+        return []
+
+
+async def _safe_fetch_recipe_recent_runs(
+    hub_url: str | None, hub_key: str | None, recipe_id: str,
+) -> list[dict]:
+    """Wrapper fail-soft du client hub_scope_client (import différé)."""
+    try:
+        from agent import hub_scope_client  # noqa: WPS433
+        return await hub_scope_client.fetch_recipe_recent_runs(
+            hub_url or "", hub_key or "", recipe_id,
+        )
+    except Exception as exc:
+        log.warning("_safe_fetch_recipe_recent_runs : erreur (%s)", exc)
+        return []
