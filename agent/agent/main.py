@@ -871,6 +871,38 @@ async def chat(
     # Créer la session en mémoire si nouvelle
     await memory.create_session(session_id, "user", profile_id)
 
+    # ── Chantier G8 : mode mute recipe_run ─────────────────────────────────
+    # Si le session_id encode un contexte recipe_run (study:{sid}:recipe:{rid}),
+    # on court-circuite ENTIEREMENT la boucle LLM freeform et on delegue au
+    # pipeline deterministe (hub /api/recipes-web/execute). Aucun tool call,
+    # aucune generation LLM, garantie forte de reproductibilite.
+    parsed_sess = memory.parse_session_id(session_id)
+    if parsed_sess.get("context_kind") == "recipe_run":
+        recipe_id = parsed_sess.get("recipe_id") or ""
+        # Import differe : evite de charger httpx/module recipe si le path
+        # freeform n'utilise jamais ce mode.
+        from agent.recipe_executor_mute import stream_recipe_execution
+
+        async def _recipe_stream() -> AsyncGenerator[str, None]:
+            async for chunk in stream_recipe_execution(
+                session_id=session_id,
+                recipe_id=recipe_id,
+                hub_url=_HUB_URL,
+                api_key=_HUB_API_KEY,
+                user_message=message,
+            ):
+                yield chunk
+
+        return StreamingResponse(
+            _recipe_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    # ── Fin bloc mute recipe_run ───────────────────────────────────────────
+
     # Historique des messages pour le contexte
     history = await memory.get_session_messages(session_id, limit=20)
 
