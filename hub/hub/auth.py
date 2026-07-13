@@ -889,6 +889,12 @@ _OIDC_MIDDLEWARE_INTER_POD = (
     # avant d'accepter la config, même niveau de protection.
     # Bug jumeau `/studies` fixé 2026-06-19 (d09ed60) ; oubli complété ici.
     "/admin",
+    # Chantier G8 / G4-b (Sprint V0.3) : endpoints recipes web deterministes.
+    # L'agent appelle POST /api/recipes-web/execute en mode mute (recipe_run)
+    # avec Bearer HUB_API_KEY. Sans whitelist -> 401 silencieux dans le stream
+    # SSE (`event: recipe_error`) et l'user voit un livrable qui ne s'execute
+    # jamais. GET /api/recipes-web/list est aussi couvert.
+    "/api/recipes-web",
     # NB : /published a ete deplace dans _OIDC_MIDDLEWARE_PUBLIC (vraie
     # whitelist anonyme). Inter-pod ne suffit pas pour acces tiers internet.
 )

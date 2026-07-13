@@ -145,6 +145,9 @@ async def _call_hub_execute(
         "Authorization": f"Bearer {api_key}",
         "X-Hub-Auth": api_key,  # symétrie avec le pattern agent→hub existant.
         "Content-Type": "application/json",
+        # Defense en profondeur : signale la nature inter-pod du call meme si
+        # la whitelist route /api/recipes-web (hub/auth.py) accepte deja Bearer.
+        "User-Agent": "kube-probe/agent-qgis recipe_executor_mute",
     }
     async with httpx.AsyncClient(timeout=60.0) as client:
         try:
