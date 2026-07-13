@@ -1,0 +1,99 @@
+# Recipe web POC — chantier G4-POC
+# Diagnostic du parc bati par periode de construction, arrondissement de
+# Marseille 4e. Utilise les 3 briques d'amorcage :
+#   - rules_global/crs_wgs84_obligatoire      (garde-fou reprojection)
+#   - rules_forbidden/no_hallucination_sources (garde-fou hallucination)
+#   - narrative/disclaimer_rga                (encart RGA batiments avant 1948)
+#
+# Executable via :
+#   from hub.recipes_web import load_recipe_from_yaml, execute_recipe_pure
+#   r = load_recipe_from_yaml('.../diagnostic_parc_bati_temporel.yaml')
+#   out = await execute_recipe_pure(r, {'timestamp': '2026-07-13T10:00:00+02:00'})
+#
+# Output : scene_manifest V0.3.1 avec 1 layer bati classifie graduated,
+# description contenant le disclaimer RGA rendu Jinja2, provenance
+# tracant les 3 briques utilisees.
+
+manifest_version: "0.3.1"
+id: diagnostic_parc_bati_temporel
+title: "Diagnostic du parc bati par periode de construction (Marseille 4e)"
+version: "1.0"
+author: "cerema"
+use_cases:
+  - diagnostic_temporel
+depends_on_datasources:
+  - bdtopo_batiments
+  - arrondissements_marseille
+output_kind: component
+
+imports:
+  - brique_ref: rules_global/crs_wgs84_obligatoire
+  - brique_ref: rules_forbidden/no_hallucination_sources
+
+steps:
+  # 1. Layer principal — batiments BD TOPO du 4e arrondissement,
+  #    classifies par annee d'apparition.
+  - kind: run_qgis
+    id: layer_batiments
+    algorithm: catalog_wfs
+    params:
+      catalog_id: bdtopo_batiments
+      zone_ref:
+        kind: insee_arm
+        insee: "13204"
+      target_crs: "EPSG:4326"
+    outputs:
+      layer_id: batiments_bd_topo
+      layer_name: "Batiments par periode"
+      geometry_type: polygon
+      classification_field: date_d_apparition
+      role: primary
+
+  # 2. Layer contextuel — contour de l'arrondissement.
+  - kind: run_qgis
+    id: layer_contour_arm
+    algorithm: catalog_wfs
+    params:
+      catalog_id: arrondissements_marseille
+      filter:
+        insee_arm: "13204"
+    outputs:
+      layer_id: arrondissement_13204
+      layer_name: "4e arrondissement (limite)"
+      geometry_type: polygon
+      role: context
+
+  # 3. Injection narrative disclaimer RGA (rendu Jinja2).
+  - kind: include_brique
+    id: disclaimer_rga
+    ref: narrative/disclaimer_rga
+    template_context:
+      zone_label: "Marseille 4e"
+      pct_ancien_avant_1948: 12.4
+
+  # 4. Rendu final composant.
+  - kind: render_web
+    id: render
+    target: component
+    manifest_defaults:
+      subtitle: "Diagnostic CEREMA - juillet 2026"
+      source_text: "BD TOPO IGN 2024 - CEREMA"
+      caveat: "Etude pedagogique, chiffres illustratifs, non exploitables operationnellement."
+      projection: mercator
+      basemap:
+        id: plan-ign-v2-gris
+      zone:
+        kind: insee_arm
+        insee: "13204"
+        buffer_km: 0.2
+      legend:
+        mode: auto
+        from_layer: batiments_bd_topo
+        position: bottom-left
+        format: chips
+        title: "Periode de construction"
+      scalebar:
+        position: bottom-right
+        unit: metric
+      north_arrow:
+        position: top-right
