@@ -835,19 +835,38 @@ async def _resolve_active_profile(form_profile: str, session_id: str = "") -> st
 
 @app.post("/chat")
 async def chat(
-    request:    Request,
-    message:    str  = Form(...),
-    session_id: str  = Form(...),
-    profile_id: str  = Form(_DEFAULT_PROFILE),
+    request:        Request,
+    message:        str  = Form(...),
+    session_id:     str  = Form(...),
+    profile_id:     str  = Form(_DEFAULT_PROFILE),
+    profile_locked: str  = Form("false"),
 ):
     """Endpoint chat principal — réponse en streaming SSE.
 
     Si une étude est active côté hub, son profil prime sur le form_profile.
     Le LLM peut switcher de profil en cours via <switch_profile>X</switch_profile>.
+
+    Chantier G2 : le frontend peut poser `profile_locked=true` (form field)
+    pour indiquer que le contexte UI (drawer BlockNote, panel V1.15, editeur
+    freeform) a deja fixe le profil. Dans ce cas :
+      - le routeur contextuel n'est PAS applique (le profil du form fait foi),
+      - le prompt systeme n'invite pas au switch,
+      - toute balise <switch_profile> emise par le LLM est ignoree,
+      - un tag `profile_locked=true` est pose sur la session (best effort).
     """
+    # Parsing tolerant du flag (form data est string). Accepte "true"/"1"/"yes".
+    profile_locked_flag = str(profile_locked).strip().lower() in {
+        "true", "1", "yes", "on",
+    }
+
     # Routeur contextuel : le render actif (sélection livrable dans le desk)
     # ou l'étude active prime sur le form. Cf. CHARTE_AGENT §3 Principe 1.
-    profile_id = await _resolve_active_profile(profile_id, session_id=session_id)
+    # Chantier G2 : si le profil est verrouille cote frontend, on court-circuite
+    # le routeur — le form field profile_id fait autorite.
+    if not profile_locked_flag:
+        profile_id = await _resolve_active_profile(
+            profile_id, session_id=session_id,
+        )
 
     # Créer la session en mémoire si nouvelle
     await memory.create_session(session_id, "user", profile_id)
@@ -873,10 +892,20 @@ async def chat(
     ]
 
     agent = QGISAgent(
-        username   = "user",
-        session_id = session_id,
-        profile_id = profile_id,
+        username       = "user",
+        session_id     = session_id,
+        profile_id     = profile_id,
+        profile_locked = profile_locked_flag,
     )
+
+    # Chantier G2 : telemetrie session (best effort, fire-and-forget). Utile
+    # pour retrouver a posteriori les sessions ou le profil etait fige et
+    # correler avec les tentatives de switch ignorees.
+    if profile_locked_flag:
+        try:
+            await memory.set_session_tag(session_id, "profile_locked", "true")
+        except Exception as exc:
+            log.debug("set_session_tag profile_locked : %s", exc)
 
     # Récupère/crée le signal d'arrêt de cette session — sera vérifié par
     # chat_stream entre chaque tool call. On le reset ici pour permettre une
