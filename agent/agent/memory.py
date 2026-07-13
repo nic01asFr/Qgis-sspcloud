@@ -140,6 +140,27 @@ async def init() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_ckpt_session ON checkpoints(session_id, message_idx);
             CREATE INDEX IF NOT EXISTS idx_ckpt_created ON checkpoints(created_at);
+
+            -- Chantier G1 : tags de session (contexte UI structurant).
+            -- Chaque session peut porter N tags (key -> value) qui la relient
+            -- explicitement a un contexte UI : etude active (sid), composant
+            -- edite (cid), assembly editee (aid), recette execute (recipe_id),
+            -- draft freeform (draft_id), etc. Complete la convention
+            -- session_id structuree (cf. parse_session_id) : la convention
+            -- donne le kind, la table permet des lookups inverses
+            -- ("toutes les sessions taggees composant X"). Backward-compat :
+            -- une session sans tag reste valide (fallback context_kind=legacy).
+            CREATE TABLE IF NOT EXISTS session_tags (
+                session_id TEXT NOT NULL,
+                key        TEXT NOT NULL,
+                value      TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY (session_id, key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_tags_key_value
+                ON session_tags(key, value);
+            CREATE INDEX IF NOT EXISTS idx_tags_session
+                ON session_tags(session_id);
         """)
 
         # Migration : pour les DB pre-existantes creees avant l'ajout de
@@ -175,6 +196,15 @@ async def set_session_study(session_id: str, study_id: str | None) -> None:
             (study_id, session_id),
         )
         await db.commit()
+    # Chantier G1 : (re)tagger la session a partir de son id structure, et
+    # tagger sid=study_id si non deja present dans la convention (cas des
+    # sessions legacy UUID auxquelles on associe explicitement une etude).
+    try:
+        await auto_tag_session_from_id(session_id)
+        if study_id:
+            await set_session_tag(session_id, "sid", study_id)
+    except Exception:
+        log.exception("auto_tag on set_session_study failed for %s", session_id)
 
 
 async def get_latest_session_for_study(
@@ -430,6 +460,13 @@ async def create_session(session_id: str, username: str, profile_id: str = "stan
             VALUES (?, ?, ?, ?)
         """, (session_id, username, profile_id, int(time.time())))
         await db.commit()
+    # Chantier G1 : auto-tag depuis la convention session_id structuree.
+    # Best-effort — n'echoue jamais : parse_session_id est defensif et set
+    # tag idempotent. Une session legacy (UUID) recoit context_kind=legacy.
+    try:
+        await auto_tag_session_from_id(session_id)
+    except Exception:
+        log.exception("auto_tag_session_from_id failed for %s", session_id)
 
 
 async def close_session(session_id: str, summary: str = "", zone: str = "") -> None:
@@ -529,6 +566,197 @@ async def truncate_messages_after(session_id: str, message_idx: int) -> int:
         )
         await db.commit()
     return len(ids)
+
+
+# ── Session tags (Chantier G1) ────────────────────────────────────────────────
+#
+# Convention de session_id structuree — un session_id porte son contexte UI
+# dans son nom, ce qui permet de le tagger automatiquement a la creation et
+# de faire des lookups inverses ("toutes les sessions du composant X").
+#
+# La convention est PARSEE par parse_session_id (best-effort) et TAGGEE dans
+# la table session_tags (verifiable, indexee). Les sessions historiques
+# (UUID pur) restent valides : parse_session_id renvoie context_kind=legacy.
+#
+# Patterns supportes (documentes dans parse_session_id) :
+#
+#   Contexte UI                          session_id                          context_kind
+#   ---------------------------------------------------------------------------------------
+#   Desk chat general                    study:{sid}                         desk
+#   Drawer BlockNote composant           assist:{sid}:cid:{cid}              assist_component
+#   Panel V1.15 sur assembly             assist:{sid}:aid:{aid}              assist_assembly
+#   Editor freeform (draft)              study:{sid}:draft:{draft_id}        editor_freeform
+#   Execution recipe                     study:{sid}:recipe:{recipe_id}      recipe_run
+#   Creation recipe (assistant)          study:{sid}:recipe_edit:{slug}      recipe_create
+#   Autre / UUID historique              <uuid>                              legacy
+
+def parse_session_id(session_id: str) -> dict[str, str]:
+    """Parse un session_id structure en dict de tags.
+
+    Retourne au minimum ``{"context_kind": <kind>}``. Les cles supplementaires
+    (sid, cid, aid, recipe_id, draft_id) sont extraites du session_id quand
+    la convention est respectee.
+
+    Convention (helper sync, cheap, sans IO) :
+
+    - ``study:{sid}``                        -> context_kind=desk, sid
+    - ``study:{sid}:draft:{draft_id}``       -> context_kind=editor_freeform, sid, draft_id
+    - ``study:{sid}:recipe:{recipe_id}``     -> context_kind=recipe_run, sid, recipe_id
+    - ``study:{sid}:recipe_edit:{slug}``     -> context_kind=recipe_create, sid, recipe_id (=slug)
+    - ``assist:{sid}:cid:{cid}``             -> context_kind=assist_component, sid, cid
+    - ``assist:{sid}:aid:{aid}``             -> context_kind=assist_assembly, sid, aid
+    - autre                                  -> context_kind=legacy
+
+    Le fallback ``legacy`` couvre les UUID historiques et tout format
+    inconnu : la session reste utilisable, sans lookup inverse specifique.
+    """
+    if not session_id or not isinstance(session_id, str):
+        return {"context_kind": "legacy"}
+
+    parts = session_id.split(":")
+
+    # study:{sid}[:...]
+    if parts[0] == "study" and len(parts) >= 2 and parts[1]:
+        sid = parts[1]
+        # study:{sid}
+        if len(parts) == 2:
+            return {"context_kind": "desk", "sid": sid}
+        # study:{sid}:draft:{draft_id}
+        if len(parts) == 4 and parts[2] == "draft" and parts[3]:
+            return {
+                "context_kind": "editor_freeform",
+                "sid": sid,
+                "draft_id": parts[3],
+            }
+        # study:{sid}:recipe:{recipe_id}
+        if len(parts) == 4 and parts[2] == "recipe" and parts[3]:
+            return {
+                "context_kind": "recipe_run",
+                "sid": sid,
+                "recipe_id": parts[3],
+            }
+        # study:{sid}:recipe_edit:{slug}
+        if len(parts) == 4 and parts[2] == "recipe_edit" and parts[3]:
+            return {
+                "context_kind": "recipe_create",
+                "sid": sid,
+                "recipe_id": parts[3],
+            }
+        return {"context_kind": "legacy"}
+
+    # assist:{sid}:cid:{cid}  ou  assist:{sid}:aid:{aid}
+    if parts[0] == "assist" and len(parts) == 4 and parts[1] and parts[3]:
+        sid = parts[1]
+        if parts[2] == "cid":
+            return {
+                "context_kind": "assist_component",
+                "sid": sid,
+                "cid": parts[3],
+            }
+        if parts[2] == "aid":
+            return {
+                "context_kind": "assist_assembly",
+                "sid": sid,
+                "aid": parts[3],
+            }
+        return {"context_kind": "legacy"}
+
+    return {"context_kind": "legacy"}
+
+
+async def set_session_tag(session_id: str, key: str, value: str) -> None:
+    """Attache (ou remplace) un tag key=value sur la session.
+
+    INSERT OR REPLACE : un meme key ecrase l'ancien value + timestamp.
+    Idempotent : safe a appeler plusieurs fois (ex : auto-tagging au reload).
+    """
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO session_tags "
+            "(session_id, key, value, created_at) VALUES (?, ?, ?, ?)",
+            (session_id, key, value, int(time.time())),
+        )
+        await db.commit()
+
+
+async def get_session_tags(session_id: str) -> dict[str, str]:
+    """Retourne les tags de la session sous forme {key: value}.
+
+    Dict vide si la session n'a aucun tag (ex : session legacy sans convention
+    parseable). Ne merge PAS avec parse_session_id — l'endpoint REST le fait
+    en composant les deux resultats.
+    """
+    async with aiosqlite.connect(_DB_PATH) as db:
+        rows = await (await db.execute(
+            "SELECT key, value FROM session_tags WHERE session_id = ?",
+            (session_id,),
+        )).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+async def find_sessions_by_tag(
+    key: str, value: str, limit: int = 50,
+) -> list[str]:
+    """Retourne les session_id portant (key, value), tri desc par tag.created_at.
+
+    Utilise l'index idx_tags_key_value. Le tri utilise le created_at du tag,
+    pas celui de la session : correspond au "quand la session a ete taggee"
+    ce qui est generalement ce qu'on veut ("dernieres sessions du composant X").
+    """
+    async with aiosqlite.connect(_DB_PATH) as db:
+        rows = await (await db.execute(
+            "SELECT session_id FROM session_tags "
+            "WHERE key = ? AND value = ? "
+            "ORDER BY created_at DESC LIMIT ?",
+            (key, value, limit),
+        )).fetchall()
+    return [r[0] for r in rows]
+
+
+async def find_sessions_by_tags(
+    tags: dict[str, str], limit: int = 50,
+) -> list[str]:
+    """Retourne les session_id portant TOUS les (key, value) du dict (AND).
+
+    Intersection multi-tag via GROUP BY session_id HAVING COUNT = len(tags).
+    Ex : ``{"context_kind": "assist_component", "cid": "abc"}`` renvoie
+    uniquement les sessions taggees composant abc.
+
+    Dict vide → liste vide (evite un SELECT sans filtre).
+    """
+    if not tags:
+        return []
+    # Construction des OR de couples (key=? AND value=?)
+    pairs_sql = " OR ".join(["(key = ? AND value = ?)"] * len(tags))
+    params: list[str | int] = []
+    for k, v in tags.items():
+        params.extend([k, v])
+    params.append(len(tags))
+    params.append(limit)
+    sql = (
+        f"SELECT session_id, MAX(created_at) AS ts "
+        f"FROM session_tags WHERE {pairs_sql} "
+        f"GROUP BY session_id HAVING COUNT(*) = ? "
+        f"ORDER BY ts DESC LIMIT ?"
+    )
+    async with aiosqlite.connect(_DB_PATH) as db:
+        rows = await (await db.execute(sql, params)).fetchall()
+    return [r[0] for r in rows]
+
+
+async def auto_tag_session_from_id(session_id: str) -> dict[str, str]:
+    """Auto-tag une session a partir de son session_id structure.
+
+    Applique parse_session_id + set_session_tag pour chaque cle decouverte.
+    Idempotent (INSERT OR REPLACE). Retourne le dict des tags poses (utile
+    pour tests et endpoint GET). Fait rien de special pour le kind=legacy
+    (on tag quand meme context_kind=legacy, ca reste utile en lookup inverse
+    pour compter les sessions historiques).
+    """
+    parsed = parse_session_id(session_id)
+    for k, v in parsed.items():
+        await set_session_tag(session_id, k, v)
+    return parsed
 
 
 # ── Checkpoints (Commit B — Rollback agent) ───────────────────────────────────
