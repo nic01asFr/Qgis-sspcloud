@@ -305,3 +305,40 @@ class TestSourceCrsForcedApresReprojection:
         assert reprojected is False
         forced_crs = "EPSG:4326" if reprojected else src.get("crs", "EPSG:4326")
         assert forced_crs == "EPSG:4326"
+
+
+# ---------------------------------------------------------------------------
+# P0-2 fix : import direct depuis hub.geo_utils (sans side-effect main FastAPI)
+# ---------------------------------------------------------------------------
+
+class TestGeoUtilsDirectImport:
+    """Le helper doit etre disponible via `from hub.geo_utils import ...`
+    pour permettre aux consumers externes (tests, scripts, autres modules)
+    de reprojeter sans importer tout hub.main."""
+
+    def test_apply_auto_reprojection_importable_from_geo_utils(self):
+        from hub.geo_utils import apply_auto_reprojection
+        gj = _mk_fc({"type": "Point", "coordinates": MARSEILLE_L93})
+        out, reprojected = apply_auto_reprojection(gj, "layer", "hint")
+        assert reprojected is True
+        coords = out["features"][0]["geometry"]["coordinates"]
+        assert coords[0] == pytest.approx(MARSEILLE_WGS84_LON, abs=TOL)
+        assert coords[1] == pytest.approx(MARSEILLE_WGS84_LAT, abs=TOL)
+
+    def test_underscore_alias_still_works(self):
+        """Alias legacy `_apply_auto_reprojection` reste utilisable."""
+        from hub.geo_utils import _apply_auto_reprojection as legacy
+        from hub.geo_utils import apply_auto_reprojection as canonical
+        assert legacy is canonical
+
+    def test_main_wrapper_delegates_to_geo_utils(self):
+        """`hub.main._apply_auto_reprojection` doit deleguer a geo_utils."""
+        from hub.main import _apply_auto_reprojection as main_fn
+        from hub.geo_utils import apply_auto_reprojection as gu_fn
+        gj = _mk_fc({"type": "Point", "coordinates": MARSEILLE_L93})
+        # Meme output = meme comportement
+        out_main, r_main = main_fn(gj, "l", "h")
+        gj2 = _mk_fc({"type": "Point", "coordinates": MARSEILLE_L93})
+        out_gu, r_gu = gu_fn(gj2, "l", "h")
+        assert r_main == r_gu
+        assert out_main == out_gu

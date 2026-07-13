@@ -94,7 +94,19 @@ def _k8s_sa_token() -> str:
 
 
 async def _k8s_get_secret_value(name: str, namespace: str, key: str) -> str | None:
-    """Lit la valeur d'une cle d'un Secret via l'API K8s HTTP. None si absent."""
+    """Lit la valeur d'une cle d'un Secret via l'API K8s HTTP. None si absent.
+
+    P1-5 fix (2026-07-13) : log explicitement les status codes non-200. Avant
+    ce fix, un 403 RBAC (SA hub sans droit `get secrets` sur qgis-hub-apikey)
+    retournait silencieusement None, forcant `create_or_get_api_key` en
+    fallback DB volatile. Symptome : la cle env HUB_API_KEY (Secret injecte)
+    et la cle retournee par la fonction divergeaient -> 401 sur inter-pod
+    auth. Cf. rapport Sprint V0.3 validation admin nic01asfr.
+
+    Le vrai fix cote infra est un RoleBinding sur le SA pour lui accorder
+    `get,list secrets` (ressource nommee qgis-hub-apikey). Cf. deploy/rbac/
+    hub-secret-reader.yaml (a appliquer manuellement post-refonte helm).
+    """
     if not namespace:
         return None
     token = _k8s_sa_token()
@@ -106,10 +118,36 @@ async def _k8s_get_secret_value(name: str, namespace: str, key: str) -> str | No
                 f"{_K8S_HOST}/api/v1/namespaces/{namespace}/secrets/{name}",
                 headers={"Authorization": f"Bearer {token}"},
             )
+        if r.status_code == 404:
+            log.info(
+                "k8s get_secret %s/%s absent (404) — cas normal a la premiere "
+                "creation, sera cree via _k8s_create_secret.",
+                namespace, name,
+            )
+            return None
+        if r.status_code == 403:
+            log.error(
+                "k8s get_secret %s/%s FORBIDDEN (403) -- le service account "
+                "du pod n'a pas de RoleBinding avec `get secrets` sur ce nom. "
+                "Symptome connu : cle API volatile qui diverge du Secret K8s "
+                "-> 401 silencieux sur inter-pod. Applique deploy/rbac/"
+                "hub-secret-reader.yaml (Role + RoleBinding pour SA %s).",
+                namespace, name, token[:12] + "...",
+            )
+            return None
         if r.status_code != 200:
+            log.warning(
+                "k8s get_secret %s/%s HTTP %d : %s",
+                namespace, name, r.status_code, r.text[:200],
+            )
             return None
         data_b64 = (r.json().get("data") or {}).get(key)
         if not data_b64:
+            log.warning(
+                "k8s get_secret %s/%s existe mais cle '%s' absente. "
+                "Verifier le champ data du Secret.",
+                namespace, name, key,
+            )
             return None
         return base64.b64decode(data_b64).decode()
     except Exception as exc:

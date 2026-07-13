@@ -15,9 +15,23 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 
 from agent import briques_client
 from agent.enrichers.base import EnrichmentResult
+
+
+def _strip_accents(text: str) -> str:
+    """Normalise NFKD + retire diacritiques pour matching insensible aux accents.
+
+    Bug detecte en validation Sprint V0.3 : `reglementaire` (user) ne matchait
+    pas `reglementaire` dans une brique dont le title contient `reglementaire`
+    (avec accent). NFKD decompose 'e' + accent, ascii ignore retire les
+    combining chars.
+    """
+    if not text:
+        return ""
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
 
 # Stopwords minimalistes fr : mots courts frequents qui polluent le scoring.
 # On complete avec les stopwords deja utilises par recipe_matcher pour rester
@@ -38,14 +52,14 @@ _STOPWORDS = {
 
 
 def _extract_keywords(user_message: str) -> list[str]:
-    """Mots >= 4 lettres, lowercased, hors stopwords."""
+    """Mots >= 4 lettres, lowercased, sans diacritiques, hors stopwords."""
     if not user_message:
         return []
     words = re.findall(r"[a-zA-Zà-ÿÀ-Ÿ]{4,}", user_message)
     kws: list[str] = []
     seen: set[str] = set()
     for w in words:
-        wl = w.lower()
+        wl = _strip_accents(w.lower())
         if wl in _STOPWORDS or wl in seen:
             continue
         seen.add(wl)
@@ -54,15 +68,31 @@ def _extract_keywords(user_message: str) -> list[str]:
 
 
 def _score_brique(brique: dict, keywords: list[str]) -> int:
-    """Compte le nombre de keywords user presents dans title + rule_text + llm_hint."""
-    haystack = " ".join([
+    """Compte le nombre de keywords user presents dans title + rule_text + llm_hint.
+
+    Robustesse P0-1 fix (2026-07-13) :
+      * Casse insensible (lower).
+      * Diacritiques insensibles (NFKD strip) : `reglementaire` matche `reglementaire`.
+      * Pluriels basiques : `dispositifs` matche `dispositif` (strip 's' final).
+
+    Le scoring reste volontairement grossier -- l'enricher est un signal
+    "top-1 highlight", pas un ranker semantique.
+    """
+    haystack = _strip_accents(" ".join([
         str(brique.get("title") or ""),
         str(brique.get("rule_text") or ""),
         str(brique.get("llm_hint") or ""),
-    ]).lower()
+    ]).lower())
     if not haystack:
         return 0
-    return sum(1 for kw in keywords if kw in haystack)
+    score = 0
+    for kw in keywords:
+        if kw in haystack:
+            score += 1
+        elif len(kw) > 4 and kw.endswith("s") and kw[:-1] in haystack:
+            # `dispositifs` (user) matche `dispositif` (brique) en supprimant le s
+            score += 1
+    return score
 
 
 def _shorten(text: str, limit: int = 200) -> str:

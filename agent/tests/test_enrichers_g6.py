@@ -273,6 +273,59 @@ def test_briques_enricher_fetch_exception_fails_soft():
     assert result is None
 
 
+def test_briques_enricher_diacritics_normalized():
+    """P0-1 fix : `reglementaire` sans accent matche brique avec accent."""
+    briques_client.reset_cache()
+
+    brique_reglementaire = {
+        "id": "no_hallucination_sources",
+        "title": "Ne jamais inventer une source ou un dispositif reglementaire",
+        "rule_text": "Interdiction absolue d'inventer un dispositif reglementaire (PPRi, PPRt, PLU) non documente dans le catalog.",
+        "llm_hint": "Refuse d'inventer une source reglementaire.",
+        "severity": "block",
+    }
+
+    async def fake_fetch(hub_url, api_key, timeout=3.0):
+        return ([], [brique_reglementaire])
+
+    with patch("agent.briques_client.fetch_briques_rules", new=fake_fetch):
+        # User tape SANS accents, la brique CONTIENT des accents
+        result = _run(briques_enricher.enrich(
+            "Attention aux dispositifs reglementaires PPR fictifs",
+            {},
+        ))
+
+    # Avant P0-1 : result etait None (mismatch accent). Apres : match top-1.
+    assert isinstance(result, EnrichmentResult)
+    assert result.data["id"] == "no_hallucination_sources"
+    assert "BRIQUE PERTINENTE" in result.summary
+
+
+def test_briques_enricher_diacritics_normalized_reverse():
+    """P0-1 fix : `reglementaire` AVEC accent matche brique sans accent."""
+    briques_client.reset_cache()
+
+    brique_sans_accent = {
+        "id": "test_regle",
+        "title": "Regle metier importante",
+        "rule_text": "Suivre la regle interne pour tout traitement geo.",
+        "llm_hint": "Utilise la regle documentee.",
+    }
+
+    async def fake_fetch(hub_url, api_key, timeout=3.0):
+        return ([brique_sans_accent], [])
+
+    with patch("agent.briques_client.fetch_briques_rules", new=fake_fetch):
+        # User tape avec accent, la brique n'a PAS d'accent
+        result = _run(briques_enricher.enrich(
+            "Quelle regle metier appliquer pour ce traitement geo",
+            {},
+        ))
+
+    assert isinstance(result, EnrichmentResult)
+    assert result.data["id"] == "test_regle"
+
+
 # ── Integration : run_all pipeline ───────────────────────────────────────────
 
 

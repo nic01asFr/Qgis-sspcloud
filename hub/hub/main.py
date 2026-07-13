@@ -5396,62 +5396,17 @@ def _apply_auto_reprojection(
     layer_id: str,
     source_hint: str,
 ) -> tuple[dict, bool]:
-    """Auto-reprojection defensive GeoJSON -> EPSG:4326 avant inline SSR.
+    """Wrapper legacy vers hub.geo_utils.apply_auto_reprojection (P0-2 fix).
 
-    Chantier G3 + finition V2/V3 (2026-07-13). Utilise dans les deux
-    chemins d'inline de _build_interactive_map_ctx :
-      - Chemin A : layers_inline avec source.type=geojson_path
-      - Chemin B : scene_manifest lu depuis PVC (scene_store)
-
-    Comportement :
-      * Import tardif de hub.geo_utils (fail-soft si pyproj absent).
-      * Detecte le CRS via crs.properties.name (GeoJSON legacy).
-      * Si CRS != EPSG:4326, reprojette vers EPSG:4326.
-      * En cas d'echec pyproj/CRSError : log warning, renvoie l'input tel
-        quel (fail-soft, meilleure UX degradee que 500).
-      * Retire toujours le champ crs top-level (RFC 7946 : 4326 implicite).
-
-    Args:
-        gj_data: FeatureCollection GeoJSON.
-        layer_id: id du layer, pour logs.
-        source_hint: chemin/URL source, pour logs.
-
-    Returns:
-        Tuple (gj_data_out, reprojected). ``reprojected=True`` uniquement
-        si une transformation a effectivement eu lieu (permet a l'appelant
-        de forcer source.crs = "EPSG:4326").
+    Chantier G3 + finition V2/V3 (2026-07-13). Le corps de la fonction a
+    ete deplace dans hub.geo_utils en 2026-07-13 (P0-2) pour rendre le
+    helper disponible aux appelants externes sans passer par le module
+    FastAPI (evite le side-effect d'import de tout main.py juste pour
+    reprojeter un GeoJSON dans un test unitaire ou un consumer tiers).
+    Ce wrapper reste pour retrocompat.
     """
-    reprojected = False
-    if not isinstance(gj_data, dict):
-        return gj_data, False
-    try:
-        from hub import geo_utils
-        declared_crs = geo_utils.detect_geojson_crs(gj_data)
-        if declared_crs and declared_crs != "EPSG:4326":
-            try:
-                gj_data = geo_utils.reproject_geojson_to_4326(gj_data, declared_crs)
-                reprojected = True
-                log.info(
-                    "Auto-reprojection %s -> EPSG:4326 pour layer %s (%d features, %s)",
-                    declared_crs,
-                    layer_id,
-                    len(gj_data.get("features", [])),
-                    source_hint,
-                )
-            except Exception as exc:
-                log.warning(
-                    "Auto-reprojection %s echouee pour layer %s (%s) : %s -- inline as-is",
-                    declared_crs, layer_id, source_hint, exc,
-                )
-    except Exception as exc:
-        log.warning(
-            "hub.geo_utils indisponible pour layer %s (%s) : %s -- inline as-is",
-            layer_id, source_hint, exc,
-        )
-    # RFC 7946 : WGS84 implicite, retire toujours le champ crs top-level.
-    if isinstance(gj_data, dict):
-        gj_data.pop("crs", None)
-    return gj_data, reprojected
+    from hub import geo_utils
+    return geo_utils.apply_auto_reprojection(gj_data, layer_id, source_hint)
 
 
 async def _build_interactive_map_ctx(

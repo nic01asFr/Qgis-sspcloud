@@ -291,6 +291,13 @@ async def startup():
             "Verifier le Secret k8s qgis-hub-apikey."
         )
 
+    # P1-4 fix (2026-07-13) : ping HUB_URL au startup pour detecter les
+    # env vars fantomes (bug HUB_URL=user-X-qgis inexistant detecte en Sprint
+    # V0.3 validation). Fail-soft strict : warning + continue, pas de crash.
+    # Un 404 sur / est OK (racine peut etre absente), on n'accepte QUE les
+    # erreurs de connexion (host inexistant, DNS fail, timeout).
+    asyncio.create_task(_hub_url_startup_ping())
+
     await memory.init()
     # Vector store : extension sqlite-vec + tables embed_chunks/vec_chunks idempotentes.
     try:
@@ -312,6 +319,51 @@ async def startup():
     # propre sans intervention manuelle.
     asyncio.create_task(_checkpoint_purge_loop())
     log.info("QGIS Agent démarré | Hub: %s | Profil: %s", _HUB_URL, _DEFAULT_PROFILE)
+
+
+async def _hub_url_startup_ping() -> None:
+    """Ping HUB_URL au startup pour detecter les env vars fantomes (P1-4 fix).
+
+    Bug detecte en validation Sprint V0.3 : le pod agent avait
+    HUB_URL=https://user-nic01asfr-qgis.user.lab.sspcloud.fr (ingress
+    inexistant), le fetch briques / execute recipe echouaient a 404 et
+    l'user voyait un livrable sans briques ou un stream `recipe_error`
+    silencieux. Sans monitoring proactif, le probleme se decouvre au
+    premier usage reel (heures plus tard).
+
+    Fail-soft strict : n'empeche jamais le pod de demarrer. Emet un
+    warning bien visible dans les logs si le hub n'est pas joignable.
+    On accepte 200-499 comme "hub existe" (le middleware OIDC repond
+    401 sur / si pas de cookie, c'est OK). Seuls les 5xx et les
+    erreurs reseau (host inexistant, timeout, TLS handshake fail)
+    declenchent le warning.
+    """
+    import httpx as _httpx
+    try:
+        async with _httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
+            resp = await client.get(f"{_HUB_URL}/", headers={"User-Agent": "kube-probe/agent-startup"})
+        if resp.status_code < 500:
+            log.info("HUB_URL ping OK : %s -> HTTP %d", _HUB_URL, resp.status_code)
+        else:
+            log.warning(
+                "HUB_URL ping HTTP %d : %s (le hub repond mais en erreur -- verifier logs hub)",
+                resp.status_code, _HUB_URL,
+            )
+    except _httpx.ConnectError as exc:
+        log.warning(
+            "HUB_URL=%s inatteignable (ConnectError: %s) -- probable env var fantome "
+            "(hub inexistant, DNS fail, ingress absent). Les appels agent->hub echoueront. "
+            "Verifier `kubectl -n user-X get ingress` et l'injection env dans le StatefulSet.",
+            _HUB_URL, exc,
+        )
+    except _httpx.TimeoutException:
+        log.warning(
+            "HUB_URL=%s timeout au ping startup (5s). Le hub est peut-etre en cold-start ou "
+            "l'ingress trop lent. A resurveiller.",
+            _HUB_URL,
+        )
+    except Exception as exc:
+        log.warning("HUB_URL ping startup erreur inattendue : %s", exc)
 
 
 async def _checkpoint_purge_loop() -> None:
