@@ -947,6 +947,10 @@ async def build_context_summary(
     active_study_treatments: list[dict] | None = None,
     project_state: dict | None = None,
     study_artifacts: dict | None = None,
+    context_kind: str | None = None,
+    scope_ids: dict | None = None,
+    hub_url: str | None = None,
+    hub_key: str | None = None,
 ) -> str:
     """
     Phase 4 : construit un résumé en 3 couches pour l'system prompt LLM.
@@ -963,6 +967,35 @@ async def build_context_summary(
     Sprint Composants Phase 3b. Compteurs + recent components/assemblies
     de l'étude active pour que l'agent voie ce qui existe déjà et propose
     la next-action contextuelle (pas de recréation à chaque turn).
+
+    context_kind (Chantier G9) : filtre / priorise la couche L2 selon le
+    contexte UI de l'appelant. Valeurs supportées :
+
+    - None ou "desk" : comportement legacy (L2 large, tout inclus).
+    - "assist_component" : L2 focalisé sur ``scope_ids["cid"]`` +
+      historique éditorial récent (fetch hub fail-soft).
+    - "assist_assembly"  : L2 focalisé sur ``scope_ids["aid"]`` +
+      composants référencés par l'assembly.
+    - "recipe_run"       : L2 focalisé sur ``scope_ids["recipe_id"]`` +
+      3 dernières exécutions réussies (via session_tags).
+    - "recipe_create"    : L2 focalisé sur la recipe en édition +
+      composants du user disponibles.
+    - "editor_freeform"  : L2 minimal (juste le draft en cours).
+
+    Toute autre valeur → repli sur le comportement "desk" (fail-soft).
+
+    scope_ids (Chantier G9) : dict issu de
+    ``parse_session_id(session_id)`` + ``get_session_tags(session_id)``.
+    Clés attendues selon le kind : ``cid``, ``aid``, ``recipe_id``,
+    ``draft_id``, ``sid``. Ignoré si ``context_kind`` est None.
+
+    hub_url / hub_key (Chantier G9) : nécessaires pour les fetches
+    complémentaires du client ``hub_scope_client`` (historique composant,
+    composants d'un assembly). Absents → sections d'enrichissement
+    vides mais fail-soft (le prompt reste valide).
+
+    BACKWARD-COMPAT : les appelants qui ne passent aucun des 4 nouveaux
+    paramètres retrouvent exactement le comportement historique.
     """
     # ── Couche 3 (user permanent) ─────────────────────────────────────────
     # Le markdown structuré est le PILIER (pattern CLAUDE.md / ChatGPT memory).
@@ -1150,9 +1183,33 @@ async def build_context_summary(
     else:
         hints = []
 
+    # ── Chantier G9 : filtre / enrichissement L2 par context_kind ────────
+    # Le comportement historique correspond à `context_kind in (None, "desk")`.
+    # Pour les autres kinds, on remplace la vue "étude large" par un bloc
+    # focalisé sur le scope courant (composant, assembly, recipe, draft) et
+    # on rend l'étude sous forme brève (rappel court).
+    kind_l2 = await _l2_by_context_kind(
+        context_kind=context_kind,
+        scope_ids=scope_ids or {},
+        active_study=active_study,
+        hub_url=hub_url,
+        hub_key=hub_key,
+    )
+
     # ── Assemblage 3 couches ──────────────────────────────────────────────
     parts = []
-    if layer2:
+    if kind_l2:
+        # Le bloc scope-aware remplace le titre "Étude en cours" par un titre
+        # plus explicite ; l'ancien layer2 est joint dessous en rappel bref
+        # (utile pour les kinds "assist_*" et "recipe_*" où l'étude reste
+        # partiellement pertinente).
+        parts.append(kind_l2)
+        if layer2 and context_kind not in (None, "desk"):
+            brief = _brief_study_summary(active_study, study_artifacts)
+            if brief:
+                parts.append("=== Rappel étude (bref) ===\n"
+                             + "\n".join(f"- {x}" for x in brief))
+    elif layer2:
         parts.append("=== Étude en cours ===\n" + "\n".join(f"- {x}" for x in layer2))
     if hints:
         parts.append(
@@ -1164,3 +1221,188 @@ async def build_context_summary(
                      + "\n".join(f"- {x}" for x in layer3))
 
     return "\n\n".join(parts) + ("\n" if parts else "")
+
+
+# ── Chantier G9 : helpers L2 par contexte UI ─────────────────────────────────
+
+# Kinds reconnus par _l2_by_context_kind. Toute autre valeur → repli "desk".
+_KNOWN_CONTEXT_KINDS = frozenset({
+    "desk",
+    "assist_component",
+    "assist_assembly",
+    "recipe_run",
+    "recipe_create",
+    "editor_freeform",
+})
+
+
+def _brief_study_summary(
+    active_study: dict | None,
+    study_artifacts: dict | None,
+) -> list[str]:
+    """Résumé bref de l'étude en cours (2-3 lignes max).
+
+    Utilisé quand le L2 principal est scope-aware (composant/assembly/recipe)
+    pour rappeler brièvement l'étude parente sans écraser le focus.
+    """
+    lines: list[str] = []
+    if active_study:
+        name = active_study.get("name") or "?"
+        lines.append(f"Étude parente : « {name} »")
+        if active_study.get("profile"):
+            lines.append(f"Profil étude : {active_study['profile']}")
+    if study_artifacts:
+        c = study_artifacts.get("components") or {}
+        a = study_artifacts.get("assemblies") or {}
+        totals = []
+        if c.get("total"):
+            totals.append(f"{c['total']} composants")
+        if a.get("total"):
+            totals.append(f"{a['total']} assemblies")
+        if totals:
+            lines.append("Livrables existants : " + ", ".join(totals))
+    return lines
+
+
+async def _l2_by_context_kind(
+    context_kind: str | None,
+    scope_ids: dict,
+    active_study: dict | None,
+    hub_url: str | None,
+    hub_key: str | None,
+) -> str:
+    """Construit le bloc L2 filtré / enrichi selon le contexte UI.
+
+    Retourne "" si le comportement legacy doit s'appliquer (context_kind None
+    ou "desk", ou kind inconnu → repli desk). Sinon retourne un bloc markdown
+    formaté (titre === === + puces).
+
+    Fail-soft : si les fetches hub échouent, on continue et on rend un bloc
+    avec seulement les IDs (pas d'historique, pas de composants).
+    """
+    if context_kind is None or context_kind == "desk":
+        return ""
+    if context_kind not in _KNOWN_CONTEXT_KINDS:
+        # Kind inconnu → repli sur legacy (comportement desk).
+        log.warning("_l2_by_context_kind : kind inconnu %r, repli desk",
+                    context_kind)
+        return ""
+
+    sid = scope_ids.get("sid") or (active_study or {}).get("sid") or ""
+
+    if context_kind == "assist_component":
+        cid = scope_ids.get("cid") or "?"
+        lines = [f"Composant actif : {cid}"]
+        history = await _safe_fetch_component_history(hub_url, hub_key, sid, cid)
+        if history:
+            lines.append(f"Historique éditorial ({len(history)} versions récentes) :")
+            for h in history[:5]:
+                ver  = h.get("version") or h.get("v") or "?"
+                summ = h.get("summary") or h.get("title") or h.get("action") or ""
+                auth = h.get("author") or h.get("username") or ""
+                bits = [f"v{ver}"]
+                if auth:
+                    bits.append(auth)
+                if summ:
+                    bits.append(summ[:80])
+                lines.append("  • " + " · ".join(bits))
+        else:
+            lines.append("Historique éditorial : (indisponible ou vide)")
+        return "=== Composant en édition ===\n" + "\n".join(f"- {x}" for x in lines)
+
+    if context_kind == "assist_assembly":
+        aid = scope_ids.get("aid") or "?"
+        lines = [f"Assembly actif : {aid}"]
+        comps = await _safe_fetch_assembly_components(hub_url, hub_key, sid, aid)
+        if comps:
+            lines.append(f"Composants référencés ({len(comps)}) :")
+            for c in comps[:10]:
+                cid   = c.get("cid") or c.get("id") or "?"
+                title = c.get("title") or ""
+                kind  = c.get("kind") or ""
+                bits = [str(cid)[:12]]
+                if kind:
+                    bits.append(kind)
+                if title:
+                    bits.append(f"« {title[:60]} »")
+                lines.append("  • " + " · ".join(bits))
+        else:
+            lines.append("Composants référencés : (indisponible ou vide)")
+        return "=== Assembly en édition ===\n" + "\n".join(f"- {x}" for x in lines)
+
+    if context_kind == "recipe_run":
+        recipe_id = scope_ids.get("recipe_id") or "?"
+        lines = [f"Recipe en exécution : {recipe_id}"]
+        runs = await _safe_fetch_recipe_recent_runs(hub_url, hub_key, recipe_id)
+        if runs:
+            lines.append(f"Exécutions précédentes réussies ({len(runs)}) :")
+            for r in runs[:3]:
+                sid_run = r.get("session_id") or "?"
+                lines.append(f"  • session {sid_run[:24]}")
+        else:
+            lines.append("Exécutions précédentes : (aucune trace mémoire)")
+        return "=== Recipe en cours d'exécution ===\n" + "\n".join(
+            f"- {x}" for x in lines
+        )
+
+    if context_kind == "recipe_create":
+        recipe_id = scope_ids.get("recipe_id") or "?"
+        lines = [
+            f"Recipe en édition : {recipe_id}",
+            "Contexte : édition libre du DAG de la recipe.",
+            "Les composants du user sont disponibles via les tools d'assemblage.",
+        ]
+        return "=== Recipe en édition ===\n" + "\n".join(f"- {x}" for x in lines)
+
+    if context_kind == "editor_freeform":
+        draft_id = scope_ids.get("draft_id") or "?"
+        lines = [
+            f"Draft {draft_id} en cours",
+            "Contexte : édition freeform, L2 minimal (pas d'étude ni de composant lié).",
+        ]
+        return "=== Éditeur freeform ===\n" + "\n".join(f"- {x}" for x in lines)
+
+    # Défensif : ne devrait pas être atteint (frozenset gate en amont).
+    return ""
+
+
+async def _safe_fetch_component_history(
+    hub_url: str | None, hub_key: str | None, sid: str, cid: str,
+) -> list[dict]:
+    """Wrapper fail-soft du client hub_scope_client (import différé)."""
+    try:
+        from agent import hub_scope_client  # noqa: WPS433
+        return await hub_scope_client.fetch_component_history(
+            hub_url or "", hub_key or "", sid, cid,
+        )
+    except Exception as exc:
+        log.warning("_safe_fetch_component_history : erreur (%s)", exc)
+        return []
+
+
+async def _safe_fetch_assembly_components(
+    hub_url: str | None, hub_key: str | None, sid: str, aid: str,
+) -> list[dict]:
+    """Wrapper fail-soft du client hub_scope_client (import différé)."""
+    try:
+        from agent import hub_scope_client  # noqa: WPS433
+        return await hub_scope_client.fetch_assembly_components(
+            hub_url or "", hub_key or "", sid, aid,
+        )
+    except Exception as exc:
+        log.warning("_safe_fetch_assembly_components : erreur (%s)", exc)
+        return []
+
+
+async def _safe_fetch_recipe_recent_runs(
+    hub_url: str | None, hub_key: str | None, recipe_id: str,
+) -> list[dict]:
+    """Wrapper fail-soft du client hub_scope_client (import différé)."""
+    try:
+        from agent import hub_scope_client  # noqa: WPS433
+        return await hub_scope_client.fetch_recipe_recent_runs(
+            hub_url or "", hub_key or "", recipe_id,
+        )
+    except Exception as exc:
+        log.warning("_safe_fetch_recipe_recent_runs : erreur (%s)", exc)
+        return []
