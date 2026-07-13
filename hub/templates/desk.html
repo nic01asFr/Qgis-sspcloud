@@ -7,6 +7,9 @@
 <title>{{ active_study.name if active_study else 'Bureau de travail' }} — CEREMA</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/utility/utility.min.css">
+<!-- Chantier G4-b-3c : galerie de recettes web (section RECETTES du desk).
+     CSS servi via app.mount("/static", ...) -> hub/hub/static/. -->
+<link rel="stylesheet" href="/static/recipe_gallery.css">
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   font-family:Marianne,arial,sans-serif}
@@ -644,7 +647,46 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       <div class="src-section">
         <div class="src-section-header">📋 Recettes</div>
         <div class="src-section-content" id="src-recipes-content">
-          <div class="publi-empty">Chargement…</div>
+          {# Chantier G4-b-3c : galerie SSR des recipes web disponibles.
+             Le contexte `recipes` est alimente par _desk_context() a partir
+             de hub.recipes_web.registry.list_recipes(scope="all"). Chaque
+             card est un lien vers /desk?session=<session_hint> qui va
+             declencher le mode mute G8 cote pod session. #}
+          <div class="rct-gallery">
+            <div class="rct-gallery-header">
+              <h4 class="rct-gallery-title">Recettes disponibles</h4>
+              <span class="rct-count">{{ recipes|length if recipes else 0 }}</span>
+            </div>
+            <div class="rct-cards">
+              {% for r in (recipes or []) %}
+              <a class="rct-card"
+                 href="/desk?session={{ r.session_hint }}"
+                 data-recipe-id="{{ r.id }}"
+                 data-source="{{ r.source }}"
+                 title="Ouvrir la session recipe_run pour cette recette">
+                <div class="rct-card-title">{{ r.title }}</div>
+                <div class="rct-card-desc">
+                  {%- if r.description -%}
+                    {{ r.description }}
+                  {%- else -%}
+                    Recette deterministe web V0.3.1
+                  {%- endif -%}
+                </div>
+                <div class="rct-card-meta">
+                  <span class="rct-source">{{ r.source or "?" }}</span>
+                  <span class="rct-author">{{ r.author or "?" }}</span>
+                </div>
+                <div class="rct-card-cta">Executer &rarr;</div>
+              </a>
+              {% endfor %}
+              {% if not recipes %}
+              <p class="rct-empty">
+                Aucune recette disponible. Demande a l'agent :
+                &laquo;&nbsp;cree une recette qui &hellip;&nbsp;&raquo;
+              </p>
+              {% endif %}
+            </div>
+          </div>
         </div>
       </div>
       {% if active_study %}
@@ -2163,17 +2205,20 @@ async function loadSources() {
   // dans les 3 sections empilées du meta-pane Sources.
   if (!_resLayersLoaded) { try { await loadResourceLayers(); } catch{} _resLayersLoaded = true; }
   if (!_resFilesLoaded)  { try { await loadResourceFiles();  } catch{} _resFilesLoaded = true; }
+  // Chantier G4-b-3c : la section RECETTES est desormais SSR (galerie
+  // rendue par Jinja2 dans #src-recipes-content au chargement du desk).
+  // On charge encore loadResourceRecipes() pour peupler le rpane user
+  // CRUD (rpane[data-rpane="recipes"] + #resources-recipes-list), mais
+  // on n'ecrase plus le contenu SSR de #src-recipes-content.
   try { await loadResourceRecipes(); } catch{}
   // Move HTML des anciens panes vers les nouvelles sections (référence directe)
   const srcLayers = document.getElementById('src-layers-content');
   const srcFiles  = document.getElementById('src-files-content');
-  const srcRecipes = document.getElementById('src-recipes-content');
   const lyEl = document.getElementById('resources-layers-list');
   const fiEl = document.getElementById('resources-files-list');
-  const reEl = document.getElementById('resources-recipes-list');
   if (srcLayers && lyEl)   srcLayers.innerHTML  = lyEl.outerHTML;
   if (srcFiles  && fiEl)   srcFiles.innerHTML   = fiEl.outerHTML;
-  if (srcRecipes && reEl)  srcRecipes.innerHTML = reEl.outerHTML;
+  // NB : plus de transfert sur srcRecipes — la galerie SSR reste intacte.
 }
 
 async function loadPartages() {
@@ -3170,5 +3215,8 @@ async function wakeGpu() {
 refreshGpuChip();
 setInterval(refreshGpuChip, 20000);
 </script>
+
+<!-- Chantier G4-b-3d : bouton « Publier » sur event SSE recipe_done -->
+<script src="/static/recipe_stream.js" defer></script>
 </body>
 </html>

@@ -1175,6 +1175,37 @@ async def journal_detail(livrable_id: str):
     return entry
 
 
+@app.post("/journal/livrables/{livrable_id}/mark_published")
+async def journal_mark_published(livrable_id: str, request: Request):
+    """Marque une entree du journal comme publiee, appele par le hub apres
+    ``POST /api/livrable/publish`` (Chantier G4-b-3d).
+
+    Body attendu : ``{"published_url": "https://.../published/..."}``.
+
+    Idempotent : re-marquer une entree deja publiee sur-ecrit `published_url`
+    (le journal reste l'unique source de verite ; le hub peut retenter en cas
+    de rollout). 404 si le livrable est inconnu ; 400 si `published_url`
+    manque. Aucune auth de bord : ce endpoint est whitelist inter-pod hub->
+    agent (User-Agent ``kube-probe/hub``) au niveau du middleware.
+    """
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(400, f"body JSON invalide : {exc}")
+    published_url = (body or {}).get("published_url")
+    if not published_url or not isinstance(published_url, str):
+        raise HTTPException(400, "published_url requis (str non vide)")
+    entry = await memory.get_livrable(livrable_id)
+    if entry is None:
+        raise HTTPException(404, "Livrable inconnu")
+    await memory.mark_livrable_published(livrable_id, published_url)
+    return {
+        "ok": True,
+        "livrable_id": livrable_id,
+        "published_url": published_url,
+    }
+
+
 # ── Checkpoints / Rollback (Commit B) ──────────────────────────────────────────
 
 @app.get("/sessions/{session_id}/checkpoints")
