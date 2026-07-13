@@ -1819,14 +1819,15 @@ async def execute_recipe_web_endpoint(
 
     try:
         if recipe_id:
-            examples_dir = (
-                _P(__file__).resolve().parent / "recipes_web" / "examples"
-            )
-            recipe_path = examples_dir / f"{recipe_id}.yaml"
-            if not recipe_path.exists():
+            # G4-b-2 : chercher via registry (examples + USER_RECIPES_DIR),
+            # user gagne en cas d'homonymie.
+            from hub.recipes_web import registry as _rw_registry
+            recipe_path = _rw_registry.find_recipe_path(recipe_id)
+            if recipe_path is None:
                 raise HTTPException(
                     404,
-                    f"Recipe '{recipe_id}' introuvable dans {examples_dir}",
+                    f"Recipe '{recipe_id}' introuvable "
+                    f"(ni examples/, ni USER_RECIPES_DIR)",
                 )
             recipe = load_recipe_from_yaml(recipe_path)
         else:
@@ -1879,6 +1880,67 @@ async def execute_recipe_web_endpoint(
         raise HTTPException(500, f"Erreur exécution recipe : {exc}")
 
     return output.model_dump()
+
+
+# ── Recipes Web : list + admin reload (chantier G4-b-2) ──────────────────────
+# Catalogue unifie examples embarques + USER_RECIPES_DIR (PVC user).
+# Voir hub/hub/recipes_web/registry.py pour la logique de scan + cache 60s.
+
+
+@app.get("/api/recipes-web/list")
+async def list_recipes_web_endpoint(
+    request: Request,
+    scope: str = "all",
+    user: dict = Depends(auth.get_current_user),
+):
+    """Liste les recipes web disponibles pour l'user.
+
+    Query params :
+      - ``scope`` : ``"all"`` (defaut) | ``"examples"`` | ``"user"``
+
+    Reponse 200 :
+      ``{"recipes": [{id, title, author, use_cases, output_kind, path, source}, ...],
+         "counts": {"examples": N, "user": M, "total": N+M}}``
+
+    Le champ ``source`` vaut ``"example"`` (embarquee avec le hub) ou ``"user"``
+    (dossier USER_RECIPES_DIR, typiquement PVC ``/home/onyxia/work/user-recipes``).
+    """
+    if scope not in ("all", "examples", "user"):
+        raise HTTPException(
+            400,
+            f"scope invalide : '{scope}' (attendu 'all' | 'examples' | 'user')",
+        )
+    try:
+        from hub.recipes_web import registry as _rw_registry
+    except ImportError as exc:
+        raise HTTPException(
+            503, f"Module recipes_web indisponible : {exc}"
+        )
+    recipes = _rw_registry.list_recipes(scope=scope)
+    return {
+        "recipes": recipes,
+        "counts": _rw_registry.counts(),
+    }
+
+
+@app.post("/admin/recipes-web/reload")
+async def reload_recipes_web_endpoint(
+    request: Request,
+    user: dict = Depends(auth.require_admin),
+):
+    """Force un reload du cache registry (admin uniquement).
+
+    Utile en dev / apres depot d'un nouveau YAML dans USER_RECIPES_DIR sans
+    attendre l'expiration du TTL 60s. Retourne le nombre d'entrees rechargees.
+    """
+    try:
+        from hub.recipes_web import registry as _rw_registry
+    except ImportError as exc:
+        raise HTTPException(
+            503, f"Module recipes_web indisponible : {exc}"
+        )
+    total = _rw_registry.reload_cache()
+    return {"reloaded": True, "total": total, "counts": _rw_registry.counts()}
 
 
 # ── GeoAI — proxy vers pod GPU (SAM3, DeepForest, OmniWater) ─────────────────
