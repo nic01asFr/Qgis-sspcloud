@@ -1,8 +1,11 @@
 """hub.recipes_web.engine — Moteur d'exécution POC des recipes web.
 
-Chantier G4-POC + G4-b-1. Mode `recipe_pure` uniquement : déterministe
-strict, aucun appel LLM. Le mode `recipe_polished` est documenté dans
-SPEC.md comme extension future.
+Chantier G4-POC + G4-b-1 + G4-b-3b. Deux modes :
+
+- `recipe_pure` : déterministe strict, aucun appel LLM. Backbone du hub.
+- `recipe_polished` : après un run pur, un LLM optionnel reformule
+  UNIQUEMENT les blocs `narrative_text` du scene_manifest (voir
+  `polish.py`). Aucune donnée géographique n'est touchée.
 
 Points d'attention :
   - `produced_at` provient toujours de `context["timestamp"]` — jamais
@@ -15,6 +18,8 @@ Points d'attention :
 API :
   - `load_recipe_from_yaml(path) -> RecipeWeb`
   - `execute_recipe_pure(recipe, context, executor=None) -> RecipeWebOutput`
+  - `execute_recipe_polished(recipe, context, executor=None,
+    llm_client=None) -> RecipeWebOutput`
   - `RecipeImportError`, `RecipeStepError`
 """
 
@@ -424,6 +429,60 @@ async def execute_recipe_pure(
         provenance=provenance,
         briques_used=list(briques_used),
     )
+
+
+# --- Mode `recipe_polished` (LLM borne sur narrative_text) --------------
+
+
+async def execute_recipe_polished(
+    recipe: RecipeWeb,
+    context: dict[str, Any],
+    executor: QgisExecutor | None = None,
+    llm_client: Any = None,
+) -> RecipeWebOutput:
+    """Exécute une recipe en mode `recipe_polished`.
+
+    Étapes :
+      1. `execute_recipe_pure(recipe, context, executor)` — déterministe.
+      2. Si `llm_client` est fourni : appelle `polish_narrative` sur le
+         scene_manifest résultant, remplace `output.scene_manifest` par
+         la version polie et ajoute `output.provenance["polish"] = diff`.
+      3. Marque `output.provenance["mode"] = "recipe_polished"`.
+
+    Backward-compat : `llm_client=None` renvoie une sortie strictement
+    identique à `execute_recipe_pure` (aux clés `mode`/`polish` près
+    qui deviennent informatives — le champ mode signale l'intention
+    utilisateur, jamais un side-effect sur les données).
+
+    Fail-soft : voir `polish.polish_narrative` — toute erreur LLM par
+    bloc est catchée, l'original est conservé, la provenance trace
+    l'échec.
+    """
+    output = await execute_recipe_pure(recipe, context, executor=executor)
+
+    if llm_client is None:
+        output.provenance["mode"] = "recipe_polished"
+        output.provenance["polish"] = {
+            "polish_llm_provenance": {
+                "blocks_polished": 0,
+                "blocks_skipped": 0,
+                "blocks_failed": 0,
+                "reason": "no_llm_client_provided",
+            },
+        }
+        return output
+
+    # Import différé pour éviter d'imposer polish.py aux consommateurs
+    # qui n'utilisent que le mode pur.
+    from hub.recipes_web.polish import polish_narrative
+
+    polished_manifest, polish_diff = await polish_narrative(
+        output.scene_manifest, llm_client,
+    )
+    output.scene_manifest = polished_manifest
+    output.provenance["polish"] = polish_diff
+    output.provenance["mode"] = "recipe_polished"
+    return output
 
 
 # --- Utilitaires de debug -----------------------------------------------
