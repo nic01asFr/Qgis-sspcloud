@@ -87,9 +87,30 @@ doit appartenir à `hub.briques_loader.VALID_CATEGORIES`.
 ### 4.1 `run_qgis`
 
 Décrit un traitement QGIS (WFS/WCS, algorithme processing, script custom).
-Dans le POC G4, le moteur simule la sortie en produisant un layer stub
-inséré dans le `scene_manifest` final. L'intégration réelle MCP interviendra
-en G4-b.
+L'exécution est déléguée à un `QgisExecutor` (voir `qgis_executor.py`)
+injecté dans le moteur :
+
+- **`StubQgisExecutor`** (défaut, POC G4) : produit un layer stub avec
+  un `source.path` préfixé `stub://` — signal explicite au reviewer qu'il
+  ne s'agit pas d'une vraie source. Utilisé pour tests d'idempotence et
+  pour valider la chaîne de rendu web sans QGIS live.
+- **`McpQgisExecutor`** (chantier G4-b-1, placeholder) : contrat prêt à
+  appeler BigQgisMCP via JSON-RPC HTTP. À l'état actuel, retourne un
+  layer plausible pointant vers `/data/scene_store/{layer_id}.geojson`.
+  Le vrai câblage JSON-RPC (set_study_zone / smart_load / run_processing
+  / export_layer) sera l'objet du chantier G4-b-2.
+
+Un nouvel executor s'ajoute en implémentant le Protocol `QgisExecutor` :
+
+```python
+class MyExecutor:
+    async def execute(self, step, context) -> dict:
+        # retourne un layer conforme au SceneManifest.layers[]
+        ...
+```
+
+L'injection se fait via l'argument `executor` d'`execute_recipe_pure`
+ou via le query param `?executor=<nom>` de l'endpoint hub.
 
 Champs obligatoires : `id`, `algorithm`, `outputs.layer_id`.
 Champs recommandés : `outputs.layer_name`, `outputs.geometry_type`,
@@ -174,9 +195,13 @@ Voir `examples/diagnostic_parc_bati_temporel.yaml` : bâti Marseille 4e
 
 ## 8. Roadmap post-POC (G4-b, G4-c)
 
-- **G4-b — Intégration MCP + endpoints REST** : câbler `run_qgis` sur les
-  vrais tools BigQgisMCP (`smart_load`, `run_processing`), exposer
-  `POST /api/recipes-web/execute` sur le hub, wire dans le desk.
+- **G4-b-1 — Protocol QgisExecutor** *(livré)* : abstraction de l'exécution
+  `run_qgis` derrière un `Protocol` avec deux implémentations (`Stub`,
+  `Mcp` placeholder) et injection via `?executor=` sur l'endpoint hub.
+- **G4-b-2 — Câblage JSON-RPC MCP réel** : implémenter dans
+  `McpQgisExecutor.execute` la traduction step → tool calls MCP
+  (`set_study_zone`, `smart_load`, `run_processing`, `export_layer`),
+  auth Bearer, gestion d'erreurs, tests d'intégration live.
 - **G4-c — `recipe_polished`** : ajouter un mode polish LLM borné (voir §5.2).
 - **G4-d — UI recipe browser** : lister les recipes web dans le desk,
   aperçu du manifest produit, one-click publish.
