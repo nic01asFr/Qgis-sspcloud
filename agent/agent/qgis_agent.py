@@ -1198,10 +1198,23 @@ class QGISAgent:
     # turn précédent a muté l'état hub.
     _ARTIFACTS_CACHE_TTL_S = 15.0
 
-    def __init__(self, username: str, session_id: str, profile_id: str = "standard"):
+    def __init__(
+        self,
+        username: str,
+        session_id: str,
+        profile_id: str = "standard",
+        profile_locked: bool = False,
+    ):
         self.username   = username
         self.session_id = session_id
         self.profile_id = profile_id
+        # Chantier G2 : si le frontend a impose le profil (drawer BlockNote sur
+        # composant, panel V1.15 sur assembly, editeur freeform, etc.) on
+        # inhibe la logique de switch cote LLM :
+        #  - le prompt systeme n'invite pas a inclure <switch_profile>,
+        #  - toute balise <switch_profile> emise malgre tout est ignoree
+        #    (log warning + telemetry via session tag).
+        self.profile_locked = bool(profile_locked)
         self._tools_cache: list[dict] | None = None
         # L2 project state mis a jour au debut de chaque turn par chat_stream.
         # Lu par le tool loop pour detecter les args spatiaux generiques
@@ -1285,6 +1298,16 @@ class QGISAgent:
         "switch pour les turns suivants. Profils dispo : standard, "
         "geoai_analyst, risk_analyst, db_analyst, recipe_creator, "
         "storymap_creator, map_composer, guided_tour."
+    )
+
+    # Chantier G2 : quand profile_locked=True, on remplace _SWITCH_INSTRUCTIONS
+    # par une note breve. Le LLM doit savoir que le contexte UI a fige le
+    # profil et qu'aucun switch n'est possible dans ce turn.
+    _LOCKED_PROFILE_NOTE = (
+        "\n\n— PROFIL VERROUILLE —\n"
+        "Le contexte UI a fixe ton profil pour cette session. Aucun switch de "
+        "profil n'est possible ici : n'emets pas de balise <switch_profile>. "
+        "Reste concentre sur la tache correspondant au profil actif."
     )
 
     _REMEMBER_INSTRUCTIONS = (
@@ -1998,9 +2021,16 @@ ne vient pas d'un outil cette session, la supprimer.
         enrich_block = enrichers.format_for_prompt(enrich_results) if enrich_results else ""
         enrich_section = f"\n\n{enrich_block}" if enrich_block else ""
 
+        # Chantier G2 : profil frontend-locked -> pas d'invitation au switch,
+        # on injecte a la place une note breve indiquant que le profil est
+        # fige. Le reste du prompt (memoire long terme) reste inchange.
+        switch_block = (
+            self._LOCKED_PROFILE_NOTE if self.profile_locked
+            else self._SWITCH_INSTRUCTIONS
+        )
         return (
             f"{profile_prompt}\n{self._QGIS_ESSENTIALS}\n\n{ctx}{enrich_section}"
-            f"{self._SWITCH_INSTRUCTIONS}{self._REMEMBER_INSTRUCTIONS}"
+            f"{switch_block}{self._REMEMBER_INSTRUCTIONS}"
         ).strip()
 
     async def chat_stream(
@@ -2731,6 +2761,29 @@ ne vient pas d'un outil cette session, la supprimer.
             r'<switch_profile>\s*([a-zA-Z0-9_]+)\s*</switch_profile>',
             full_response, flags=_re_end.IGNORECASE,
         )
+        if m and self.profile_locked:
+            # Chantier G2 : le contexte UI a fige le profil. On log l'intention
+            # (utile pour le telemetry / audit LLM) et on nettoie la balise du
+            # full_response, mais on n'applique PAS le switch.
+            attempted = m.group(1).strip().lower()
+            log.warning(
+                "Profile switch ignore (profile_locked=true) : session=%s "
+                "tentative=%s profil_actif=%s",
+                self.session_id, attempted, self.profile_id,
+            )
+            try:
+                await memory.set_session_tag(
+                    self.session_id,
+                    "profile_switch_ignored_last",
+                    attempted,
+                )
+            except Exception as exc:  # best effort telemetry
+                log.debug("set_session_tag telemetry ignoree : %s", exc)
+            full_response = _re_end.sub(
+                r'<switch_profile>\s*[a-zA-Z0-9_]+\s*</switch_profile>\s*',
+                '', full_response, flags=_re_end.IGNORECASE,
+            )
+            m = None  # court-circuite le bloc de switch reel
         if m:
             new_profile = m.group(1).strip().lower()
             log.info("LLM directive switch_profile → %s", new_profile)
