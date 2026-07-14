@@ -130,16 +130,26 @@ async def _call_hub_execute(
     api_key: str,
     recipe_id: str,
     user_message: str | None,
+    sid: str | None = None,
 ) -> tuple[int, dict[str, Any] | str]:
     """Appelle POST {hub_url}/api/recipes-web/execute avec Bearer api_key.
+
+    Args:
+        sid: etude.id extrait du session_id (Sprint V0.4.2 Chantier B) --
+            propage au hub pour permettre `assembly_bridge` de persister
+            un Assembly + Components rattaches a l'etude, avec un
+            `publish_hint = {sid, aid}` valide dans la reponse.
 
     Retourne ``(status_code, body)`` où body est le JSON parsé si possible,
     sinon la chaîne brute. Ne lève pas — le stream gère l'erreur en amont.
     """
     url = f"{hub_url.rstrip('/')}/api/recipes-web/execute"
+    context: dict[str, Any] = {"user_message": user_message or ""}
+    if sid:
+        context["sid"] = sid
     payload = {
         "recipe_id": recipe_id,
-        "context": {"user_message": user_message or ""},
+        "context": context,
     }
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -197,8 +207,13 @@ async def stream_recipe_execution(
         },
     )
 
+    # Sprint V0.4.2 Chantier B : extract sid from session_id
+    # (`study:{sid}:recipe:{...}`) et propage au hub pour l'assembly_bridge.
+    parsed = memory.parse_session_id(session_id)
+    sid_from_session = parsed.get("sid")
+
     status, body = await _call_hub_execute(
-        hub_url, api_key, recipe_id, user_message,
+        hub_url, api_key, recipe_id, user_message, sid=sid_from_session,
     )
 
     if status != 200:
@@ -259,13 +274,27 @@ async def stream_recipe_execution(
         {"scene_manifest_summary": _summarize_scene_manifest(scene)},
     )
 
-    # 5. Narratif final + publish_hint (déterministe, pas de LLM).
+    # 5. Narratif final + publish_hint.
+    #
+    # Sprint V0.4.2 Chantier B : le hub retourne dans son output un
+    # `publish_hint = {sid, aid, cids}` produit par `assembly_bridge`
+    # (convergence voie recipe + voie agent chat sur le meme modele
+    # Assembly). Si present, on le forward tel quel ; sinon fallback
+    # legacy sur le hint imcomplet (retrocompat tests offline sans sid).
     narrative = _build_final_narrative(recipe_id, output, user_message)
-    publish_hint = {
-        "endpoint": "/publish/scene_manifest",
-        "recipe_id": recipe_id,
-        "produced_at": scene.get("produced_at"),
-    }
+    hub_publish_hint = output.get("publish_hint")
+    if isinstance(hub_publish_hint, dict) and hub_publish_hint.get("aid"):
+        publish_hint = dict(hub_publish_hint)
+        publish_hint.setdefault("recipe_id", recipe_id)
+        publish_hint.setdefault("produced_at", scene.get("produced_at"))
+    else:
+        # Fallback legacy -- sans sid, le frontend ne pourra pas publier
+        # (main.py:6968-6971 exige sid + aid|cid). Documente pour audit.
+        publish_hint = {
+            "endpoint": "/publish/scene_manifest",  # legacy sans sid/aid
+            "recipe_id": recipe_id,
+            "produced_at": scene.get("produced_at"),
+        }
     yield _sse(
         "recipe_done",
         {

@@ -297,7 +297,7 @@ def test_hook_creates_journal_entry_after_recipe_done():
 
     sid = "study:g10hook:recipe:demo"
 
-    async def _fake_hub_call(hub_url, api_key, recipe_id, user_message):
+    async def _fake_hub_call(hub_url, api_key, recipe_id, user_message, sid=None):
         return 200, _fake_hub_output()
 
     with patch.object(rem, "_call_hub_execute", new=AsyncMock(
@@ -342,7 +342,7 @@ def test_hook_failure_does_not_break_stream(monkeypatch):
     """
     _run(_setup())
 
-    async def _fake_hub_call(hub_url, api_key, recipe_id, user_message):
+    async def _fake_hub_call(hub_url, api_key, recipe_id, user_message, sid=None):
         return 200, _fake_hub_output()
 
     async def _broken_journal(*args, **kwargs):

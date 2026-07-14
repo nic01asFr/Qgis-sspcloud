@@ -1015,6 +1015,28 @@ function toggleProfileMenu() {
 // Quand l'user clique sur un livrable dans le drawer publi du desk,
 // le desk envoie postMessage qgis_set_render au chat iframe.
 // On en informe le backend (state agent) + on met à jour le chip.
+// Sprint V0.4.2 Chantier D : le desk envoie postMessage recipe_run_request
+// quand l'user clique sur "Executer ->" dans la gallery. On injecte un
+// message dans le textbox + submit auto -- l'agent orchestre alors la
+// recipe (charte "agent orchestre en Production").
+window.addEventListener('message', (e) => {
+  const data = e.data;
+  if (!data || data.type !== 'recipe_run_request') return;
+  const recipeId = String(data.recipe_id || '').trim();
+  if (!recipeId) return;
+  const mode = (data.mode === 'pure') ? 'pure' : 'polished';
+  const textarea = document.getElementById('message-input');
+  const form = document.getElementById('chat-form');
+  if (!textarea || !form) return;
+  // Insert le prompt et submit -- l'agent lira le message + choisira
+  // l'endpoint /api/recipes-web/execute?mode=<mode> via ses tools MCP.
+  textarea.value =
+    `Lance la recette "${recipeId}" pour cette etude en mode ${mode}. ` +
+    `Appelle /api/recipes-web/execute?mode=${mode} avec recipe_id="${recipeId}" ` +
+    `et propage le publish_hint {sid, aid} retourne pour afficher le bouton Publier.`;
+  form.dispatchEvent(new Event('submit', {cancelable: true, bubbles: true}));
+});
+
 window.addEventListener('message', async (e) => {
   const data = e.data;
   if (!data || data.type !== 'qgis_set_render') return;

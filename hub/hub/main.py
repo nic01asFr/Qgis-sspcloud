@@ -1844,22 +1844,22 @@ async def execute_recipe_web_endpoint(
     if executor_choice == "stub":
         qgis_executor = StubQgisExecutor()
     elif executor_choice == "mcp":
-        # G4-b-3a : câblage JSON-RPC prêt. Le vrai executor est activé
-        # uniquement si l'env ``USE_REAL_MCP=1`` — sans ça, on garde le
-        # comportement placeholder G4-b-1 (retrocompat tests offline et
-        # environnements sans BigQgisMCP déployé).
+        # G4-b-3a + Sprint V0.4.2 Chantier A : cablage JSON-RPC pret. Le vrai
+        # executor est active uniquement si l'env ``USE_REAL_MCP=1`` -- sans
+        # ca, on garde le comportement placeholder G4-b-1 (retrocompat tests
+        # offline et environnements sans workspace demarre).
+        #
+        # Route par defaut : McpQgisExecutor lit HUB_URL/HUB_API_KEY depuis
+        # l'env (cf. son __init__) -- tape le hub proxy /mcp qui deja
+        # audit + auth centralises vers workspace :8100/mcp. Override
+        # QGIS_MCP_URL/QGIS_MCP_AUTH possible pour un cas particulier
+        # (serveur externe de tests d'integration).
         import os as _os
         _use_real = (
             _os.environ.get("USE_REAL_MCP", "").strip().lower()
             in ("1", "true", "yes", "on")
         )
-        qgis_executor = McpQgisExecutor(
-            mcp_url=_os.environ.get(
-                "QGIS_MCP_URL", "http://qgis-mcp-server:8090"
-            ),
-            mcp_auth=_os.environ.get("QGIS_MCP_AUTH") or None,
-            live=_use_real,
-        )
+        qgis_executor = McpQgisExecutor(live=_use_real)
     else:
         raise HTTPException(
             400,
@@ -1936,6 +1936,14 @@ async def execute_recipe_web_endpoint(
     exec_context["timestamp"] = server_timestamp
     exec_context.setdefault("user_message", client_ctx.get("user_message"))
 
+    # Sprint V0.4.2 Chantier A : injecte scene_store_dir cohérent avec le PVC
+    # workspace (`/data/studies/{sid}/scene_store`) si sid connu. Sinon fallback
+    # legacy (tests unitaires). Cf. hub/main.py:5677 -- pattern attendu par
+    # `_execute_python_in_workspace` pour lire les GeoJSON exportes.
+    ctx_sid = client_ctx.get("sid")
+    if isinstance(ctx_sid, str) and ctx_sid and "scene_store_dir" not in exec_context:
+        exec_context["scene_store_dir"] = f"/data/studies/{ctx_sid}/scene_store"
+
     # 3. Exécution (executor injecté selon query param).
     #    Mode `pure` : execute_recipe_pure (no LLM).
     #    Mode `polished` : execute_recipe_polished (polish narrative_text
@@ -1959,7 +1967,45 @@ async def execute_recipe_web_endpoint(
         log.exception("execute_recipe_pure a levé une exception non gérée")
         raise HTTPException(500, f"Erreur exécution recipe : {exc}")
 
-    return output.model_dump()
+    # Sprint V0.4.2 Chantier B : convergence Assembly. Si sid fourni,
+    # persiste le scene_manifest en (Assembly, [Component, ...]) dans
+    # assemblies_index + components_index, aligne sur la voie agent chat
+    # (uniformite modele livrable, cf. audit alignement V0.4.2).
+    #
+    # Le publish_hint retourne contient sid + aid -> l'endpoint frontend
+    # /api/livrable/publish route vers publish_assembly_endpoint (deja
+    # en place, audit_chain calcule au publish par le mapper Chantier C).
+    #
+    # Fail-soft : si la persistance echoue (sid invalide, DB verrouillee),
+    # on retourne quand meme le scene_manifest -- le user recupere son
+    # output, la publication est simplement indisponible pour ce run.
+    dump = output.model_dump()
+    if isinstance(ctx_sid, str) and ctx_sid:
+        try:
+            from hub.recipes_web.assembly_bridge import (
+                create_assembly_from_scene_manifest,
+            )
+            aid, cids = await create_assembly_from_scene_manifest(
+                scene_manifest=dump["scene_manifest"],
+                sid=ctx_sid,
+                owner=user["username"],
+                title_override=None,
+            )
+            dump["publish_hint"] = {"sid": ctx_sid, "aid": aid, "cids": cids}
+        except ValueError as exc:
+            # sid invalide -- ne casse pas la reponse, log seulement.
+            log.warning(
+                "recipe_polished : assembly_bridge sid invalide (%s) : %s",
+                ctx_sid, exc,
+            )
+        except Exception:
+            # Persistance failure -- fail-soft, l'user a son output.
+            log.exception(
+                "recipe_polished : persist assembly_bridge KO (sid=%s)",
+                ctx_sid,
+            )
+
+    return dump
 
 
 # ── Recipes Web : list + admin reload (chantier G4-b-2) ──────────────────────

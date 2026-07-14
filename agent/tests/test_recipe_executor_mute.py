@@ -116,7 +116,7 @@ def test_stream_yields_events_in_order_on_success():
     """Recipe qui reussit : recipe_start, recipe_step*, recipe_output, recipe_done."""
     _run(_setup())
 
-    async def _fake_hub_call(hub_url, api_key, recipe_id, user_message):
+    async def _fake_hub_call(hub_url, api_key, recipe_id, user_message, sid=None):
         return 200, _fake_hub_output()
 
     with patch.object(rem, "_call_hub_execute", new=AsyncMock(
@@ -154,7 +154,7 @@ def test_stream_yields_recipe_error_when_hub_returns_404():
     """recipe_id inexistant : hub 404 → yield recipe_error puis stop."""
     _run(_setup())
 
-    async def _fake_hub_call(hub_url, api_key, recipe_id, user_message):
+    async def _fake_hub_call(hub_url, api_key, recipe_id, user_message, sid=None):
         return 404, {"detail": "Recipe 'ghost' introuvable"}
 
     with patch.object(rem, "_call_hub_execute", new=AsyncMock(
@@ -215,7 +215,7 @@ def test_execution_mode_tag_set_after_success():
 
     sid = "study:s2:recipe:demo"
 
-    async def _fake_hub_call(hub_url, api_key, recipe_id, user_message):
+    async def _fake_hub_call(hub_url, api_key, recipe_id, user_message, sid=None):
         return 200, _fake_hub_output()
 
     with patch.object(rem, "_call_hub_execute", new=AsyncMock(
@@ -267,7 +267,7 @@ def test_chat_recipe_run_shortcircuits_llm(monkeypatch):
     # Mock l'appel hub → retourne notre fake output.
     from agent import recipe_executor_mute as _rem
 
-    async def _fake_hub_call(hub_url, api_key, recipe_id, user_message):
+    async def _fake_hub_call(hub_url, api_key, recipe_id, user_message, sid=None):
         return 200, _fake_hub_output()
 
     monkeypatch.setattr(

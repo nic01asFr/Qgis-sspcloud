@@ -140,7 +140,9 @@ def test_mcp_call_ok_returns_result():
     assert body["method"] == "ping"
     assert body["params"] == {"foo": "bar"}
     assert body["id"] == 1
-    assert fake.calls[0]["url"] == "http://mcp.test:8090/rpc"
+    # Sprint V0.4.2 Chantier A : path /mcp aligne avec hub proxy et
+    # workspace (l'ancien /rpc etait un placeholder inexistant).
+    assert fake.calls[0]["url"] == "http://mcp.test:8090/mcp"
 
 
 # ── 2. _mcp_call JSON-RPC error ──────────────────────────────────────────────
@@ -264,7 +266,12 @@ def test_mcp_call_bearer_header_when_auth_defined():
     assert headers.get("Authorization") == "Bearer secret-token"
 
 
-def test_mcp_call_no_bearer_header_when_auth_none():
+def test_mcp_call_no_bearer_header_when_auth_none(monkeypatch):
+    # Sprint V0.4.2 Chantier A : les defaults lisent HUB_API_KEY / QGIS_MCP_AUTH.
+    # Explicitement nettoyer l'env pour tester l'absence de header (l'ancien
+    # comportement acceptait un mcp_auth=None default sans lookup env).
+    monkeypatch.delenv("HUB_API_KEY", raising=False)
+    monkeypatch.delenv("QGIS_MCP_AUTH", raising=False)
     exec_ = McpQgisExecutor(
         mcp_url="http://mcp.test:8090", mcp_auth=None, live=True,
     )
@@ -444,6 +451,48 @@ def test_execute_placeholder_mode_no_http_calls():
         layer = asyncio.run(exec_.execute(step, {"timestamp": "2026-07-14"}))
     assert fake.calls == []
     assert layer["source"]["path"] == "/data/scene_store/layer_1.geojson"
+
+
+# ── Sprint V0.4.2 Chantier A : defaults hub proxy ────────────────────────────
+
+
+def test_default_mcp_url_uses_hub_url_env(monkeypatch):
+    """McpQgisExecutor sans argument lit HUB_URL de l'env (aligne STRUCTURE §2 :
+    hub = seul contact point workspace).
+    """
+    monkeypatch.setenv("HUB_URL", "https://user-x-qgis.example.com")
+    monkeypatch.delenv("QGIS_MCP_URL", raising=False)
+    exec_ = McpQgisExecutor()
+    assert exec_.mcp_url == "https://user-x-qgis.example.com"
+
+
+def test_qgis_mcp_url_overrides_hub_url(monkeypatch):
+    """QGIS_MCP_URL prend priorite sur HUB_URL (cas serveur externe tests).
+    """
+    monkeypatch.setenv("HUB_URL", "https://hub.example.com")
+    monkeypatch.setenv("QGIS_MCP_URL", "http://external-mcp:9000")
+    exec_ = McpQgisExecutor()
+    assert exec_.mcp_url == "http://external-mcp:9000"
+
+
+def test_default_mcp_auth_uses_hub_api_key(monkeypatch):
+    """McpQgisExecutor lit HUB_API_KEY par defaut -- meme clef que celle
+    utilisee par l'agent pour parler au hub. Le middleware inter-pod
+    la whitelist.
+    """
+    monkeypatch.setenv("HUB_API_KEY", "secret-hub-api-key")
+    monkeypatch.delenv("QGIS_MCP_AUTH", raising=False)
+    exec_ = McpQgisExecutor()
+    assert exec_.mcp_auth == "secret-hub-api-key"
+
+
+def test_explicit_args_override_env(monkeypatch):
+    """Arguments explicites au constructeur priment sur l'env."""
+    monkeypatch.setenv("HUB_URL", "https://hub.example.com")
+    monkeypatch.setenv("HUB_API_KEY", "env-key")
+    exec_ = McpQgisExecutor(mcp_url="http://custom:1234", mcp_auth="custom-key")
+    assert exec_.mcp_url == "http://custom:1234"
+    assert exec_.mcp_auth == "custom-key"
 
 
 # ── 14. Marker mcp_live : test optionnel skip en CI ──────────────────────────

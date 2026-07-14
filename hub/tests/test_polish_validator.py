@@ -91,6 +91,44 @@ def test_polish_empty_strings():
     assert ok
 
 
+# Sprint V0.4.2 Chantier E (MED#5) : noms propres
+
+
+def test_polish_refuse_nom_propre_modifie():
+    """Fix MED#5 : LLM change Marseille -> Marseilles : refuse."""
+    original = "La commune de Marseille est concernee."
+    polished = "La commune de Marseilles est concernee."
+    ok, violations = validate_polish(original, polished)
+    assert not ok
+    assert any("proper_nouns_removed" in v and "Marseille" in v for v in violations)
+    assert any("proper_nouns_added" in v and "Marseilles" in v for v in violations)
+
+
+def test_polish_refuse_nom_propre_supprime():
+    """Fix MED#5 : LLM supprime un nom propre : refuse."""
+    original = "La commune de Marseille et de Bezier sont concernees."
+    polished = "La commune concerne les zones etudiees."
+    ok, violations = validate_polish(original, polished)
+    assert not ok
+    assert any("proper_nouns_removed" in v for v in violations)
+
+
+def test_polish_accepte_nom_propre_conserve():
+    """Fix MED#5 : Marseille reste Marseille apres reformulation."""
+    original = "Le PPRi a ete approuve en 2019 pour la commune de Marseille."
+    polished = "En 2019, la commune de Marseille a vu son PPRi approuve."
+    ok, violations = validate_polish(original, polished)
+    assert ok, f"violations : {violations}"
+
+
+def test_polish_accepte_departement_compose():
+    """Fix MED#5 : departement compose Bouches-du-Rhone preserve."""
+    original = "Consulter la DDRM des Bouches-du-Rhone."
+    polished = "Consulter la DDRM du departement des Bouches-du-Rhone."
+    ok, violations = validate_polish(original, polished)
+    assert ok, f"violations : {violations}"
+
+
 def test_polish_multiplicite_chiffres_ok():
     """Chiffre repete plusieurs fois dans original mais une seule fois
     dans polished -> OK (set-based comparison)."""

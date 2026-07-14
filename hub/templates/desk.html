@@ -2096,6 +2096,58 @@ function setActiveRender(kind, id, title) {
   } catch {}
 }
 
+// ── Sprint V0.4.2 Chantier D : deep-link ?session=study:{sid}:recipe:{rid} ──
+// La gallery G4-b-3c genere ce lien sur "Executer ->". Quand l'user y arrive,
+// on parse le param, on active le pane Chat, on attend que l'iframe agent soit
+// pret puis on envoie postMessage recipe_run_request. L'agent injecte le
+// message + submit -- il orchestre alors la recipe (charte "agent orchestre").
+function _handleRecipeDeepLink() {
+  const url = new URL(window.location.href);
+  const sessionParam = url.searchParams.get('session');
+  if (!sessionParam) return;
+  // Attendu : study:{sid}:recipe:{recipe_id}
+  const parts = sessionParam.split(':');
+  if (parts.length !== 4 || parts[0] !== 'study' || parts[2] !== 'recipe') return;
+  const sid = parts[1];
+  const recipeId = parts[3];
+  if (!sid || !recipeId) return;
+
+  // Activer le pane Chat si masque, puis envoyer le request quand l'iframe
+  // est prete. Simple heuristique : on retente toutes les 300ms pendant 10s.
+  const iframe = document.querySelector('.right-pane[data-pane="chat"] iframe');
+  if (!iframe) return;
+  let attempts = 0;
+  const maxAttempts = 33;  // ~10s
+  const trySend = () => {
+    attempts++;
+    if (!iframe.contentWindow) {
+      if (attempts < maxAttempts) setTimeout(trySend, 300);
+      return;
+    }
+    try {
+      iframe.contentWindow.postMessage({
+        type:       'recipe_run_request',
+        recipe_id:  recipeId,
+        sid:        sid,
+        mode:       'polished',
+      }, '*');
+      // Nettoie l'URL apres l'envoi (evite double-trigger sur reload).
+      url.searchParams.delete('session');
+      window.history.replaceState({}, '', url.toString());
+    } catch {
+      if (attempts < maxAttempts) setTimeout(trySend, 300);
+    }
+  };
+  // Delai initial pour laisser l'iframe charger son script.
+  setTimeout(trySend, 800);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', _handleRecipeDeepLink);
+} else {
+  _handleRecipeDeepLink();
+}
+
 // ── Panel Ressources : onglets internes (Couches / Publi / Fichiers) ────
 // Bascule entre les 3 vues du drawer. Lazy-load des couches et fichiers
 // au premier affichage.

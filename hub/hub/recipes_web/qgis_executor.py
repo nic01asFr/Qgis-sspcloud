@@ -1,12 +1,15 @@
 """hub.recipes_web.qgis_executor — Protocol d'exécution des steps run_qgis.
 
-Chantiers G4-b-1 (protocol + stub) puis G4-b-3a (vrai JSON-RPC MCP). Cette
-couche découple le moteur `execute_recipe_pure` (déterministe, orchestration)
-de l'exécution réelle des steps `run_qgis` :
+Chantiers G4-b-1 (protocol + stub), G4-b-3a (JSON-RPC), Sprint V0.4.2
+Chantier A (route via hub proxy). Cette couche découple le moteur
+``execute_recipe_pure`` (déterministe, orchestration) de l'exécution
+réelle des steps ``run_qgis`` :
 
   - ``StubQgisExecutor`` : POC G4, path ``stub://`` (retrocompat).
-  - ``McpQgisExecutor`` : appelle BigQgisMCP via JSON-RPC 2.0 quand
-    ``live=True``. En mode ``live=False`` (défaut), garde le comportement
+  - ``McpQgisExecutor`` : appelle le workspace BigQgisMCP via
+    JSON-RPC streamable HTTP quand ``live=True``. Route par défaut :
+    hub proxy ``{HUB_URL}/mcp`` (audit trail + auth centralisée, aligné
+    STRUCTURE §2). En mode ``live=False`` (défaut), garde le comportement
     placeholder G4-b-1 pour ne pas casser les tests offline.
 
 Design
@@ -127,16 +130,18 @@ class StubQgisExecutor:
 
 
 class McpQgisExecutor:
-    """Executor branchant BigQgisMCP via JSON-RPC 2.0.
+    """Executor branchant le workspace QGIS MCP via le hub proxy.
 
     Deux modes cohabitent volontairement :
 
     - ``live=False`` (défaut) : mode **placeholder G4-b-1**. Retourne un
-      layer dict simulé avec un ``source.path`` scene_store réaliste
-      (``/data/scene_store/{layer_id}.geojson``). Utile pour tests
-      offline et pour le POC de l'endpoint qui n'a pas encore de
-      BigQgisMCP câblé. Backward-compat totale avec G4-b-1.
-    - ``live=True`` (G4-b-3a) : mode **JSON-RPC réel**. La méthode
+      layer dict simulé avec un ``source.path`` scene_store cohérent
+      (``{context.scene_store_dir}/{layer_id}.geojson``). Utile pour tests
+      offline et POC de l'endpoint qui n'a pas encore de workspace démarré.
+      Backward-compat totale avec G4-b-1.
+    - ``live=True`` (Sprint V0.4.2 Chantier A) : appels **JSON-RPC réels
+      via le hub proxy ``/mcp``** (STRUCTURE §2 : hub = seul contact
+      workspace, garantit audit trail + auth centralisée). La méthode
       ``execute`` traduit le step en une séquence d'appels MCP :
 
         1. ``set_study_zone(zone)`` si ``context["study_zone_hint"]``
@@ -149,23 +154,26 @@ class McpQgisExecutor:
         4. ``export_layer(layer_id, format=geojson, output_path)`` pour
            matérialiser dans le PVC scene_store.
 
-      Chaque appel utilise JSON-RPC 2.0 (POST ``{mcp_url}/rpc``) et est
-      protégé par retry exponentiel sur les codes transitoires
-      500/502/503/504. Toute erreur (HTTP ou JSON-RPC ``error``) est
-      encapsulée en ``RecipeStepError`` avec ``step_tag`` pour la
-      traçabilité côté moteur.
+      Chaque appel POST ``{mcp_url}/mcp`` (path aligné avec le proxy hub
+      et le workspace ``:8100/mcp``) avec Bearer ``HUB_API_KEY`` interne
+      pour être whitelist par le middleware. Retry exponentiel sur
+      500/502/503/504. Toute erreur est encapsulée en ``RecipeStepError``
+      avec ``step_tag`` pour la traçabilité côté moteur.
 
     Paramètres constructor :
-      - ``mcp_url`` : URL du serveur BigQgisMCP.
-      - ``mcp_auth`` : token Bearer optionnel (scope hub ou secret Vault).
+      - ``mcp_url`` : URL de base (hub proxy par défaut = ``{HUB_URL}``,
+        override possible via env ``QGIS_MCP_URL`` pour un serveur MCP
+        externe distinct).
+      - ``mcp_auth`` : token Bearer (par défaut ``HUB_API_KEY`` env pour
+        que le middleware inter-pod du hub authentifie l'appel).
       - ``timeout`` : timeout HTTP en secondes (par appel).
       - ``live`` : ``False`` = placeholder, ``True`` = vrais tool calls.
 
     Idempotence
     -----------
     ``context["timestamp"] + layer_id`` sert de clé ``run_key`` implicite —
-    passée dans les params MCP en champ ``run_key``. Le serveur MCP
-    peut la déduplique si besoin.
+    passée dans les params MCP en champ ``run_key``. Le workspace
+    peut la déduplique si besoin (Sprint V0.5 backlog).
 
     Thread-safety
     -------------
@@ -176,13 +184,32 @@ class McpQgisExecutor:
 
     def __init__(
         self,
-        mcp_url: str = "http://qgis-mcp-server:8090",
+        mcp_url: str | None = None,
         mcp_auth: str | None = None,
         timeout: float = 30.0,
         live: bool = False,
     ) -> None:
-        self.mcp_url = mcp_url.rstrip("/")
-        self.mcp_auth = mcp_auth
+        import os as _os
+
+        # Default : hub proxy /mcp -- audit + auth centralises, source de
+        # verite MCP unique (STRUCTURE §2). Override possible via env
+        # QGIS_MCP_URL pour un cas particulier (workspace externe, tests
+        # d'integration, staging).
+        resolved_url = (
+            mcp_url
+            or _os.environ.get("QGIS_MCP_URL")
+            or _os.environ.get("HUB_URL")
+            or "http://localhost:8888"
+        )
+        # Default auth : HUB_API_KEY -- meme clef que celle utilisee par
+        # l'agent pour parler au hub. Le middleware inter-pod la whitelist.
+        resolved_auth = (
+            mcp_auth
+            or _os.environ.get("QGIS_MCP_AUTH")
+            or _os.environ.get("HUB_API_KEY")
+        )
+        self.mcp_url = resolved_url.rstrip("/")
+        self.mcp_auth = resolved_auth
         self.timeout = timeout
         self.live = live
         # itertools.count(1) : atomique en CPython (implémenté en C sous GIL).
@@ -236,7 +263,10 @@ class McpQgisExecutor:
         if self.mcp_auth:
             headers["Authorization"] = f"Bearer {self.mcp_auth}"
 
-        endpoint = f"{self.mcp_url}/rpc"
+        # Sprint V0.4.2 Chantier A : path aligne avec hub proxy et workspace
+        # (JSON-RPC streamable HTTP sur /mcp). L'ancien /rpc etait un
+        # placeholder qui pointait vers un service inexistant.
+        endpoint = f"{self.mcp_url}/mcp"
         # 1 tentative initiale + len(_RETRY_BACKOFF_SECONDS) retries.
         max_attempts = 1 + len(_RETRY_BACKOFF_SECONDS)
         last_error: str = ""
