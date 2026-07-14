@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from typing import AsyncGenerator
@@ -152,6 +153,12 @@ _AGENT_INTER_POD_ROUTES = (
     # garantit que seul le hub legitime passe (idem cote hub).
     "/user",          # /user/memory, /user/preferences, /user/insights
     "/memory",        # /memory/context, /memory/extract_insights, etc.
+    # Fix H2 revue adversariale Sprint V0.4.1 : `mark_published` etait
+    # accessible via UA=kube-probe seul, ce qui permettait a n'importe quel
+    # attaquant Internet (une fois H1 present) de marquer un livrable
+    # arbitraire avec une URL de phishing. On l'ajoute aux inter-pod routes
+    # pour exiger Bearer HUB_API_KEY (defense in depth, meme si H1 tombe).
+    "/journal/livrables",
 )
 
 _JWKS_CACHE = None
@@ -189,8 +196,13 @@ async def agent_oidc_middleware(request: Request, call_next):
     # 1. Routes publiques
     if any(path == p or path.startswith(p + "/") for p in _AGENT_PUBLIC_ROUTES):
         return await call_next(request)
-    # 2. Court-circuit kube-probe
-    if "kube-probe" in request.headers.get("user-agent", "").lower():
+    # 2. Court-circuit kube-probe -- symetrique fix H1 hub. Un vrai kube-probe
+    # (kubelet -> pod) n'a jamais de X-Forwarded-For. Un attaquant Internet
+    # qui forge l'UA passe par l'ingress qui l'ajoute.
+    if (
+        "kube-probe" in request.headers.get("user-agent", "").lower()
+        and "x-forwarded-for" not in request.headers
+    ):
         return await call_next(request)
     # 3. Inter-pod (hub -> agent via X-Hub-Auth ou Bearer)
     if any(path == p or path.startswith(p + "/") for p in _AGENT_INTER_POD_ROUTES):
@@ -1185,8 +1197,11 @@ async def journal_mark_published(livrable_id: str, request: Request):
     Idempotent : re-marquer une entree deja publiee sur-ecrit `published_url`
     (le journal reste l'unique source de verite ; le hub peut retenter en cas
     de rollout). 404 si le livrable est inconnu ; 400 si `published_url`
-    manque. Aucune auth de bord : ce endpoint est whitelist inter-pod hub->
-    agent (User-Agent ``kube-probe/hub``) au niveau du middleware.
+    manque ou n'a pas un format legitime.
+
+    Auth : whitelist inter-pod ``/journal/livrables`` (fix H2 Sprint V0.4.1)
+    dans le middleware -- exige Bearer HUB_API_KEY. Le hub relaie cet appel
+    apres son propre ``POST /api/livrable/publish``.
     """
     try:
         body = await request.json()
@@ -1195,6 +1210,18 @@ async def journal_mark_published(livrable_id: str, request: Request):
     published_url = (body or {}).get("published_url")
     if not published_url or not isinstance(published_url, str):
         raise HTTPException(400, "published_url requis (str non vide)")
+    # Fix H2 : whitelist du domaine cible pour empecher un published_url de
+    # phishing (ex: https://evil.example.com/steal). Un published_url legitime
+    # pointe vers un hub SSPCloud ou un domaine .gouv.fr / .cerema.fr.
+    if not re.match(
+        r"^https://[a-zA-Z0-9._-]+\.(user\.lab\.sspcloud\.fr|gouv\.fr|cerema\.fr)(/|$)",
+        published_url,
+    ):
+        raise HTTPException(
+            400,
+            "published_url doit pointer vers un domaine legitime "
+            "(*.user.lab.sspcloud.fr, *.gouv.fr, *.cerema.fr)",
+        )
     entry = await memory.get_livrable(livrable_id)
     if entry is None:
         raise HTTPException(404, "Livrable inconnu")

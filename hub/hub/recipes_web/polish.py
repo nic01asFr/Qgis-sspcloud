@@ -28,6 +28,7 @@ import time
 from typing import Any
 
 from hub.recipes_web.llm_client import LlmClient
+from hub.recipes_web.polish_validator import validate_polish
 
 log = logging.getLogger("hub.recipes_web.polish")
 
@@ -164,6 +165,21 @@ async def polish_narrative(
             and isinstance(polished_text, str)
             and polished_text.strip() != ""
         )
+
+        # Fix H5 revue adversariale : verifie que le LLM n'a pas hallucine.
+        # Le prompt system interdit la modification des chiffres/URLs/sigles
+        # mais rien ne l'oblige a obeir. On extrait les faits saillants du
+        # texte original et on refuse le polished s'il en ajoute, supprime
+        # ou modifie. Fail-soft : garde l'original.
+        if polished_ok:
+            invariants_ok, violations = validate_polish(original, polished_text)
+            if not invariants_ok:
+                polished_ok = False
+                fail_reason = f"invariants_violated:{','.join(violations)}"
+                log.warning(
+                    "polish_narrative : bloc %s viole les invariants (%s) -- garde original",
+                    block_id, fail_reason,
+                )
 
         if polished_ok:
             container[idx]["content"] = polished_text

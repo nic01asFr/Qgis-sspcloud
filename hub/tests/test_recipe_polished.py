@@ -185,6 +185,38 @@ def test_polish_llm_error_falls_back_soft():
     assert "RuntimeError" in entry["reason"]
 
 
+# ── 5bis. LLM hallucine (viole invariants) → fail-soft H5 ──────────────────
+
+
+class _HallucinatingLlmClient:
+    """LLM qui reformule mais change un chiffre. Fix H5 revue adversariale."""
+
+    async def complete(self, system: str, user: str, max_tokens: int = 500) -> str:
+        del system, max_tokens
+        # Change 47000 -> 90000 : hallucination silencieuse.
+        return (user or "").replace("47000", "90000")
+
+
+def test_polish_llm_hallucination_falls_back_soft():
+    """Fix H5 : le LLM change un chiffre. Le validator refuse et garde original."""
+    manifest = _make_manifest_with_narrative(n_blocks=1)
+    original = manifest["components"][0]["content"]
+    assert "47000" in original  # invariant du fixture
+
+    polished, provenance = asyncio.run(
+        polish_narrative(manifest, _HallucinatingLlmClient())
+    )
+    # Garde original (invariants viole)
+    assert polished["components"][0]["content"] == original
+    llm_prov = provenance["polish_llm_provenance"]
+    assert llm_prov["blocks_failed"] == 1
+    assert llm_prov["blocks_polished"] == 0
+    entry = llm_prov["per_block"][0]
+    assert entry["polish_ok"] is False
+    assert "invariants_violated" in entry["reason"]
+    assert "47000" in entry["reason"] or "90000" in entry["reason"]
+
+
 # ── 6. Max blocs > 10 → skip surplus + log ─────────────────────────────────
 
 

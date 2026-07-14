@@ -1006,8 +1006,17 @@ async def oidc_auth_middleware(request: "Request", call_next):
     if any(path == p or path.startswith(p + "/") for p in _OIDC_MIDDLEWARE_PUBLIC):
         return await call_next(request)
 
-    # 2. Court-circuit kube-probe (idem Bug #17 fix L1490 hub_home)
-    if "kube-probe" in request.headers.get("user-agent", "").lower():
+    # 2. Court-circuit kube-probe (idem Bug #17 fix L1490 hub_home).
+    # Fix H1 revue adversariale Sprint V0.4.1 : exige que la requete provienne
+    # bien du cluster K8s. Un vrai kube-probe (kubelet -> pod) n'a JAMAIS de
+    # header X-Forwarded-For (pas de hop ingress). Un attaquant Internet qui
+    # forge le User-Agent passe forcement par l'ingress SSPCloud qui ajoute
+    # ce header. Sans ce check, `curl -H "User-Agent: kube-probe"` depuis
+    # Internet bypass toute l'auth. Casse la garde RGPD Phase 0ter.
+    if (
+        "kube-probe" in request.headers.get("user-agent", "").lower()
+        and "x-forwarded-for" not in request.headers
+    ):
         return await call_next(request)
 
     # 3. Routes inter-pod avec Bearer HUB_API_KEY
