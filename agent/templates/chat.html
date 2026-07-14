@@ -1016,24 +1016,29 @@ function toggleProfileMenu() {
 // le desk envoie postMessage qgis_set_render au chat iframe.
 // On en informe le backend (state agent) + on met à jour le chip.
 // Sprint V0.4.2 Chantier D : le desk envoie postMessage recipe_run_request
-// quand l'user clique sur "Executer ->" dans la gallery. On injecte un
-// message dans le textbox + submit auto -- l'agent orchestre alors la
-// recipe (charte "agent orchestre en Production").
+// quand l'user clique sur "Executer ->" dans la gallery. On bascule le
+// session_id sur le pattern `study:{sid}:recipe:{recipe_id}` -- cote
+// backend, `parse_session_id` detecte context_kind=recipe_run et court-
+// circuite le LLM classique pour appeler stream_recipe_execution
+// (recipe_executor_mute -> hub /api/recipes-web/execute -> assembly_bridge
+// -> publish_hint {sid, aid} -> bouton Publier via recipe_stream.js).
 window.addEventListener('message', (e) => {
   const data = e.data;
   if (!data || data.type !== 'recipe_run_request') return;
   const recipeId = String(data.recipe_id || '').trim();
-  if (!recipeId) return;
+  const sid = String(data.sid || '').trim();
+  if (!recipeId || !sid) return;
   const mode = (data.mode === 'pure') ? 'pure' : 'polished';
   const textarea = document.getElementById('message-input');
+  const sessionIdField = document.getElementById('session-id');
   const form = document.getElementById('chat-form');
-  if (!textarea || !form) return;
-  // Insert le prompt et submit -- l'agent lira le message + choisira
-  // l'endpoint /api/recipes-web/execute?mode=<mode> via ses tools MCP.
-  textarea.value =
-    `Lance la recette "${recipeId}" pour cette etude en mode ${mode}. ` +
-    `Appelle /api/recipes-web/execute?mode=${mode} avec recipe_id="${recipeId}" ` +
-    `et propage le publish_hint {sid, aid} retourne pour afficher le bouton Publier.`;
+  if (!textarea || !sessionIdField || !form) return;
+  // Bascule le session_id sur le pattern recipe_run -- c'est ce qui active
+  // stream_recipe_execution cote backend (agent/main.py:944).
+  sessionIdField.value = `study:${sid}:recipe:${recipeId}`;
+  // Message utile mais court -- le mode recipe_run n'appelle pas le LLM,
+  // le user_message est juste stocke en trace + injecte dans le narratif.
+  textarea.value = `Lance la recette (mode ${mode}).`;
   form.dispatchEvent(new Event('submit', {cancelable: true, bubbles: true}));
 });
 
