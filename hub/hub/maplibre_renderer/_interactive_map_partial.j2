@@ -139,6 +139,9 @@
     zoom: {{ zoom | float }}
   });
   map.addControl(new maplibregl.NavigationControl(), 'top-left');
+  // Sprint V0.4.3 P0.4 : attribution obligatoire (licences fonds + donnees)
+  // pour livrable public conforme (OSM licence ODbL, IGN Etalab-2.0, etc.).
+  map.addControl(new maplibregl.AttributionControl({compact: true}), 'bottom-right');
   // Vague E2 Commit 6 (D-QGIS-009 §6) : interactions
   // - hover_attributes : attributs a afficher dans tooltip survol
   // - popup_template : template HTML au clic (placeholders {prop})

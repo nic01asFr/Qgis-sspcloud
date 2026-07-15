@@ -251,6 +251,10 @@ a:hover{color:var(--blue-france)}
 {% endif %}
 
 {% for section in sections %}
+{# Sprint V0.4.3 P0.1 : skip section vide (ni title, ni narrative_md, ni
+   components) -- evite un `<section>` visuellement vide entre 2 sections
+   remplies (bug UX vu sur livrable Marie V3 Synthese/Recommandations). #}
+{% if section.title or section.narrative_md or section.components %}
 {# Vague E2 Commit 2 (P2) : skip section.title si 1er composant = heading
    (anti double-titration). Set _skip_title pour conditionner l'affichage. #}
 {% set _first_kind = (rendered_components_kinds.get((section.components or [{}])[0].ref, '')
@@ -297,6 +301,7 @@ a:hover{color:var(--blue-france)}
     {% endif %}
   </div>
 </section>
+{% endif %}{# Sprint V0.4.3 P0.1 : fin garde skip section vide #}
 {% endfor %}
 
 {% if audit_chain %}

@@ -6076,12 +6076,12 @@ async def _pre_render_component_html(
 
         elif kind == "interactive_map":
             ctx = await _build_interactive_map_ctx(comp_manifest, sid, username, cid)
-            # V1.20.5 (2026-07-08) : feature flag pour bascule progressive vers
-            # <geo-map> Web Component (cerema-geo-components v0.1.0-alpha).
-            # Set env USE_GEO_COMPONENTS=1 pour activer le partial v2 qui
-            # produit un <geo-map> au lieu du bloc MapLibre inline.
-            # Le partial v1 reste par defaut pour rollback safe.
-            _use_gc = os.getenv("USE_GEO_COMPONENTS", "0").strip() in ("1", "true", "yes")
+            # V1.20.5 (2026-07-08) + Sprint V0.4.3 P0.3 (2026-07-15) :
+            # <geo-map> Web Component (cerema-geo-components v0.1.0-alpha)
+            # active par defaut -- il expose auto legend (mode="auto") derivee
+            # de la classification de layer, ce que le partial v1 ne fait pas.
+            # Override possible via env USE_GEO_COMPONENTS=0 pour rollback.
+            _use_gc = os.getenv("USE_GEO_COMPONENTS", "1").strip() in ("1", "true", "yes")
             partial_name = (
                 "_interactive_map_partial_v2.j2"
                 if _use_gc else "_interactive_map_partial.j2"
