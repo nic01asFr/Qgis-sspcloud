@@ -6701,6 +6701,66 @@ async def clone_assembly_endpoint(
     }
 
 
+async def _count_features_in_map_component(
+    comp_manifest: dict, sid: str, username: str, cid: str,
+) -> dict:
+    """Sprint V0.4.4 : compte les features effectivement resolues cote data
+    pour un composant `interactive_map`.
+
+    Reutilise `_build_interactive_map_ctx` qui fait deja le fetch PVC
+    (chemin A scene_hash ou chemin B geojson_path) et applique
+    l'auto-reprojection. On parse ensuite `map_layers_json` pour compter.
+
+    Retourne :
+      {
+        "total_features": int,                # somme features sur toutes les layers
+        "layers_matched": int,                # nb de layers avec au moins 1 feature
+        "layers_empty": list[str],            # ids/names des layers sans features
+        "error": Optional[str],               # erreur du fetch (path invalide, timeout, etc.)
+      }
+
+    Cause d'usage : detecter en amont de publish_assembly qu'un composant
+    map va rendre une carte vide (path introuvable, scene_hash sans
+    scene_layers, etc.) - evite le pattern "publie et 'fonctionnel'" alors
+    que la carte est en fait vide (regression V10 sprint V0.4.3).
+    """
+    import json as _json_cf
+    try:
+        ctx = await _build_interactive_map_ctx(comp_manifest, sid, username, cid)
+    except Exception as exc:
+        return {
+            "total_features": 0, "layers_matched": 0,
+            "layers_empty": [], "error": f"build_ctx: {str(exc)[:200]}",
+        }
+    layers_json = ctx.get("map_layers_json") or "[]"
+    try:
+        layers = _json_cf.loads(layers_json)
+    except Exception as exc:
+        return {
+            "total_features": 0, "layers_matched": 0,
+            "layers_empty": [], "error": f"json_parse: {str(exc)[:200]}",
+        }
+    total_features = 0
+    layers_matched = 0
+    layers_empty: list[str] = []
+    for layer in layers:
+        lid = layer.get("id") or layer.get("name") or "(anon)"
+        gj = layer.get("geojson") or {}
+        feats = gj.get("features") if isinstance(gj, dict) else None
+        n = len(feats) if isinstance(feats, list) else 0
+        if n > 0:
+            layers_matched += 1
+            total_features += n
+        else:
+            layers_empty.append(lid)
+    return {
+        "total_features": total_features,
+        "layers_matched": layers_matched,
+        "layers_empty": layers_empty,
+        "error": None,
+    }
+
+
 async def _check_publish_ready(sid: str, aid: str, username: str) -> list[dict]:
     """V1.20.4 : verifie les composants avant publication.
 
@@ -6712,6 +6772,15 @@ async def _check_publish_ready(sid: str, aid: str, username: str) -> list[dict]:
       source.scene_hash present (sinon carte pointera vers rien)
     - `narrative_text` : signale les `**...**` non-fermes (bloque le rendu
       markdown) - non-bloquant pour l'instant, juste avertissement
+
+    Sprint V0.4.4 (2026-07-16) - defense en profondeur Gap 2+3 unifie :
+    apres les checks basiques title/source, on appelle
+    `_count_features_in_map_component` qui replay le fetch data (scene_hash
+    ou geojson_path) et compte les features effectivement resolues. Si
+    total_features == 0 -> issue "aucune donnee effective (fichier
+    introuvable ou source vide)". Empeche le pattern V10 : composant qui
+    pointe un path inexistant sur PVC, publish passe, carte rendue vide,
+    Marie affirme "fonctionnel" sans verifier.
 
     Si la liste retournee est non-vide, le caller doit refuser la publication
     avec un message pedagogique listant les corrections a apporter.
@@ -6768,8 +6837,37 @@ async def _check_publish_ready(sid: str, aid: str, username: str) -> list[dict]:
                 if not title or title.lower() in ("nouvelle carte", "new map"):
                     missing.append("titre explicite (autre que 'Nouvelle carte')")
                 source = comp.get("source") or {}
-                if not (source.get("scene_hash") or source.get("sid")):
+                params = comp.get("params") or {}
+                has_source_ref = (
+                    source.get("scene_hash") or source.get("sid")
+                    or source.get("path") or source.get("data_url")
+                    or (params.get("layers") or [])
+                )
+                if not has_source_ref:
                     missing.append("source de donnees liee (couche QGIS)")
+                else:
+                    # Sprint V0.4.4 : defense en profondeur - replay le fetch
+                    # data pour compter les features effectivement resolues.
+                    # Detecte path inexistant, scene_hash sans scene_layers,
+                    # geojson vide, etc.
+                    fcount = await _count_features_in_map_component(
+                        comp, sid, username, cid,
+                    )
+                    if fcount.get("error"):
+                        missing.append(
+                            f"donnees non resolvables ({fcount['error']})"
+                        )
+                    elif fcount.get("total_features", 0) == 0:
+                        empty_ids = fcount.get("layers_empty") or []
+                        detail = (
+                            f"layers vides: {', '.join(empty_ids[:3])}"
+                            if empty_ids else "0 features apres fetch"
+                        )
+                        missing.append(
+                            f"aucune donnee effective ({detail}) - "
+                            "fichier introuvable, path incorrect ou "
+                            "scene_hash sans scene_layers"
+                        )
             if missing:
                 issues.append({
                     "cid": cid,
@@ -6939,6 +7037,27 @@ async def publish_assembly_endpoint(
         except Exception as exc:
             log.warning("register_publication F17 : %s", exc)
 
+    # Sprint V0.4.4 (2026-07-16) : diagnostics.map_features_count agrege
+    # Gap 2+3 unifie - une carte publiee sans features est un livrable casse.
+    # On compte via le HTML rendu (source de verite du contenu envoye au
+    # client MapLibre) plutot que de rejouer un fetch : le HTML contient
+    # deja les FeatureCollection inlines par le partial v1
+    # (_interactive_map_partial.j2). Regex simple, cout negligeable vs
+    # relire N composants map depuis PVC.
+    _map_total_features = 0
+    _map_features_by_component: list[dict] = []
+    try:
+        import re as _re_mf
+        # Chaque bloc const layers = [...]; contient une seule liste de layers
+        # avec {id, name, geojson:{type:"FeatureCollection",features:[...]}}.
+        # On compte toutes les occurrences de "type":"Feature" (single feature)
+        # dans le HTML - simple et robuste au format d'inline.
+        _map_total_features = len(
+            _re_mf.findall(r'"type"\s*:\s*"Feature"[,}]', html)
+        )
+    except Exception as _exc_mf:
+        log.warning("map_features_count parse : %s", _exc_mf)
+
     # Renvoie résultat structuré (toujours 200, état détaillé dans body)
     resp = {
         "id": aid,
@@ -6956,6 +7075,12 @@ async def publish_assembly_endpoint(
             "audit_chain_written_to_db": audit_chain_written,
             "rendered_html_written_pvc": write_pvc_error is None,
             "rendered_html_size_bytes": len(html.encode("utf-8")),
+            # Sprint V0.4.4 : compte features effectivement inlinees dans HTML
+            # -> une carte publiee avec 0 features est un signal d'alerte
+            # (regression V10 : composant map pointe path inexistant, publish
+            # passe, HTML rendu sans features, Marie affirme "fonctionnel").
+            # L'agent consommateur peut utiliser ce champ pour son post-check.
+            "map_features_count": _map_total_features,
             "errors": {
                 "write_pvc": write_pvc_error,
                 "db_update": db_update_error,
