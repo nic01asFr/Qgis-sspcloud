@@ -5716,6 +5716,22 @@ async def _build_interactive_map_ctx(
             src = l.get("source", {}) or {}
             src_type = src.get("type")
             has_inline = l.get("geojson") or (src_type == "geojson" and src.get("data"))
+            # Sprint V0.4.4 (2026-07-17) : bug carte vide V12 malgre HTML 38 MB.
+            # Cas contract V0.3.2 pivot : composant peut avoir source.type=geojson
+            # + source.data=FeatureCollection (inline direct, comme fait par
+            # Marie via update_component). Dans ce cas has_inline=true et le
+            # chemin fetch geojson_path est skip -> OK, MAIS le layer sortant
+            # n'a que `source.data`, pas `layer.geojson`. Le partial v1
+            # (_interactive_map_partial.j2) fait
+            # `map.addSource(sourceId, {type:'geojson', data:layer.geojson})`
+            # -> layer.geojson undefined -> 0 features rendus visuellement
+            # malgre 14 270 features presentes dans le HTML brut.
+            # Fix : copier source.data -> layer.geojson en amont, pour
+            # que le template partial v1 puisse lire ce champ historique.
+            # Compat contract V0.3.2 (source.data) + template v1 (layer.geojson).
+            if src_type == "geojson" and src.get("data") and not l.get("geojson"):
+                l = dict(l)
+                l["geojson"] = src["data"]
             # V0.3.1 geojson_path : fetch PVC + inline pour SSR autoportant
             if not has_inline and src_type == "geojson_path" and src.get("path"):
                 try:
