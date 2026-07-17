@@ -6092,21 +6092,33 @@ async def _pre_render_component_html(
 
         elif kind == "interactive_map":
             ctx = await _build_interactive_map_ctx(comp_manifest, sid, username, cid)
-            # V1.20.5 (2026-07-08) : feature flag pour bascule progressive vers
-            # <geo-map> Web Component (cerema-geo-components v0.1.0-alpha).
-            # Set env USE_GEO_COMPONENTS=1 pour activer le partial v2 qui
-            # produit un <geo-map> au lieu du bloc MapLibre inline.
-            # Le partial v1 reste par defaut pour rollback safe.
+            # V1.20.5 (2026-07-08) : feature flag pour bascule vers
+            # <geo-map> Web Component (cerema-geo-components).
+            # Le partial v2 est un wrapper minimal qui packagera params +
+            # catalog_layers ; la lib fait tout le rendu MapLibre + trio
+            # metier + interactions cote client (source unique de verite).
             #
-            # Sprint V0.4.3 P0.3 rollback (2026-07-16) : le partial v2 est
-            # regressant en runtime (data pas fetch, narrative_md pas rendu,
-            # timeline pas cable, legend non-derivee). On retablit le default
-            # v1 qui rend correctement carte+bati+Markdown, en acceptant que
-            # l'auto legend (mode="auto") ne soit pas disponible cote server.
-            # Backlog : porter geo-components v2 pour supporter narrative_md +
-            # legend auto + timeline + fetch data client-side, PUIS repasser
-            # le default sur 1.
-            _use_gc = os.getenv("USE_GEO_COMPONENTS", "0").strip() in ("1", "true", "yes")
+            # Historique du flag :
+            # - V1.20.5 : default "0" (v1) le temps d'incuber la lib
+            # - Sprint V0.4.3 P0.3 (2026-07-16) : bascule "1" test -> rollback
+            #   "0" (commit 675b702) car regressions observees (data pas
+            #   fetchee, timeline manquant, legend non-derivee, narrative_md
+            #   pas rendu). Root cause identifie a posteriori : bug
+            #   source.data -> layer.geojson dans _build_interactive_map_ctx
+            #   (chemin B) + partial v2 alpha.6 avec compass conditionnel +
+            #   bbox_text non injecte.
+            # - Sprint V0.4.4 (2026-07-16/17) : trois fixes livres qui
+            #   ferment tous les gaps identifies :
+            #   * 347da06 : copie source.data -> layer.geojson pour partial v1 & v2
+            #   * fb1eeb0 : geo-components v0.2.0-alpha.7 (compass + bbox_text)
+            #   * P2.20 C5 (CE COMMIT) : bascule default sur "1" apres
+            #     validation empirique V14/V15 (parite complete v1/v2 sur
+            #     assembly-fedcba987654 Marie V3 diagnostic parc bati)
+            #
+            # USE_GEO_COMPONENTS=0 reste un fallback explicite pour rollback
+            # rapide en cas d'incident lib front (single point de restauration
+            # sans redeploy).
+            _use_gc = os.getenv("USE_GEO_COMPONENTS", "1").strip() in ("1", "true", "yes")
             partial_name = (
                 "_interactive_map_partial_v2.j2"
                 if _use_gc else "_interactive_map_partial.j2"
