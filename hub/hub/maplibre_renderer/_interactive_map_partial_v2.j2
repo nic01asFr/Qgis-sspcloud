@@ -35,9 +35,15 @@
    la cle _catalog_layers (que <geo-map> supporte au meme titre que
    hostContext.catalog_layers). Evite la race condition entre map.on("load")
    et le setter hostContext post-render. #}
+{# Sprint P2.20 C3 (2026-07-17) : concatenation subtitle + bbox_text pour
+   parite v1 -> affiche "Classification par periode de construction — 1 couche"
+   au lieu de "Classification par periode de construction" seul.
+   bbox_text = " — N couche(s) · M objets" produit par _build_interactive_map_ctx
+   ligne 5703. #}
+{% set _subtitle_full = (subtitle | default('')) + (bbox_text | default('')) %}
 {% set gc_params = {
   "title": title,
-  "subtitle": subtitle | default(''),
+  "subtitle": _subtitle_full,
   "description": description | default(''),
   "source": source_text | default(''),
   "caveat": caveat | default(''),

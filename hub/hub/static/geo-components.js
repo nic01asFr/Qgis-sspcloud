@@ -41,7 +41,7 @@
 // ──────────────────────────────────────────────────────────────────────────
 
 /** Version de la lib. */
-export const LIB_VERSION = "0.2.0-alpha.6";
+export const LIB_VERSION = "0.2.0-alpha.7";
 
 /**
  * Catalogue des 6 basemaps du contrat InteractiveMapParams V1.13.
@@ -1272,13 +1272,20 @@ export class GeoMap extends HTMLElement {
     });
 
     // V0.3.1 alpha.4 : declaratifs params.scalebar / params.north_arrow.
-    // Sans north_arrow declare, on garde le comportement historique
-    // NavigationControl sans compass. Avec, on affiche compass a la position
-    // demandee. scalebar => ScaleControl natif MapLibre a la position/unit.
+    // V0.2.0-alpha.7 (Sprint P2.20 C3, 2026-07-17) : match comportement
+    // partial v1 - compass button (reset bearing to north) affiche PAR
+    // DEFAUT. Le v1 faisait `new NavigationControl()` sans options -> les
+    // defaults MapLibre etaient showCompass=true. En v2 alpha.6 on avait
+    // rendu showCompass conditionnel sur north_arrow -> regression
+    // ergonomique lors du re-flip USE_GEO_COMPONENTS=1. Retablissement :
+    // compass on par defaut, desactivable via params.north_arrow=false
+    // (rare cas ou l'utilisateur veut vraiment cacher).
     const northCfg = params.north_arrow;
     const scaleCfg = params.scalebar;
-    const showCompass = !!northCfg;
-    const northPos = northCfg && northCfg.position ? northCfg.position : "top-left";
+    const showCompass = northCfg === false ? false : true;
+    const northPos = (northCfg && typeof northCfg === "object" && northCfg.position)
+      ? northCfg.position
+      : "top-left";
     this.map.addControl(
       new ml.NavigationControl({ showCompass, visualizePitch: showCompass }),
       _mlPosition(northPos, "top-left"),
