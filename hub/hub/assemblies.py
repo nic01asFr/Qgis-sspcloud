@@ -333,16 +333,31 @@ def write_assembly_rendered_pod_code(
     sid: str, aid: str, html_content: str
 ) -> str:
     path = assembly_rendered_path(sid, aid)
-    # html_content peut être grand → on encode base64 pour éviter le quoting
-    import base64
-    b64 = base64.b64encode(html_content.encode("utf-8")).decode()
+    # Sprint V0.4.4 (2026-07-17) : gzip + base64 au lieu de base64 seul.
+    #
+    # Contexte du bug : depuis que les composants interactive_map inlinent
+    # de gros GeoJSON (14 270 batiments BD TOPO -> HTML ~38 MB), le
+    # payload JSON POST vers workspace `execute_python` (~50 MB code
+    # base64-encode) etait rejete silencieusement (body_size_limit ou
+    # timeout). Le hub voyait resp.ok mais le fichier PVC n'etait jamais
+    # ecrit -> `rendered_html_written_pvc:true` mais fichier reel
+    # inchange -> livrable rendu = vieille version, meme apres publish
+    # V11 (mtime=V10 sur PVC).
+    #
+    # Fix : compression gzip (facteur 5-8x sur HTML repetitif GeoJSON),
+    # decompression cote workspace. Le HTML 38 MB descend a ~5-8 MB
+    # payload -> passe largement sous les limites httpx / uvicorn
+    # (defaults 100 MB). Atomique, un seul call.
+    import base64, gzip
+    gz = gzip.compress(html_content.encode("utf-8"), compresslevel=6)
+    b64 = base64.b64encode(gz).decode()
     return f"""
-import base64
+import base64, gzip
 from pathlib import Path
 p = Path({path!r})
 p.parent.mkdir(parents=True, exist_ok=True)
 b64 = {b64!r}
-content = base64.b64decode(b64).decode('utf-8')
+content = gzip.decompress(base64.b64decode(b64)).decode('utf-8')
 p.write_text(content, encoding='utf-8')
 print(f'ASSEMBLY_RENDER_WRITE_OK path={{p}} size={{len(content)}}')
 """

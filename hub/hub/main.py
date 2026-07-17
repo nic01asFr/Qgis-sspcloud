@@ -6947,12 +6947,27 @@ async def publish_assembly_endpoint(
     db_update_error = None
     s3_publish_error = None
 
-    # 1. Persiste rendered HTML sur PVC (best-effort)
+    # 1. Persiste rendered HTML sur PVC (best-effort).
+    # Sprint V0.4.4 (2026-07-17) : timeout etendu 120s (defaut 30s trop
+    # court pour les gros HTML avec GeoJSON inline meme apres gzip).
+    # write_assembly_rendered_pod_code compresse gzip + base64 le HTML
+    # pour eviter le body_size_limit workspace uvicorn (~100 MB par
+    # defaut, mais le payload code Python + b64 explose pour un HTML
+    # 38 MB brut). On verifie aussi que le stdout confirme
+    # `ASSEMBLY_RENDER_WRITE_OK` sinon on remonte l'erreur (avant : write
+    # silencieux, rendered_html_written_pvc=true meme sans ecriture reelle).
     try:
-        await _execute_python_in_workspace(
+        _write_stdout = await _execute_python_in_workspace(
             user["username"],
             asm_mod.write_assembly_rendered_pod_code(sid, aid, html),
+            timeout=120,
         )
+        if "ASSEMBLY_RENDER_WRITE_OK" not in _write_stdout:
+            write_pvc_error = (
+                f"stdout n'a pas ASSEMBLY_RENDER_WRITE_OK "
+                f"(len={len(_write_stdout)}, head={_write_stdout[:200]!r})"
+            )
+            log.warning("write assembly rendered no OK signal : %s", write_pvc_error)
     except Exception as exc:
         write_pvc_error = str(exc)[:200]
         log.warning("write assembly rendered : %s", exc)
