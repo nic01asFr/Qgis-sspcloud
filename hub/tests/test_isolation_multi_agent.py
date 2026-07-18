@@ -57,3 +57,30 @@ def test_extract_expected_sid_agent_pattern_needs_full_shape():
     assert _extract_expected_sid("agent:w1:sid:") is None
     # keyword sid manquant -> None
     assert _extract_expected_sid("agent:w1:not_sid:s1") is None
+
+
+# ── B1 : contract session_id retourne par POST /agent-context/new ──────────
+
+def test_extract_expected_sid_roundtrip_with_b1_pattern():
+    """L'agent qui recoit session_id de POST /agent-context/new doit pouvoir
+    le passer tel quel dans X-Session-Id du call MCP suivant : le hub extrait
+    le meme sid via _extract_expected_sid. Non-regression cross-endpoint."""
+    # Simule la construction de session_id cote endpoint create_agent_context
+    for agent_id in ["auto-20260718T101500", "myworker", "recipe-runner.42",
+                     "test_agent_v1"]:
+        for sid in ["abc123", "study_1", "long-sid-with-dashes"]:
+            session_id = f"agent:{agent_id}:sid:{sid}"
+            assert _extract_expected_sid(session_id) == sid
+
+
+def test_extract_expected_sid_b1_pattern_rejects_bad_agent_id():
+    """agent_id avec caracteres qui cassent le split ':' produit un sid
+    mal extrait. La sanitize cote endpoint B1 (regex [a-zA-Z0-9._-]+) protege
+    contre ca, mais on verifie ici le comportement pour un cas volontairement
+    mal forme (defensive parsing du parser)."""
+    # Un agent_id contenant ":" produit un session_id qui a plus de 4 parts.
+    # Le parser voit "agent:my", "id", "sid", "xyz" - le keyword "sid" est
+    # a la position 2 (correcte) donc extraction OK si len exact = 4.
+    # Cas avec ":" en trop -> le parser attend len==4 exactement, donc None
+    session_id = "agent:my:id:sid:xyz"  # 5 parts
+    assert _extract_expected_sid(session_id) is None

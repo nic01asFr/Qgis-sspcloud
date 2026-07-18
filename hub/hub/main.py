@@ -9036,6 +9036,137 @@ def _record_switch(
         pass  # instrumentation ne doit jamais casser le call metier
 
 
+@app.post("/agent-context/new", status_code=status.HTTP_201_CREATED)
+async def create_agent_context(
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Sprint isolation B1 : contexte fresh pour un agent qui veut travailler
+    en isole sans polluer les etudes/projets existants du user.
+
+    Cas d'usage :
+    - Un agent recipe qui veut executer un traitement sans toucher la storymap
+      en cours d'edition dans le desk
+    - Deux agents Claude Desktop concurrents qui veulent bosser en parallele
+      sur des sujets differents sans se marcher dessus (isolation via header
+      X-Session-Id lu par mcp_auto_session, gap ferme par A1+A2)
+    - Un agent qui teste une hypothese qu'il veut jeter apres (origin=test)
+
+    Comportement :
+    1. Cree une nouvelle etude (create_study) avec name/profile/origin optionnels.
+    2. Cree un projet 'Projet principal' avec is_default=True (create_project).
+    3. Bascule active_study + active_project via _ensure_active_study_for_agent
+       (mutex A2 applique, save sortante + activate pod code).
+    4. Retourne (sid, pid, session_id) - l'agent utilise ce session_id dans
+       tous ses calls MCP suivants (via header X-Session-Id) pour maintenir
+       son isolation.
+
+    Body optionnel (JSON) :
+    - label : nom de l'etude (defaut : "Contexte agent " + date iso)
+    - profile : profil workspace (defaut "standard")
+    - origin : "user" (defaut) | "demo" | "test" — 'test' recommande pour
+      un scratchpad jetable qui n'apparait pas dans la liste desk normale
+    - agent_id : id logique de l'agent, utilise pour construire le pattern
+      session_id `agent:{agent_id}:sid:{sid}` (defaut = "auto-" + timestamp)
+
+    Retour :
+    {
+      "sid": str,
+      "pid": str,
+      "session_id": "agent:{agent_id}:sid:{sid}",
+      "study": { ... manifest complet },
+      "project": { ... manifest complet }
+    }
+
+    Idempotence : chaque appel cree un contexte DISTINCT. Un agent qui veut
+    reutiliser son contexte precedent doit garder son sid en memoire et
+    passer le session_id dans X-Session-Id (pattern A1).
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    body = body or {}
+
+    from datetime import datetime as _dt_agentctx, timezone as _tz_agentctx
+    _now = _dt_agentctx.now(_tz_agentctx.utc)
+    default_label = f"Contexte agent {_now.strftime('%Y-%m-%d %H:%M UTC')}"
+    label = str(body.get("label") or default_label).strip() or default_label
+    profile = str(body.get("profile") or "standard").strip() or "standard"
+    origin = str(body.get("origin") or "user").strip() or "user"
+    if origin not in ("user", "demo", "test"):
+        origin = "user"
+    # agent_id : identifiant logique porte par l'agent (Claude Desktop,
+    # recipe worker, ...). Utilise pour construire le pattern session_id
+    # `agent:{agent_id}:sid:{sid}`.
+    _default_agent_id = "auto-" + _now.strftime("%Y%m%dT%H%M%S")
+    agent_id = str(body.get("agent_id") or _default_agent_id).strip() \
+        or _default_agent_id
+    # Sanitize agent_id : caracteres simples ([a-zA-Z0-9\-_.]) pour eviter
+    # de casser le split ":" du session_id downstream.
+    import re as _re_agent
+    if not _re_agent.fullmatch(r"[a-zA-Z0-9._\-]+", agent_id):
+        raise HTTPException(
+            400,
+            "agent_id invalide : caracteres autorises [a-zA-Z0-9._-] seulement",
+        )
+
+    username = user["username"]
+
+    # 1. Cree l'etude
+    try:
+        s = await studies.create_study(
+            owner=username, name=label, profile=profile, origin=origin,
+        )
+    except Exception as exc:
+        log.error("create_agent_context: create_study echec : %s", exc)
+        raise HTTPException(500, f"create_study echec : {exc}")
+
+    # 2. Init du layout PVC (idem create_study endpoint standard)
+    try:
+        await _execute_python_in_workspace(
+            username,
+            studies.init_pod_layout_code(s["id"], s["name"], s["profile"]),
+        )
+    except Exception as exc:
+        log.warning(
+            "create_agent_context: init layout pod pour %s : %s", s["id"], exc,
+        )
+
+    # 3. Cree le projet default
+    try:
+        p = await studies.create_project(
+            sid=s["id"], owner=username,
+            label="Projet principal", is_default=True,
+        )
+    except Exception as exc:
+        log.error("create_agent_context: create_project echec : %s", exc)
+        raise HTTPException(500, f"create_project echec : {exc}")
+
+    # 4. Active l'etude + le projet (sous mutex A2). Reutilise la logique
+    # existante _ensure_active_study_for_agent qui gere save sortante,
+    # sentinels, symlinks, chained project activate, instrumentation A3.
+    await _ensure_active_study_for_agent(username, s["id"])
+
+    session_id = f"agent:{agent_id}:sid:{s['id']}"
+
+    log.info(
+        "create_agent_context: user=%s sid=%s pid=%s session_id=%s",
+        username, s["id"], p["pid"], session_id,
+    )
+
+    return {
+        "sid": s["id"],
+        "pid": p["pid"],
+        "session_id": session_id,
+        "study": s,
+        "project": p,
+    }
+
+
 @app.get("/diagnostics/isolation")
 async def diagnostics_isolation(
     user: dict = Depends(auth.get_current_user),
