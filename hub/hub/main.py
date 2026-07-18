@@ -8820,6 +8820,141 @@ async def post_workspace_upload(
     return await _proxy_request(request, target_url, session["id"])
 
 
+# ── Sprint isolation multi-agent A1 (2026-07-18) — session_id extraction ────
+#
+# Contexte : le workspace QGIS est mono-instance (une seule QgsProject.instance()
+# tourne sur display :99 par pod). L'active_study est global au pod : si l'agent A
+# switche vers sid1, l'agent B qui envoie une action juste apres opere aussi sur
+# sid1, meme s'il pensait etre sur sid2. Solution : chaque call MCP entrant porte
+# implicitement son sid attendu via la convention session_id agent (Sprint V0.3
+# G1). Ce sid est extrait ici, et si different du active_study courant, on
+# declenche un switch propre avant de forwarder l'action au workspace.
+#
+# Convention session_id ([[reference_session_id_convention]]) :
+#   study:{sid}                          -> desk chat
+#   study:{sid}:draft:{draft_id}         -> editor freeform
+#   study:{sid}:recipe:{recipe_id}       -> recipe run
+#   study:{sid}:recipe_edit:{slug}       -> recipe create
+#   assist:{sid}:cid:{cid}               -> assist component
+#   assist:{sid}:aid:{aid}               -> assist assembly
+#   agent:{agent_id}:sid:{sid}           -> agent context prive (B1, Sprint iso)
+#   autre                                -> legacy (pas de switch)
+
+
+def _extract_expected_sid(session_id: str | None) -> str | None:
+    """Extract sid attendu depuis un session_id agent structure.
+
+    Retourne None si session_id absent, mal forme, ou pattern non-reconnu
+    (legacy UUID). Ne fait pas d'IO : parsing pur sur la structure de string.
+
+    Doit rester en sync avec agent/agent/memory.py:parse_session_id, mais on
+    ne duplique QUE l'extraction sid car c'est tout ce dont le hub a besoin
+    pour son mecanisme d'isolation.
+    """
+    if not session_id or not isinstance(session_id, str):
+        return None
+    parts = session_id.split(":")
+    if len(parts) < 2:
+        return None
+    # study:{sid}[:...]
+    if parts[0] == "study" and parts[1]:
+        return parts[1]
+    # assist:{sid}:...
+    if parts[0] == "assist" and parts[1]:
+        return parts[1]
+    # agent:{agent_id}:sid:{sid} (Sprint isolation B1 - pattern agent-scoped)
+    if parts[0] == "agent" and len(parts) >= 4 and parts[2] == "sid" and parts[3]:
+        return parts[3]
+    return None
+
+
+async def _ensure_active_study_for_agent(
+    username: str, expected_sid: str | None,
+) -> tuple[str | None, bool]:
+    """Bascule active_study si necessaire avant un call MCP agent.
+
+    - Si expected_sid None -> no-op, retourne (active_actuel, False).
+    - Si expected_sid == active_actuel -> no-op, retourne (active_actuel, False).
+    - Sinon -> save active sortante + set_active_study(expected_sid) +
+      activate_pod_code(expected_sid) + chained activate default project.
+      Retourne (expected_sid, True) pour signaler qu'un switch a eu lieu.
+
+    Best-effort : toute exception est loggee en warning, le call MCP continue
+    (l'agent recevra alors une reponse dans le contexte sortant, ce qui est
+    signalable a l'oeil nu mais moins grave qu'un 500). Idempotent.
+    """
+    if not expected_sid:
+        return None, False
+    try:
+        active_actual = await studies.get_active_study_id(username)
+    except Exception as exc:
+        log.warning("ensure_active_study: get_active_study_id echec pour %s : %s",
+                    username, exc)
+        return None, False
+    if active_actual == expected_sid:
+        return active_actual, False
+
+    # Verifie que l'etude cible existe et est active
+    try:
+        s = await studies.get_study(expected_sid, username)
+    except Exception as exc:
+        log.warning("ensure_active_study: get_study %s echec : %s", expected_sid, exc)
+        return active_actual, False
+    if not s or s.get("status") != "active":
+        log.info(
+            "ensure_active_study: expected_sid=%s inexistante/archivee -> no switch",
+            expected_sid,
+        )
+        return active_actual, False
+
+    # Save sortante avant switch (autosave protection - meme code que
+    # activate_study endpoint L2779).
+    if active_actual:
+        try:
+            await _execute_python_in_workspace(
+                username, studies.save_active_pod_code(active_actual),
+            )
+        except Exception as exc:
+            log.warning(
+                "ensure_active_study: save sortante %s avant switch : %s",
+                active_actual, exc,
+            )
+
+    try:
+        await studies.set_active_study(username, expected_sid)
+        await studies.touch_study(expected_sid)
+        await _execute_python_in_workspace(
+            username, studies.activate_pod_code(expected_sid),
+        )
+        # Chained activate default project (meme pattern que activate_study L2803)
+        default_p = await studies.get_default_project(expected_sid)
+        if default_p is not None:
+            await studies.set_active_project(username, default_p["pid"])
+            await studies.touch_project(default_p["pid"])
+            try:
+                await _execute_python_in_workspace(
+                    username,
+                    studies.activate_project_pod_code(expected_sid, default_p["pid"]),
+                )
+            except Exception as exc:
+                log.warning(
+                    "ensure_active_study: activate projet %s echec : %s",
+                    default_p["pid"], exc,
+                )
+    except Exception as exc:
+        log.warning(
+            "ensure_active_study: switch %s -> %s echec : %s",
+            active_actual, expected_sid, exc,
+        )
+        return active_actual, False
+
+    log.info(
+        "ensure_active_study: switch %s -> %s reussi pour %s (mcp agent isolation)",
+        active_actual, expected_sid, username,
+    )
+    return expected_sid, True
+
+
 # ── Endpoint MCP principal — auto-session ─────────────────────────────────────
 
 @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "PUT", "PATCH"])
@@ -8834,6 +8969,19 @@ async def mcp_auto_session(
     # OIDC) = acces total, aucune interception.
     scope = user.get("scope")
     session = await _get_or_create_session(username)
+
+    # Sprint isolation multi-agent A1 (2026-07-18) : lit le header X-Session-Id
+    # optionnel (l'agent Claude Desktop / chat / recipe passe son session_id
+    # structure ici pour que le hub isole son contexte du reste). Best-effort :
+    # si le pattern n'est pas reconnu (legacy UUID, header absent), on continue
+    # sans switch et l'agent opere sur l'active_study courant du user. Voir
+    # _extract_expected_sid + _ensure_active_study_for_agent au-dessus.
+    _mcp_session_id_hdr = request.headers.get("x-session-id") \
+        or request.headers.get("X-Session-Id")
+    _expected_sid = _extract_expected_sid(_mcp_session_id_hdr)
+    if _expected_sid:
+        await _ensure_active_study_for_agent(username, _expected_sid)
+
     target_url = _mcp_url(session, path)
     return await _proxy_request(request, target_url, session["id"], scope=scope)
 
