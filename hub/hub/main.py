@@ -135,6 +135,17 @@ _session_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 # operent sur des pods differents, aucune contention entre eux.
 _active_study_switch_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+# Sprint isolation multi-agent A3 (2026-07-18) : instrumentation switch.
+# Objectif = observability empirique du chantier isolation. On expose :
+# - un compteur global des switches depuis boot (indicateur de contention)
+# - une deque bornee des N derniers switches (audit trail + tuning)
+# Volontairement simple (memoire process, reset au restart). Un futur
+# chantier metrics peut re-exporter vers prometheus si necessaire.
+from collections import deque as _deque
+_iso_switches_total: dict[str, int] = {"count": 0}
+# Deque tuple : (ts_iso, username, from_sid, to_sid, latency_ms, source)
+_iso_recent_switches: _deque = _deque(maxlen=200)
+
 
 # ── Bootstrap agent K8s ────────────────────────────────────────────────────────
 
@@ -8949,6 +8960,8 @@ async def _ensure_active_study_for_agent(
 
     # Save sortante avant switch (autosave protection - meme code que
     # activate_study endpoint L2779).
+    import time as _time_iso
+    _switch_start = _time_iso.monotonic()
     if active_actual:
         try:
             await _execute_python_in_workspace(
@@ -8988,11 +9001,85 @@ async def _ensure_active_study_for_agent(
         )
         return active_actual, False
 
+    _latency_ms = int((_time_iso.monotonic() - _switch_start) * 1000)
+    _record_switch(username, active_actual, expected_sid, _latency_ms, source="mcp")
     log.info(
-        "ensure_active_study: switch %s -> %s reussi pour %s (mcp agent isolation)",
-        active_actual, expected_sid, username,
+        "ensure_active_study: switch %s -> %s reussi pour %s en %dms "
+        "(mcp agent isolation)",
+        active_actual, expected_sid, username, _latency_ms,
     )
     return expected_sid, True
+
+
+def _record_switch(
+    username: str, from_sid: str | None, to_sid: str,
+    latency_ms: int, source: str = "mcp",
+) -> None:
+    """Sprint isolation A3 : trace instrumentation d'un switch reussi.
+
+    - Incremente le compteur global (metric _iso_switches_total).
+    - Push dans la deque bornee _iso_recent_switches (audit trail max 200).
+    Best-effort : jamais raise, pas de blocage sur l'IO du switch.
+    """
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        _iso_switches_total["count"] += 1
+        _iso_recent_switches.append({
+            "ts": _dt.now(_tz.utc).isoformat(),
+            "username": username,
+            "from_sid": from_sid,
+            "to_sid": to_sid,
+            "latency_ms": latency_ms,
+            "source": source,
+        })
+    except Exception:
+        pass  # instrumentation ne doit jamais casser le call metier
+
+
+@app.get("/diagnostics/isolation")
+async def diagnostics_isolation(
+    user: dict = Depends(auth.get_current_user),
+):
+    """Sprint isolation A3 : expose l'etat du chantier isolation multi-agent.
+
+    Reservee aux admins (superviseurs). Retourne :
+    - `switches_total_since_boot` : compteur cumulatif des switches
+      _ensure_active_study_for_agent. Reset au restart pod.
+    - `recent_switches` : les N derniers switches (200 max) avec metadata.
+    - `active_locks` : count des locks en cours (utile pour observability
+      d'une contention).
+    - `helpers` : versions du contract (session_id patterns supportes).
+
+    Usage : `curl -H "Authorization: Bearer $HUB_API_KEY" $HUB_URL/diagnostics/isolation`
+    """
+    # Filtre : superviseur (username == owner du hub) OU pas de scope key
+    # (cle OIDC/admin). Les cles scopees agent ne voient pas cet endpoint.
+    if user.get("scope"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Endpoint reserve aux cles superviseur (pas de scope agent).",
+        )
+
+    return {
+        "switches_total_since_boot": _iso_switches_total["count"],
+        "recent_switches": list(_iso_recent_switches),
+        "active_locks": {
+            "active_study_switch": len(_active_study_switch_locks),
+            "session": len(_session_locks),
+        },
+        "helpers": {
+            "supported_session_id_patterns": [
+                "study:{sid}",
+                "study:{sid}:draft:{draft_id}",
+                "study:{sid}:recipe:{recipe_id}",
+                "study:{sid}:recipe_edit:{slug}",
+                "assist:{sid}:cid:{cid}",
+                "assist:{sid}:aid:{aid}",
+                "agent:{agent_id}:sid:{sid}",
+            ],
+            "sprint": "isolation-multi-agent A1+A2+A3",
+        },
+    }
 
 
 # ── Endpoint MCP principal — auto-session ─────────────────────────────────────
