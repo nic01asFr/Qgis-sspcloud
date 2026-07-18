@@ -123,6 +123,18 @@ _active_sessions: dict[str, str] = {}
 # defaultdict évite la race condition à la création du lock
 _session_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+# Sprint isolation multi-agent A2 (2026-07-18) : lock dedie a la
+# serialisation des switches active_study. Sans ce lock, deux calls MCP
+# concurrents avec des `X-Session-Id` differents pouvaient racer sur les
+# sentinels PVC (.active_study, symlink /data/studies/active) et laisser
+# l'etat workspace incoherent (ex: sentinel pointe sid1 mais QgsProject
+# a lu project.qgz de sid2). Le mutex enveloppe UNIQUEMENT le switch
+# physique (_ensure_active_study_for_agent) - il ne freine PAS les calls
+# MCP sans switch (qui vont directement au proxy sans passer par ce lock).
+# Un lock par username : deux users concurrents (nicolaslaval + autre)
+# operent sur des pods differents, aucune contention entre eux.
+_active_study_switch_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+
 
 # ── Bootstrap agent K8s ────────────────────────────────────────────────────────
 
@@ -8879,12 +8891,22 @@ async def _ensure_active_study_for_agent(
       activate_pod_code(expected_sid) + chained activate default project.
       Retourne (expected_sid, True) pour signaler qu'un switch a eu lieu.
 
+    Sprint isolation A2 : le switch physique (autosave + set + activate) est
+    enveloppe dans un lock par username pour serialiser les switches
+    concurrents. Deux calls MCP simultanes avec des expected_sid differents
+    seront servis en serie propre, aucun ne race sur les sentinels PVC. Un
+    call sans switch necessaire (expected_sid == active_actuel) ne prend
+    PAS le lock : le fast-path early-return preserve la latence des calls
+    normaux.
+
     Best-effort : toute exception est loggee en warning, le call MCP continue
     (l'agent recevra alors une reponse dans le contexte sortant, ce qui est
     signalable a l'oeil nu mais moins grave qu'un 500). Idempotent.
     """
     if not expected_sid:
         return None, False
+    # Fast-path SANS lock : si l'active_study courant matche deja, on
+    # court-circuite. Le read get_active_study_id est atomique cote DB.
     try:
         active_actual = await studies.get_active_study_id(username)
     except Exception as exc:
@@ -8893,6 +8915,24 @@ async def _ensure_active_study_for_agent(
         return None, False
     if active_actual == expected_sid:
         return active_actual, False
+
+    # Slow-path AVEC lock : le switch physique doit etre serialise pour
+    # eviter les race conditions sentinels/symlink. Le lock est par
+    # username : deux users differents (pods differents) ne se bloquent
+    # jamais entre eux.
+    async with _active_study_switch_locks[username]:
+        # Re-check apres acquisition du lock : un autre agent peut avoir
+        # deja switche vers expected_sid pendant qu'on attendait.
+        try:
+            active_actual = await studies.get_active_study_id(username)
+        except Exception as exc:
+            log.warning(
+                "ensure_active_study: re-check get_active_study_id echec : %s",
+                exc,
+            )
+            return None, False
+        if active_actual == expected_sid:
+            return active_actual, False
 
     # Verifie que l'etude cible existe et est active
     try:
