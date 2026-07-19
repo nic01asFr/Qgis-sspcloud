@@ -939,6 +939,18 @@ _OIDC_MIDDLEWARE_INTER_POD = (
     # FORBIDDEN du prompt structure. Sans whitelist -> 401 silencieux
     # -> prompt LLM sans briques -> anti-hallucination cassee.
     "/briques",
+    # Sprint isolation multi-agent (2026-07-18) : les 2 nouveaux endpoints
+    # doivent accepter Bearer HUB_API_KEY (superviseur) sinon le middleware
+    # OIDC retourne 401 avant que le Depends(auth.get_current_user) puisse
+    # valider le token. Meme pattern que /studies + /admin ci-dessus.
+    #   - /diagnostics/isolation : observability endpoint reserve superviseurs
+    #     (get_current_user rejette les cles scopees agent avec 403 in-endpoint,
+    #     donc auth double-layer safe).
+    #   - /agent-context/new : endpoint appele en Bearer par un agent (Claude
+    #     Desktop / recipe / chat) pour creer un contexte etude+projet fresh
+    #     isole. get_current_user valide le Bearer normalement.
+    "/diagnostics",
+    "/agent-context",
     # NB : /published a ete deplace dans _OIDC_MIDDLEWARE_PUBLIC (vraie
     # whitelist anonyme). Inter-pod ne suffit pas pour acces tiers internet.
 )
