@@ -2647,14 +2647,24 @@ async def _upload_bytes_to_workspace(
     content_type: str = "application/octet-stream",
     timeout: int = 120,
 ) -> tuple[bool, str]:
-    """Upload streaming multipart de bytes vers /api/upload du workspace.
+    """Upload multipart de bytes vers /api/upload du workspace (dans un thread).
 
-    Sprint sec-vague0 dette OOM (2026-07-19) : chemin d'ecriture sans
-    b64/gzip inline pour eviter le pic RSS hub sur gros payloads.
+    Sprint sec-vague0 dette OOM v2 (2026-07-20) : le chemin ecrit en v1
+    utilisait httpx.AsyncClient().post(files=...). Meme si "async", la
+    CONSTRUCTION du body multipart pour 38MB de bytes est CPU-bound et
+    bloque l'event loop uvicorn plusieurs secondes -> les kube-probe
+    GET / timeout -> kubelet SIGKILL le pod (exit 137). Reproduit publish
+    V22 fedcba987654 (2026-07-20T12:23 UTC : container tournait 3h stable
+    puis kill pendant le POST /publish).
+
+    Fix : deleguer TOUTE l'operation (multipart build + envoi socket) a
+    un thread separe via asyncio.to_thread. L'event loop reste dispo
+    pour repondre aux probes GET / (< 10ms grace au court-circuit
+    kube-probe deja en place ligne 2409). Le thread se termine quand
+    l'upload complet, sans jamais bloquer uvicorn.
 
     Le workspace ecrit dans /data/{filename} (endpoint api_server.py:606,
-    MAX_UPLOAD_SIZE=50MB). Le hub streamer via httpx multipart evite tout
-    encodage intermediaire en RAM (~1MB buffer chunk, pas 3x le HTML).
+    MAX_UPLOAD_SIZE=50MB).
 
     Returns:
         (ok, message) : ok=True si HTTP 200, message = detail ou path
@@ -2664,10 +2674,11 @@ async def _upload_bytes_to_workspace(
     if not api_url:
         return False, "workspace api_url manquant"
     api_key = await auth.create_or_get_api_key(owner)
-    files = {"file": (filename, content, content_type)}
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.post(
+
+    def _sync_upload() -> tuple[bool, str]:
+        files = {"file": (filename, content, content_type)}
+        with httpx.Client(timeout=timeout) as client:
+            r = client.post(
                 f"{api_url}/api/upload",
                 files=files,
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -2679,6 +2690,9 @@ async def _upload_bytes_to_workspace(
             except Exception:
                 return True, ""
         return False, f"HTTP {r.status_code} : {r.text[:200]}"
+
+    try:
+        return await asyncio.to_thread(_sync_upload)
     except Exception as exc:
         return False, f"upload exc : {exc}"
 
