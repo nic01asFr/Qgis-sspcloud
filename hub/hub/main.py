@@ -6525,17 +6525,32 @@ async def _render_assembly_html(
             CLASSIFICATION_LABELS_FR as _CLS_LABELS,
             ASSEMBLY_KIND_LABELS_FR as _KIND_LABELS,
         )
-        html = tpl.render(
-            assembly=asm.model_dump(mode="json"),
-            sections=[s.model_dump(mode="json") for s in asm.layout.sections],
+        # Sprint sec-vague0 dette OOM v3 (2026-07-20) : Jinja2 tpl.render
+        # est CPU-bound synchrone. Sur un HTML 38MB (14270 features BD TOPO
+        # inlinees), le render bloque l'event loop uvicorn 5-15s -> les
+        # kube-probes GET / timeout -> kubelet SIGKILL. Reproduit publish
+        # V22 fedcba987654 (2026-07-20T12:36 UTC, restart 0->1 pendant
+        # publish malgre fix v1 upload multipart et v2 asyncio.to_thread
+        # sur _upload_bytes_to_workspace).
+        #
+        # Le vrai blocage est en amont, dans le render Jinja2 ici. On le
+        # deplace dans un thread pour liberer l'event loop.
+        _assembly_dump = asm.model_dump(mode="json")
+        _sections_dump = [s.model_dump(mode="json") for s in asm.layout.sections]
+        _chain_dump = chain.model_dump(mode="json")
+        _footer_dump = asm.footer.model_dump(mode="json")
+        html = await asyncio.to_thread(
+            tpl.render,
+            assembly=_assembly_dump,
+            sections=_sections_dump,
             rendered_components=rendered_components,
             rendered_components_kinds=rendered_components_kinds,
-            audit_chain=chain.model_dump(mode="json"),
-            footer=asm.footer.model_dump(mode="json"),
+            audit_chain=_chain_dump,
+            footer=_footer_dump,
             classification_labels=_CLS_LABELS,
             assembly_kind_labels=_KIND_LABELS,
         )
-        return html, chain.model_dump(mode="json")
+        return html, _chain_dump
     except Exception as exc:
         import traceback as _tb
         log.error("render_assembly %s/%s : %s", sid, aid, exc)
