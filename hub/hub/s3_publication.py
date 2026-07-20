@@ -240,12 +240,44 @@ def publish(owner: str, kind: str, slug: str, content: bytes,
     # le gate serve_published.
     s3_acl = "public-read" if audience == "public" else "private"
 
-    client.put_object(
-        Bucket=bucket, Key=key, Body=content,
-        ContentType=ct,
-        ACL=s3_acl,
-        Metadata=metadata,
-    )
+    # Sprint sec-vague0 dette OOM piste 1a v2 (2026-07-20) : MinIO SSPCloud
+    # ferme la connexion sur les gros uploads single-PUT (`put_object` avec
+    # Body=bytes de 19-38MB) - erreur observee :
+    # "Connection was closed before we received a valid response from
+    #  endpoint URL: minio.lab.sspcloud.fr/..."
+    # Solution : passer en multipart_upload via upload_fileobj + TransferConfig
+    # pour tout content > 5MB. Boto3 decoupe automatiquement en chunks 5MB,
+    # chaque chunk uploaded individuellement (retry per-chunk possible, moins
+    # sensible aux timeouts intermediaires). MinIO S3 supporte multipart
+    # nativement (S3 API compliance).
+    _MULTIPART_THRESHOLD = 5 * 1024 * 1024  # 5MB
+    if len(content) > _MULTIPART_THRESHOLD:
+        import io as _io
+        from boto3.s3.transfer import TransferConfig as _TransferConfig
+        transfer_cfg = _TransferConfig(
+            multipart_threshold=_MULTIPART_THRESHOLD,
+            multipart_chunksize=_MULTIPART_THRESHOLD,
+            use_threads=False,  # boto3 gere threading, mais on est deja dans
+                                # un thread via asyncio.to_thread cote hub -
+                                # evite thread nested inutile
+        )
+        client.upload_fileobj(
+            Fileobj=_io.BytesIO(content),
+            Bucket=bucket, Key=key,
+            ExtraArgs={
+                "ContentType": ct,
+                "ACL": s3_acl,
+                "Metadata": metadata,
+            },
+            Config=transfer_cfg,
+        )
+    else:
+        client.put_object(
+            Bucket=bucket, Key=key, Body=content,
+            ContentType=ct,
+            ACL=s3_acl,
+            Metadata=metadata,
+        )
     url = public_url(endpoint, bucket, key)
     info = {
         "url":      url,
