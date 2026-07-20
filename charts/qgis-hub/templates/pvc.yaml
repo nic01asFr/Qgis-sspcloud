@@ -5,6 +5,18 @@ metadata:
   name: {{ include "qgis-hub.fullname" . }}
   labels:
     {{- include "qgis-hub.labels" . | nindent 4 }}
+  # Sprint sec-persistence T2a (2026-07-19) : annotation Helm qui
+  # empeche la suppression du PVC lors d'un `helm uninstall`. Sans cette
+  # annotation, `helm uninstall qgis-hub` supprime le PVC et tout le
+  # scene_store/audit_chain/scene_manifest est perdu -> livrables
+  # audit-references pointent vers du vide (contradiction avec le
+  # contract "immutable"). C'est la cause racine confirmee des
+  # data-loss observees Sprint V0.4.4 (2026-07-16/17).
+  #
+  # Pour VRAIMENT supprimer le PVC : kubectl delete pvc <name> apres
+  # helm uninstall. Volontairement lourd, pour eviter la perte accidentelle.
+  annotations:
+    helm.sh/resource-policy: keep
 spec:
   accessModes:
     - ReadWriteOnce

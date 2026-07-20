@@ -129,7 +129,12 @@ def list_entity_kinds(entity_type: str) -> dict[str, Any]:
 
 
 def _kind_descriptions(entity_type: str) -> dict[str, str]:
-    """Documentation courte par kind (utile pour le LLM)."""
+    """Documentation courte par kind (utile pour le LLM).
+
+    Sprint sec A2-R3 (2026-07-19) : ajout des 5 kinds manquants
+    (kpi_grid, heading, quote, separator, timeline) que l'agent ne voyait
+    pas dans /schema/component/kinds jusqu'ici.
+    """
     if entity_type == "component":
         return {
             "interactive_map":  "Carte 2D + pitch 3D MapLibre — scope project/study/external/geomind",
@@ -141,6 +146,12 @@ def _kind_descriptions(entity_type: str) -> dict[str, str]:
             "data_table":       "Tableau filtrable datatables.net depuis CSV / Grist",
             "media_embed":      "URL média HTML5 (image, vidéo, PDF)",
             "iframe_grist":     "iframe vers URL Grist doc (édition collaborative)",
+            # Sprint sec A2-R3 (2026-07-19) : Vague E2 (D-QGIS-009) + V1.20.5
+            "kpi_grid":         "Bandeau responsive de N KPIs (grille CSS) — palette monochrome ou rainbow, N chiffres clés vs kpi_badge isolé",
+            "heading":          "Titre H1-H4 standalone DSFR — remplace la concatenation dans narrative_text",
+            "quote":            "Citation / pull-quote DSFR — sources expertes, temoignages, extraits reglementaires",
+            "separator":        "Separateur horizontal entre blocks — respire visuellement les storymaps longs",
+            "timeline":         "Slider temporel controller (Web Component <geo-timeline>) — pilote une carte via binding declaratif CustomEvent 'geo:bind' {prop:'time'}",
         }
     if entity_type == "assembly":
         return {

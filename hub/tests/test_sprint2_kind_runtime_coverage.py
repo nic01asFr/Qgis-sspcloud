@@ -17,7 +17,7 @@ import inspect
 
 
 def get_all_component_kinds() -> list[str]:
-    """Extrait les 13 kinds depuis Literal."""
+    """Extrait les 14 kinds depuis Literal (Sprint sec A2-R1)."""
     from hub.models.component import ComponentKind
     from typing import get_args
     return list(get_args(ComponentKind))
@@ -29,13 +29,19 @@ COMPONENT_KINDS = get_all_component_kinds()
 class TestKindCoverage:
     """Cross-verification : tous les kinds ont leur infrastructure complete."""
 
-    def test_13_kinds_exposed(self):
-        """ComponentKind Literal expose les 13 kinds attendus."""
-        assert len(COMPONENT_KINDS) == 13
+    def test_14_kinds_exposed(self):
+        """ComponentKind Literal expose les 14 kinds attendus.
+
+        Sprint sec A2-R1 (2026-07-19) : bumpe 13 -> 14 apres ajout `timeline`
+        Vague E2 (V1.20.5, 2026-07-08). Le test cassait silencieusement
+        depuis 3 semaines - fix pour non-regression.
+        """
+        assert len(COMPONENT_KINDS) == 14
         expected = {
             "interactive_map", "scene_3d", "chart", "kpi_badge", "legend",
             "narrative_text", "data_table", "media_embed", "iframe_grist",
             "kpi_grid", "heading", "quote", "separator",
+            "timeline",  # Sprint sec A2-R1 : ajout V1.20.5 non-reflete jusqu'ici
         }
         assert set(COMPONENT_KINDS) == expected
 
