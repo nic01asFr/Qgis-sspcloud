@@ -47,6 +47,16 @@ _KINDS = {
     # Sprint Composants Phase 3 : strate COMPOSANTS (composant publishable
     # standalone, ex: interactive_map iframe-embeddable site tiers).
     "component",
+    # Sprint sec-vague0 dette OOM piste 1a (2026-07-20) : strate FEATURES.
+    # Complete le contract V0.3.2 pivot universel (data_url + geojson_url
+    # existants dans ComponentSource + commentaire main.py:5792 "laisse
+    # le client fetch (URL publique)" - jamais implemente). Un geojson
+    # externalise = livrable atomique data-only reference par un assembly
+    # via layer.geojson=URL_string. MapLibre native accepte URL string
+    # dans addSource(...data). Reduit HTML publish 38MB -> ~500KB pour
+    # les assemblies avec beaucoup de features, contourne le blocage
+    # GIL sur Jinja2 render.
+    "features",
 }
 _KIND_EXT = {
     "storymap":  "html",
@@ -56,6 +66,7 @@ _KIND_EXT = {
     "pdf":       "pdf",
     "assembly":  "html",
     "component": "html",
+    "features":  "geojson",
 }
 _KIND_CONTENT_TYPE = {
     "storymap":  "text/html; charset=utf-8",
@@ -64,6 +75,7 @@ _KIND_CONTENT_TYPE = {
     "dataset":   "application/geopackage+sqlite3",
     "pdf":       "application/pdf",
     "assembly":  "text/html; charset=utf-8",
+    "features":  "application/geo+json; charset=utf-8",
     "component": "text/html; charset=utf-8",
 }
 

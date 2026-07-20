@@ -2640,6 +2640,120 @@ async def _execute_python_in_workspace(owner: str, code: str, timeout: int = 30)
         return text
 
 
+async def _externalize_large_features(
+    map_layers_js: str,
+    cid: str,
+    owner: str,
+    audience: str = "cerema_internal",
+    threshold_bytes: int = 500_000,
+) -> tuple[str, list[dict]]:
+    """Complete le contract V0.3.2 pivot universel (piste 1a, 2026-07-20).
+
+    Le hub inline actuellement TOUS les geojson layer dans le HTML rendu
+    (main.py:5787 "V0.3.1 geojson_path : fetch PVC + inline pour SSR
+    autoportant"). A 14270 features BD TOPO le HTML depasse 38MB et
+    provoque un blocage GIL Python sur Jinja2 render >60s -> kubelet
+    SIGKILL (exit 137).
+
+    Ce helper complete le mecanisme deja prevu par le contract (cf.
+    ComponentSource.data_url, layer.source.type=geojson_url,
+    commentaire main.py:5792 "meme logique pour source.type=geojson_url :
+    laisse le client fetch (URL publique)" - jamais implemente).
+
+    Comportement : parcourt les layers, pour chaque layer dont le
+    geojson serialise depasse `threshold_bytes` :
+    1. Upload via s3_publication.publish(kind="features", ...)
+       (kind ajoute dans s3_publication._KINDS, meme flux ACL/audience
+       que assembly/component - RGPD gate applique via /published)
+    2. Remplace layer.geojson (dict) par l'URL hub /published/... string
+       (MapLibre native accepte URL string dans addSource(...data))
+    3. Enregistre {cid, layer_id, url, n_features, size_bytes} dans
+       audit_data_urls pour tracability audit_chain
+
+    Le HTML publie devient ~500KB au lieu de 38MB. Le client MapLibre
+    fait un fetch async cote browser au chargement (parallelisable,
+    cache-able HTTP). Le rendu final est identique visuellement.
+
+    Layers < threshold restent inline (evite pollution S3 pour petits
+    layers pilotage/legende).
+
+    Returns:
+        (map_layers_js modifie, audit_data_urls)
+    """
+    import json as _json
+    try:
+        layers = _json.loads(map_layers_js)
+    except Exception:
+        return map_layers_js, []
+    if not isinstance(layers, list):
+        return map_layers_js, []
+
+    audit_data_urls: list[dict] = []
+    hub_base = (_HUB_URL or _SELF_URL or "").rstrip("/")
+    modified = False
+
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        gj = layer.get("geojson")
+        if not isinstance(gj, dict):
+            continue  # deja URL string ou absent
+        try:
+            payload = _json.dumps(gj, ensure_ascii=False)
+        except Exception:
+            continue
+        size = len(payload.encode("utf-8"))
+        if size < threshold_bytes:
+            continue  # petit layer -> reste inline
+
+        # Slug : cid-layerid-hash8 pour uniqueness (immuable per snapshot)
+        import hashlib as _hl
+        content_hash = _hl.sha256(payload.encode("utf-8")).hexdigest()
+        layer_id = str(layer.get("id", "layer"))[:16]
+        # Sanitize layer_id : caracteres safe pour slug S3
+        import re as _re
+        layer_id_safe = _re.sub(r"[^a-zA-Z0-9_-]", "-", layer_id)
+        slug = f"{cid[:12]}-{layer_id_safe}-{content_hash[:8]}"
+
+        try:
+            # Deleguer boto3 put_object au thread (v4 pattern)
+            from hub import s3_publication as _s3
+            info = await asyncio.to_thread(
+                _s3.publish,
+                owner=owner,
+                kind="features",
+                slug=slug,
+                content=payload.encode("utf-8"),
+                content_type="application/geo+json; charset=utf-8",
+                audience=audience,
+            )
+            # URL hub gate (audience filter applique), pas MinIO direct
+            url = (
+                f"{hub_base}/published/{owner}/features/{slug}"
+                if hub_base else info.get("url")
+            )
+            layer["geojson"] = url  # str, MapLibre native OK
+            n_features = len((gj.get("features") or []))
+            audit_data_urls.append({
+                "cid": cid,
+                "layer_id": layer_id,
+                "url": url,
+                "n_features": n_features,
+                "size_bytes": size,
+                "content_hash": content_hash,
+            })
+            modified = True
+        except Exception as exc:
+            log.warning(
+                "externalize features %s/%s (%d bytes) : %s -> reste inline",
+                cid, layer_id, size, exc,
+            )
+
+    if modified:
+        return _json.dumps(layers), audit_data_urls
+    return map_layers_js, audit_data_urls
+
+
 async def _upload_bytes_to_workspace(
     owner: str,
     filename: str,
@@ -6023,6 +6137,33 @@ async def _build_interactive_map_ctx(
         final_lng = fallback_lng
         final_lat = fallback_lat
         final_zoom = fallback_zoom
+
+    # Sprint sec-vague0 dette OOM piste 1a (2026-07-20) : externalise les
+    # layer.geojson volumineux (>500KB serialise) vers S3 via kind
+    # "features" (complete le contract V0.3.2 pivot universel prevu mais
+    # jamais implemente cote publish). Contrepartie : le HTML publie
+    # passe de 38MB (14270 features inline) a ~500KB, plus de blocage
+    # GIL sur Jinja2 render. MapLibre native accepte URL string dans
+    # addSource(...data). Rendu visuel identique cote client.
+    _audience_for_features = comp_manifest.get(
+        "classification", "cerema_internal",
+    )
+    try:
+        map_layers_js, _audit_urls = await _externalize_large_features(
+            map_layers_js,
+            cid=cid,
+            owner=username,
+            audience=_audience_for_features,
+        )
+        if _audit_urls:
+            log.info(
+                "externalized %d layer(s) for %s : %s",
+                len(_audit_urls), cid,
+                [f"{u['layer_id']}({u['size_bytes']//1024}KB)" for u in _audit_urls],
+            )
+    except Exception as exc:
+        log.warning("externalize features %s : %s -> keep inline", cid, exc)
+
     return {
         "cid": cid,
         "title": final_title,
