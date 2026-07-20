@@ -6500,7 +6500,13 @@ async def _render_assembly_html(
                     continue
                 import base64 as _b64
                 b64_data = stdout.split("b64=", 1)[1].split()[0].strip()
-                comp_manifest = _json.loads(_b64.b64decode(b64_data).decode())
+                # Sprint sec-vague0 dette OOM v4 (2026-07-20) : les manifests
+                # composant peuvent contenir des GeoJSON inline 5-30MB. Le
+                # base64.decode + json.loads est CPU-bound - deleguer au
+                # thread pour ne pas bloquer l'event loop uvicorn.
+                comp_manifest = await asyncio.to_thread(
+                    lambda: _json.loads(_b64.b64decode(b64_data).decode())
+                )
                 # Stocke le kind pour le template (Vague E2 Commit 2)
                 rendered_components_kinds[cid] = comp_manifest.get("kind", "")
                 # Helper unifié (D-QGIS-008) — templates partials Jinja2
@@ -7152,7 +7158,12 @@ async def publish_assembly_endpoint(
             _audience_pub = None
     _audience_pub = _audience_pub or "cerema_internal"
     try:
-        info = s3_publication.publish(
+        # Sprint sec-vague0 dette OOM v4 (2026-07-20) : s3_publication.publish
+        # utilise boto3.client.put_object synchrone. Sur un content 38MB,
+        # l'upload bloque l'event loop uvicorn plusieurs secondes ->
+        # kube-probe timeout -> kubelet SIGKILL. Deleguer au thread.
+        info = await asyncio.to_thread(
+            s3_publication.publish,
             owner=user["username"], kind="assembly", slug=slug,
             content=html.encode("utf-8"),
             content_type="text/html; charset=utf-8",
