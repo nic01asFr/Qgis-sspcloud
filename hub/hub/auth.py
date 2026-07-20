@@ -858,6 +858,18 @@ _OIDC_MIDDLEWARE_PUBLIC = (
     # (assemblages publishables avec audience), accessible aux collegues
     # CEREMA via SSO ET aux tiers via lien direct. Pas d'OIDC requis.
     "/published",
+    # Sprint sec-rbac RBAC-3 (2026-07-19) : URLs stables versionees /p/{slug}
+    # sont censees etre publiques comme un DOI (voir docstring
+    # resolve_latest_publication_endpoint main.py:7365 : "Cette route est
+    # publique - jamais changer, toujours pointer vers l'etat courant"). Le
+    # middleware OIDC les gate implicitement aujourd'hui -> tiers non-logges
+    # ne peuvent pas les consommer -> le sens "DOI" est casse. Fix : ajouter
+    # /p au whitelist public + appliquer le meme audience gate que
+    # /published (via _serve_published_audience_gate) dans les endpoints
+    # /p/{slug} et /p/{slug}/v{version} eux-memes.
+    "/p",
+    # Sprint sec-rgpd P0-3 (2026-07-19) : robots.txt statique public.
+    "/robots.txt",
     # Audit v1.7.2 P1 #3 (D-QGIS-010) : bundle Vite BlockNote = JS/CSS pur
     # statique, AUCUN secret. La page principale /editor/{sid}/assembly/{aid}
     # reste protegee OIDC (elle sert l'index.html via FileResponse). Whitelist

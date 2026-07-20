@@ -6579,6 +6579,7 @@ async def publish_component_endpoint(
             content=standalone_html.encode("utf-8"),
             content_type="text/html; charset=utf-8",
             study_id=sid,
+            audience=audience,  # sec-rgpd P0-2 : ACL conditionnel + metadata
         )
         # URL hub (anti-MinIO ACL bug fix f11da9d)
         hub_base = (_HUB_URL or _SELF_URL or "").rstrip("/")
@@ -7044,13 +7045,26 @@ async def publish_assembly_endpoint(
         log.error("update audit_chain_json : %s", exc)
 
     # 3. Publish S3 via s3_publication.publish()
+    # Sprint sec-rgpd P0-2 (2026-07-19) : propage audience pour ACL
+    # conditionnel + metadata. Priorite : body.audience > asm.audience >
+    # default cerema_internal.
     slug = f"assembly-{aid}"
+    _audience_pub = _body.get("audience") if isinstance(_body, dict) else None
+    if not _audience_pub:
+        try:
+            _asm_latest = await asm_mod.get_assembly_latest(aid)
+            _audience_pub = (_asm_latest or {}).get("classification") \
+                or (_asm_latest or {}).get("audience")
+        except Exception:
+            _audience_pub = None
+    _audience_pub = _audience_pub or "cerema_internal"
     try:
         info = s3_publication.publish(
             owner=user["username"], kind="assembly", slug=slug,
             content=html.encode("utf-8"),
             content_type="text/html; charset=utf-8",
             study_id=sid,
+            audience=_audience_pub,
         )
         # Bug fix 2026-06-27 : MinIO SSPCloud n'accepte plus l'ACL canned
         # public-read sur les objets uploades (retourne AccessDenied 403).
@@ -7349,13 +7363,15 @@ async def publish_livrable_endpoint(
 # ── F17 Sprint 1.4 Vague 1 Equipe B : versioning URL stable ───────────────────
 
 @app.get("/p/{slug}")
-async def resolve_latest_publication_endpoint(slug: str):
+async def resolve_latest_publication_endpoint(slug: str, request: Request):
     """F17 : URL stable qui redirige HTTP 302 vers la derniere version.
 
-    Cette route est publique (pas d'auth) : elle sert le meme role qu'une
-    URL DOI - jamais changer, toujours pointer vers l'etat courant du
-    livrable. La ressource cible (v{n}) est immutable ; seule la
-    redirection change quand une nouvelle version est publiee.
+    Sprint sec-rbac RBAC-3 (2026-07-19) : cette route est maintenant
+    VRAIMENT publique (whitelist _OIDC_MIDDLEWARE_PUBLIC dans auth.py) -
+    avant, la docstring disait "publique" mais le middleware OIDC
+    l'interceptait. Sens DOI enfin respecte. Le gate audience s'applique
+    au niveau du contenu servi par render_versioned_publication_endpoint.
+    Le redirect 302 est ok pour tous (revele juste "cette pub existe").
 
     404 si aucune publication n'existe pour ce slug.
     """
@@ -7368,7 +7384,9 @@ async def resolve_latest_publication_endpoint(slug: str):
 
 
 @app.get("/p/{slug}/v{version}", response_class=HTMLResponse)
-async def render_versioned_publication_endpoint(slug: str, version: int):
+async def render_versioned_publication_endpoint(
+    slug: str, version: int, request: Request,
+):
     """F17 : rend la version immutable N d'une publication.
 
     - Cherche la row (slug, version) dans `publications`
@@ -7387,6 +7405,21 @@ async def render_versioned_publication_endpoint(slug: str, version: int):
     sid = pub["sid"]
     aid = pub["aid"]
     owner = pub["owner"]
+
+    # Sprint sec-rbac RBAC-3 (2026-07-19) : gate audience meme politique que
+    # /published (identique table de decision). audience est lu via
+    # l'assembly latest (property stable inter-versions).
+    try:
+        from hub import assemblies as _asm_mod
+        _asm_latest = await _asm_mod.get_assembly_latest(aid)
+        _audience_p = (_asm_latest or {}).get("classification") \
+            or (_asm_latest or {}).get("audience") \
+            or "cerema_internal"
+    except Exception:
+        _audience_p = "cerema_internal"
+    _gate = await _serve_published_audience_gate(request, owner, _audience_p)
+    if _gate is not None:
+        return _gate
 
     # Rendu HTML de la version cible. On reutilise _render_assembly_html
     # (latest version en PVC). Note : v1 ne stocke pas de snapshot HTML
@@ -7546,11 +7579,15 @@ async def export_bundle_endpoint(
     if _S3_AVAILABLE:
         try:
             bundle_slug = f"assembly-{aid}-bundle-v{version_num_pub}"
+            # sec-rgpd P0-2 : audience heritee de l'assembly source
+            _bundle_audience = (body.get("audience") if isinstance(body, dict) else None) \
+                or getattr(asm, "audience", None) or "cerema_internal"
             info = s3_publication.publish(
                 owner=user["username"], kind="assembly", slug=bundle_slug,
                 content=zip_bytes,
                 content_type="application/zip",
                 study_id=sid,
+                audience=_bundle_audience,
             )
             s3_url = info.get("url")
         except Exception as exc:
@@ -7639,11 +7676,15 @@ async def publish_pdf_endpoint(
     if _S3_AVAILABLE:
         try:
             pdf_slug = f"assembly-{aid}-v{version_num_pub}"
+            # sec-rgpd P0-2 : audience heritee de l'assembly source
+            _pdf_audience = (body.get("audience") if isinstance(body, dict) else None) \
+                or getattr(asm, "audience", None) or "cerema_internal"
             info = s3_publication.publish(
                 owner=user["username"], kind="pdf", slug=pdf_slug,
                 content=pdf_bytes,
                 content_type="application/pdf",
                 study_id=sid,
+                audience=_pdf_audience,
             )
             s3_url = info.get("url")
         except Exception as exc:
@@ -8479,6 +8520,84 @@ async def list_published_owner(owner: str) -> HTMLResponse:
     return HTMLResponse(content=body, status_code=200)
 
 
+async def _serve_published_audience_gate(
+    request: "Request | None", owner: str, audience: str,
+) -> "Response | None":
+    """Sprint sec-rgpd P0-1 (2026-07-19) : gate audience pour serve_published.
+
+    Retourne :
+        - None si l'acces est autorise (le caller sert le contenu)
+        - Response 401/403 si refus (le caller retourne directement)
+
+    Politique :
+        - audience=public         : toujours autorise (comportement legacy)
+        - audience=cerema_internal: cookie OIDC valide OU Bearer HUB_API_KEY /
+                                    scoped key requis (any authenticated user)
+        - audience=restricted     : identite requise ET owner match OU superviseur
+        - audience=confidential   : identite requise ET owner match OU superviseur
+
+    Detection identite : le middleware OIDC populate `request.state.oidc_user`
+    si cookie valide. Alternativement, Bearer HUB_API_KEY passe le middleware
+    inter-pod. On tente d'appeler `auth.get_current_user` en resolvant les
+    dependances FastAPI manuellement pour extraire l'user sans forcer 401
+    inconditionnel (endpoint reste anonymousable pour audience=public).
+    """
+    if audience == "public":
+        return None  # fast-path anonyme, comportement legacy
+
+    # Extraire identite si dispo (sans lever 401 - on gere le decision-tree ici)
+    identity = None
+    if request:
+        try:
+            from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+            bearer_scheme = HTTPBearer(auto_error=False)
+            creds: HTTPAuthorizationCredentials | None = await bearer_scheme(request)
+            identity = await auth.get_current_user(request=request, creds=creds)
+        except HTTPException:
+            identity = None
+        except Exception:
+            identity = None
+
+    if identity is None:
+        # Pas d'identite : 401 avec pointeur vers portail.
+        log.info(
+            "serve_published gate DENY anon audience=%s owner=%s",
+            audience, owner,
+        )
+        return Response(
+            content=(
+                '{"detail":"Livrable non-public (audience=' + audience + ').'
+                ' Identification requise.","portal_url":"'
+                + (os.getenv("PORTAL_URL", "") or "/")
+                + '?next=' + (request.url.path if request else "/") + '"}'
+            ),
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            media_type="application/json",
+            headers={"X-Robots-Tag": "noindex, nofollow"},
+        )
+
+    username = identity.get("username", "")
+    if audience == "cerema_internal":
+        # Toute identite OIDC/API-key superviseur suffit
+        return None
+
+    # audience in {"restricted", "confidential"} : owner match OU superviseur
+    is_supervisor = not identity.get("scope")  # cle non-scopee = superviseur
+    if username == owner or is_supervisor:
+        return None
+
+    log.info(
+        "serve_published gate DENY user=%s (owner=%s) audience=%s",
+        username, owner, audience,
+    )
+    return Response(
+        content='{"detail":"Livrable ' + audience + ' - acces reserve owner + superviseur."}',
+        status_code=status.HTTP_403_FORBIDDEN,
+        media_type="application/json",
+        headers={"X-Robots-Tag": "noindex, nofollow"},
+    )
+
+
 @app.get("/published/{owner}/{slug}")
 @app.get("/published/{owner}/{kind}/{slug}")
 async def serve_published(
@@ -8493,11 +8612,15 @@ async def serve_published(
     URL canonique : /published/{owner}/{kind}/{slug}
     Compat       : /published/{owner}/{slug}  → kind=storymap par défaut
 
-    Public, pas d'auth requise. La publication doit avoir été créée via
-    POST /publish (pousse PVC workspace → s3://{bucket}/qgis-workspace/published/).
+    Sprint sec-rgpd P0-1 (2026-07-19) : gate audience.
+        - audience=public         -> anonyme OK
+        - audience=cerema_internal-> cookie OIDC valide requis (any OIDC user)
+        - audience=restricted     -> owner match ou HUB_API_KEY superviseur
+        - audience=confidential   -> owner match ou HUB_API_KEY superviseur
+        - default (publications historiques sans metadata audience)
+                                  -> cerema_internal (safe default anti-fuite)
 
-    Si on a un fallback à faire (workspace plus actif, S3 indisponible), c'est
-    transparent côté user.
+    Fallback S3 indisponible : 503 propre.
     """
     if not _S3_AVAILABLE:
         raise HTTPException(503, "Publication S3 indisponible (module non chargé)")
@@ -8522,6 +8645,17 @@ async def serve_published(
         # V1.20.4 : 404 DSFR humaine au lieu de JSON brut. Le user qui clique
         # un lien peri me/expire voit une page utilisable (CTA retour).
         return _render_publication_404_html(owner, kind, safe_slug)
+
+    # Sprint sec-rgpd P0-1 (2026-07-19) : audience gate BEFORE lecture body.
+    # Lit metadata S3 (posee par s3_publication.publish() depuis ce sprint).
+    # Publications historiques sans metadata : default cerema_internal.
+    _audience = (meta.get("metadata") or {}).get("audience", "cerema_internal")
+    _decision = await _serve_published_audience_gate(
+        request, owner, _audience,
+    )
+    if _decision is not None:
+        # Refus : 401 (pas d'identite) ou 403 (identite mais pas owner).
+        return _decision
 
     try:
         content = s3_publication.read(owner, kind, safe_slug)
@@ -8591,10 +8725,53 @@ async def serve_published(
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "no-referrer",
     }
+    # Sprint sec-rgpd P0-3 (2026-07-19) : robots-tag conditionnel selon
+    # audience. Empeche indexation Google/Bing des livrables non-publics.
+    if _audience != "public":
+        headers["X-Robots-Tag"] = "noindex, nofollow"
     return Response(
         content=content,
         media_type=meta.get("content_type", "application/octet-stream"),
         headers=headers,
+    )
+
+
+@app.get("/robots.txt")
+async def robots_txt():
+    """Sprint sec-rgpd P0-3 (2026-07-19) : robots.txt statique pour empecher
+    l'indexation par les moteurs de recherche des espaces sensibles.
+
+    Politique globale :
+        Disallow /published/  (les livrables audience!=public ont AUSSI un
+                               X-Robots-Tag: noindex individuel via
+                               serve_published, defense en profondeur)
+        Disallow /desk/       (interne, jamais publique)
+        Disallow /workspace/  (proxy noVNC, jamais publique)
+        Disallow /mcp/        (agent proxy)
+        Disallow /editor/     (BlockNote editeur, session user)
+
+    Les livrables `audience=public` restent accessible mais ne sont PAS
+    indexés (voir X-Robots-Tag conditionnel dans serve_published). Cette
+    politique protege contre les fuites accidentelles de metadonnees
+    (username OIDC = email CEREMA, arborescence /published/{owner}/...).
+    """
+    body = (
+        "# qgis-sspcloud robots.txt\n"
+        "# Politique : livrables non-publics + espaces internes non-indexes.\n"
+        "# Les livrables audience=public ont un X-Robots-Tag individuel.\n"
+        "User-agent: *\n"
+        "Disallow: /published/\n"
+        "Disallow: /desk/\n"
+        "Disallow: /workspace/\n"
+        "Disallow: /mcp/\n"
+        "Disallow: /editor/\n"
+        "Disallow: /admin/\n"
+        "Disallow: /diagnostics/\n"
+    )
+    return Response(
+        content=body,
+        media_type="text/plain; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=86400"},
     )
 
 
@@ -8707,9 +8884,19 @@ else:
     file_bytes = _b64.b64decode(stdout[start + len("<<<FILE_B64>>>"):end])
 
     # Push S3 — Phase 13 : on passe study_id pour traçabilité (provenance).
+    # sec-rgpd P0-2 (2026-07-19) : audience passe en body (fallback
+    # cerema_internal safe by default anti-fuite).
     try:
+        _audience_generic = "cerema_internal"
+        try:
+            _body_pub = await request.json()
+            if isinstance(_body_pub, dict) and _body_pub.get("audience"):
+                _audience_generic = _body_pub["audience"]
+        except Exception:
+            pass
         info = s3_publication.publish(owner, kind, safe_slug, file_bytes,
-                                       study_id=active_sid)
+                                       study_id=active_sid,
+                                       audience=_audience_generic)
     except Exception as exc:
         log.error("Publish S3 failed: %s", exc)
         raise HTTPException(500, f"Push S3 échoué: {exc}")
@@ -9530,10 +9717,23 @@ async def admin_delete_session(session_id: str, _: dict = Depends(auth.require_a
 
 @app.post("/admin/agent-config")
 async def update_agent_config(request: Request):
-    """Met à jour HUB_API_KEY et LLM_API_KEY dans le pod agent et redémarre."""
+    """Met à jour HUB_API_KEY et LLM_API_KEY dans le pod agent et redémarre.
+
+    Sprint sec-rbac RBAC-1 (2026-07-19) : le check ADMIN_TOKEN etait bypass
+    silencieusement si la variable env etait vide (endpoint alors ouvert a
+    tout Bearer HUB_API_KEY inter-pod). Fix : refuser 500 si ADMIN_TOKEN
+    non configure. Un agent compromis avec HUB_API_KEY ne peut plus
+    patcher le StatefulSet.
+    """
     admin_token = os.getenv("ADMIN_TOKEN", "")
+    if not admin_token:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "ADMIN_TOKEN non configure cote hub : endpoint /admin/agent-config "
+            "inutilisable. Definir l'env var ADMIN_TOKEN.",
+        )
     auth_header = request.headers.get("Authorization", "")
-    if admin_token and auth_header != f"Bearer {admin_token}":
+    if auth_header != f"Bearer {admin_token}":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin token requis")
 
     body = await request.json()
@@ -9606,7 +9806,10 @@ async def update_agent_config(request: Request):
 
 @app.get("/api/refresh-llm-config", response_class=HTMLResponse)
 @app.post("/api/refresh-llm-config")
-async def refresh_llm_config(request: Request):
+async def refresh_llm_config(
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
     """Re-lit la config LLM SSPCloud et resynchronise l'agent.
 
     Declenche par le bouton "Verifier ma config" du bandeau agent quand
@@ -9615,10 +9818,11 @@ async def refresh_llm_config(request: Request):
     courte (cross-origin : seul le portail a le cookie OIDC permettant
     d'agir sur le namespace).
 
-    Mecanisme : rappelle `_bootstrap_agent()`, qui relit
-    `*-secretassistant/config.json` du namespace, patche l'env du SS
-    qgis-agent (LLM_API_KEY/LLM_MODEL/LLM_BASE_URL) et supprime le pod
-    qgis-agent-0 -> redemarrage avec la cle fraiche.
+    Sprint sec-rbac RBAC-2 (2026-07-19) : ajout Depends(auth.get_current_user)
+    en defense en profondeur. L'endpoint etait deja gate par le middleware
+    OIDC en pratique (pas de whitelist inter-pod ni public), mais ne
+    dependait d'aucun garde-fou en cas de bug de middleware. Le Depends
+    force la validation identite meme si le middleware bug/change.
     """
     try:
         await _bootstrap_agent()
@@ -9644,11 +9848,17 @@ async def refresh_llm_config(request: Request):
 async def admin_workspace_info(request: Request):
     """Diagnostic : retourne l'image et l'état du pod workspace pour debug.
 
-    Pas d'auth (ADMIN_TOKEN optionnel) : lecture seule, namespace local uniquement.
+    Sprint sec-rbac RBAC-1 (2026-07-19) : ADMIN_TOKEN devient strict (refus
+    500 si non configure, au lieu du bypass silencieux).
     """
     admin_token = os.getenv("ADMIN_TOKEN", "")
+    if not admin_token:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "ADMIN_TOKEN non configure cote hub. Definir l'env var.",
+        )
     auth_header = request.headers.get("Authorization", "")
-    if admin_token and auth_header != f"Bearer {admin_token}":
+    if auth_header != f"Bearer {admin_token}":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin token requis")
 
     token_file = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
@@ -9726,11 +9936,16 @@ async def admin_workspace_fix_image(request: Request):
     """Patche l'image des StatefulSets workspace existants vers _QGIS_IMAGE
     (la valeur actuelle dans sessions.py) et supprime le pod pour forcer un re-pull.
 
-    Utile quand un workspace a été créé avec une image privée inaccessible.
+    Sprint sec-rbac RBAC-1 (2026-07-19) : ADMIN_TOKEN strict.
     """
     admin_token = os.getenv("ADMIN_TOKEN", "")
+    if not admin_token:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "ADMIN_TOKEN non configure cote hub. Definir l'env var.",
+        )
     auth_header = request.headers.get("Authorization", "")
-    if admin_token and auth_header != f"Bearer {admin_token}":
+    if auth_header != f"Bearer {admin_token}":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin token requis")
 
     body = {}

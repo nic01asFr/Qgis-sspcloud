@@ -179,10 +179,24 @@ def public_url(endpoint: str, bucket: str, key: str) -> str:
 
 def publish(owner: str, kind: str, slug: str, content: bytes,
             content_type: str | None = None,
-            study_id: str | None = None) -> dict:
+            study_id: str | None = None,
+            audience: str = "cerema_internal") -> dict:
     """
-    Publie un livrable. Retourne {url, key, kind, slug, size, study_id}.
-    Pose ACL=public-read pour rendre l'URL directement consultable.
+    Publie un livrable. Retourne {url, key, kind, slug, size, study_id, audience}.
+
+    Sprint sec-rgpd P0-1+P0-2 (2026-07-19) : audience obligatoire propagé
+    dans metadata S3 pour permettre `serve_published` d'appliquer un gate
+    sur reads (P0-1). ACL S3 conditionnel selon audience (P0-2) :
+        - "public"           -> ACL public-read (URL MinIO directe accessible)
+        - "cerema_internal"  -> ACL private (lecture uniquement via hub /published)
+        - "restricted"       -> ACL private
+        - "confidential"     -> ACL private
+    Default "cerema_internal" (anti-fuite : safe by default).
+
+    Publications historiques (sans metadata audience) : au next re-publish,
+    l'ACL est mise a jour selon l'audience courante. Les objets existants
+    en public-read restent accessibles via MinIO direct jusqu'a leur
+    prochain publish - un script batch re-ACL est prevu en suite.
 
     Phase 13 : `study_id` lie la publication à l'étude qui l'a produite.
     Sert pour la traçabilité (provenance des données) et l'UI desk
@@ -192,19 +206,32 @@ def publish(owner: str, kind: str, slug: str, content: bytes,
     key = s3_key(owner, kind, slug)
     ct = content_type or _KIND_CONTENT_TYPE.get(kind, "application/octet-stream")
 
+    # Validation audience (anti-injection metadata). Valeurs conformes au
+    # Literal Classification (hub/hub/models/classification.py).
+    valid_audiences = {"public", "cerema_internal", "restricted", "confidential"}
+    if audience not in valid_audiences:
+        log.warning("publish: audience %r invalide, fallback cerema_internal", audience)
+        audience = "cerema_internal"
+
     metadata = {
         "owner":    owner,
         "kind":     kind,
         "slug":     _safe_slug(slug),
         "published-at": str(int(time.time())),
+        "audience": audience,
     }
     if study_id:
         metadata["study-id"] = study_id
 
+    # ACL conditionnel : seul audience=public reste directement accessible
+    # via MinIO. Les autres passent obligatoirement par le hub qui applique
+    # le gate serve_published.
+    s3_acl = "public-read" if audience == "public" else "private"
+
     client.put_object(
         Bucket=bucket, Key=key, Body=content,
         ContentType=ct,
-        ACL="public-read",
+        ACL=s3_acl,
         Metadata=metadata,
     )
     url = public_url(endpoint, bucket, key)
@@ -217,6 +244,8 @@ def publish(owner: str, kind: str, slug: str, content: bytes,
         "size":     len(content),
         "published_at": int(time.time()),
         "content_type": ct,
+        "audience": audience,
+        "acl":      s3_acl,
     }
     if study_id:
         info["study_id"] = study_id
