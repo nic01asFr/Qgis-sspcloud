@@ -2640,6 +2640,49 @@ async def _execute_python_in_workspace(owner: str, code: str, timeout: int = 30)
         return text
 
 
+async def _upload_bytes_to_workspace(
+    owner: str,
+    filename: str,
+    content: bytes,
+    content_type: str = "application/octet-stream",
+    timeout: int = 120,
+) -> tuple[bool, str]:
+    """Upload streaming multipart de bytes vers /api/upload du workspace.
+
+    Sprint sec-vague0 dette OOM (2026-07-19) : chemin d'ecriture sans
+    b64/gzip inline pour eviter le pic RSS hub sur gros payloads.
+
+    Le workspace ecrit dans /data/{filename} (endpoint api_server.py:606,
+    MAX_UPLOAD_SIZE=50MB). Le hub streamer via httpx multipart evite tout
+    encodage intermediaire en RAM (~1MB buffer chunk, pas 3x le HTML).
+
+    Returns:
+        (ok, message) : ok=True si HTTP 200, message = detail ou path
+    """
+    s = await _get_or_create_session(owner)
+    api_url = s.get("api_url")
+    if not api_url:
+        return False, "workspace api_url manquant"
+    api_key = await auth.create_or_get_api_key(owner)
+    files = {"file": (filename, content, content_type)}
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.post(
+                f"{api_url}/api/upload",
+                files=files,
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+        if r.status_code == 200:
+            try:
+                body = r.json()
+                return True, str(body.get("path", ""))
+            except Exception:
+                return True, ""
+        return False, f"HTTP {r.status_code} : {r.text[:200]}"
+    except Exception as exc:
+        return False, f"upload exc : {exc}"
+
+
 @app.post("/studies", status_code=status.HTTP_201_CREATED)
 async def create_study(
     request: Request,
@@ -7000,26 +7043,47 @@ async def publish_assembly_endpoint(
     s3_publish_error = None
 
     # 1. Persiste rendered HTML sur PVC (best-effort).
-    # Sprint V0.4.4 (2026-07-17) : timeout etendu 120s (defaut 30s trop
-    # court pour les gros HTML avec GeoJSON inline meme apres gzip).
-    # write_assembly_rendered_pod_code compresse gzip + base64 le HTML
-    # pour eviter le body_size_limit workspace uvicorn (~100 MB par
-    # defaut, mais le payload code Python + b64 explose pour un HTML
-    # 38 MB brut). On verifie aussi que le stdout confirme
-    # `ASSEMBLY_RENDER_WRITE_OK` sinon on remonte l'erreur (avant : write
-    # silencieux, rendered_html_written_pvc=true meme sans ecriture reelle).
+    # Sprint sec-vague0 dette OOM (2026-07-19) : refactor du chemin
+    # d'ecriture. Le chemin precedent (write_assembly_rendered_pod_code
+    # v0.4.4) gzippait + b64-inlinait le HTML dans un code Python exec
+    # via JSON-RPC. Sur un HTML 38 MB, le pic RSS du hub atteignait
+    # >8Gi et le pod etait OOMKilled (exit 137) - reproduit publish
+    # V22 assembly-fedcba987654 (2026-07-19).
+    #
+    # Nouveau chemin en 2 hops :
+    #   1a. Upload multipart streaming vers /api/upload workspace
+    #       (endpoint existant, MAX 50MB, cf. api_server.py:606). Pas de
+    #       b64/gzip inline, httpx buffer en chunks ~1MB.
+    #   1b. exec_python leger (~200 bytes) qui shutil.move le fichier
+    #       upload vers assembly_rendered_path canonique.
+    #
+    # Contract inchange : path final identique, signal
+    # ASSEMBLY_RENDER_WRITE_OK preserve (fix V0.4.4 conserve).
     try:
-        _write_stdout = await _execute_python_in_workspace(
+        import time as _time
+        _upload_name = f"assembly-render-{aid}-{int(_time.time() * 1000)}.html"
+        _ok, _msg = await _upload_bytes_to_workspace(
             user["username"],
-            asm_mod.write_assembly_rendered_pod_code(sid, aid, html),
+            _upload_name,
+            html.encode("utf-8"),
+            content_type="text/html; charset=utf-8",
             timeout=120,
         )
-        if "ASSEMBLY_RENDER_WRITE_OK" not in _write_stdout:
-            write_pvc_error = (
-                f"stdout n'a pas ASSEMBLY_RENDER_WRITE_OK "
-                f"(len={len(_write_stdout)}, head={_write_stdout[:200]!r})"
+        if not _ok:
+            write_pvc_error = f"upload /api/upload workspace echec : {_msg}"
+            log.warning("write assembly rendered upload : %s", _msg)
+        else:
+            _write_stdout = await _execute_python_in_workspace(
+                user["username"],
+                asm_mod.move_upload_to_rendered_pod_code(sid, aid, _upload_name),
+                timeout=30,
             )
-            log.warning("write assembly rendered no OK signal : %s", write_pvc_error)
+            if "ASSEMBLY_RENDER_WRITE_OK" not in _write_stdout:
+                write_pvc_error = (
+                    f"move stdout sans ASSEMBLY_RENDER_WRITE_OK "
+                    f"(len={len(_write_stdout)}, head={_write_stdout[:200]!r})"
+                )
+                log.warning("write assembly rendered no OK signal : %s", write_pvc_error)
     except Exception as exc:
         write_pvc_error = str(exc)[:200]
         log.warning("write assembly rendered : %s", exc)

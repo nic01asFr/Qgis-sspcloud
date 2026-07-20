@@ -329,9 +329,52 @@ else:
 """
 
 
+def move_upload_to_rendered_pod_code(
+    sid: str, aid: str, uploaded_filename: str,
+) -> str:
+    """Sprint sec-vague0 dette OOM (2026-07-19) : nouveau chemin d'ecriture
+    du HTML rendu qui contourne le pic memoire du hub.
+
+    Ancien chemin (write_assembly_rendered_pod_code ci-dessous, deprecated) :
+    HTML 38MB -> gzip 7-10MB -> b64 10-15MB -> string Python inline dans
+    code exec ~50MB -> JSON RPC payload ~50MB -> pic RSS hub > 8Gi ->
+    OOMKilled (exit 137). Observe sur publish V22 fedcba987654 (2026-07-19).
+
+    Nouveau chemin (ce helper + `_upload_html_via_workspace` cote hub) :
+    1. Hub streamer HTML via multipart POST /api/upload workspace
+       (aucun b64 inline, ~1MB buffer chunks httpx)
+    2. Workspace ecrit dans /data/{uploaded_filename} (endpoint upload
+       existant, MAX_UPLOAD_SIZE=50MB dans api_server.py:572)
+    3. Ce helper produit le code Python leger (~200 bytes) pour
+       shutil.move() du fichier upload vers assembly_rendered_path()
+       canonique + mkdir parent + confirm signal
+
+    Le HTML canonique final reste au meme path : contract inchange.
+    Uniquement le chemin d'ecriture change.
+    """
+    target = assembly_rendered_path(sid, aid)
+    return f"""
+import shutil
+from pathlib import Path
+src = Path("/data/{uploaded_filename}")
+dst = Path({target!r})
+dst.parent.mkdir(parents=True, exist_ok=True)
+if src.exists():
+    shutil.move(str(src), str(dst))
+    print(f"ASSEMBLY_RENDER_WRITE_OK path={{dst}} size={{dst.stat().st_size}}")
+else:
+    print(f"ASSEMBLY_RENDER_WRITE_ERR uploaded file not found src={{src}}")
+"""
+
+
 def write_assembly_rendered_pod_code(
     sid: str, aid: str, html_content: str
 ) -> str:
+    """DEPRECATED (2026-07-19) : chemin inline b64 remplace par
+    `move_upload_to_rendered_pod_code` + `_upload_html_via_workspace`
+    cote hub (voir docstring ci-dessus). Conserve pour rollback rapide
+    en cas de regression du nouveau chemin - a supprimer apres 1-2 sprints
+    de stabilite empirique."""
     path = assembly_rendered_path(sid, aid)
     # Sprint V0.4.4 (2026-07-17) : gzip + base64 au lieu de base64 seul.
     #
