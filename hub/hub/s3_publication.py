@@ -151,18 +151,39 @@ import boto3  # noqa: E402 — top-level pour que _S3_AVAILABLE détecte l'absen
 
 
 def _get_s3_client(owner: str = ""):
-    """Renvoie (client, bucket, endpoint)."""
+    """Renvoie (client, bucket, endpoint).
+
+    Sprint sec-vague0 dette OOM piste 1a v3 (2026-07-20) : ajoute une
+    Config boto3 avec retries adaptifs + timeouts longs pour absorber
+    les "Connection was closed before we received a valid response"
+    observees sur les gros uploads (19-38MB) contre MinIO SSPCloud.
+    - retries.mode=adaptive : backoff exponentiel + jitter (retry safer
+      qu'un simple loop)
+    - retries.max_attempts=5 : 4 retries apres le 1er echec
+    - connect_timeout=10s : etablissement connexion TCP
+    - read_timeout=300s : lecture data (5min - upload lent tolere)
+    - tcp_keepalive=True : evite les coupures mid-upload par les
+      middleboxes reseau
+    """
+    from botocore.config import Config as _BotoConfig
     creds = _read_passerelle_s3_creds(owner)
     endpoint = creds.get("AWS_S3_ENDPOINT", "https://minio.lab.sspcloud.fr").rstrip("/")
     if not endpoint.startswith("http"):
         endpoint = "https://" + endpoint
     bucket = creds["SSPCLOUD_BUCKET"]
+    boto_cfg = _BotoConfig(
+        retries={"max_attempts": 5, "mode": "adaptive"},
+        connect_timeout=10,
+        read_timeout=300,
+        tcp_keepalive=True,
+    )
     client = boto3.client(
         "s3", endpoint_url=endpoint,
         aws_access_key_id=creds["AWS_ACCESS_KEY_ID"],
         aws_secret_access_key=creds["AWS_SECRET_ACCESS_KEY"],
         aws_session_token=creds.get("AWS_SESSION_TOKEN"),
         region_name=creds.get("AWS_DEFAULT_REGION", "us-east-1"),
+        config=boto_cfg,
     )
     return client, bucket, endpoint
 
@@ -240,44 +261,26 @@ def publish(owner: str, kind: str, slug: str, content: bytes,
     # le gate serve_published.
     s3_acl = "public-read" if audience == "public" else "private"
 
-    # Sprint sec-vague0 dette OOM piste 1a v2 (2026-07-20) : MinIO SSPCloud
-    # ferme la connexion sur les gros uploads single-PUT (`put_object` avec
-    # Body=bytes de 19-38MB) - erreur observee :
-    # "Connection was closed before we received a valid response from
-    #  endpoint URL: minio.lab.sspcloud.fr/..."
-    # Solution : passer en multipart_upload via upload_fileobj + TransferConfig
-    # pour tout content > 5MB. Boto3 decoupe automatiquement en chunks 5MB,
-    # chaque chunk uploaded individuellement (retry per-chunk possible, moins
-    # sensible aux timeouts intermediaires). MinIO S3 supporte multipart
-    # nativement (S3 API compliance).
-    _MULTIPART_THRESHOLD = 5 * 1024 * 1024  # 5MB
-    if len(content) > _MULTIPART_THRESHOLD:
-        import io as _io
-        from boto3.s3.transfer import TransferConfig as _TransferConfig
-        transfer_cfg = _TransferConfig(
-            multipart_threshold=_MULTIPART_THRESHOLD,
-            multipart_chunksize=_MULTIPART_THRESHOLD,
-            use_threads=False,  # boto3 gere threading, mais on est deja dans
-                                # un thread via asyncio.to_thread cote hub -
-                                # evite thread nested inutile
-        )
-        client.upload_fileobj(
-            Fileobj=_io.BytesIO(content),
-            Bucket=bucket, Key=key,
-            ExtraArgs={
-                "ContentType": ct,
-                "ACL": s3_acl,
-                "Metadata": metadata,
-            },
-            Config=transfer_cfg,
-        )
-    else:
-        client.put_object(
-            Bucket=bucket, Key=key, Body=content,
-            ContentType=ct,
-            ACL=s3_acl,
-            Metadata=metadata,
-        )
+    # Sprint sec-vague0 dette OOM piste 1a v3 (2026-07-20) : historique
+    # des tentatives sur les gros uploads (19-38MB) contre MinIO SSPCloud :
+    # - v1 : put_object direct -> "Connection was closed before valid
+    #        response" (TCP timeout ~15-30s sur upload lent).
+    # - v2 : upload_fileobj + TransferConfig multipart 5MB -> erreur
+    #        "InvalidAccessKeyId sur CreateMultipartUpload". Le token
+    #        stsonly SSPCloud n'a PAS la permission
+    #        s3:CreateMultipartUpload (restriction policy connue - cf.
+    #        memoire "Users OIDC ne peuvent create/delete Role").
+    # - v3 (actuel) : put_object direct + boto3 Config avec retries
+    #        adaptifs + timeouts longs. Absorbe les connection close
+    #        transient via retry cote client, sans passer par multipart.
+    #        Config appliquee au client boto3 dans _get_s3_client (voir
+    #        modif ligne ~155). Ici on garde put_object simple.
+    client.put_object(
+        Bucket=bucket, Key=key, Body=content,
+        ContentType=ct,
+        ACL=s3_acl,
+        Metadata=metadata,
+    )
     url = public_url(endpoint, bucket, key)
     info = {
         "url":      url,
