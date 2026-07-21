@@ -2731,63 +2731,86 @@ async def _externalize_large_features(
 
         # ── Niveau 1 : PMTiles (V0.4, comportement optimal) ─────────────
         if _PMTILES_ENABLED:
+            pmtiles_bytes = None
+            pmt_meta = None
+            # 1a. Encode geojson -> pmtiles bytes (peut echouer si lib
+            # non installee ou geometrie invalide)
             try:
                 from hub.pmtiles_encoder import geojson_to_pmtiles
+                # Sprint sec-vague0 PMTiles V0.4 hotfix (2026-07-21) :
+                # zoom range initial 6-16 (11 niveaux) genere des tuiles
+                # aux zooms bas contenant TOUTES les features non
+                # simplifiees -> pmtiles bloated (>5MB, echoue MinIO).
+                # Reduit a 12-16 (5 niveaux) : couvre commune -> batiment,
+                # taille reduite ~16x. Simplification par zoom (chantier
+                # futur) permettra de reetendre a 6-16 si necessaire.
                 pmtiles_bytes, pmt_meta = await asyncio.to_thread(
                     geojson_to_pmtiles,
                     gj,
                     layer_id_safe or "features",
-                    6,   # min_zoom (France entiere)
-                    16,  # max_zoom (quartier detaille)
+                    12,  # min_zoom (commune/arrondissement)
+                    16,  # max_zoom (batiment)
                 )
-                content_hash = _hl.sha256(pmtiles_bytes).hexdigest()
-                slug = f"{cid[:12]}-{layer_id_safe}-{content_hash[:8]}"
-                info = await asyncio.to_thread(
-                    _s3.publish,
-                    owner=owner,
-                    kind="features_pmtiles",
-                    slug=slug,
-                    content=pmtiles_bytes,
-                    content_type="application/vnd.pmtiles",
-                    audience=audience,
-                )
-                url = (
-                    f"{hub_base}/published/{owner}/features_pmtiles/{slug}"
-                    if hub_base else info.get("url")
-                )
-                # Layer : passe en mode "pmtiles" pour le partial MapLibre
-                # (voir Commit 4 : _interactive_map_partial.j2 detecte
-                # layer.source_type === "pmtiles").
-                layer.pop("geojson", None)  # supprime pour alleger HTML
-                layer["source_type"] = "pmtiles"
-                layer["tiles_url"] = url
-                layer["source_layer_name"] = layer_id_safe or "features"
-                layer["bbox"] = pmt_meta["bbox"]
-                layer["min_zoom"] = pmt_meta["min_zoom"]
-                layer["max_zoom"] = pmt_meta["max_zoom"]
-                audit_data_urls.append({
-                    "cid": cid,
-                    "layer_id": layer_id,
-                    "kind": "pmtiles",
-                    "url": url,
-                    "n_features": pmt_meta["n_features"],
-                    "size_bytes": pmt_meta["size_bytes"],
-                    "content_hash": content_hash,
-                    "bbox": pmt_meta["bbox"],
-                })
-                modified = True
                 log.info(
-                    "externalized PMTiles %s/%s : %d features -> %d KB (%d tuiles)",
+                    "PMTiles encoded %s/%s : %d features -> %d KB (%d tuiles) - upload S3...",
                     cid, layer_id, pmt_meta["n_features"],
                     pmt_meta["size_bytes"] // 1024, pmt_meta["n_tiles"],
                 )
-                continue  # PMTiles OK -> skip fallback
             except Exception as exc:
                 log.warning(
-                    "PMTiles encode/upload %s/%s (%d features) : %s -> fallback geojson gzip",
+                    "PMTiles encode %s/%s (%d features) : %s -> fallback geojson gzip",
                     cid, layer_id, n_features_source, exc,
                 )
-                # Poursuit vers niveau 2 (geojson gzip URL)
+                pmtiles_bytes = None
+
+            # 1b. Upload S3 (peut echouer si MinIO ferme la connexion)
+            if pmtiles_bytes is not None and pmt_meta is not None:
+                try:
+                    content_hash = _hl.sha256(pmtiles_bytes).hexdigest()
+                    slug = f"{cid[:12]}-{layer_id_safe}-{content_hash[:8]}"
+                    info = await asyncio.to_thread(
+                        _s3.publish,
+                        owner=owner,
+                        kind="features_pmtiles",
+                        slug=slug,
+                        content=pmtiles_bytes,
+                        content_type="application/vnd.pmtiles",
+                        audience=audience,
+                    )
+                    url = (
+                        f"{hub_base}/published/{owner}/features_pmtiles/{slug}"
+                        if hub_base else info.get("url")
+                    )
+                    # Layer : passe en mode "pmtiles" pour le partial MapLibre
+                    layer.pop("geojson", None)  # allege le HTML
+                    layer["source_type"] = "pmtiles"
+                    layer["tiles_url"] = url
+                    layer["source_layer_name"] = layer_id_safe or "features"
+                    layer["bbox"] = pmt_meta["bbox"]
+                    layer["min_zoom"] = pmt_meta["min_zoom"]
+                    layer["max_zoom"] = pmt_meta["max_zoom"]
+                    audit_data_urls.append({
+                        "cid": cid,
+                        "layer_id": layer_id,
+                        "kind": "pmtiles",
+                        "url": url,
+                        "n_features": pmt_meta["n_features"],
+                        "size_bytes": pmt_meta["size_bytes"],
+                        "content_hash": content_hash,
+                        "bbox": pmt_meta["bbox"],
+                    })
+                    modified = True
+                    log.info(
+                        "PMTiles upload OK %s/%s : %d KB uploaded",
+                        cid, layer_id, pmt_meta["size_bytes"] // 1024,
+                    )
+                    continue  # PMTiles OK -> skip fallback
+                except Exception as exc:
+                    log.warning(
+                        "PMTiles upload %s/%s (%d KB) : %s -> fallback geojson gzip",
+                        cid, layer_id, pmt_meta["size_bytes"] // 1024, exc,
+                    )
+                    # Poursuit vers niveau 2 (geojson gzip URL)
 
         # ── Niveau 2 : GeoJSON gzip URL (piste 1a v4, fallback) ────────
         try:
