@@ -28,5 +28,21 @@ setup(
         # WGS84 dans _build_interactive_map_ctx (hub/geo_utils.py). Import
         # tardif + fail-soft si absent.
         "pyproj>=3.5",
+        # Sprint sec-vague0 dette OOM piste PMTiles V0.4 (2026-07-21) :
+        # externalisation features vectorielles en tuiles PMTiles cote
+        # publish, pour contourner le hard limit MinIO SSPCloud sur uploads
+        # >5MB (token stsonly interdit s3:CreateMultipartUpload, put_object
+        # coupe la connexion sur payloads 19-38MB). PMTiles = format
+        # monofichier vector tiles (spec Protomaps v3), sert via HTTP
+        # Range Requests. 19MB geojson brut -> ~2MB pmtiles (compression
+        # MVT + zstd interne). MapLibre natif via plugin pmtiles-protocol
+        # (chargement inline dans _interactive_map_partial.j2).
+        # - pmtiles : reader + writer + spec v3
+        # - mapbox-vector-tile : encode features -> MVT (protobuf)
+        # - shapely : geometrie helpers (deja tire par pyproj transitive
+        #   dans certains contextes, on l'explicite ici)
+        "pmtiles>=3.4.0",
+        "mapbox-vector-tile>=2.0.0",
+        "shapely>=2.0",
     ],
 )

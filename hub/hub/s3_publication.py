@@ -57,6 +57,15 @@ _KINDS = {
     # les assemblies avec beaucoup de features, contourne le blocage
     # GIL sur Jinja2 render.
     "features",
+    # Sprint sec-vague0 dette OOM piste PMTiles V0.4 (2026-07-21) : strate
+    # FEATURES_PMTILES. Vector tiles pmtiles au lieu de geojson brut.
+    # Bypass la limite MinIO SSPCloud stsonly (put_object echoue >5MB) en
+    # produisant un fichier compact (~2MB pour 14270 features BD TOPO)
+    # via encoding MVT + compression zstd/gzip interne pmtiles v3.
+    # MapLibre lit via HTTP Range Requests (16KB chunks), Cache-Control
+    # immuable (URL avec hash). Le kind separe de "features" permet un
+    # servi different cote serve_published (Range + no gzip re-encoding).
+    "features_pmtiles",
 }
 _KIND_EXT = {
     "storymap":  "html",
@@ -67,6 +76,7 @@ _KIND_EXT = {
     "assembly":  "html",
     "component": "html",
     "features":  "geojson",
+    "features_pmtiles": "pmtiles",
 }
 _KIND_CONTENT_TYPE = {
     "storymap":  "text/html; charset=utf-8",
@@ -76,6 +86,7 @@ _KIND_CONTENT_TYPE = {
     "pdf":       "application/pdf",
     "assembly":  "text/html; charset=utf-8",
     "features":  "application/geo+json; charset=utf-8",
+    "features_pmtiles": "application/vnd.pmtiles",
     "component": "text/html; charset=utf-8",
 }
 
@@ -282,7 +293,12 @@ def publish(owner: str, kind: str, slug: str, content: bytes,
     #        sur petits objets.
     import gzip as _gzip
     _GZIP_THRESHOLD = 2 * 1024 * 1024  # 2MB
-    if len(content) > _GZIP_THRESHOLD:
+    # Piste PMTiles V0.4 (2026-07-21) : les .pmtiles sont deja compresses
+    # en interne (zstd/gzip sur les tuiles MVT). Recompresser cote HTTP
+    # ajoute du CPU pour un gain nul + brise le magic byte reader
+    # (pmtiles.reader attend le magic "PMTiles" en byte 0 non-encapsule).
+    # Skip gzip pour ce kind.
+    if kind != "features_pmtiles" and len(content) > _GZIP_THRESHOLD:
         content = _gzip.compress(content, compresslevel=6)
         extra_kwargs = {"ContentEncoding": "gzip"}
     else:
