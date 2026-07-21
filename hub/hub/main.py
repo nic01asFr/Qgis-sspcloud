@@ -8965,7 +8965,11 @@ async def serve_published(
     # (s3_key() ajoute l'extension selon le kind). L'URL retournee par
     # publish_assembly_endpoint n'en met pas, mais des URL externes
     # (clic user sur lien .html) en mettent. Resilience : accepter les 2.
-    for _ext in (".html", ".pdf", ".yaml", ".json", ".gpkg", ".qgz", ".zip"):
+    # PMTiles V0.4 (2026-07-21) : ajoute .pmtiles et .geojson.
+    for _ext in (
+        ".html", ".pdf", ".yaml", ".json",
+        ".gpkg", ".qgz", ".zip", ".pmtiles", ".geojson",
+    ):
         if safe_slug.endswith(_ext):
             safe_slug = safe_slug[:-len(_ext)]
             break
@@ -8991,6 +8995,47 @@ async def serve_published(
     if _decision is not None:
         # Refus : 401 (pas d'identite) ou 403 (identite mais pas owner).
         return _decision
+
+    # Sprint sec-vague0 dette OOM PMTiles V0.4 Commit 5 (2026-07-21) :
+    # Range Requests pour kind features_pmtiles. Le protocol pmtiles-protocol
+    # cote MapLibre fetch les tuiles par chunks 16KB via HTTP Range. On
+    # forward le header Range du request vers S3 GetObject(Range=...) et
+    # retourne 206 Partial Content avec les headers appropries. Le fichier
+    # .pmtiles n'est jamais gzip-compresse cote S3 (kind features_pmtiles
+    # skip Content-Encoding dans publish()), donc les bytes partiels sont
+    # exploitables tels quels par pmtiles.reader.
+    if kind == "features_pmtiles":
+        range_header = None
+        if request is not None:
+            range_header = request.headers.get("Range")
+        # Cas 1 : client demande un range partiel -> 206
+        if range_header:
+            try:
+                range_result = s3_publication.read_range(
+                    owner, kind, safe_slug, range_header,
+                )
+            except Exception as exc:
+                raise HTTPException(503, f"Lecture S3 range échouée: {exc}")
+            if range_result is None:
+                return _render_publication_404_html(owner, kind, safe_slug)
+            headers_206 = {
+                "Content-Range": range_result["content_range"] or f"bytes 0-{range_result['content_length']-1}/{range_result['total_size']}",
+                "Accept-Ranges": "bytes",
+                # PMTiles URLs contiennent un content-hash immuable dans le
+                # slug -> cache navigateur/CDN infini (evite 1 fetch/session).
+                "Cache-Control": "public, max-age=31536000, immutable",
+            }
+            if _audience != "public":
+                headers_206["X-Robots-Tag"] = "noindex, nofollow"
+            return Response(
+                content=range_result["body"],
+                status_code=206,
+                media_type=range_result["content_type"],
+                headers=headers_206,
+            )
+        # Cas 2 : client fetch sans Range (ex. header check pmtiles.reader
+        # ou wget entier). On sert 200 complet avec Accept-Ranges annonce
+        # pour que les futures requetes utilisent Range.
 
     try:
         content = s3_publication.read(owner, kind, safe_slug)
@@ -9064,6 +9109,12 @@ async def serve_published(
     # audience. Empeche indexation Google/Bing des livrables non-publics.
     if _audience != "public":
         headers["X-Robots-Tag"] = "noindex, nofollow"
+    # Sprint sec-vague0 dette OOM PMTiles V0.4 (2026-07-21) : pour kind
+    # features_pmtiles servi sans Range, on annonce Accept-Ranges et Cache
+    # immuable (URL avec content-hash -> jamais modifie).
+    if kind == "features_pmtiles":
+        headers["Accept-Ranges"] = "bytes"
+        headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return Response(
         content=content,
         media_type=meta.get("content_type", "application/octet-stream"),

@@ -357,6 +357,65 @@ def read(owner: str, kind: str, slug: str) -> bytes | None:
         return None
 
 
+def read_range(
+    owner: str, kind: str, slug: str, byte_range: str,
+) -> dict | None:
+    """Lit un range partiel d'une publication S3. Utilise pour PMTiles.
+
+    Sprint sec-vague0 dette OOM piste PMTiles V0.4 Commit 5 (2026-07-21) :
+    le protocol pmtiles-protocol MapLibre fetch les tuiles via HTTP Range
+    Requests (chunks 16KB). Ce helper forward le Range header client vers
+    S3 GetObject(Range=...) et retourne les bytes partiels + les metadonnees
+    necessaires pour construire une reponse HTTP 206 Partial Content.
+
+    Note : les .pmtiles ne sont JAMAIS gzip-compresses cote S3 (kind
+    "features_pmtiles" skip Content-Encoding dans publish()). Le magic
+    byte "PMTiles" doit rester lisible en byte 0 pour que pmtiles.reader
+    puisse parser le header, et le Range doit adresser les bytes bruts.
+
+    Args:
+        owner, kind, slug : identifiants publication (kind attendu :
+                            "features_pmtiles").
+        byte_range : header Range client (ex. "bytes=0-16383" ou
+                     "bytes=1000-").
+
+    Returns:
+        None si publication absente. Sinon dict :
+            {
+              "body": bytes,             # bytes partiels
+              "content_range": str,      # ex. "bytes 0-16383/2048576"
+              "content_length": int,     # taille des bytes partiels
+              "content_type": str,       # ex. "application/vnd.pmtiles"
+              "total_size": int,         # taille totale du fichier
+            }
+    """
+    client, bucket, _ = _get_s3_client(owner)
+    key = s3_key(owner, kind, slug)
+    try:
+        obj = client.get_object(Bucket=bucket, Key=key, Range=byte_range)
+        body = obj["Body"].read()
+        # boto3 renvoie ContentRange sous forme "bytes 0-16383/2048576"
+        content_range = obj.get("ContentRange", "")
+        total_size = 0
+        if content_range and "/" in content_range:
+            try:
+                total_size = int(content_range.split("/")[-1])
+            except Exception:
+                pass
+        return {
+            "body": body,
+            "content_range": content_range,
+            "content_length": len(body),
+            "content_type": obj.get("ContentType", "application/octet-stream"),
+            "total_size": total_size,
+        }
+    except client.exceptions.NoSuchKey:
+        return None
+    except Exception as exc:
+        log.warning("S3 read_range failed %s/%s %s: %s", owner, slug, byte_range, exc)
+        return None
+
+
 def head(owner: str, kind: str, slug: str) -> dict | None:
     """Métadonnées d'une publication sans télécharger le body."""
     client, bucket, endpoint = _get_s3_client(owner)
