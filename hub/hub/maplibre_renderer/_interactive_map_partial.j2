@@ -121,12 +121,37 @@
   </div>
   {% endif %}
 </div>
+{# Sprint sec-vague0 dette OOM PMTiles V0.4 (2026-07-21) : charge le
+   plugin pmtiles-protocol depuis unpkg (autorise par CSP hub). Une seule
+   fois par page (idempotent guard sur window.pmtiles). Vector tiles
+   servis via HTTP Range Requests par serve_published (Commit 5). #}
+<script>
+if (typeof window !== 'undefined' && typeof pmtiles === 'undefined') {
+  document.write('<script src="https://unpkg.com/pmtiles@3.0.6/dist/index.js"><\/script>');
+}
+</script>
 <script>
 (function() {
   if (typeof maplibregl === 'undefined') {
     document.getElementById('{{ map_id }}').innerHTML =
       '<div style="padding:40px;text-align:center;color:#666">MapLibre indisponible.</div>';
     return;
+  }
+  // Sprint sec-vague0 dette OOM PMTiles V0.4 (2026-07-21) : enregistre
+  // le protocol 'pmtiles://' pour permettre a MapLibre de lire les vector
+  // tiles PMTiles via HTTP Range Requests. Le script pmtiles-protocol
+  // est charge en tete du partial (CDN unpkg autorise par CSP hub).
+  // Fail-safe : si pmtiles pas dispo (CDN down), les layers PMTiles
+  // affichent une erreur non-bloquante mais les layers geojson
+  // continuent de fonctionner.
+  if (typeof pmtiles !== 'undefined' && !window.__pmtilesProtocolRegistered) {
+    try {
+      const protocol = new pmtiles.Protocol();
+      maplibregl.addProtocol('pmtiles', protocol.tile);
+      window.__pmtilesProtocolRegistered = true;
+    } catch (e) {
+      console.warn('pmtiles protocol registration failed:', e);
+    }
   }
   const layers = {{ map_layers_json | safe }};
   {# Vague E2 Commit 7 : catalogue fonds via basemap_style_json injecte par hub.
@@ -151,11 +176,40 @@
   map.on('load', () => {
     const palette = ['#000091','#e1000f','#1f8d4d','#ff6f00','#9c27b0','#0288d1'];
     layers.forEach((layer, i) => {
-      if (!layer.geojson) return;
+      // Sprint sec-vague0 dette OOM PMTiles V0.4 (2026-07-21) : 3 modes
+      // possibles selon comment le hub a externalise le layer :
+      // 1. layer.source_type === 'pmtiles' + layer.tiles_url : vector
+      //    tiles PMTiles (Commit 3 cascade niveau 1). Le layer.geojson
+      //    a ete supprime pour alleger le HTML.
+      // 2. layer.geojson (str URL) : URL geojson S3 gzip (Commit 3
+      //    cascade niveau 2, fallback si PMTiles echoue).
+      // 3. layer.geojson (dict) : inline historique (Commit 3 cascade
+      //    niveau 3, dernier recours).
+      const isPmtiles = layer.source_type === 'pmtiles' && layer.tiles_url;
+      if (!isPmtiles && !layer.geojson) return;
       const sourceId = 'src-' + layer.id;
       const layerId = 'lyr-' + layer.id;
+      // Pour PMTiles : nom du source-layer dans les tuiles MVT (defini
+      // au moment de l'encoding cote hub, cf. pmtiles_encoder.py).
+      // Pour geojson : indefini, MapLibre lit directement `source`.
+      const srcLayerName = isPmtiles
+        ? (layer.source_layer_name || 'features')
+        : undefined;
       try {
-        map.addSource(sourceId, {type:'geojson', data:layer.geojson});
+        if (isPmtiles) {
+          // Vector tiles via PMTiles Protocol. MapLibre fetch les tuiles
+          // via HTTP Range Requests declenches par le protocol handler
+          // registre en tete de partial. Cache HTTP navigateur applique
+          // (Cache-Control: immutable cote serve_published Commit 5).
+          map.addSource(sourceId, {
+            type: 'vector',
+            url: 'pmtiles://' + layer.tiles_url,
+          });
+        } else {
+          // GeoJSON inline (dict) ou URL string : MapLibre native
+          // accepte les 2 dans le champ `data`.
+          map.addSource(sourceId, {type:'geojson', data:layer.geojson});
+        }
         const isPoint = (layer.geometry_type || '').toLowerCase().includes('point');
         const isLine  = (layer.geometry_type || '').toLowerCase().includes('line');
         // Vague E2 Commit 5 : applique paint_expression de classification thematique
@@ -167,9 +221,14 @@
         // Vague E2 Commit 8 : proportional symbols + heatmap
         // - layer.proportional_field : si defini, circle-radius = f(value)
         // - layer.heatmap_field : si defini, render heatmap layer au lieu de circles
+        // PMTiles V0.4 : pour les layer sur vector tiles, MapLibre exige
+        // un champ `source-layer` (nom MVT interne). Pour geojson il ne
+        // doit PAS etre present. On spread dans chaque addLayer.
+        const srcLayerSpread = isPmtiles ? {'source-layer': srcLayerName} : {};
         if (layer.heatmap_field && isPoint) {
           // Heatmap layer MapLibre (intensite via attribut)
           map.addLayer({id:layerId, type:'heatmap', source:sourceId,
+            ...srcLayerSpread,
             maxzoom: 18,
             paint: {
               'heatmap-weight': ['interpolate', ['linear'],
@@ -194,6 +253,7 @@
           const radiusMin = (layer.proportional_radius_min !== undefined) ? layer.proportional_radius_min : 4;
           const radiusMax = (layer.proportional_radius_max !== undefined) ? layer.proportional_radius_max : 30;
           map.addLayer({id:layerId, type:'circle', source:sourceId,
+            ...srcLayerSpread,
             paint:{
               'circle-color': themedColor,
               'circle-radius': ['interpolate', ['linear'],
@@ -205,13 +265,16 @@
             }});
         } else if (isPoint) {
           map.addLayer({id:layerId, type:'circle', source:sourceId,
+            ...srcLayerSpread,
             paint:{'circle-color': themedColor, 'circle-radius':6,
                   'circle-stroke-width':1, 'circle-stroke-color':'#fff'}});
         } else if (isLine) {
           map.addLayer({id:layerId, type:'line', source:sourceId,
+            ...srcLayerSpread,
             paint:{'line-color': themedColor, 'line-width':2}});
         } else {
           map.addLayer({id:layerId, type:'fill', source:sourceId,
+            ...srcLayerSpread,
             paint:{'fill-color': themedColor, 'fill-opacity':0.6,
                   'fill-outline-color': '#ffffff'}});
         }
@@ -280,20 +343,33 @@
       });
       document.getElementById('{{ map_id }}').appendChild(toggleDiv);
     }
-    if (layers.length && layers[0].geojson) {
+    // fitBounds() : Sprint sec-vague0 dette OOM PMTiles V0.4 (2026-07-21)
+    // priorite 1 = layer.bbox (calcule au hub cote encoder PMTiles,
+    // disponible pour source_type='pmtiles') ; priorite 2 = walk sur
+    // features geojson dict inline. Pour source geojson URL string,
+    // les features ne sont pas dispo cote SSR -> pas de fitBounds, on
+    // reste sur center/zoom du hub.
+    if (layers.length && layers[0]) {
       try {
-        const fs = (layers[0].geojson.features) || [];
-        if (fs.length) {
-          const b = new maplibregl.LngLatBounds();
-          fs.forEach(f => {
-            const coords = (f.geometry && f.geometry.coordinates) || [];
-            const walk = (c) => {
-              if (typeof c[0] === 'number') { b.extend(c); return; }
-              c.forEach(walk);
-            };
-            walk(coords);
-          });
+        const l0 = layers[0];
+        if (l0.bbox && l0.bbox.length === 4) {
+          const [minLng, minLat, maxLng, maxLat] = l0.bbox;
+          const b = new maplibregl.LngLatBounds([minLng, minLat], [maxLng, maxLat]);
           if (!b.isEmpty()) map.fitBounds(b, {padding:40, maxZoom:16});
+        } else if (l0.geojson && typeof l0.geojson === 'object' && l0.geojson.features) {
+          const fs = l0.geojson.features || [];
+          if (fs.length) {
+            const b = new maplibregl.LngLatBounds();
+            fs.forEach(f => {
+              const coords = (f.geometry && f.geometry.coordinates) || [];
+              const walk = (c) => {
+                if (typeof c[0] === 'number') { b.extend(c); return; }
+                c.forEach(walk);
+              };
+              walk(coords);
+            });
+            if (!b.isEmpty()) map.fitBounds(b, {padding:40, maxZoom:16});
+          }
         }
       } catch (e) { console.warn('fitBounds failed', e); }
     }
