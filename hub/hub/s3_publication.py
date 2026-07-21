@@ -261,25 +261,39 @@ def publish(owner: str, kind: str, slug: str, content: bytes,
     # le gate serve_published.
     s3_acl = "public-read" if audience == "public" else "private"
 
-    # Sprint sec-vague0 dette OOM piste 1a v3 (2026-07-20) : historique
+    # Sprint sec-vague0 dette OOM piste 1a v4 (2026-07-21) : historique
     # des tentatives sur les gros uploads (19-38MB) contre MinIO SSPCloud :
     # - v1 : put_object direct -> "Connection was closed before valid
-    #        response" (TCP timeout ~15-30s sur upload lent).
+    #        response" (TCP timeout ~15-30s sur upload lent 19MB).
     # - v2 : upload_fileobj + TransferConfig multipart 5MB -> erreur
     #        "InvalidAccessKeyId sur CreateMultipartUpload". Le token
     #        stsonly SSPCloud n'a PAS la permission
-    #        s3:CreateMultipartUpload (restriction policy connue - cf.
-    #        memoire "Users OIDC ne peuvent create/delete Role").
-    # - v3 (actuel) : put_object direct + boto3 Config avec retries
-    #        adaptifs + timeouts longs. Absorbe les connection close
-    #        transient via retry cote client, sans passer par multipart.
-    #        Config appliquee au client boto3 dans _get_s3_client (voir
-    #        modif ligne ~155). Ici on garde put_object simple.
+    #        s3:CreateMultipartUpload (restriction policy).
+    # - v3 : put_object + boto3 Config retries adaptive + timeouts 300s.
+    #        Retry adaptive INSUFFISANT : MinIO ferme la connexion apres
+    #        ~15-20s systematiquement sur payloads 19MB+, chaque retry
+    #        echoue de la meme facon (hard limit infra SSPCloud).
+    # - v4 (actuel) : gzip Content-Encoding cote client + put_object du
+    #        payload compresse. Un GeoJSON gzip ~= -70% (19MB -> ~6MB).
+    #        Passe sous le seuil connection close. MinIO sert avec
+    #        Content-Encoding: gzip, MapLibre / navigateur decompressent
+    #        nativement via HTTP. Compatible aussi pour les HTML publish
+    #        (38MB -> ~10-12MB). Threshold gzip = 2MB pour eviter overhead
+    #        sur petits objets.
+    import gzip as _gzip
+    _GZIP_THRESHOLD = 2 * 1024 * 1024  # 2MB
+    if len(content) > _GZIP_THRESHOLD:
+        content = _gzip.compress(content, compresslevel=6)
+        extra_kwargs = {"ContentEncoding": "gzip"}
+    else:
+        extra_kwargs = {}
+
     client.put_object(
         Bucket=bucket, Key=key, Body=content,
         ContentType=ct,
         ACL=s3_acl,
         Metadata=metadata,
+        **extra_kwargs,
     )
     url = public_url(endpoint, bucket, key)
     info = {
@@ -302,12 +316,24 @@ def publish(owner: str, kind: str, slug: str, content: bytes,
 
 
 def read(owner: str, kind: str, slug: str) -> bytes | None:
-    """Récupère le contenu d'une publication. None si absent."""
+    """Récupère le contenu d'une publication. None si absent.
+
+    Sprint sec-vague0 dette OOM piste 1a v4 (2026-07-21) : les publish
+    > 2MB sont stockes gzip-compresses avec ContentEncoding=gzip (pour
+    contourner le "Connection was closed" sur uploads MinIO SSPCloud
+    des gros objets 19-38MB). On decompresse ici pour que serve_published
+    retourne bytes uncompressed comme avant, transparent pour le client.
+    """
     client, bucket, _ = _get_s3_client(owner)
     key = s3_key(owner, kind, slug)
     try:
         obj = client.get_object(Bucket=bucket, Key=key)
-        return obj["Body"].read()
+        body = obj["Body"].read()
+        # Auto-decompresse si le publish etait gzip
+        if obj.get("ContentEncoding") == "gzip":
+            import gzip as _gzip
+            body = _gzip.decompress(body)
+        return body
     except client.exceptions.NoSuchKey:
         return None
     except Exception as exc:
