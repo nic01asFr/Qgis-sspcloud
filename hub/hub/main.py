@@ -2751,7 +2751,7 @@ async def _externalize_large_features(
                     12,  # min_zoom (commune/arrondissement)
                     16,  # max_zoom (batiment)
                 )
-                log.info(
+                log.warning(
                     "PMTiles encoded %s/%s : %d features -> %d KB (%d tuiles) - upload S3...",
                     cid, layer_id, pmt_meta["n_features"],
                     pmt_meta["size_bytes"] // 1024, pmt_meta["n_tiles"],
@@ -2781,8 +2781,21 @@ async def _externalize_large_features(
                         f"{hub_base}/published/{owner}/features_pmtiles/{slug}"
                         if hub_base else info.get("url")
                     )
-                    # Layer : passe en mode "pmtiles" pour le partial MapLibre
-                    layer.pop("geojson", None)  # allege le HTML
+                    # Layer : passe en mode "pmtiles" pour le partial MapLibre.
+                    # Sprint PMTiles V0.4 hotfix2 (2026-07-21) : IMPORTANT nettoyer
+                    # TOUS les champs qui contiennent des features dict pour eviter
+                    # de re-inliner le geojson dans le HTML publie. Le hub inject
+                    # 3 endroits potentiels selon le path :
+                    #   - layer.geojson (compat template v1 apres fix V0.4.4)
+                    #   - layer.source.data (contract V0.3.2 pivot, fetch
+                    #     geojson_path met les 19MB features ici)
+                    #   - layer.source.geojson (rare, ancien schema)
+                    # Tous nettoyes ici pour que le HTML ne contienne QUE les
+                    # metadatas + URL pmtiles.
+                    layer.pop("geojson", None)
+                    if isinstance(layer.get("source"), dict):
+                        layer["source"].pop("data", None)
+                        layer["source"].pop("geojson", None)
                     layer["source_type"] = "pmtiles"
                     layer["tiles_url"] = url
                     layer["source_layer_name"] = layer_id_safe or "features"
@@ -2800,9 +2813,12 @@ async def _externalize_large_features(
                         "bbox": pmt_meta["bbox"],
                     })
                     modified = True
-                    log.info(
-                        "PMTiles upload OK %s/%s : %d KB uploaded",
+                    # Log en WARNING pour visibilite (hub.main logger effective
+                    # level = 30/WARNING par defaut, INFO est filtre).
+                    log.warning(
+                        "PMTiles upload OK %s/%s : %d KB uploaded (%d features, %d tuiles)",
                         cid, layer_id, pmt_meta["size_bytes"] // 1024,
+                        pmt_meta["n_features"], pmt_meta["n_tiles"],
                     )
                     continue  # PMTiles OK -> skip fallback
                 except Exception as exc:
@@ -2838,6 +2854,12 @@ async def _externalize_large_features(
                 if hub_base else info.get("url")
             )
             layer["geojson"] = url  # URL string, MapLibre native OK
+            # Sprint PMTiles V0.4 hotfix2 (2026-07-21) : nettoyer aussi
+            # source.data / source.geojson pour eviter double-inline
+            # dans HTML publie.
+            if isinstance(layer.get("source"), dict):
+                layer["source"].pop("data", None)
+                layer["source"].pop("geojson", None)
             audit_data_urls.append({
                 "cid": cid,
                 "layer_id": layer_id,
@@ -2848,7 +2870,7 @@ async def _externalize_large_features(
                 "content_hash": content_hash,
             })
             modified = True
-            log.info(
+            log.warning(
                 "externalized geojson gzip URL %s/%s : %d features -> %d KB",
                 cid, layer_id, n_features_source, size // 1024,
             )
