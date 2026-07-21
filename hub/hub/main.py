@@ -79,6 +79,16 @@ _MCP_PORT = 8100
 _API_PORT = 8080
 _SELF_URL  = f"http://127.0.0.1:{os.getenv('HUB_INTERNAL_PORT', '8888')}"
 
+# Sprint sec-vague0 dette OOM piste PMTiles V0.4 (2026-07-21) : feature
+# flag pour activer/desactiver l'externalisation en vector tiles PMTiles
+# des layers d'un interactive_map. Defaut : "true" (comportement optimal).
+# Rollback rapide en prod possible sans redeploy code : passer la var
+# d'env a "false" et relancer le pod -> retombe sur la piste 1a v4
+# (geojson gzip URL) puis inline.
+_PMTILES_ENABLED = os.getenv("PMTILES_ENABLED", "true").lower() in (
+    "true", "1", "yes", "on",
+)
+
 # ── Config GeoAI GPU pod ──────────────────────────────────────────────────────
 # Injecté par qgis-mcp.service.yml → serve.env
 def _parse_port(raw: str | None, default: int) -> int:
@@ -2647,35 +2657,47 @@ async def _externalize_large_features(
     audience: str = "cerema_internal",
     threshold_bytes: int = 500_000,
 ) -> tuple[str, list[dict]]:
-    """Complete le contract V0.3.2 pivot universel (piste 1a, 2026-07-20).
+    """Externalise les layer.geojson via PMTiles (V0.4) ou geojson gzip (v1a).
 
-    Le hub inline actuellement TOUS les geojson layer dans le HTML rendu
-    (main.py:5787 "V0.3.1 geojson_path : fetch PVC + inline pour SSR
-    autoportant"). A 14270 features BD TOPO le HTML depasse 38MB et
-    provoque un blocage GIL Python sur Jinja2 render >60s -> kubelet
-    SIGKILL (exit 137).
+    Cascade fallback en 3 niveaux (2026-07-21) :
 
-    Ce helper complete le mecanisme deja prevu par le contract (cf.
-    ComponentSource.data_url, layer.source.type=geojson_url,
-    commentaire main.py:5792 "meme logique pour source.type=geojson_url :
-    laisse le client fetch (URL publique)" - jamais implemente).
+    1. **PMTiles** (defaut, si _PMTILES_ENABLED=true) :
+       geojson_to_pmtiles() -> pmtiles bytes (~2MB pour 14270 features BD
+       TOPO) -> upload kind=features_pmtiles -> layer devient
+       {source_type: "pmtiles", tiles_url: URL, bbox: [...], min/max_zoom}.
+       Bypass la limite MinIO stsonly sur uploads >5MB (pmtiles compact
+       + Range Requests cote client).
 
-    Comportement : parcourt les layers, pour chaque layer dont le
-    geojson serialise depasse `threshold_bytes` :
-    1. Upload via s3_publication.publish(kind="features", ...)
-       (kind ajoute dans s3_publication._KINDS, meme flux ACL/audience
-       que assembly/component - RGPD gate applique via /published)
-    2. Remplace layer.geojson (dict) par l'URL hub /published/... string
-       (MapLibre native accepte URL string dans addSource(...data))
-    3. Enregistre {cid, layer_id, url, n_features, size_bytes} dans
-       audit_data_urls pour tracability audit_chain
+    2. **GeoJSON gzip URL** (piste 1a v4, fallback) :
+       si PMTiles echoue OU _PMTILES_ENABLED=false, ET layer > threshold
+       (500KB par defaut) -> upload kind=features avec Content-Encoding
+       gzip -> layer.geojson devient URL string. MapLibre native accepte
+       URL dans addSource(...data). Ne bypass pas la limite MinIO 5MB si
+       geojson gzippe reste gros, mais utile pour datasets moyens.
 
-    Le HTML publie devient ~500KB au lieu de 38MB. Le client MapLibre
-    fait un fetch async cote browser au chargement (parallelisable,
-    cache-able HTTP). Le rendu final est identique visuellement.
+    3. **Inline** (dernier recours) :
+       si layer < threshold OU les 2 uploads echouent, on garde
+       layer.geojson dict inline dans le HTML (comportement historique).
+       Acceptable pour petits datasets (<500KB).
 
-    Layers < threshold restent inline (evite pollution S3 pour petits
-    layers pilotage/legende).
+    Chaque externalisation reussie enregistre dans audit_data_urls :
+    {cid, layer_id, kind: "pmtiles"|"geojson_gzip_url", url, n_features,
+    size_bytes, content_hash, bbox?}. Traceable dans audit_chain.
+
+    Contract V0.3.2 pivot universel respecte : ComponentSource.data_url +
+    layer.source.type=geojson_url (deja prevus, jamais implementes cote
+    publish) sont maintenant completes.
+
+    Args:
+        map_layers_js: JSON serialize des layers a externaliser (input
+                       de map_layers_js dans _build_interactive_map_ctx).
+        cid: component id (12 hex), utilise dans le slug S3 pour audit.
+        owner: username proprietaire (routing bucket S3).
+        audience: audience RGPD des livrables externalises (heritee de
+                  l'assembly parent). "cerema_internal" par defaut.
+        threshold_bytes: taille minimum pour fallback geojson gzip URL.
+                         Ignore par PMTiles (toujours externalise si
+                         _PMTILES_ENABLED=true).
 
     Returns:
         (map_layers_js modifie, audit_data_urls)
@@ -2692,32 +2714,93 @@ async def _externalize_large_features(
     hub_base = (_HUB_URL or _SELF_URL or "").rstrip("/")
     modified = False
 
+    import re as _re
+    import hashlib as _hl
+    from hub import s3_publication as _s3
+
     for layer in layers:
         if not isinstance(layer, dict):
             continue
         gj = layer.get("geojson")
         if not isinstance(gj, dict):
             continue  # deja URL string ou absent
+
+        layer_id = str(layer.get("id", "layer"))[:16]
+        layer_id_safe = _re.sub(r"[^a-zA-Z0-9_-]", "-", layer_id)
+        n_features_source = len((gj.get("features") or []))
+
+        # ── Niveau 1 : PMTiles (V0.4, comportement optimal) ─────────────
+        if _PMTILES_ENABLED:
+            try:
+                from hub.pmtiles_encoder import geojson_to_pmtiles
+                pmtiles_bytes, pmt_meta = await asyncio.to_thread(
+                    geojson_to_pmtiles,
+                    gj,
+                    layer_id_safe or "features",
+                    6,   # min_zoom (France entiere)
+                    16,  # max_zoom (quartier detaille)
+                )
+                content_hash = _hl.sha256(pmtiles_bytes).hexdigest()
+                slug = f"{cid[:12]}-{layer_id_safe}-{content_hash[:8]}"
+                info = await asyncio.to_thread(
+                    _s3.publish,
+                    owner=owner,
+                    kind="features_pmtiles",
+                    slug=slug,
+                    content=pmtiles_bytes,
+                    content_type="application/vnd.pmtiles",
+                    audience=audience,
+                )
+                url = (
+                    f"{hub_base}/published/{owner}/features_pmtiles/{slug}"
+                    if hub_base else info.get("url")
+                )
+                # Layer : passe en mode "pmtiles" pour le partial MapLibre
+                # (voir Commit 4 : _interactive_map_partial.j2 detecte
+                # layer.source_type === "pmtiles").
+                layer.pop("geojson", None)  # supprime pour alleger HTML
+                layer["source_type"] = "pmtiles"
+                layer["tiles_url"] = url
+                layer["source_layer_name"] = layer_id_safe or "features"
+                layer["bbox"] = pmt_meta["bbox"]
+                layer["min_zoom"] = pmt_meta["min_zoom"]
+                layer["max_zoom"] = pmt_meta["max_zoom"]
+                audit_data_urls.append({
+                    "cid": cid,
+                    "layer_id": layer_id,
+                    "kind": "pmtiles",
+                    "url": url,
+                    "n_features": pmt_meta["n_features"],
+                    "size_bytes": pmt_meta["size_bytes"],
+                    "content_hash": content_hash,
+                    "bbox": pmt_meta["bbox"],
+                })
+                modified = True
+                log.info(
+                    "externalized PMTiles %s/%s : %d features -> %d KB (%d tuiles)",
+                    cid, layer_id, pmt_meta["n_features"],
+                    pmt_meta["size_bytes"] // 1024, pmt_meta["n_tiles"],
+                )
+                continue  # PMTiles OK -> skip fallback
+            except Exception as exc:
+                log.warning(
+                    "PMTiles encode/upload %s/%s (%d features) : %s -> fallback geojson gzip",
+                    cid, layer_id, n_features_source, exc,
+                )
+                # Poursuit vers niveau 2 (geojson gzip URL)
+
+        # ── Niveau 2 : GeoJSON gzip URL (piste 1a v4, fallback) ────────
         try:
             payload = _json.dumps(gj, ensure_ascii=False)
         except Exception:
             continue
         size = len(payload.encode("utf-8"))
         if size < threshold_bytes:
-            continue  # petit layer -> reste inline
+            continue  # petit layer -> reste inline (niveau 3)
 
-        # Slug : cid-layerid-hash8 pour uniqueness (immuable per snapshot)
-        import hashlib as _hl
         content_hash = _hl.sha256(payload.encode("utf-8")).hexdigest()
-        layer_id = str(layer.get("id", "layer"))[:16]
-        # Sanitize layer_id : caracteres safe pour slug S3
-        import re as _re
-        layer_id_safe = _re.sub(r"[^a-zA-Z0-9_-]", "-", layer_id)
         slug = f"{cid[:12]}-{layer_id_safe}-{content_hash[:8]}"
-
         try:
-            # Deleguer boto3 put_object au thread (v4 pattern)
-            from hub import s3_publication as _s3
             info = await asyncio.to_thread(
                 _s3.publish,
                 owner=owner,
@@ -2727,25 +2810,28 @@ async def _externalize_large_features(
                 content_type="application/geo+json; charset=utf-8",
                 audience=audience,
             )
-            # URL hub gate (audience filter applique), pas MinIO direct
             url = (
                 f"{hub_base}/published/{owner}/features/{slug}"
                 if hub_base else info.get("url")
             )
-            layer["geojson"] = url  # str, MapLibre native OK
-            n_features = len((gj.get("features") or []))
+            layer["geojson"] = url  # URL string, MapLibre native OK
             audit_data_urls.append({
                 "cid": cid,
                 "layer_id": layer_id,
+                "kind": "geojson_gzip_url",
                 "url": url,
-                "n_features": n_features,
+                "n_features": n_features_source,
                 "size_bytes": size,
                 "content_hash": content_hash,
             })
             modified = True
+            log.info(
+                "externalized geojson gzip URL %s/%s : %d features -> %d KB",
+                cid, layer_id, n_features_source, size // 1024,
+            )
         except Exception as exc:
             log.warning(
-                "externalize features %s/%s (%d bytes) : %s -> reste inline",
+                "externalize geojson gzip %s/%s (%d bytes) : %s -> reste inline",
                 cid, layer_id, size, exc,
             )
 
@@ -6138,13 +6224,13 @@ async def _build_interactive_map_ctx(
         final_lat = fallback_lat
         final_zoom = fallback_zoom
 
-    # Sprint sec-vague0 dette OOM piste 1a (2026-07-20) : externalise les
-    # layer.geojson volumineux (>500KB serialise) vers S3 via kind
-    # "features" (complete le contract V0.3.2 pivot universel prevu mais
-    # jamais implemente cote publish). Contrepartie : le HTML publie
-    # passe de 38MB (14270 features inline) a ~500KB, plus de blocage
-    # GIL sur Jinja2 render. MapLibre native accepte URL string dans
-    # addSource(...data). Rendu visuel identique cote client.
+    # Sprint sec-vague0 dette OOM piste 1a + PMTiles V0.4 (2026-07-21) :
+    # externalise les layer.geojson vers S3. Cascade fallback 3 niveaux :
+    # 1. PMTiles (V0.4, defaut) : 19MB -> ~2MB, bypass MinIO stsonly
+    # 2. geojson gzip URL (piste 1a v4) : fallback si PMTiles echoue
+    # 3. inline : dernier recours si tout casse
+    # Contract V0.3.2 pivot universel respecte (data_url + geojson_url).
+    # Rendu visuel identique cote client MapLibre.
     _audience_for_features = comp_manifest.get(
         "classification", "cerema_internal",
     )
@@ -6159,7 +6245,11 @@ async def _build_interactive_map_ctx(
             log.info(
                 "externalized %d layer(s) for %s : %s",
                 len(_audit_urls), cid,
-                [f"{u['layer_id']}({u['size_bytes']//1024}KB)" for u in _audit_urls],
+                [
+                    f"{u['layer_id']}[{u.get('kind', '?')}]"
+                    f"({u.get('n_features', 0)}f/{u['size_bytes']//1024}KB)"
+                    for u in _audit_urls
+                ],
             )
     except Exception as exc:
         log.warning("externalize features %s : %s -> keep inline", cid, exc)
