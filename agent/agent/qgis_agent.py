@@ -534,7 +534,24 @@ _WORKSPACE_URL_RE = re.compile(
 def _rewrite_workspace_urls(payload: str) -> str:
     """Remplace toute URL pod-interne `localhost:PORT/api/...` par l'URL
     publique du hub. Deux endpoints ciblés : `/api/files/X` (download) et
-    `/api/upload` (upload multipart). Idempotent."""
+    `/api/upload` (upload multipart). Idempotent.
+
+    NOTE 2026-07-23 (post-audit) : le hub proxy MCP applique DEJA ce meme
+    rewrite dans _proxy_request (hub/hub/main.py) pour les reponses tools/call
+    de tous les clients MCP (Claude Desktop, Cursor, Cline, agent LLM
+    interne...). Ce helper cote agent devient donc redondant pour la boucle
+    agent -> hub /mcp -> agent (seconde passe = no-op ~1ms, regex ne matche
+    pas `https://user-...`).
+
+    Conserve en defense-in-depth pour :
+      - payloads locaux hors reponses MCP (logs, error messages, chat SSE
+        que l'agent enrichit avant de renvoyer a l'UI desk)
+      - fallback si hub deploye avec code pre-2026-07-23 (compat descendante)
+      - futurs chemins alternatifs qui shortcut le proxy hub /mcp
+
+    Source unique de verite : hub/hub/url_rewrite.py. Si le regex evolue,
+    resync manuel des 2 endroits (regex simple, idempotent, cout runtime
+    negligeable — pas de refactor package partage requis)."""
     if not payload:
         return payload
 

@@ -10639,16 +10639,28 @@ async def _proxy_request(
     # Enforcement scope : cote requete (gate tools/call) + flag filtrage reponse.
     whitelist = _scope_tools_whitelist(scope)
     _filter_tools_list = False
-    if whitelist is not None and body:
+    # Post-audit 2026-07-23 : detecter tools/call pour appliquer rewrite URLs
+    # workspace localhost:PORT -> hub public sur les reponses. Comble le trou
+    # cote clients MCP externes (Claude Desktop, Cursor, Cline) qui recevaient
+    # des URLs pod-interne inutilisables. L'agent LLM interne fait deja ce
+    # rewrite (agent/agent/qgis_agent.py:_rewrite_workspace_urls, ligne 534),
+    # mais le proxy hub /mcp ne l'appliquait pas -> tool upload_file etc.
+    # renvoyaient `http://localhost:8080/api/upload` illisible depuis PC user.
+    # Voir hub/hub/url_rewrite.py pour source unique + hub/tests/test_url_rewrite.py.
+    _rewrite_urls_response = False
+    if body:
         obj = _jsonrpc_obj(body)
         if obj is not None:
             method = obj.get("method")
             if method == "tools/call":
-                denied = _tool_call_denied(obj, whitelist)
-                if denied is not None:
-                    return denied
+                _rewrite_urls_response = True
+                if whitelist is not None:
+                    denied = _tool_call_denied(obj, whitelist)
+                    if denied is not None:
+                        return denied
             elif method == "tools/list":
-                _filter_tools_list = True
+                if whitelist is not None:
+                    _filter_tools_list = True
 
     client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=10.0))
     try:
@@ -10668,6 +10680,31 @@ async def _proxy_request(
     content_type = resp.headers.get("content-type", "application/json")
     _skip_resp = {"content-encoding", "transfer-encoding", "content-length", "connection"}
     resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in _skip_resp}
+
+    # Post-audit 2026-07-23 : rewrite URLs workspace localhost:PORT -> hub
+    # public sur les reponses tools/call bufferisees. Priorite sur le stream
+    # pour les tools/call uniquement (autres methodes = stream transparent).
+    # Combinable avec le filtrage tools/list : les deux cas passent par un
+    # aread() -> bufferisation courte. Pour tools/call, on rewrite. Le
+    # filtrage whitelist tools/call est deja fait au moment du gate cote
+    # requete (avant le send).
+    if _rewrite_urls_response:
+        try:
+            raw = await resp.aread()
+        finally:
+            await resp.aclose()
+            await client.aclose()
+            await sessions.touch_session(session_id)
+        from hub.url_rewrite import rewrite_workspace_urls
+        _hub_public = (_HUB_URL or _SELF_URL or "").rstrip("/")
+        raw_str = raw.decode("utf-8", errors="replace")
+        rewritten = rewrite_workspace_urls(raw_str, _hub_public)
+        return Response(
+            content=rewritten.encode("utf-8"),
+            status_code=resp.status_code,
+            media_type=content_type,
+            headers=resp_headers,
+        )
 
     # Filtrage tools/list : reponse courte -> on bufferise, filtre, renvoie en
     # one-shot (pas de stream). Tout autre flux reste streame (zero overhead).
