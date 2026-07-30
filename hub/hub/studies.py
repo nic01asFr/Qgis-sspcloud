@@ -1765,22 +1765,49 @@ except Exception:
 """
 
 
-def save_active_pod_code(sid: str) -> str:
-    """
-    Code Python pour sauvegarder l'étude `sid` côté pod.
+def save_active_project_pod_code(sid: str, pid: str | None = None) -> str:
+    """Code Python pour sauvegarder l'étude `sid` (+ projet `pid` si fourni)
+    côté pod, en **dual-write** legacy + pid-scopé.
 
-    Phase 12 — étude = bundle autoportant :
-    AVANT le write(), on adopte les sources de données dans `{sid}/data/` :
-    pour chaque couche dont la datasource pointe vers /data/cache/ (cache
-    partagé, volatil), on copie le fichier dans /data/studies/{sid}/data/ et
-    on relink la couche dessus. Le .qgz devient autoportant — même si le
-    cache est nettoyé, l'étude reste rechargeable.
+    Sprint isolation etudes-projets Fix #1 (2026-07-30) : le comportement
+    historique n'ecrit QUE dans le path legacy `/data/studies/{sid}/project.qgz`,
+    jamais dans `projects/{pid}/project.qgz`. Consequence : quand `activate_
+    project_pod_code` charge un projet par pid, l'etat lu est fige a la
+    date de la lazy migration (jamais re-mis a jour au save). Tous les
+    projets d'une meme etude partagent donc de fait le fichier legacy.
+
+    Nouveau comportement dual-write :
+
+    1. **Write LEGACY** (`/data/studies/{sid}/project.qgz`) :
+       - Adoption sources cache -> `data/` (comportement historique preserve)
+       - `writeEntry("Paths", "Absolute", False)` -> chemins relatifs
+       - Permet a l'export ZIP + scene_manifest V0.2 de rester portables
+
+    2. **Write PID-SCOPE** si `pid` fourni
+       (`/data/studies/{sid}/projects/{pid}/project.qgz`) :
+       - Copie apres le write legacy avec `setFileName(pid_target)`
+       - `writeEntry("Paths", "Absolute", True)` -> chemins absolus
+         (evite le bug `../data/` qui pointerait vers `projects/data/` inexistant
+         depuis un sous-dossier deux niveaux plus profond)
+       - Restore fileName + Paths=False apres le write pour ne pas perturber
+         les operations ulterieures qui attendent le mode historique
+
+    Backward compat : appel sans `pid` (ou `pid=None`) = comportement legacy
+    strict (aucun write pid-scope). Le wrapper `save_active_pod_code(sid)`
+    ci-dessous preserve la signature historique.
+
+    Phase 12 heritage : etude = bundle autoportant. AVANT le write legacy,
+    on adopte les sources de donnees dans `{sid}/data/` : pour chaque couche
+    dont la datasource pointe vers `/data/cache/`, on copie le fichier dans
+    `/data/studies/{sid}/data/` et on relink la couche dessus. Le .qgz legacy
+    devient autoportant meme si le cache est nettoye.
     """
     return f"""
 import re
 import shutil as _sh
 from pathlib import Path
 sid = {sid!r}
+pid = {pid!r}
 target = Path(f"/data/studies/{{sid}}/project.qgz")
 data_dir = target.parent / "data"
 try:
@@ -1827,7 +1854,8 @@ try:
             except Exception as exc:
                 failed.append({{"name": layer.name(), "reason": f"setDataSource fail: {{exc}}"}})
 
-    # ── Write project ──
+    # ── Write LEGACY (portable, chemins relatifs, adopte sources cache) ──
+    ok_legacy = False
     if n_layers > 0 or not target.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
         proj.setFileName(str(target))
@@ -1837,9 +1865,9 @@ try:
             proj.writeEntry("Paths", "Absolute", False)
         except Exception:
             pass
-        ok = proj.write(str(target))
+        ok_legacy = proj.write(str(target))
         print(
-            f"STUDY_SAVE_OK sid={{sid}} ok={{ok}} n_layers={{n_layers}} "
+            f"STUDY_SAVE_OK sid={{sid}} ok={{ok_legacy}} n_layers={{n_layers}} "
             f"adopted={{len(adopted)}} failed={{len(failed)}}"
         )
         if adopted:
@@ -1848,9 +1876,57 @@ try:
             print(f"  failed_adoptions={{failed}}")
     else:
         print(f"STUDY_SAVE_SKIP sid={{sid}} n_layers=0 target_exists={{target.exists()}}")
+
+    # ── Write PID-SCOPE (chemins absolus, non-portable mais equivalent fonctionnel) ──
+    # Sprint isolation etudes-projets Fix #1 (2026-07-30) : ecrit AUSSI dans
+    # /data/studies/{{sid}}/projects/{{pid}}/project.qgz pour que activate_project_
+    # pod_code (qui lit ce path en priorite) charge l'etat courant, pas un etat
+    # fige depuis la lazy migration.
+    if pid and n_layers > 0 and ok_legacy:
+        try:
+            pid_target = Path(f"/data/studies/{{sid}}/projects/{{pid}}/project.qgz")
+            pid_target.parent.mkdir(parents=True, exist_ok=True)
+            proj.setFileName(str(pid_target))
+            # Chemins ABSOLUS pour le pid-scope :
+            # depuis /data/studies/{{sid}}/projects/{{pid}}/project.qgz un
+            # `../data/` pointerait vers /data/studies/{{sid}}/projects/data/
+            # qui n'existe pas. En absolu, on garde les references intactes
+            # vers /data/studies/{{sid}}/data/ ecrites au write legacy.
+            try:
+                proj.writeEntry("Paths", "Absolute", True)
+            except Exception:
+                pass
+            ok_pid = proj.write(str(pid_target))
+            print(f"STUDY_SAVE_PID_OK sid={{sid}} pid={{pid}} ok={{ok_pid}}")
+            # Restore fileName et Paths mode pour ne pas perturber saves ulterieurs
+            # (autres call-sites attendent le mode legacy historique par defaut).
+            proj.setFileName(str(target))
+            try:
+                proj.writeEntry("Paths", "Absolute", False)
+            except Exception:
+                pass
+        except Exception as _pid_exc:
+            print(f"STUDY_SAVE_PID_ERR sid={{sid}} pid={{pid}} : {{_pid_exc}}")
 except Exception as exc:
     print(f"STUDY_SAVE_ERR {{exc}}")
 """
+
+
+def save_active_pod_code(sid: str) -> str:
+    """Wrapper backward-compat : appelle save_active_project_pod_code(sid, None)
+    pour preserver la signature historique. Les 6 call-sites main.py qui
+    passent uniquement `sid` continuent de fonctionner (comportement legacy
+    strict, aucun write pid-scope).
+
+    Les call-sites qui ont acces a pid (ex. activate_project_endpoint) doivent
+    passer explicitement `save_active_project_pod_code(sid, pid)` pour beneficier
+    du dual-write. Migration progressive callee par callee.
+
+    Sprint isolation etudes-projets Fix #1 (2026-07-30) : cette indirection
+    permet un rollout en 2 phases (deploy la nouvelle fonction sans casser
+    les call-sites existants, puis migrer chaque call-site un a un).
+    """
+    return save_active_project_pod_code(sid, None)
 
 
 def snapshot_active_pod_code(sid: str, checkpoint_id: str, tool_name: str) -> str:

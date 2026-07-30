@@ -3098,11 +3098,17 @@ async def activate_study(
         raise HTTPException(400, f"Étude archivée (status={s['status']})")
 
     # Save de l'étude sortante avant le switch (si différente et non-None)
+    # Sprint isolation etudes-projets Fix #1 (2026-07-30) : passe le prev_pid
+    # au save pour beneficier du dual-write pid-scope. Sans pid explicite,
+    # le save n'ecrit que dans le legacy et le projet DB ne persiste pas
+    # les modifications au switch.
     prev_sid = await studies.get_active_study_id(user["username"])
     if prev_sid and prev_sid != sid:
+        prev_pid = await studies.get_active_project_id(user["username"])
         try:
             await _execute_python_in_workspace(
-                user["username"], studies.save_active_pod_code(prev_sid),
+                user["username"],
+                studies.save_active_project_pod_code(prev_sid, prev_pid),
             )
         except Exception as exc:
             log.warning("Save étude sortante %s avant switch : %s", prev_sid, exc)
@@ -3174,15 +3180,25 @@ async def save_study(
     s = await studies.get_study(sid, user["username"])
     if not s:
         raise HTTPException(404, "Étude introuvable")
+    # Sprint isolation etudes-projets Fix #1 (2026-07-30) : passe active_pid
+    # au save pour dual-write pid-scope. Si l'user a un projet actif dans
+    # cette etude, on synchronise legacy + pid-scope. Sinon comportement
+    # legacy strict (backward compat).
+    active_pid = await studies.get_active_project_id(user["username"])
+    active_sid_verify = await studies.get_active_study_id(user["username"])
+    pid_for_save = active_pid if active_sid_verify == sid else None
     try:
         out = await _execute_python_in_workspace(
-            user["username"], studies.save_active_pod_code(sid),
+            user["username"],
+            studies.save_active_project_pod_code(sid, pid_for_save),
         )
-        log.info("Save étude %s : %s", sid, (out or "").strip()[:300])
+        log.info("Save étude %s (pid=%s) : %s", sid, pid_for_save,
+                 (out or "").strip()[:300])
     except Exception as exc:
         log.warning("Save étude %s ERR : %s", sid, exc)
         return {"saved": False, "error": str(exc)}
-    return {"saved": True, "sid": sid, "output": (out or "").strip()[:500]}
+    return {"saved": True, "sid": sid, "pid": pid_for_save,
+            "output": (out or "").strip()[:500]}
 
 
 # ── Sprint UX-3 Commit 2 : endpoints projects (1 etude -> N projets) ──────────
@@ -3340,13 +3356,18 @@ async def activate_project_endpoint(
     # Si l'etude n'est pas active, l'activer en cascade (mais SANS re-trigger
     # le chained activate de son default project -> on prefere notre pid choisi)
     prev_sid = await studies.get_active_study_id(user["username"])
+    prev_pid = await studies.get_active_project_id(user["username"])
     if prev_sid != sid:
         # Save de l'etude sortante avant le switch (idempotent au pattern
         # activate_study).
+        # Sprint isolation etudes-projets Fix #1 (2026-07-30) : passe prev_pid
+        # au save pour dual-write pid-scope, evite que les edits sur (prev_sid,
+        # prev_pid) atterrissent uniquement dans le legacy.
         if prev_sid:
             try:
                 await _execute_python_in_workspace(
-                    user["username"], studies.save_active_pod_code(prev_sid),
+                    user["username"],
+                    studies.save_active_project_pod_code(prev_sid, prev_pid),
                 )
             except Exception as exc:
                 log.warning("Save etude sortante %s : %s", prev_sid, exc)
@@ -3358,6 +3379,22 @@ async def activate_project_endpoint(
             )
         except Exception as exc:
             log.warning("Activation sentinel etude %s : %s", sid, exc)
+    else:
+        # Sprint isolation etudes-projets Fix #2 (2026-07-30) : save intra-etude
+        # au switch pid -> pid (meme etude). Sans ce save, les edits sur prev_pid
+        # sont perdus au moment ou activate_project_pod_code charge le nouveau
+        # pid (proj.read ecrase QgsProject.instance en RAM). Le prev_pid doit
+        # persister avant le switch.
+        if prev_pid and prev_pid != pid:
+            try:
+                await _execute_python_in_workspace(
+                    user["username"],
+                    studies.save_active_project_pod_code(sid, prev_pid),
+                )
+                log.info("Save intra-etude %s : %s -> %s (fix #2)",
+                         sid, prev_pid, pid)
+            except Exception as exc:
+                log.warning("Save intra-etude %s/%s : %s", sid, prev_pid, exc)
 
     await studies.set_active_project(user["username"], pid)
     await studies.touch_project(pid)
@@ -9549,6 +9586,13 @@ async def _ensure_active_study_for_agent(
     # eviter les race conditions sentinels/symlink. Le lock est par
     # username : deux users differents (pods differents) ne se bloquent
     # jamais entre eux.
+    #
+    # Sprint isolation etudes-projets Fix #3 (2026-07-30) : le lock etait
+    # historiquement ferme apres le re-check (L9601) et le vrai switch
+    # physique tournait HORS du lock. Deux tools/call concurrents
+    # pouvaient race sur set_active_study + activate_pod_code + chained
+    # default project + save sortante. Le lock est desormais etendu
+    # jusqu'a la fin du switch (record_switch + return final).
     async with _active_study_switch_locks[username]:
         # Re-check apres acquisition du lock : un autre agent peut avoir
         # deja switche vers expected_sid pendant qu'on attendait.
@@ -9563,70 +9607,77 @@ async def _ensure_active_study_for_agent(
         if active_actual == expected_sid:
             return active_actual, False
 
-    # Verifie que l'etude cible existe et est active
-    try:
-        s = await studies.get_study(expected_sid, username)
-    except Exception as exc:
-        log.warning("ensure_active_study: get_study %s echec : %s", expected_sid, exc)
-        return active_actual, False
-    if not s or s.get("status") != "active":
-        log.info(
-            "ensure_active_study: expected_sid=%s inexistante/archivee -> no switch",
-            expected_sid,
-        )
-        return active_actual, False
-
-    # Save sortante avant switch (autosave protection - meme code que
-    # activate_study endpoint L2779).
-    import time as _time_iso
-    _switch_start = _time_iso.monotonic()
-    if active_actual:
+        # Verifie que l'etude cible existe et est active
         try:
-            await _execute_python_in_workspace(
-                username, studies.save_active_pod_code(active_actual),
-            )
+            s = await studies.get_study(expected_sid, username)
         except Exception as exc:
-            log.warning(
-                "ensure_active_study: save sortante %s avant switch : %s",
-                active_actual, exc,
+            log.warning("ensure_active_study: get_study %s echec : %s", expected_sid, exc)
+            return active_actual, False
+        if not s or s.get("status") != "active":
+            log.info(
+                "ensure_active_study: expected_sid=%s inexistante/archivee -> no switch",
+                expected_sid,
             )
+            return active_actual, False
 
-    try:
-        await studies.set_active_study(username, expected_sid)
-        await studies.touch_study(expected_sid)
-        await _execute_python_in_workspace(
-            username, studies.activate_pod_code(expected_sid),
-        )
-        # Chained activate default project (meme pattern que activate_study L2803)
-        default_p = await studies.get_default_project(expected_sid)
-        if default_p is not None:
-            await studies.set_active_project(username, default_p["pid"])
-            await studies.touch_project(default_p["pid"])
+        # Save sortante avant switch (autosave protection - meme code que
+        # activate_study endpoint L2779).
+        # Sprint isolation etudes-projets Fix #1 (2026-07-30) : passe
+        # active_pid au save pour dual-write pid-scope.
+        import time as _time_iso
+        _switch_start = _time_iso.monotonic()
+        if active_actual:
+            try:
+                active_pid_prev = await studies.get_active_project_id(username)
+            except Exception:
+                active_pid_prev = None
             try:
                 await _execute_python_in_workspace(
                     username,
-                    studies.activate_project_pod_code(expected_sid, default_p["pid"]),
+                    studies.save_active_project_pod_code(active_actual, active_pid_prev),
                 )
             except Exception as exc:
                 log.warning(
-                    "ensure_active_study: activate projet %s echec : %s",
-                    default_p["pid"], exc,
+                    "ensure_active_study: save sortante %s avant switch : %s",
+                    active_actual, exc,
                 )
-    except Exception as exc:
-        log.warning(
-            "ensure_active_study: switch %s -> %s echec : %s",
-            active_actual, expected_sid, exc,
-        )
-        return active_actual, False
 
-    _latency_ms = int((_time_iso.monotonic() - _switch_start) * 1000)
-    _record_switch(username, active_actual, expected_sid, _latency_ms, source="mcp")
-    log.info(
-        "ensure_active_study: switch %s -> %s reussi pour %s en %dms "
-        "(mcp agent isolation)",
-        active_actual, expected_sid, username, _latency_ms,
-    )
-    return expected_sid, True
+        try:
+            await studies.set_active_study(username, expected_sid)
+            await studies.touch_study(expected_sid)
+            await _execute_python_in_workspace(
+                username, studies.activate_pod_code(expected_sid),
+            )
+            # Chained activate default project (meme pattern que activate_study L2803)
+            default_p = await studies.get_default_project(expected_sid)
+            if default_p is not None:
+                await studies.set_active_project(username, default_p["pid"])
+                await studies.touch_project(default_p["pid"])
+                try:
+                    await _execute_python_in_workspace(
+                        username,
+                        studies.activate_project_pod_code(expected_sid, default_p["pid"]),
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "ensure_active_study: activate projet %s echec : %s",
+                        default_p["pid"], exc,
+                    )
+        except Exception as exc:
+            log.warning(
+                "ensure_active_study: switch %s -> %s echec : %s",
+                active_actual, expected_sid, exc,
+            )
+            return active_actual, False
+
+        _latency_ms = int((_time_iso.monotonic() - _switch_start) * 1000)
+        _record_switch(username, active_actual, expected_sid, _latency_ms, source="mcp")
+        log.info(
+            "ensure_active_study: switch %s -> %s reussi pour %s en %dms "
+            "(mcp agent isolation)",
+            active_actual, expected_sid, username, _latency_ms,
+        )
+        return expected_sid, True
 
 
 def _record_switch(
@@ -11139,11 +11190,19 @@ async def desk_save_study(sid: str):
     """
     if not _STUDIES_AVAILABLE:
         return {"ok": False}
+    # Sprint isolation etudes-projets Fix #1 (2026-07-30) : dual-write pid-scope
+    # si l'user a un projet actif dans cette etude. beforeunload = save d'urgence,
+    # on prend le meilleur effort : legacy toujours + pid-scope si connu.
+    active_pid = await studies.get_active_project_id(_ONYXIA_USER)
+    active_sid_verify = await studies.get_active_study_id(_ONYXIA_USER)
+    pid_for_save = active_pid if active_sid_verify == sid else None
     try:
         await _execute_python_in_workspace(
-            _ONYXIA_USER, studies.save_active_pod_code(sid), timeout=15,
+            _ONYXIA_USER,
+            studies.save_active_project_pod_code(sid, pid_for_save),
+            timeout=15,
         )
-        return {"ok": True, "sid": sid}
+        return {"ok": True, "sid": sid, "pid": pid_for_save}
     except Exception as exc:
         log.warning("Save desk étude %s : %s", sid, exc)
         return {"ok": False, "error": str(exc)}
