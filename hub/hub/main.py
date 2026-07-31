@@ -10641,6 +10641,56 @@ def _tool_call_denied(obj: dict, whitelist: list) -> JSONResponse | None:
     return None
 
 
+def _merge_hub_tools_in_tools_list(raw: bytes, content_type: str) -> bytes:
+    """Sprint isolation etudes-projets Fix #4 (2026-07-30) : injecte les 6
+    tools hub natifs (study_list, study_create, study_switch, study_project_*)
+    dans la reponse tools/list du workspace, pour que les clients MCP externes
+    (Claude Desktop, Cursor, Cline) les decouvrent en meme temps que les 46
+    tools workspace QGIS.
+
+    Idempotent : si les hub-tools sont deja presents (double appel, wrapper
+    proxy en amont), on ne les duplique pas. Preserve l'ordre : workspace
+    tools d'abord (compat historique), hub tools apres.
+
+    Support JSON simple ET SSE (text/event-stream) comme _filter_tools_list_payload.
+    """
+    from hub.mcp_hub_tools import HUB_TOOLS_SCHEMA
+    hub_names = {t["name"] for t in HUB_TOOLS_SCHEMA}
+
+    def _merge(obj):
+        try:
+            result = obj.get("result") or {}
+            tools = result.get("tools")
+            if isinstance(tools, list):
+                existing_names = {t.get("name") for t in tools}
+                # Idempotence : n'ajoute que les hub-tools absents
+                to_add = [t for t in HUB_TOOLS_SCHEMA if t["name"] not in existing_names]
+                if to_add:
+                    result["tools"] = list(tools) + to_add
+                    obj["result"] = result
+        except Exception:
+            pass
+        return obj
+
+    text = raw.decode("utf-8", "replace")
+    if "text/event-stream" in (content_type or ""):
+        out = []
+        for line in text.split("\n"):
+            if line.startswith("data:"):
+                payload = line[5:].strip()
+                try:
+                    out.append("data: " + json.dumps(_merge(json.loads(payload))))
+                except Exception:
+                    out.append(line)
+            else:
+                out.append(line)
+        return "\n".join(out).encode("utf-8")
+    try:
+        return json.dumps(_merge(json.loads(text))).encode("utf-8")
+    except Exception:
+        return raw
+
+
 def _filter_tools_list_payload(raw: bytes, content_type: str, whitelist: list) -> bytes:
     """Retire les tools hors whitelist d'une reponse tools/list (JSON ou SSE)."""
     wl = set(whitelist)
@@ -10699,19 +10749,107 @@ async def _proxy_request(
     # renvoyaient `http://localhost:8080/api/upload` illisible depuis PC user.
     # Voir hub/hub/url_rewrite.py pour source unique + hub/tests/test_url_rewrite.py.
     _rewrite_urls_response = False
+    # Sprint isolation etudes-projets Fix #4 (2026-07-30) : injection de tools MCP
+    # hub natifs (study_list, study_create, study_switch, study_project_*) dans
+    # tools/list + dispatch local sur tools/call. Comble le trou : les clients MCP
+    # externes n'avaient aucun moyen de gerer les etudes/projets sans passer par
+    # l'UI /desk. Voir hub/hub/mcp_hub_tools.py pour les 6 tools + handlers.
+    _merge_hub_tools_in_list = False
+    _hub_tool_dispatch = None  # (tool_name, args, jsonrpc_id) si tools/call hub-tool
     if body:
         obj = _jsonrpc_obj(body)
         if obj is not None:
             method = obj.get("method")
             if method == "tools/call":
-                _rewrite_urls_response = True
-                if whitelist is not None:
-                    denied = _tool_call_denied(obj, whitelist)
-                    if denied is not None:
-                        return denied
+                # Detecter si c'est un hub-tool (study_*) avant de forward workspace
+                try:
+                    from hub.mcp_hub_tools import is_hub_tool
+                    _tool_name = ((obj.get("params") or {}).get("name") or "")
+                    if is_hub_tool(_tool_name):
+                        _hub_tool_dispatch = (
+                            _tool_name,
+                            (obj.get("params") or {}).get("arguments") or {},
+                            obj.get("id"),
+                        )
+                except Exception as _hub_import_exc:
+                    log.warning("hub_tools import failed : %s", _hub_import_exc)
+                if _hub_tool_dispatch is None:
+                    # Tool workspace normal : gate whitelist + flag rewrite URLs
+                    _rewrite_urls_response = True
+                    if whitelist is not None:
+                        denied = _tool_call_denied(obj, whitelist)
+                        if denied is not None:
+                            return denied
             elif method == "tools/list":
+                # Toujours bufferiser pour merger hub-tools + optionnel filter whitelist
+                _merge_hub_tools_in_list = True
                 if whitelist is not None:
                     _filter_tools_list = True
+
+    # Sprint isolation etudes-projets Fix #4 : dispatch local du hub-tool sans
+    # forward vers workspace. Le hub gere lui-meme la gestion etudes/projets.
+    if _hub_tool_dispatch is not None:
+        _tool_name, _args, _jsonrpc_id = _hub_tool_dispatch
+        try:
+            from hub.mcp_hub_tools import dispatch_hub_tool
+            # Extract username depuis le target_url / session — on l'a deja
+            # implicitement via mcp_auto_session en amont mais il faut re-le
+            # deriver. Approche simple : parser depuis session_id ou header
+            # Authorization. Ici on utilise l'user identifiable depuis
+            # _ONYXIA_USER (mono-user par pod) OU une extraction depuis le
+            # header Authorization Bearer -> user.
+            _username = _ONYXIA_USER
+            try:
+                # Fallback plus robuste : extraire depuis Bearer -> get_current_user
+                # Pour eviter dep circulaire, on utilise _ONYXIA_USER qui est
+                # correct dans le contexte pod mono-user actuel.
+                pass
+            except Exception:
+                pass
+            result_content = await dispatch_hub_tool(
+                _tool_name, _args, _username, _execute_python_in_workspace,
+            )
+            # Wrap au format MCP tools/call response : result.content[0].text = JSON
+            import json as _json_hub
+            response_obj = {
+                "jsonrpc": "2.0",
+                "id": _jsonrpc_id,
+                "result": {
+                    "content": [{
+                        "type": "text",
+                        "text": _json_hub.dumps(result_content, ensure_ascii=False),
+                    }],
+                    "isError": False,
+                },
+            }
+            log.info("hub_tool dispatch %s OK", _tool_name)
+            return Response(
+                content=_json_hub.dumps(response_obj).encode("utf-8"),
+                status_code=200,
+                media_type="application/json",
+            )
+        except Exception as exc:
+            log.warning("hub_tool dispatch %s KO : %s", _tool_name, exc)
+            import json as _json_hub
+            error_obj = {
+                "jsonrpc": "2.0",
+                "id": _jsonrpc_id,
+                "result": {
+                    "content": [{
+                        "type": "text",
+                        "text": _json_hub.dumps({
+                            "error": str(exc),
+                            "tool": _tool_name,
+                        }, ensure_ascii=False),
+                    }],
+                    "isError": True,
+                },
+            }
+            return Response(
+                content=_json_hub.dumps(error_obj).encode("utf-8"),
+                status_code=200,  # MCP error dans body, HTTP 200 pour respecter spec
+                media_type="application/json",
+            )
 
     client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=10.0))
     try:
@@ -10757,8 +10895,31 @@ async def _proxy_request(
             headers=resp_headers,
         )
 
-    # Filtrage tools/list : reponse courte -> on bufferise, filtre, renvoie en
+    # Sprint isolation etudes-projets Fix #4 (2026-07-30) : merge des tools hub
+    # natifs (study_*) dans la reponse tools/list du workspace + filtre whitelist
+    # optionnel. Deux cas passent par un aread() -> bufferisation courte.
+    if _merge_hub_tools_in_list:
+        try:
+            raw = await resp.aread()
+        finally:
+            await resp.aclose()
+            await client.aclose()
+            await sessions.touch_session(session_id)
+        # Merge hub-tools puis filtre whitelist si applicable
+        merged = _merge_hub_tools_in_tools_list(raw, content_type)
+        if _filter_tools_list and whitelist is not None:
+            merged = _filter_tools_list_payload(merged, content_type, whitelist)
+        return Response(
+            content=merged,
+            status_code=resp.status_code,
+            media_type=content_type,
+            headers=resp_headers,
+        )
+
+    # Filtrage tools/list legacy : reponse courte -> on bufferise, filtre, renvoie en
     # one-shot (pas de stream). Tout autre flux reste streame (zero overhead).
+    # Note : depuis fix #4, ce chemin devient rare car _merge_hub_tools_in_list
+    # est vrai pour tous les tools/list. Conserve pour retrocompat future.
     if _filter_tools_list and whitelist is not None:
         try:
             raw = await resp.aread()

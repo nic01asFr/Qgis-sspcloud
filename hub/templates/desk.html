@@ -474,18 +474,25 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       <div class="center-content">
         <div class="study-menu">
           <button class="study-trigger" id="study-trigger" onclick="toggleStudyMenu(event)"
-                  title="{% if active_study %}Étude en cours : {{ active_study.name }} — clique pour en changer{% else %}Choisir une étude{% endif %}">
+                  title="{% if active_study %}Étude : {{ active_study.name }}{% if active_project %} — Projet : {{ active_project.label }}{% endif %} — clique pour changer de projet{% else %}Choisir une étude{% endif %}">
             <span>📂</span>
             {% if active_study %}
+              {# Sprint isolation etudes-projets Fix #6 (2026-07-30) : badge
+                 explicite 'Étude : X / Projet : Y' pour rendre l'isolation
+                 visible au user. Sans projet actif, warning visuel. #}
+              <span style="font-size:11px;color:var(--text-mention-grey);text-transform:uppercase;letter-spacing:.3px">Étude&nbsp;:</span>
               <span class="study-name">{{ active_study.name }}</span>
-              {# Sprint UX-3 Commit 3 (2026-06-21) : badge projet actif a cote
-                 du nom etude. Si N>1 projets dans l'etude, indicateur '(N)'.
-                 Le dropdown projets est expose via le menu adjacent (cf.
-                 project-menu apres study-menu). #}
               {% if active_project %}
-              <span style="font-size:11px;color:var(--text-mention-grey);margin-left:4px"
+              <span style="color:var(--text-mention-grey);font-size:14px;margin:0 2px" aria-hidden="true">›</span>
+              <span style="font-size:11px;color:var(--text-mention-grey);text-transform:uppercase;letter-spacing:.3px">Projet&nbsp;:</span>
+              <span style="font-weight:500"
                     title="Projet actif : {{ active_project.label }}">
-                · {{ active_project.label }}
+                {{ active_project.label }}
+              </span>
+              {% else %}
+              <span style="font-size:11px;color:var(--warning-425);margin-left:6px"
+                    title="Aucun projet actif — sélectionner un projet pour isoler tes travaux QGIS">
+                · aucun projet actif
               </span>
               {% endif %}
             {% else %}
