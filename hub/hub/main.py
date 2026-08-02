@@ -918,8 +918,18 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(sessions.cleanup_loop())
     asyncio.create_task(_bootstrap_agent())
     asyncio.create_task(_bootstrap_geoai_gpu())
+    # Sprint isolation Day 3 (2026-08-02) : GC task background pour purger
+    # les entrees session_active_state expirees (TTL 24h par session MCP).
+    try:
+        from hub import session_active_state as _sas
+        _sas_gc_task = asyncio.create_task(_sas.gc_loop())
+    except Exception as exc:
+        log.warning("startup: session_active_state gc_loop non lance : %s", exc)
+        _sas_gc_task = None
     yield
     task.cancel()
+    if _sas_gc_task is not None:
+        _sas_gc_task.cancel()
 
 
 app = FastAPI(
@@ -9680,6 +9690,66 @@ async def _ensure_active_study_for_agent(
         return expected_sid, True
 
 
+async def resolve_effective_active_sid(
+    username: str,
+    mcp_session_id: str | None,
+    x_session_id: str | None,
+) -> tuple[str | None, str | None]:
+    """Sprint isolation Day 3 (2026-08-02) : determine (sid, pid) effectif
+    pour ce call MCP en appliquant la priorite de resolution.
+
+    Priorite descendante :
+    1. `session_active_state.get_active(mcp_session_id)` - client MCP moderne
+       (spec MCP 2024-11-05 header `Mcp-Session-Id`) : chaque connexion peut
+       avoir son propre couple actif sans muter la DB user globale.
+    2. `_extract_expected_sid(x_session_id)` - fallback Sprint A1 legacy pour
+       les agents internes (chat, editor, recipe worker) qui envoient un
+       session_id structure via `X-Session-Id`.
+    3. `studies.get_active_study_id(username)` - fallback DB user pour l'UI
+       desk et les sessions MCP non-instrumentees (comportement Day 2).
+
+    Retourne (None, None) si aucune source ne fournit un sid.
+
+    Best-effort : toute exception au niveau DB est logguee et remonte None
+    pour la source en erreur, sans casser la chaine de fallback.
+    """
+    # 1. Session-scoped MCP moderne
+    if mcp_session_id:
+        try:
+            from hub import session_active_state as _sas
+            sid, pid = await _sas.get_active(mcp_session_id)
+            if sid:
+                return sid, pid
+        except Exception as exc:
+            log.warning(
+                "resolve_effective: session_active_state lookup echec %s : %s",
+                mcp_session_id, exc,
+            )
+    # 2. Legacy Sprint A1 (agents internes)
+    if x_session_id:
+        sid_a1 = _extract_expected_sid(x_session_id)
+        if sid_a1:
+            try:
+                pid_db = await studies.get_active_project_id(username)
+            except Exception:
+                pid_db = None
+            return sid_a1, pid_db
+    # 3. Fallback DB user (UI desk / mono-session non-instrumentee)
+    try:
+        sid_db = await studies.get_active_study_id(username)
+    except Exception as exc:
+        log.warning("resolve_effective: get_active_study_id echec %s : %s",
+                    username, exc)
+        return None, None
+    if sid_db:
+        try:
+            pid_db = await studies.get_active_project_id(username)
+        except Exception:
+            pid_db = None
+        return sid_db, pid_db
+    return None, None
+
+
 def _record_switch(
     username: str, from_sid: str | None, to_sid: str,
     latency_ms: int, source: str = "mcp",
@@ -9860,6 +9930,13 @@ async def diagnostics_isolation(
             detail="Endpoint reserve aux cles superviseur (pas de scope agent).",
         )
 
+    # Sprint isolation Day 3 (2026-08-02) : stats session_active_state
+    try:
+        from hub import session_active_state as _sas
+        _sas_stats = _sas.stats()
+    except Exception as exc:
+        log.warning("diagnostics/isolation: sas.stats echec : %s", exc)
+        _sas_stats = {"error": str(exc)}
     return {
         "switches_total_since_boot": _iso_switches_total["count"],
         "recent_switches": list(_iso_recent_switches),
@@ -9867,6 +9944,7 @@ async def diagnostics_isolation(
             "active_study_switch": len(_active_study_switch_locks),
             "session": len(_session_locks),
         },
+        "session_active_state": _sas_stats,
         "helpers": {
             "supported_session_id_patterns": [
                 "study:{sid}",
@@ -9876,6 +9954,11 @@ async def diagnostics_isolation(
                 "assist:{sid}:cid:{cid}",
                 "assist:{sid}:aid:{aid}",
                 "agent:{agent_id}:sid:{sid}",
+            ],
+            "day3_priority": [
+                "1. session_active_state[Mcp-Session-Id] (client MCP moderne)",
+                "2. _extract_expected_sid(X-Session-Id) (Sprint A1 legacy)",
+                "3. studies.get_active_study_id(username) (DB, UI desk)",
             ],
             "sprint": "isolation-multi-agent A1+A2+A3",
         },
@@ -9899,18 +9982,42 @@ async def mcp_auto_session(
 
     # Sprint isolation multi-agent A1 (2026-07-18) : lit le header X-Session-Id
     # optionnel (l'agent Claude Desktop / chat / recipe passe son session_id
-    # structure ici pour que le hub isole son contexte du reste). Best-effort :
-    # si le pattern n'est pas reconnu (legacy UUID, header absent), on continue
-    # sans switch et l'agent opere sur l'active_study courant du user. Voir
-    # _extract_expected_sid + _ensure_active_study_for_agent au-dessus.
-    _mcp_session_id_hdr = request.headers.get("x-session-id") \
+    # structure ici pour que le hub isole son contexte du reste).
+    #
+    # Sprint isolation Day 3 (2026-08-02) : lit aussi le header Mcp-Session-Id
+    # (spec MCP 2024-11-05, UUID unique par connexion client MCP externe).
+    # Priorite de resolution du sid effectif :
+    #   1. session_active_state[mcp_session_id]  (client MCP moderne, isolation
+    #      multi-session du meme user)
+    #   2. _extract_expected_sid(x_session_id)   (agents internes legacy A1)
+    #   3. DB.get_active_study_id(username)      (UI desk, mono-session)
+    #
+    # Best-effort : si aucune source, comportement Day 2 preserve (aucun switch).
+    _x_session_id_hdr = request.headers.get("x-session-id") \
         or request.headers.get("X-Session-Id")
-    _expected_sid = _extract_expected_sid(_mcp_session_id_hdr)
-    if _expected_sid:
-        await _ensure_active_study_for_agent(username, _expected_sid)
+    _mcp_session_id_hdr = request.headers.get("mcp-session-id") \
+        or request.headers.get("Mcp-Session-Id")
+    # Day 3 : keep-alive TTL de la session au moindre call
+    if _mcp_session_id_hdr:
+        try:
+            from hub import session_active_state as _sas
+            await _sas.touch(_mcp_session_id_hdr)
+        except Exception as exc:
+            log.warning("mcp_auto_session: sas.touch echec %s : %s",
+                        _mcp_session_id_hdr, exc)
+
+    # Resolve sid effectif via priorite session > A1 > DB
+    _effective_sid, _ = await resolve_effective_active_sid(
+        username, _mcp_session_id_hdr, _x_session_id_hdr,
+    )
+    if _effective_sid:
+        await _ensure_active_study_for_agent(username, _effective_sid)
 
     target_url = _mcp_url(session, path)
-    return await _proxy_request(request, target_url, session["id"], scope=scope)
+    return await _proxy_request(
+        request, target_url, session["id"], scope=scope,
+        mcp_session_id=_mcp_session_id_hdr,
+    )
 
 
 # ── API Key — émission clé stable pour Claude Desktop ────────────────────────
@@ -10725,12 +10832,17 @@ def _filter_tools_list_payload(raw: bytes, content_type: str, whitelist: list) -
 
 async def _proxy_request(
     request: Request, target_url: str, session_id: str, scope: dict | None = None,
+    mcp_session_id: str | None = None,
 ) -> Response:
     """Proxy HTTP vers un pod de session (JSON ou SSE stream).
 
     `scope` (cle scopee) optionnel : si une whitelist de tools s'applique, le
     flux MCP est filtre (gate tools/call + filtrage tools/list). Sinon le proxy
     reste transparent (comportement historique).
+
+    Sprint isolation Day 3 (2026-08-02) : `mcp_session_id` optionnel propage
+    aux handlers hub natifs (study_*) pour isolation session-scoped de
+    l'active_sid/pid. None -> comportement Day 2 (mute DB user).
     """
     _skip_headers = {"host", "connection", "transfer-encoding", "te", "trailers", "upgrade"}
     headers = {k: v for k, v in request.headers.items() if k.lower() not in _skip_headers}
@@ -10808,6 +10920,7 @@ async def _proxy_request(
                 pass
             result_content = await dispatch_hub_tool(
                 _tool_name, _args, _username, _execute_python_in_workspace,
+                mcp_session_id=mcp_session_id,
             )
             # Wrap au format MCP tools/call response : result.content[0].text = JSON
             import json as _json_hub

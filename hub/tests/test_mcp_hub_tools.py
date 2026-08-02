@@ -263,3 +263,153 @@ def test_merge_hub_tools_no_result_tools_key():
     # Aucun tools key -> merge no-op
     assert "tools" not in result.get("result", {})
     assert result == payload
+
+
+# ── Day 3 session-scoped tests ───────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_day3_dispatch_propagates_mcp_session_id():
+    """dispatch_hub_tool passe mcp_session_id aux handlers."""
+    from hub import session_active_state as sas
+    await sas._reset_for_tests()
+    with patch("hub.studies.list_studies",
+               new=AsyncMock(return_value=[
+                   {"id": "sidA", "name": "A", "status": "active",
+                    "last_active": None, "profile": "standard"},
+               ])):
+        # Pre-set session-scoped active
+        await sas.set_active("mcp-XYZ", "sidA", "pidA")
+        result = await dispatch_hub_tool(
+            "study_list", {}, "user", execute_python_in_workspace_fn=None,
+            mcp_session_id="mcp-XYZ",
+        )
+    assert result["active_sid"] == "sidA"
+    assert result["session_scoped"] is True
+    await sas._reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_day3_study_list_sans_session_fallback_db():
+    """Sans mcp_session_id -> fallback DB (session_scoped=False)."""
+    from hub import session_active_state as sas
+    await sas._reset_for_tests()
+    with patch("hub.studies.list_studies",
+               new=AsyncMock(return_value=[
+                   {"id": "sidDB", "name": "DB", "status": "active",
+                    "last_active": None, "profile": "standard"},
+               ])), \
+         patch("hub.studies.get_active_study_id",
+               new=AsyncMock(return_value="sidDB")), \
+         patch("hub.studies.get_active_project_id",
+               new=AsyncMock(return_value=None)):
+        result = await dispatch_hub_tool(
+            "study_list", {}, "user", execute_python_in_workspace_fn=None,
+        )
+    assert result["active_sid"] == "sidDB"
+    assert result["session_scoped"] is False
+
+
+@pytest.mark.asyncio
+async def test_day3_study_list_reinject_active_archived():
+    """Fix edge case : etude active archivee -> toujours dans la liste."""
+    from hub import session_active_state as sas
+    await sas._reset_for_tests()
+    with patch("hub.studies.list_studies",
+               new=AsyncMock(return_value=[
+                   {"id": "sidA", "name": "A-active", "status": "active",
+                    "last_active": None, "profile": "standard"},
+                   {"id": "sidB", "name": "B-archived", "status": "archived",
+                    "last_active": None, "profile": "standard"},
+               ])):
+        # Active-sid pointe sur l'etude archived
+        await sas.set_active("mcp-XYZ", "sidB", None)
+        result = await dispatch_hub_tool(
+            "study_list", {}, "user", execute_python_in_workspace_fn=None,
+            mcp_session_id="mcp-XYZ",
+        )
+    # sidB doit apparaitre malgre status=archived
+    names = [s["sid"] for s in result["studies"]]
+    assert "sidA" in names
+    assert "sidB" in names  # <-- fix edge case
+    assert result["active_sid"] == "sidB"
+    # is_active True sur sidB
+    assert next(s for s in result["studies"] if s["sid"] == "sidB")["is_active"] is True
+    await sas._reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_day3_switch_isolation_2_sessions():
+    """2 mcp_session_id distincts -> 2 active_sid isoles, DB user inchangee."""
+    from hub import session_active_state as sas
+    await sas._reset_for_tests()
+
+    execute_mock = AsyncMock()
+    with patch("hub.studies.get_study", new=AsyncMock(side_effect=lambda sid, u: {
+                    "id": sid, "name": f"study-{sid}", "status": "active",
+                })), \
+         patch("hub.studies.get_active_study_id",
+               new=AsyncMock(return_value="sidDB")), \
+         patch("hub.studies.get_active_project_id",
+               new=AsyncMock(return_value=None)), \
+         patch("hub.studies.get_default_project", new=AsyncMock(return_value=None)), \
+         patch("hub.studies.set_active_study",
+               new=AsyncMock()) as mock_set_db, \
+         patch("hub.studies.touch_study", new=AsyncMock()), \
+         patch("hub.studies.save_active_project_pod_code",
+               return_value="# save code"), \
+         patch("hub.studies.activate_pod_code", return_value="# activate code"):
+
+        # Session A switch vers sidA
+        await dispatch_hub_tool(
+            "study_switch", {"sid": "sidAAAAAAAAAA"}, "user",
+            execute_python_in_workspace_fn=execute_mock,
+            mcp_session_id="mcp-A",
+        )
+        # Session B switch vers sidB
+        await dispatch_hub_tool(
+            "study_switch", {"sid": "sidBBBBBBBBBB"}, "user",
+            execute_python_in_workspace_fn=execute_mock,
+            mcp_session_id="mcp-B",
+        )
+
+        # Verif isolation
+        sidA, _ = await sas.get_active("mcp-A")
+        sidB, _ = await sas.get_active("mcp-B")
+        assert sidA == "sidAAAAAAAAAA"
+        assert sidB == "sidBBBBBBBBBB"
+        # DB user JAMAIS mutee (session-scoped)
+        mock_set_db.assert_not_called()
+
+    await sas._reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_day3_switch_sans_session_mute_db():
+    """Sans mcp_session_id -> comportement Day 2 (mute DB user)."""
+    from hub import session_active_state as sas
+    await sas._reset_for_tests()
+
+    execute_mock = AsyncMock()
+    with patch("hub.studies.get_study", new=AsyncMock(return_value={
+                    "id": "sidX", "name": "X", "status": "active",
+                })), \
+         patch("hub.studies.get_active_study_id",
+               new=AsyncMock(return_value="sidPrev")), \
+         patch("hub.studies.get_active_project_id",
+               new=AsyncMock(return_value=None)), \
+         patch("hub.studies.get_default_project", new=AsyncMock(return_value=None)), \
+         patch("hub.studies.set_active_study",
+               new=AsyncMock()) as mock_set_db, \
+         patch("hub.studies.touch_study", new=AsyncMock()), \
+         patch("hub.studies.save_active_project_pod_code",
+               return_value="# save code"), \
+         patch("hub.studies.activate_pod_code", return_value="# activate code"):
+
+        await dispatch_hub_tool(
+            "study_switch", {"sid": "sidX"}, "user",
+            execute_python_in_workspace_fn=execute_mock,
+            # mcp_session_id absent
+        )
+        # DB user bien mutee
+        mock_set_db.assert_called_once_with("user", "sidX")

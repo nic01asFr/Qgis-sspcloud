@@ -221,11 +221,38 @@ HUB_TOOLS_SCHEMA: list[dict[str, Any]] = [
 
 # ── Handlers (invoques par le dispatcher hub apres routing du tools/call) ────
 
-async def study_list_handler(username: str, args: dict) -> dict:
-    """Retourne la liste des etudes actives du user + celle active."""
+async def study_list_handler(
+    username: str, args: dict, mcp_session_id: str | None = None,
+) -> dict:
+    """Retourne la liste des etudes actives du user + celle active.
+
+    Day 3 : active_sid resolu via priorite session_state > A1 > DB user.
+    Garantit que l'etude active (session-scoped ou DB) est TOUJOURS dans
+    la liste retournee, meme si status != active (fix edge case study_list).
+
+    Ajoute champs :
+    - `is_session_active` : True si l'entree correspond a l'active_sid
+      session-scoped (distinct de is_active DB)
+    - `status` : expose le status brut pour debug
+    - `session_scoped` (root) : True si la session courante a un scope MCP
+    """
     from hub import studies
+    from hub.main import resolve_effective_active_sid
     all_studies = await studies.list_studies(username)
-    active_sid = await studies.get_active_study_id(username)
+    # Day 3 : sid effectif via priorite
+    effective_sid, _ = await resolve_effective_active_sid(
+        username, mcp_session_id, None,
+    )
+    # Filtre status=active ; puis re-inject l'etude active si absente
+    filtered = [s for s in (all_studies or []) if s.get("status") == "active"]
+    if effective_sid and not any(s["id"] == effective_sid for s in filtered):
+        # Chercher l'etude active dans all_studies (peut etre archived)
+        active_s = next(
+            (s for s in (all_studies or []) if s["id"] == effective_sid),
+            None,
+        )
+        if active_s:
+            filtered.append(active_s)
     return {
         "studies": [
             {
@@ -233,20 +260,28 @@ async def study_list_handler(username: str, args: dict) -> dict:
                 "name": s["name"],
                 "profile": s.get("profile", "standard"),
                 "last_active": s.get("last_active"),
-                "is_active": s["id"] == active_sid,
+                "status": s.get("status", "active"),
+                "is_active": s["id"] == effective_sid,
             }
-            for s in (all_studies or [])
-            if s.get("status") == "active"
+            for s in filtered
         ],
-        "active_sid": active_sid,
+        "active_sid": effective_sid,
+        "session_scoped": bool(mcp_session_id) and effective_sid is not None,
     }
 
 
 async def study_create_handler(
     username: str, args: dict, execute_python_in_workspace_fn,
+    mcp_session_id: str | None = None,
 ) -> dict:
     """Cree etude + default project + active. Reutilise studies.create_study
-    + chained default project (Sprint UX-3 Commit 2 pattern)."""
+    + chained default project (Sprint UX-3 Commit 2 pattern).
+
+    Day 3 : si mcp_session_id fourni, l'activation est session-scoped
+    (ecrit dans session_active_state) au lieu de DB user. Le pod QGIS est
+    active pour rendre le contexte immediatement utilisable par les tools
+    suivants dans la meme session MCP.
+    """
     from hub import studies
     name = (args.get("name") or "").strip()
     if not name:
@@ -278,12 +313,20 @@ async def study_create_handler(
         )
     except Exception as exc:
         log.warning("study_create: default project pour %s : %s", sid, exc)
-    # Activate (pattern activate_study_endpoint)
-    await studies.set_active_study(username, sid)
+    # Day 3 : activation session-scoped ou globale selon presence mcp_session_id
+    if mcp_session_id:
+        from hub import session_active_state as _sas
+        await _sas.set_active(mcp_session_id, sid, default_pid)
+    else:
+        # Legacy Day 2 : mute DB user (comportement historique preserve)
+        await studies.set_active_study(username, sid)
     await studies.touch_study(sid)
     if default_pid:
-        await studies.set_active_project(username, default_pid)
+        if not mcp_session_id:
+            await studies.set_active_project(username, default_pid)
         await studies.touch_project(default_pid)
+    # Switch physique du pod QGIS (necessaire dans les 2 cas pour que les
+    # tools workspace suivants operent sur le bon .qgz)
     try:
         await execute_python_in_workspace_fn(
             username, studies.activate_pod_code(sid),
@@ -300,13 +343,22 @@ async def study_create_handler(
         "profile": s["profile"],
         "default_pid": default_pid,
         "is_active": True,
+        "session_scoped": bool(mcp_session_id),
     }
 
 
 async def study_switch_handler(
     username: str, args: dict, execute_python_in_workspace_fn,
+    mcp_session_id: str | None = None,
 ) -> dict:
-    """Bascule etude active + save prev (dual-write pid-scope) + chained default."""
+    """Bascule etude active + save prev (dual-write pid-scope) + chained default.
+
+    Day 3 : si mcp_session_id fourni, la nouvelle etude est session-scoped
+    (ecrit dans session_active_state, NE MUTE PAS DB user). Le save sortante
+    utilise l'etat effectif AVANT switch (donc soit session_state precedent
+    soit DB user selon la source). Le switch physique du pod QGIS est fait
+    dans les 2 cas.
+    """
     from hub import studies
     sid = args.get("sid")
     if not sid:
@@ -317,8 +369,18 @@ async def study_switch_handler(
     if s.get("status") != "active":
         raise ValueError(f"Etude {sid} archivee (status={s.get('status')})")
 
-    prev_sid = await studies.get_active_study_id(username)
-    prev_pid = await studies.get_active_project_id(username)
+    # Day 3 : etat SORTANT depend de la scope courante
+    if mcp_session_id:
+        from hub import session_active_state as _sas
+        prev_sid, prev_pid = await _sas.get_active(mcp_session_id)
+        # Si session_state vide, fallback DB pour save sortante propre
+        if not prev_sid:
+            prev_sid = await studies.get_active_study_id(username)
+            prev_pid = await studies.get_active_project_id(username)
+    else:
+        prev_sid = await studies.get_active_study_id(username)
+        prev_pid = await studies.get_active_project_id(username)
+
     if prev_sid and prev_sid != sid:
         # Save sortante avec dual-write pid-scope (Fix #1)
         try:
@@ -329,45 +391,77 @@ async def study_switch_handler(
         except Exception as exc:
             log.warning("study_switch: save sortante %s : %s", prev_sid, exc)
 
-    await studies.set_active_study(username, sid)
+    # Ecriture active : session-scoped ou DB user selon mcp_session_id
+    default_p = await studies.get_default_project(sid)
+    default_pid = default_p["pid"] if default_p else None
+    if mcp_session_id:
+        from hub import session_active_state as _sas
+        await _sas.set_active(mcp_session_id, sid, default_pid)
+    else:
+        await studies.set_active_study(username, sid)
+        if default_pid:
+            await studies.set_active_project(username, default_pid)
     await studies.touch_study(sid)
+    if default_pid:
+        await studies.touch_project(default_pid)
+
+    # Switch physique pod QGIS (dans les 2 cas)
     try:
         await execute_python_in_workspace_fn(
             username, studies.activate_pod_code(sid),
         )
+        if default_pid:
+            try:
+                await execute_python_in_workspace_fn(
+                    username, studies.activate_project_pod_code(sid, default_pid),
+                )
+            except Exception as exc:
+                log.warning("study_switch: activate projet %s : %s",
+                            default_pid, exc)
     except Exception as exc:
         log.warning("study_switch: activate pod %s : %s", sid, exc)
 
-    # Chained default project (Sprint UX-3 Commit 2 pattern)
-    default_p = await studies.get_default_project(sid)
-    default_pid = None
-    if default_p is not None:
-        default_pid = default_p["pid"]
-        await studies.set_active_project(username, default_pid)
-        await studies.touch_project(default_pid)
-        try:
-            await execute_python_in_workspace_fn(
-                username, studies.activate_project_pod_code(sid, default_pid),
-            )
-        except Exception as exc:
-            log.warning("study_switch: activate projet %s : %s", default_pid, exc)
     return {
         "active_sid": sid,
         "active_pid": default_pid,
         "name": s["name"],
+        "session_scoped": bool(mcp_session_id),
     }
 
 
-async def study_project_list_handler(username: str, args: dict) -> dict:
-    """Liste les projets d'une etude (defaut = active)."""
+async def study_project_list_handler(
+    username: str, args: dict, mcp_session_id: str | None = None,
+) -> dict:
+    """Liste les projets d'une etude (defaut = active).
+
+    Day 3 : sid effectif via priorite session > A1 > DB. active_pid retourne
+    depend de la scope courante (session_state ou DB user).
+    """
     from hub import studies
+    from hub.main import resolve_effective_active_sid
     sid = args.get("sid")
+    effective_pid = None
     if not sid:
-        sid = await studies.get_active_study_id(username)
+        # Day 3 : resolve prioritise session_state
+        sid, effective_pid = await resolve_effective_active_sid(
+            username, mcp_session_id, None,
+        )
+    else:
+        # sid explicite -> active_pid depend de la scope de la session
+        if mcp_session_id:
+            from hub import session_active_state as _sas
+            cur_sid, cur_pid = await _sas.get_active(mcp_session_id)
+            # Ne montre le pid session-scope que s'il correspond au sid demande
+            if cur_sid == sid:
+                effective_pid = cur_pid
+        if effective_pid is None:
+            effective_pid = await studies.get_active_project_id(username)
     if not sid:
-        raise ValueError("Aucune etude active - passer 'sid' explicite ou utiliser study_switch d'abord")
+        raise ValueError(
+            "Aucune etude active - passer 'sid' explicite ou utiliser "
+            "study_switch d'abord"
+        )
     projects = await studies.list_projects(sid)
-    active_pid = await studies.get_active_project_id(username)
     return {
         "sid": sid,
         "projects": [
@@ -375,35 +469,55 @@ async def study_project_list_handler(username: str, args: dict) -> dict:
                 "pid": p["pid"],
                 "label": p["label"],
                 "is_default": bool(p.get("is_default")),
-                "is_active": p["pid"] == active_pid,
+                "is_active": p["pid"] == effective_pid,
                 "last_active": p.get("last_active"),
             }
             for p in (projects or [])
             if p.get("status") == "active"
         ],
-        "active_pid": active_pid,
+        "active_pid": effective_pid,
+        "session_scoped": bool(mcp_session_id) and effective_pid is not None,
     }
 
 
 async def study_project_create_handler(
     username: str, args: dict, execute_python_in_workspace_fn,
+    mcp_session_id: str | None = None,
 ) -> dict:
-    """Cree un nouveau projet dans une etude + l'active."""
+    """Cree un nouveau projet dans une etude + l'active.
+
+    Day 3 : sid resolu via priorite session_state > DB user. Activation
+    du nouveau projet session-scoped si mcp_session_id present.
+    """
     from hub import studies
     label = (args.get("label") or "").strip()
     if not label:
         raise ValueError("Le label du projet est obligatoire")
     sid = args.get("sid")
+    prev_pid = None
     if not sid:
-        sid = await studies.get_active_study_id(username)
+        # Day 3 : sid effectif via priorite session > DB
+        if mcp_session_id:
+            from hub import session_active_state as _sas
+            sid, prev_pid = await _sas.get_active(mcp_session_id)
+        if not sid:
+            sid = await studies.get_active_study_id(username)
+            prev_pid = await studies.get_active_project_id(username)
+    else:
+        # sid explicite -> prev_pid lu du meme scope que celui qui sera muta
+        if mcp_session_id:
+            from hub import session_active_state as _sas
+            _cur_sid, prev_pid = await _sas.get_active(mcp_session_id)
+            # Si la session pointait ailleurs, on quand meme utilise
+            # prev_pid du meme scope pour save (peut etre None -> ok)
+        else:
+            prev_pid = await studies.get_active_project_id(username)
     if not sid:
         raise ValueError("Aucune etude active - passer 'sid' explicite")
-    # Verifier acces
     s = await studies.get_study(sid, username)
     if not s:
         raise ValueError(f"Etude {sid} introuvable")
 
-    prev_pid = await studies.get_active_project_id(username)
     # Save prev projet AVANT create (fix #2 pattern intra-etude)
     if prev_pid:
         try:
@@ -426,8 +540,12 @@ async def study_project_create_handler(
     except Exception as exc:
         log.warning("study_project_create: create pod %s : %s", new_pid, exc)
 
-    # Activate
-    await studies.set_active_project(username, new_pid)
+    # Day 3 : activate session-scoped ou DB user
+    if mcp_session_id:
+        from hub import session_active_state as _sas
+        await _sas.set_active(mcp_session_id, sid, new_pid)
+    else:
+        await studies.set_active_project(username, new_pid)
     await studies.touch_project(new_pid)
     try:
         await execute_python_in_workspace_fn(
@@ -440,13 +558,20 @@ async def study_project_create_handler(
         "sid": sid,
         "label": label,
         "is_active": True,
+        "session_scoped": bool(mcp_session_id),
     }
 
 
 async def study_project_switch_handler(
     username: str, args: dict, execute_python_in_workspace_fn,
+    mcp_session_id: str | None = None,
 ) -> dict:
-    """Bascule sur un autre projet + save prev (dual-write intra-etude fix #2)."""
+    """Bascule sur un autre projet + save prev (dual-write intra-etude fix #2).
+
+    Day 3 : etat SORTANT depend de la scope courante (session ou DB). Ecriture
+    active session-scoped si mcp_session_id present. Cascade etude cross-etude
+    idem session-scoped.
+    """
     from hub import studies
     pid = args.get("pid")
     if not pid:
@@ -458,8 +583,16 @@ async def study_project_switch_handler(
         raise ValueError(f"Projet {pid} archive")
 
     target_sid = p["sid"]
-    prev_sid = await studies.get_active_study_id(username)
-    prev_pid = await studies.get_active_project_id(username)
+    # Day 3 : lecture etat sortant selon scope courante
+    if mcp_session_id:
+        from hub import session_active_state as _sas
+        prev_sid, prev_pid = await _sas.get_active(mcp_session_id)
+        if not prev_sid:
+            prev_sid = await studies.get_active_study_id(username)
+            prev_pid = await studies.get_active_project_id(username)
+    else:
+        prev_sid = await studies.get_active_study_id(username)
+        prev_pid = await studies.get_active_project_id(username)
 
     # Cascade activate etude si cross-etude
     if prev_sid != target_sid:
@@ -471,15 +604,19 @@ async def study_project_switch_handler(
                     studies.save_active_project_pod_code(prev_sid, prev_pid),
                 )
             except Exception as exc:
-                log.warning("study_project_switch: save sortante etude %s : %s", prev_sid, exc)
-        await studies.set_active_study(username, target_sid)
+                log.warning("study_project_switch: save sortante etude %s : %s",
+                            prev_sid, exc)
+        # Day 3 : activate etude session-scoped ou DB
+        if not mcp_session_id:
+            await studies.set_active_study(username, target_sid)
         await studies.touch_study(target_sid)
         try:
             await execute_python_in_workspace_fn(
                 username, studies.activate_pod_code(target_sid),
             )
         except Exception as exc:
-            log.warning("study_project_switch: activate etude %s : %s", target_sid, exc)
+            log.warning("study_project_switch: activate etude %s : %s",
+                        target_sid, exc)
     else:
         # Save intra-etude (fix #2) avant switch pid -> pid
         if prev_pid and prev_pid != pid:
@@ -492,7 +629,12 @@ async def study_project_switch_handler(
                 log.warning("study_project_switch: save intra-etude %s/%s : %s",
                             target_sid, prev_pid, exc)
 
-    await studies.set_active_project(username, pid)
+    # Day 3 : activate projet session-scoped ou DB
+    if mcp_session_id:
+        from hub import session_active_state as _sas
+        await _sas.set_active(mcp_session_id, target_sid, pid)
+    else:
+        await studies.set_active_project(username, pid)
     await studies.touch_project(pid)
     try:
         await execute_python_in_workspace_fn(
@@ -504,6 +646,7 @@ async def study_project_switch_handler(
         "active_pid": pid,
         "active_sid": target_sid,
         "label": p["label"],
+        "session_scoped": bool(mcp_session_id),
     }
 
 
@@ -529,6 +672,7 @@ async def dispatch_hub_tool(
     args: dict,
     username: str,
     execute_python_in_workspace_fn,
+    mcp_session_id: str | None = None,
 ) -> dict:
     """Dispatche un tools/call vers le bon handler local.
 
@@ -538,6 +682,9 @@ async def dispatch_hub_tool(
         username: user courant (pour scoping DB)
         execute_python_in_workspace_fn: reference vers hub.main._execute_python_in_workspace
                                         pour les handlers qui doivent activer/save cote pod
+        mcp_session_id: Day 3 - identifiant session MCP (Mcp-Session-Id header)
+                        pour scoping session-level de l'active_sid/pid. Si None,
+                        comportement Day 2 (mute DB user).
 
     Returns:
         dict serialisable JSON (contenu de result.content[0].text apres wrap MCP)
@@ -549,5 +696,8 @@ async def dispatch_hub_tool(
         raise ValueError(f"Hub tool inconnu : {tool_name}")
     handler, needs_execute = HUB_TOOL_HANDLERS[tool_name]
     if needs_execute:
-        return await handler(username, args, execute_python_in_workspace_fn)
-    return await handler(username, args)
+        return await handler(
+            username, args, execute_python_in_workspace_fn,
+            mcp_session_id=mcp_session_id,
+        )
+    return await handler(username, args, mcp_session_id=mcp_session_id)
