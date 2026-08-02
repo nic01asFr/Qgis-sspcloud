@@ -1067,7 +1067,29 @@ async def oidc_auth_middleware(request: "Request", call_next):
             return await call_next(request)
         # Sinon on tombe sur le check OIDC ci-dessous (fallback UI)
 
-    # 4. Routes UI : cookie OIDC obligatoire
+    # Sprint UX Auth Persistante Day 4 (2026-08-02) : le user n'a pas a
+    # repasser par le portail OIDC a chaque expiration cookie oidc_token.
+    # Si un cookie `hub_api_key` valide est present (TTL 90j pose par
+    # /login?key=... ou par le portail lors de l'onboarding), on laisse
+    # passer directement. Le user retient sa cle API personnelle stable
+    # (visible sur /workspace ou via GET /auth/apikey) au lieu de re-coller
+    # le token OIDC eyJ... a chaque fois.
+    #
+    # Priorite d'auth pour routes UI :
+    #   3ter. Cookie hub_api_key (nouveau, longue TTL)
+    #   4. Cookie OIDC (fallback, bootstrap initial ou perte cle API)
+    _cookie_key = request.cookies.get("hub_api_key", "")
+    if _cookie_key.startswith("qgis_"):
+        try:
+            _user_from_cookie = await _validate_api_key(_cookie_key)
+            if _user_from_cookie:
+                # Injecte dans state pour downstream (compat get_current_user)
+                request.state.oidc_user = _user_from_cookie.get("username", "")
+                return await call_next(request)
+        except Exception as exc:
+            log.warning("middleware: hub_api_key cookie validation failed : %s", exc)
+
+    # 4. Routes UI : cookie OIDC obligatoire (fallback si pas de hub_api_key)
     token = request.cookies.get("oidc_token") or ""
     if not token:
         # Pas de cookie -> redirect vers portail pour saisie token
@@ -1122,4 +1144,33 @@ async def oidc_auth_middleware(request: "Request", call_next):
     # OK : injecte claims dans request.state pour downstream
     request.state.oidc_claims = claims
     request.state.oidc_user = claimed_user
-    return await call_next(request)
+
+    # Sprint UX Auth Persistante Day 4 (2026-08-02) : auto-set cookie
+    # hub_api_key apres la 1ere validation OIDC reussie. Le user n'a plus
+    # besoin de recoller son token OIDC a chaque expiration cookie oidc_token
+    # (courte TTL Keycloak SSPCloud). Cookie stable 90j = onboarding OIDC
+    # une seule fois, ensuite acces navigateur transparent.
+    #
+    # Cle API mint automatiquement si absente (idempotent, Secret K8s
+    # persistant). Ajoute au response en fin de traitement via wrapper.
+    _response = await call_next(request)
+    try:
+        # Ne repose pas le cookie s'il est deja present (idempotence + evite
+        # de rewrite le cookie a chaque requete)
+        if not request.cookies.get("hub_api_key"):
+            api_key = await create_or_get_api_key(claimed_user)
+            if api_key:
+                _response.set_cookie(
+                    "hub_api_key", api_key,
+                    httponly=True, secure=True,
+                    max_age=90 * 24 * 3600, samesite="lax",
+                    path="/",
+                )
+                log.info(
+                    "auto-set cookie hub_api_key pour user %s (OIDC bootstrap)",
+                    claimed_user,
+                )
+    except Exception as exc:
+        log.warning("auto-set hub_api_key cookie echec pour %s : %s",
+                    claimed_user, exc)
+    return _response
