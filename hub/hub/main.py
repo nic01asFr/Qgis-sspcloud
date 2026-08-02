@@ -75,6 +75,15 @@ except ImportError:
 
 log = logging.getLogger("hub.main")
 
+# Phase 0 quick win (2026-08-02) : niveau de log configurable via env var
+# HUB_LOG_LEVEL (DEBUG, INFO, WARNING, ERROR). Defaut INFO. Permet le debug
+# ad-hoc sans redeployer (juste patch env + restart pod). Applique au logger
+# racine si non-defaut.
+_HUB_LOG_LEVEL = os.getenv("HUB_LOG_LEVEL", "").upper().strip()
+if _HUB_LOG_LEVEL in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+    logging.getLogger().setLevel(getattr(logging, _HUB_LOG_LEVEL))
+    log.info("HUB_LOG_LEVEL applique : %s", _HUB_LOG_LEVEL)
+
 _MCP_PORT = 8100
 _API_PORT = 8080
 _SELF_URL  = f"http://127.0.0.1:{os.getenv('HUB_INTERNAL_PORT', '8888')}"
@@ -871,9 +880,33 @@ async def _migrate_studies_to_projects() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await sessions.init_db()
-    await auth.init_apikeys_db()
-    await auth._build_jwks_cache()
+    # Phase 0 fail-fast (2026-08-02) : les 3 init critiques doivent reussir
+    # sinon le pod refuse de start. Sans ce guard, le hub demarre en mode
+    # degrade silencieux (200 sur healthz mais toutes les routes DB retournent
+    # 500). Fail-fast rend l'echec visible dans les logs K8s et declenche un
+    # restart automatique (CrashLoopBackOff -> observability + alerting).
+    _critical_init_errors = []
+    try:
+        await sessions.init_db()
+    except Exception as exc:
+        _critical_init_errors.append(f"sessions.init_db: {exc}")
+    try:
+        await auth.init_apikeys_db()
+    except Exception as exc:
+        _critical_init_errors.append(f"auth.init_apikeys_db: {exc}")
+    try:
+        await auth._build_jwks_cache()
+    except Exception as exc:
+        # JWKS non-critique en dev, warning au lieu de fail
+        log.warning("auth._build_jwks_cache: %s (mode degrade OIDC)", exc)
+    if _critical_init_errors:
+        log.critical(
+            "STARTUP FAIL-FAST : %d erreurs critiques : %s",
+            len(_critical_init_errors), "; ".join(_critical_init_errors),
+        )
+        raise RuntimeError(
+            f"Hub startup failed : {'; '.join(_critical_init_errors)}"
+        )
     if _STUDIES_AVAILABLE:
         await studies.init_db()
         # F17 Sprint 1.4 Vague 1 Equipe B : table publications (versioning
