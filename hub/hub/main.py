@@ -9558,14 +9558,26 @@ def _extract_expected_sid(session_id: str | None) -> str | None:
 
 async def _ensure_active_study_for_agent(
     username: str, expected_sid: str | None,
+    expected_pid: str | None = None,
+    mcp_session_id: str | None = None,
 ) -> tuple[str | None, bool]:
     """Bascule active_study si necessaire avant un call MCP agent.
 
     - Si expected_sid None -> no-op, retourne (active_actuel, False).
     - Si expected_sid == active_actuel -> no-op, retourne (active_actuel, False).
-    - Sinon -> save active sortante + set_active_study(expected_sid) +
-      activate_pod_code(expected_sid) + chained activate default project.
-      Retourne (expected_sid, True) pour signaler qu'un switch a eu lieu.
+    - Sinon -> save active sortante + activate_pod_code(expected_sid) +
+      chained activate default project. Retourne (expected_sid, True) pour
+      signaler qu'un switch a eu lieu.
+
+    Sprint isolation Day 3.1 (2026-08-02) : si `mcp_session_id` fourni, le
+    switch est SESSION-SCOPED : la DB user n'est PAS mutee (respect vrai piste
+    1). Sans mcp_session_id, comportement historique (mute DB). Le save
+    sortante utilise le prev_pid resolu depuis la MEME scope (session ou DB)
+    pour eviter d'ecrire dans un mauvais path.
+
+    `expected_pid` fourni : bascule aussi sur ce projet apres l'activate etude
+    (au lieu du default project auto). Utile pour maintenir la coherence
+    session_active_state qui porte les 2.
 
     Sprint isolation A2 : le switch physique (autosave + set + activate) est
     enveloppe dans un lock par username pour serialiser les switches
@@ -9579,6 +9591,7 @@ async def _ensure_active_study_for_agent(
     (l'agent recevra alors une reponse dans le contexte sortant, ce qui est
     signalable a l'oeil nu mais moins grave qu'un 500). Idempotent.
     """
+    _is_session_scoped = bool(mcp_session_id)
     if not expected_sid:
         return None, False
     # Fast-path SANS lock : si l'active_study courant matche deja, on
@@ -9634,13 +9647,31 @@ async def _ensure_active_study_for_agent(
         # activate_study endpoint L2779).
         # Sprint isolation etudes-projets Fix #1 (2026-07-30) : passe
         # active_pid au save pour dual-write pid-scope.
+        # Sprint isolation Day 3.1 (2026-08-02) : le pid_prev doit venir de
+        # la MEME scope que active_actual (session ou DB), sinon on ecrit dans
+        # un mauvais /data/studies/{active_actual}/projects/{pid_wrong}/ path.
         import time as _time_iso
         _switch_start = _time_iso.monotonic()
         if active_actual:
-            try:
-                active_pid_prev = await studies.get_active_project_id(username)
-            except Exception:
-                active_pid_prev = None
+            active_pid_prev = None
+            if _is_session_scoped:
+                try:
+                    from hub import session_active_state as _sas
+                    _sess_sid, _sess_pid = await _sas.get_active(mcp_session_id)
+                    if _sess_sid == active_actual:
+                        active_pid_prev = _sess_pid
+                except Exception:
+                    pass
+            if active_pid_prev is None:
+                # Fallback DB (comportement Day 2) : valide uniquement si
+                # active_actual == DB.active_study (sinon pid appartient a
+                # une autre etude -> save dans mauvais path)
+                try:
+                    _db_sid = await studies.get_active_study_id(username)
+                    if _db_sid == active_actual:
+                        active_pid_prev = await studies.get_active_project_id(username)
+                except Exception:
+                    active_pid_prev = None
             try:
                 await _execute_python_in_workspace(
                     username,
@@ -9653,25 +9684,32 @@ async def _ensure_active_study_for_agent(
                 )
 
         try:
-            await studies.set_active_study(username, expected_sid)
+            # Day 3.1 : ne mute DB QUE si NON session-scoped (piste 1 pure)
+            if not _is_session_scoped:
+                await studies.set_active_study(username, expected_sid)
             await studies.touch_study(expected_sid)
             await _execute_python_in_workspace(
                 username, studies.activate_pod_code(expected_sid),
             )
-            # Chained activate default project (meme pattern que activate_study L2803)
-            default_p = await studies.get_default_project(expected_sid)
-            if default_p is not None:
-                await studies.set_active_project(username, default_p["pid"])
-                await studies.touch_project(default_p["pid"])
+            # Chained activate project : priorite au expected_pid explicite
+            # (Day 3.1), sinon default_project comme pattern historique
+            target_pid = expected_pid
+            if not target_pid:
+                default_p = await studies.get_default_project(expected_sid)
+                target_pid = default_p["pid"] if default_p else None
+            if target_pid is not None:
+                if not _is_session_scoped:
+                    await studies.set_active_project(username, target_pid)
+                await studies.touch_project(target_pid)
                 try:
                     await _execute_python_in_workspace(
                         username,
-                        studies.activate_project_pod_code(expected_sid, default_p["pid"]),
+                        studies.activate_project_pod_code(expected_sid, target_pid),
                     )
                 except Exception as exc:
                     log.warning(
                         "ensure_active_study: activate projet %s echec : %s",
-                        default_p["pid"], exc,
+                        target_pid, exc,
                     )
         except Exception as exc:
             log.warning(
@@ -10006,12 +10044,18 @@ async def mcp_auto_session(
             log.warning("mcp_auto_session: sas.touch echec %s : %s",
                         _mcp_session_id_hdr, exc)
 
-    # Resolve sid effectif via priorite session > A1 > DB
-    _effective_sid, _ = await resolve_effective_active_sid(
+    # Resolve sid+pid effectifs via priorite session > A1 > DB
+    _effective_sid, _effective_pid = await resolve_effective_active_sid(
         username, _mcp_session_id_hdr, _x_session_id_hdr,
     )
     if _effective_sid:
-        await _ensure_active_study_for_agent(username, _effective_sid)
+        # Day 3.1 : passe pid effectif + mcp_session_id pour respect vrai
+        # session-scoped (pas de mutation DB user si session-scoped)
+        await _ensure_active_study_for_agent(
+            username, _effective_sid,
+            expected_pid=_effective_pid,
+            mcp_session_id=_mcp_session_id_hdr,
+        )
 
     target_url = _mcp_url(session, path)
     return await _proxy_request(
