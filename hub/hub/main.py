@@ -10018,6 +10018,52 @@ async def diagnostics_isolation(
     }
 
 
+@app.get("/diagnostics/mcp-sessions")
+async def diagnostics_mcp_sessions(
+    user: dict = Depends(auth.get_current_user),
+):
+    """Sprint isolation Day 3.1c (2026-08-02) : liste les sessions MCP externes
+    actives pour l'user courant (session_active_state entries taguees username).
+
+    Utilise par l'UI desk pour afficher un badge "MCP session sur Y" lorsqu'une
+    connexion MCP externe (Claude Desktop, Cursor, Cline) a un active_sid/pid
+    session-scoped different de DB.active_study/active_project.
+
+    Sans divergence -> liste vide -> pas de badge affiche.
+
+    Cle superviseur (Bearer HUB_API_KEY) OK. Cles scopees agent : filtrees par
+    scope si different du user courant (mono-user pod = pas de fuite).
+    """
+    from hub import session_active_state as _sas
+    username = user["username"]
+    sessions_mcp = _sas.list_active_by_user(username)
+    # Compare avec DB.active pour signaler la divergence au client
+    try:
+        db_active_sid = await studies.get_active_study_id(username)
+    except Exception:
+        db_active_sid = None
+    try:
+        db_active_pid = await studies.get_active_project_id(username)
+    except Exception:
+        db_active_pid = None
+    # Enrichit chaque entree avec un flag "diverges" et le nom de l'etude
+    for s in sessions_mcp:
+        s["diverges_from_db"] = (s.get("sid") != db_active_sid)
+        if s.get("sid"):
+            try:
+                st = await studies.get_study(s["sid"], username)
+                s["study_name"] = st.get("name") if st else None
+            except Exception:
+                s["study_name"] = None
+    return {
+        "username": username,
+        "db_active_sid": db_active_sid,
+        "db_active_pid": db_active_pid,
+        "mcp_sessions": sessions_mcp,
+        "count_diverging": sum(1 for s in sessions_mcp if s.get("diverges_from_db")),
+    }
+
+
 # ── Endpoint MCP principal — auto-session ─────────────────────────────────────
 
 @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "PUT", "PATCH"])

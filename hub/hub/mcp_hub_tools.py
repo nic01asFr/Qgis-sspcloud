@@ -316,7 +316,7 @@ async def study_create_handler(
     # Day 3 : activation session-scoped ou globale selon presence mcp_session_id
     if mcp_session_id:
         from hub import session_active_state as _sas
-        await _sas.set_active(mcp_session_id, sid, default_pid)
+        await _sas.set_active(mcp_session_id, sid, default_pid, username=username)
     else:
         # Legacy Day 2 : mute DB user (comportement historique preserve)
         await studies.set_active_study(username, sid)
@@ -396,7 +396,7 @@ async def study_switch_handler(
     default_pid = default_p["pid"] if default_p else None
     if mcp_session_id:
         from hub import session_active_state as _sas
-        await _sas.set_active(mcp_session_id, sid, default_pid)
+        await _sas.set_active(mcp_session_id, sid, default_pid, username=username)
     else:
         await studies.set_active_study(username, sid)
         if default_pid:
@@ -543,7 +543,7 @@ async def study_project_create_handler(
     # Day 3 : activate session-scoped ou DB user
     if mcp_session_id:
         from hub import session_active_state as _sas
-        await _sas.set_active(mcp_session_id, sid, new_pid)
+        await _sas.set_active(mcp_session_id, sid, new_pid, username=username)
     else:
         await studies.set_active_project(username, new_pid)
     await studies.touch_project(new_pid)
@@ -632,7 +632,7 @@ async def study_project_switch_handler(
     # Day 3 : activate projet session-scoped ou DB
     if mcp_session_id:
         from hub import session_active_state as _sas
-        await _sas.set_active(mcp_session_id, target_sid, pid)
+        await _sas.set_active(mcp_session_id, target_sid, pid, username=username)
     else:
         await studies.set_active_project(username, pid)
     await studies.touch_project(pid)

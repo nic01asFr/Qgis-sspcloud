@@ -500,6 +500,41 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             {% endif %}
             <span class="caret">▾</span>
           </button>
+          {# Sprint isolation Day 3.1c (2026-08-02) : badge divergence
+             session MCP externe (Claude Desktop / claude.ai). Rempli par
+             fetch /diagnostics/mcp-sessions au load + poll 30s. Vide par
+             defaut = pas d'affichage. #}
+          <span id="mcp-session-badge"
+                style="display:none;font-size:11px;padding:2px 8px;
+                       margin-left:8px;border-radius:4px;
+                       background:var(--background-alt-blue-france);
+                       color:var(--text-title-blue-france);
+                       border:1px solid var(--border-action-high-blue-france)"
+                title=""></span>
+          <script>
+          (async function _loadMcpSessionsBadge(){
+            const el = document.getElementById('mcp-session-badge');
+            if (!el) return;
+            async function refresh(){
+              try {
+                const r = await fetch('/diagnostics/mcp-sessions', {credentials:'same-origin'});
+                if (!r.ok) return;
+                const data = await r.json();
+                const diverging = (data.mcp_sessions || []).filter(s => s.diverges_from_db);
+                if (diverging.length === 0){
+                  el.style.display = 'none';
+                  return;
+                }
+                const names = diverging.map(s => s.study_name || s.sid).join(', ');
+                el.textContent = 'MCP: ' + names;
+                el.title = diverging.length + ' session(s) MCP externe(s) sur autre(s) etude(s) : ' + names + '. L\'UI desk affiche l\'etude par defaut du user; les clients MCP (Claude Desktop, claude.ai) ont leur propre contexte session-scoped.';
+                el.style.display = 'inline-block';
+              } catch(e){ /* silent */ }
+            }
+            refresh();
+            setInterval(refresh, 30000);
+          })();
+          </script>
           <div class="study-dropdown" id="study-dropdown">
             {# Sprint UX-3 fix (2026-06-21) : dropdown desk = PROJETS UNIQUEMENT
                de l'etude active. Plus de section 'Mes etudes' ici (changement

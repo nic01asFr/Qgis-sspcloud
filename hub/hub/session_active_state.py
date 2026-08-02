@@ -51,6 +51,7 @@ class _Entry(NamedTuple):
     sid: str | None
     pid: str | None
     expires_at: float
+    username: str | None = None  # Day 3.1c : tag user pour lookup UI desk
 
 
 _state: dict[str, _Entry] = {}
@@ -61,11 +62,16 @@ async def set_active(
     mcp_session_id: str,
     sid: str | None,
     pid: str | None = None,
+    username: str | None = None,
 ) -> None:
     """Ecrit l'etude/projet active pour cette session MCP.
 
     sid=None efface l'entree (unset explicite). pid=None acceptable :
     la session peut avoir une etude active sans projet default resolu.
+
+    Day 3.1c : `username` optionnel taggue l'entree pour permettre a
+    l'endpoint /diagnostics/mcp-sessions de lister les sessions actives
+    d'un user donne (affichage UI desk : badge divergence).
 
     Idempotent : reappeler avec les memes args reset juste la TTL.
     """
@@ -79,6 +85,7 @@ async def set_active(
             sid=sid,
             pid=pid,
             expires_at=time.time() + TTL_SECONDS,
+            username=username,
         )
 
 
@@ -173,6 +180,35 @@ def stats() -> dict:
     total = len(_state)
     active = sum(1 for v in _state.values() if v.expires_at >= now)
     return {"total_entries": total, "active_entries": active}
+
+
+def list_active_by_user(username: str) -> list[dict]:
+    """Day 3.1c : liste les sessions MCP actives pour un user donne.
+
+    Retourne une liste de dicts {mcp_session_id_short, sid, pid, age_seconds}
+    pour toutes les entrees NON EXPIREES taguees avec ce username.
+
+    Ne prend PAS le lock (lecture best-effort). Utilise par l'endpoint
+    /diagnostics/mcp-sessions pour l'UI desk badge divergence.
+    """
+    if not username:
+        return []
+    now = time.time()
+    out = []
+    for mcp_sid, entry in _state.items():
+        if entry.expires_at < now:
+            continue
+        if entry.username != username:
+            continue
+        # Anonymise le session_id : garde 8 premiers chars
+        short = mcp_sid[:8] + "..." if len(mcp_sid) > 8 else mcp_sid
+        out.append({
+            "mcp_session_short": short,
+            "sid": entry.sid,
+            "pid": entry.pid,
+            "age_seconds": int(now - (entry.expires_at - TTL_SECONDS)),
+        })
+    return out
 
 
 # Testing helpers (utilises par tests unit uniquement) ────────────────────────

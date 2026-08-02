@@ -963,6 +963,14 @@ _OIDC_MIDDLEWARE_INTER_POD = (
     #     isole. get_current_user valide le Bearer normalement.
     "/diagnostics",
     "/agent-context",
+    # Sprint isolation Day 3.1c (2026-08-02) : /publish/{kind}/{slug} appele
+    # en self-call workspace->hub via publish_artifact MCP tool + Authorization
+    # Bearer HUB_API_KEY. Sans whitelist, le middleware OIDC redirige vers
+    # portail (401 JSON) avant que l'endpoint puisse verifier la cle. Bug
+    # empirique 2026-08-02 test E2E : publish storymap echouait toujours.
+    # Whitelist les endpoints publish top-level et sub-endpoints (component,
+    # assembly, livrable, pdf, agent) qui suivent la meme convention.
+    "/publish",
     # NB : /published a ete deplace dans _OIDC_MIDDLEWARE_PUBLIC (vraie
     # whitelist anonyme). Inter-pod ne suffit pas pour acces tiers internet.
 )
