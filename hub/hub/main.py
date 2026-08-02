@@ -9596,8 +9596,17 @@ async def _ensure_active_study_for_agent(
         return None, False
     # Fast-path SANS lock : si l'active_study courant matche deja, on
     # court-circuite. Le read get_active_study_id est atomique cote DB.
+    # Sprint isolation Day 3.1 (2026-08-02) : si session-scoped, lit
+    # session_active_state en priorite pour eviter faux positifs "divergence"
+    # (ex : DB.active_sid=X ancien, session=Y courant, pod deja sur Y ->
+    # ancien code aurait force un switch X->Y destructif).
     try:
-        active_actual = await studies.get_active_study_id(username)
+        if _is_session_scoped:
+            from hub import session_active_state as _sas
+            _sess_sid, _ = await _sas.get_active(mcp_session_id)
+            active_actual = _sess_sid or await studies.get_active_study_id(username)
+        else:
+            active_actual = await studies.get_active_study_id(username)
     except Exception as exc:
         log.warning("ensure_active_study: get_active_study_id echec pour %s : %s",
                     username, exc)
@@ -9619,8 +9628,14 @@ async def _ensure_active_study_for_agent(
     async with _active_study_switch_locks[username]:
         # Re-check apres acquisition du lock : un autre agent peut avoir
         # deja switche vers expected_sid pendant qu'on attendait.
+        # Day 3.1 : meme priorite session_state > DB que le fast-path.
         try:
-            active_actual = await studies.get_active_study_id(username)
+            if _is_session_scoped:
+                from hub import session_active_state as _sas
+                _sess_sid, _ = await _sas.get_active(mcp_session_id)
+                active_actual = _sess_sid or await studies.get_active_study_id(username)
+            else:
+                active_actual = await studies.get_active_study_id(username)
         except Exception as exc:
             log.warning(
                 "ensure_active_study: re-check get_active_study_id echec : %s",
