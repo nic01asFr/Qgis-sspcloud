@@ -223,19 +223,37 @@ fois DB (si non session-scoped) ET le fichier RAM.
 
 ## 6. Auth et sécurité
 
-### 6.1 Trois modes d'auth
+### 6.1 Modes d'auth (Day 4 UX Auth Persistante)
 
-1. **Cookie OIDC** (UI desk) : cookie `oidc_token` set par le portail
-   après échange token SSPCloud. `preferred_username` doit matcher
-   `ONYXIA_USER` du pod.
-2. **Bearer HUB_API_KEY** (inter-pod, agent internes) : token stable par
-   user, source de vérité = Secret K8s `qgis-hub-apikey`.
-3. **Bearer scope key** (agents publiés futurs, actuellement inerte) :
+Depuis Sprint UX Day 4 (2026-08-02), le user a **une seule fois** besoin
+du portail OIDC (bootstrap), ensuite un cookie persistant `hub_api_key`
+(90j) le maintient authentifié.
+
+Priorité d'auth pour routes UI :
+1. **Cookie `hub_api_key`** (Day 4, TTL 90j HttpOnly Secure) : cookie
+   navigateur stable, auto-set après validation OIDC réussie. Le user
+   n'a plus à repasser par le portail à chaque expiration cookie OIDC.
+2. **Cookie `oidc_token`** (fallback, TTL courte Keycloak) : utilisé
+   pour bootstrap initial ou si le cookie `hub_api_key` est absent (ex :
+   perte cache navigateur).
+
+Priorité d'auth pour routes inter-pod et API :
+3. **Bearer HUB_API_KEY** (inter-pod, agents internes) : token stable
+   par user, source de vérité = Secret K8s `qgis-hub-apikey`. Utilisé
+   par les self-calls hub→hub, les agents internes, et les clients MCP
+   externes (Claude Desktop, claude.ai) via le connecteur.
+4. **Bearer scope key** (agents publiés futurs, actuellement inerte) :
    token scopé qui autorise un subset des tools MCP.
+
+Endpoint `/auth/apikey` : retourne la clé API personnelle stable du
+user (idempotent, à copier dans `claude_desktop_config.json`).
+
+Endpoint `/login?key=qgis_...` : pose manuellement le cookie
+`hub_api_key` (usage : perte cookie, changement navigateur).
 
 ### 6.2 Middleware OIDC
 
-`auth.py::oidc_auth_middleware` :
+`auth.py::oidc_auth_middleware` (ordre des étapes) :
 - Routes publiques (`/version`, `/healthz`, `/probe`, `/published/*`)
 - Whitelist inter-pod (Bearer HUB_API_KEY) : `/mcp`, `/studies`,
   `/projects`, `/admin`, `/api/recipes-web`, `/briques`, `/diagnostics`,

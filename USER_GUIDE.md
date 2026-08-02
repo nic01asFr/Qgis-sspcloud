@@ -29,6 +29,14 @@ Version 2026-08-02 · Sprint isolation Day 3.1c CLOS.
 - **Connecteur MCP** : à configurer dans Claude Desktop /
   `claude_desktop_config.json` (voir [ONBOARDING.md](ONBOARDING.md) §6)
 
+**Auth persistante (Day 4)** : le portail OIDC te sert une seule fois
+au bootstrap (onboarding initial). Ensuite un cookie `hub_api_key` (TTL
+90 jours) te maintient authentifié dans le navigateur : plus besoin de
+recoller ton token OIDC à chaque expiration cookie Keycloak. Ta clé API
+personnelle (`qgis_<user>_...`) est disponible sur `/workspace` ou via
+`GET /auth/apikey`. Si tu perds ton cookie (cache navigateur effacé,
+autre PC), tu peux le reposer via `https://user-<toi>-qgis.user.lab.sspcloud.fr/login?key=<ta-cle>`.
+
 ## 3. Workflow type : créer une étude et publier une carte
 
 ### 3.1 Via Claude Desktop (conversation naturelle)
