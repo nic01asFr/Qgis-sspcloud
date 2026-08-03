@@ -883,6 +883,16 @@ _OIDC_MIDDLEWARE_PUBLIC = (
     # fait path.startswith(p + "/") donc "/static" sans trailing slash matche
     # "/static/geo-components.js" via "/static/".
     "/static",
+    # Sprint UX Auth Persistante Day 4.2 (2026-08-03) : /login?key=... doit
+    # etre accessible SANS cookie OIDC pour permettre au user de poser son
+    # cookie hub_api_key apres perte cache ou depuis un autre navigateur.
+    # Sans whitelist, le middleware redirigeait vers portail avant que
+    # /login puisse traiter la cle -> flow impossible (chicken-and-egg).
+    # Aucun secret expose : la cle arrive dans l'URL (leak URL logs
+    # possible mais equivalent au token OIDC eyJ colle dans le portail).
+    # _validate_api_key valide contre Secret K8s pod-scoped -> cle
+    # invalide = pas de cookie pose, page HTML "Cle invalide".
+    "/login",
 )
 
 # Routes inter-pods : Bearer HUB_API_KEY = clé hub partagée entre hub et agent
