@@ -264,12 +264,31 @@ Endpoint `/login?key=qgis_...` : pose manuellement le cookie
 ### 6.3 Isolation cross-user (SSPCloud namespace)
 
 Chaque user a son propre namespace K8s → RBAC K8s empêche `nic01asfr`
-d'accéder aux pods `nicolaslaval` via kubectl. Le desk hub `qgis` d'un
-autre user renvoie une page HTML mais l'iframe agent bloque via message
-`"Cet espace appartient a X. Tu es connecte en tant que Y."`.
+d'accéder aux pods `nicolaslaval` via kubectl.
 
-**Point d'attention** : le desk HTML lui-même est servi (les noms
-d'études sont visibles) → à sécuriser dans un futur sprint si sensible.
+**Isolation cross-tenant HTTP hub (Sprint securite Day 4.1, 2026-08-03)** :
+
+Une tentative d'accès cross-tenant (ex : user nic01asfr avec cookie
+`hub_api_key=qgis_nic01asfr_...` navigue vers pod nicolaslaval) est
+bloquée à 2 niveaux :
+
+1. **Authentification (Secret K8s pod-scoped)** : `_validate_api_key`
+   compare la clé contre le Secret K8s `qgis-hub-apikey` du **namespace
+   courant** (nicolaslaval). La clé nic01asfr ne matche pas → retour
+   `None` → middleware tombe sur fallback OIDC → 302 redirect portail.
+2. **Autorisation (défense en profondeur Day 4.1)** : si un jour
+   `_validate_api_key` retournait un user cross-namespace (via DB legacy
+   ou régression future), le middleware compare ensuite
+   `user_from_cookie.username` vs `os.environ.ONYXIA_USER` → 403 explicite
+   avec message identique au chemin OIDC étape 5.
+
+Le chemin OIDC (étape 5) fait aussi ce check `claimed_user != onyxia_user`
+→ 403. Les 2 chemins d'auth sont désormais alignés pour l'ownership check.
+
+Vérification empirique 2026-08-03 : `curl -H "Cookie: hub_api_key=$NIC01_KEY"
+https://user-nicolaslaval-qgis.user.lab.sspcloud.fr/desk` → HTTP 302
+portail (bloqué au niveau 1). Le test HTTP 200 sur le pod légitime
+nic01asfr confirme aucune régression sur le cas nominal.
 
 ---
 
