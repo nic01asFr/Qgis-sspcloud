@@ -1275,9 +1275,20 @@ async def _desk_context() -> dict:
         # Sprint UX-3 Commit 3 (2026-06-21) : projet actif + liste des projets
         # de l'etude active (pour dropdown switch dans desk header).
         "active_project": None, "projects_in_active_study": [],
+        # Sprint UX Day 4.3a (2026-08-03) : cle API personnelle du user +
+        # URL magique /login?key=... pour permettre au user de revenir sans
+        # passer par le portail OIDC. Expose UNIQUEMENT dans le template
+        # workspace/desk auquel il accede via son propre pod authentifie
+        # (cookie OIDC ou hub_api_key deja valide) -> zero risque de fuite.
+        "hub_api_key": None,
+        "hub_login_magic_url": None,
     }
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+        # Day 4.3a : expose cle + URL magique dans le context template
+        if api_key and _HUB_URL:
+            ctx["hub_api_key"] = api_key
+            ctx["hub_login_magic_url"] = f"{_HUB_URL.rstrip('/')}/login?key={api_key}"
         headers = {"Authorization": f"Bearer {api_key}"}
         async with httpx.AsyncClient(timeout=8, base_url=_SELF_URL) as c:
             for path, cb in [
