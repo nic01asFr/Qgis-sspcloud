@@ -1083,8 +1083,24 @@ async def oidc_auth_middleware(request: "Request", call_next):
         try:
             _user_from_cookie = await _validate_api_key(_cookie_key)
             if _user_from_cookie:
+                # Sprint securite Day 4.1 (2026-08-03) : check ownership
+                # ONYXIA_USER identique au chemin OIDC (etape 5) pour empecher
+                # un user X d'acceder au pod hub d'un user Y avec sa cle X.
+                # Sans ce check, la Day 4 introduisait un bypass cross-tenant :
+                # cookie hub_api_key laissait passer sans verifier que
+                # l'identite derriere la cle matche le pod cible.
+                _cookie_user = _user_from_cookie.get("username", "")
+                _pod_user = os.environ.get("ONYXIA_USER", "")
+                if _pod_user and _cookie_user != _pod_user:
+                    return JSONResponse(
+                        {"detail": f"Cet espace appartient a '{_pod_user}'. "
+                                   f"Tu es connecte en tant que "
+                                   f"'{_cookie_user}'. Connecte-toi sur "
+                                   f"ton propre espace via le portail."},
+                        status_code=403,
+                    )
                 # Injecte dans state pour downstream (compat get_current_user)
-                request.state.oidc_user = _user_from_cookie.get("username", "")
+                request.state.oidc_user = _cookie_user
                 return await call_next(request)
         except Exception as exc:
             log.warning("middleware: hub_api_key cookie validation failed : %s", exc)
