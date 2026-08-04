@@ -1,3 +1,8 @@
+# qgis-hub chart values
+# Sprint Day 5 Phase 1.2 (2026-08-04) : etendu pour deployer les 3 pods
+# (hub + agent + workspace) via un seul `helm install`, remplaçant le
+# portail nic01asfr.
+
 image:
   repository: ghcr.io/nic01asfr/qgis-hub
   tag: latest
@@ -8,7 +13,8 @@ service:
 
 ingress:
   enabled: true
-  # Onyxia injecte le hostname automatiquement
+  # Onyxia injecte le hostname automatiquement via values.schema.json
+  # (pattern x-onyxia.overwriteDefaultWith)
   hostname: ""
   ingressClassName: onyxia
 
@@ -73,3 +79,51 @@ global:
 message:
   fr: "**NB:** ce service pourrait être supprimé après 7 jours d'utilisation."
   en: "**Warning:** this service may be deleted after 7 days."
+
+# ── Sprint Day 5 Phase 1.2 : nouveaux blocs agent + workspace + llm ──────────
+
+# Agent LLM (chat + tool-runner)
+agent:
+  enabled: true
+  image:
+    repository: ghcr.io/nic01asfr/qgis-agent
+    tag: latest
+    pullPolicy: Always
+  persistence:
+    size: 10Gi
+  ingress:
+    enabled: true
+    # Hostname derive du hub hostname par defaut (user-X-qgis-agent.*)
+    hostname: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+# Workspace QGIS Desktop (noVNC + BigQgisMCP)
+workspace:
+  enabled: true
+  image:
+    repository: ghcr.io/nic01asfr/qgisremotemcp
+    tag: latest
+    pullPolicy: Always
+  persistence:
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+# Cle LLM (SSPCloud llm.lab.sspcloud.fr par defaut, ou custom)
+llm:
+  # A remplir par l'user dans Onyxia UI. Peut aussi etre injecte depuis
+  # Vault via x-onyxia dans values.schema.json (userProfileValues.aiAssistant.apiKey)
+  apiKey: ""
+  baseUrl: "https://llm.lab.sspcloud.fr/api"
+  model: ""

@@ -1,0 +1,84 @@
+{{/*
+Sprint Day 5 Phase 1.2 (2026-08-04) : StatefulSet qgis-agent (agent LLM
+tool-runner). Absorbe la creation runtime `_bootstrap_agent()` de
+hub/hub/main.py:376-443. Le hub garde la fonction en self-heal (idempotent,
+GET avant POST) si le chart ne l'a pas cree.
+
+Pattern identique au manifest historique :
+- image `ghcr.io/nic01asfr/qgis-agent:latest`
+- fsGroup=1000 (necessaire pour PVC data mounted en /data)
+- PVC data 10Gi rook-ceph-block (sessions chat, insights, memoire long-terme)
+- HUB_API_KEY via secretKeyRef sur Secret genere par le chart
+- readinessProbe /health:8888 (route lite, evite queries DB au cold start)
+*/}}
+{{- if .Values.agent.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qgis-agent
+  labels:
+    {{- include "qgis-hub.labels" . | nindent 4 }}
+    app: qgis-agent
+spec:
+  serviceName: qgis-agent
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qgis-agent
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+      annotations:
+        "helm.sh/resource-policy": keep
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: rook-ceph-block
+      resources:
+        requests:
+          storage: {{ .Values.agent.persistence.size | default "10Gi" }}
+  template:
+    metadata:
+      labels:
+        app: qgis-agent
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+      - name: agent
+        image: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag }}"
+        imagePullPolicy: {{ .Values.agent.image.pullPolicy | default "Always" }}
+        command: ["uvicorn", "agent.main:app", "--host", "0.0.0.0", "--port", "8888"]
+        ports:
+        - containerPort: 8888
+        env:
+        - name: ONYXIA_USER
+          value: {{ .Values.oidc.username | quote }}
+        - name: DATA_DIR
+          value: /data
+        - name: HUB_URL
+          value: "https://{{ .Values.ingress.hostname }}"
+        - name: HUB_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: qgis-hub-apikey
+              key: HUB_API_KEY
+        - name: LLM_API_KEY
+          value: {{ .Values.llm.apiKey | default "" | quote }}
+        {{- if .Values.llm.baseUrl }}
+        - name: LLM_BASE_URL
+          value: {{ .Values.llm.baseUrl | quote }}
+        {{- end }}
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8888
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 12
+        resources:
+          {{- toYaml .Values.agent.resources | nindent 10 }}
+{{- end }}

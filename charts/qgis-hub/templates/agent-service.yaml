@@ -1,0 +1,33 @@
+{{- if .Values.agent.enabled }}
+{{/* Sprint Day 5 Phase 1.2 : Service headless (DNS StatefulSet) + Service
+     ClusterIP (pour Ingress). Miroir des 2 services crees par
+     _bootstrap_agent (main.py:452-466). */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: qgis-agent
+  labels:
+    {{- include "qgis-hub.labels" . | nindent 4 }}
+    app: qgis-agent
+spec:
+  clusterIP: None
+  selector:
+    app: qgis-agent
+  ports:
+  - port: 8888
+    targetPort: 8888
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qgis-agent-svc
+  labels:
+    {{- include "qgis-hub.labels" . | nindent 4 }}
+    app: qgis-agent
+spec:
+  selector:
+    app: qgis-agent
+  ports:
+  - port: 8888
+    targetPort: 8888
+{{- end }}

@@ -1,11 +1,12 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "QGIS Hub",
+  "title": "QGIS Hub — Service géospatial CEREMA",
+  "description": "QGIS Desktop + Agent IA + Mémoire long terme pour agents CEREMA. Sprint Day 5 : chart complet 3 pods, remplace le portail nic01asfr.",
   "type": "object",
   "properties": {
     "image": {
       "type": "object",
-      "title": "Image",
+      "title": "Image Hub",
       "properties": {
         "repository": {
           "type": "string",
@@ -21,18 +22,10 @@
     },
     "persistence": {
       "type": "object",
-      "title": "Persistence",
+      "title": "Persistance Hub",
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "title": "Enable persistence",
-          "default": true
-        },
-        "size": {
-          "type": "string",
-          "title": "Storage size",
-          "default": "10Gi"
-        }
+        "enabled": { "type": "boolean", "default": true },
+        "size": { "type": "string", "default": "10Gi" }
       }
     },
     "kubernetes": {
@@ -41,7 +34,6 @@
       "properties": {
         "role": {
           "type": "string",
-          "title": "Service account role",
           "default": "edit",
           "enum": ["view", "edit", "admin"]
         }
@@ -51,14 +43,222 @@
       "type": "object",
       "title": "Ingress",
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "default": true
-        },
+        "enabled": { "type": "boolean", "default": true },
         "hostname": {
           "type": "string",
-          "title": "Hostname",
+          "title": "Hostname (auto)",
+          "description": "Auto-injecté par Onyxia. Format : user-{username}-qgis.user.lab.sspcloud.fr",
+          "default": "",
+          "x-onyxia": {
+            "overwriteDefaultWith": "user-{{user.username}}-qgis.{{k8s.domain}}"
+          }
+        },
+        "ingressClassName": {
+          "type": "string",
+          "default": "onyxia"
+        }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "title": "Agent IA",
+      "description": "Agent LLM tool-runner (subdomain qgis-agent). Requis pour le chat conversationnel.",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string", "default": "ghcr.io/nic01asfr/qgis-agent" },
+            "tag": { "type": "string", "default": "latest" }
+          }
+        },
+        "persistence": {
+          "type": "object",
+          "properties": {
+            "size": { "type": "string", "default": "10Gi" }
+          }
+        },
+        "ingress": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "hostname": {
+              "type": "string",
+              "default": "",
+              "x-onyxia": {
+                "overwriteDefaultWith": "user-{{user.username}}-qgis-agent.{{k8s.domain}}"
+              }
+            }
+          }
+        }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "title": "Workspace QGIS Desktop",
+      "description": "QGIS Desktop + BigQgisMCP tools (subdomain interne, non exposé publiquement — accès via proxy hub).",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string", "default": "ghcr.io/nic01asfr/qgisremotemcp" },
+            "tag": { "type": "string", "default": "latest" }
+          }
+        },
+        "persistence": {
+          "type": "object",
+          "properties": {
+            "size": { "type": "string", "default": "10Gi" }
+          }
+        }
+      }
+    },
+    "llm": {
+      "type": "object",
+      "title": "Clé LLM",
+      "description": "Clé API pour l'agent LLM. Utilise SSPCloud LLM (llm.lab.sspcloud.fr) par défaut.",
+      "properties": {
+        "apiKey": {
+          "type": "string",
+          "title": "LLM API key",
+          "description": "Récupère depuis llm.lab.sspcloud.fr > API keys, ou saisis ta clé OpenAI compatible.",
+          "default": "",
+          "x-onyxia": {
+            "hidden": true,
+            "overwriteDefaultWith": "{{userProfileValues.aiAssistant.apiKey}}"
+          }
+        },
+        "baseUrl": {
+          "type": "string",
+          "title": "Base URL",
+          "default": "https://llm.lab.sspcloud.fr/api"
+        },
+        "model": {
+          "type": "string",
+          "title": "Model (optionnel)",
           "default": ""
+        }
+      }
+    },
+    "oidc": {
+      "type": "object",
+      "title": "OIDC (auto)",
+      "properties": {
+        "username": {
+          "type": "string",
+          "description": "Auto-injecté par Onyxia depuis Keycloak.",
+          "default": "",
+          "x-onyxia": {
+            "overwriteDefaultWith": "{{user.username}}"
+          }
+        }
+      }
+    },
+    "s3": {
+      "type": "object",
+      "title": "MinIO S3 (auto)",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "endpoint": {
+          "type": "string",
+          "default": "minio.lab.sspcloud.fr",
+          "x-onyxia": { "overwriteDefaultWith": "{{s3.AWS_S3_ENDPOINT}}" }
+        },
+        "defaultRegion": {
+          "type": "string",
+          "default": "us-east-1",
+          "x-onyxia": { "overwriteDefaultWith": "{{s3.AWS_DEFAULT_REGION}}" }
+        },
+        "accessKeyId": {
+          "type": "string",
+          "x-onyxia": {
+            "hidden": true,
+            "overwriteDefaultWith": "{{s3.AWS_ACCESS_KEY_ID}}"
+          }
+        },
+        "secretAccessKey": {
+          "type": "string",
+          "x-onyxia": {
+            "hidden": true,
+            "overwriteDefaultWith": "{{s3.AWS_SECRET_ACCESS_KEY}}"
+          }
+        },
+        "sessionToken": {
+          "type": "string",
+          "x-onyxia": {
+            "hidden": true,
+            "overwriteDefaultWith": "{{s3.AWS_SESSION_TOKEN}}"
+          }
+        },
+        "workingDirectoryPath": {
+          "type": "string",
+          "x-onyxia": {
+            "hidden": true,
+            "overwriteDefaultWith": "{{s3.AWS_BUCKET_NAME}}/{{project.id}}/qgis-hub/"
+          }
+        }
+      }
+    },
+    "vault": {
+      "type": "object",
+      "title": "Vault (auto)",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "url": {
+          "type": "string",
+          "default": "https://vault.lab.sspcloud.fr",
+          "x-onyxia": { "overwriteDefaultWith": "{{vault.VAULT_ADDR}}" }
+        },
+        "token": {
+          "type": "string",
+          "x-onyxia": {
+            "hidden": true,
+            "overwriteDefaultWith": "{{vault.VAULT_TOKEN}}"
+          }
+        },
+        "mount": {
+          "type": "string",
+          "default": "onyxia-kv",
+          "x-onyxia": { "overwriteDefaultWith": "{{vault.VAULT_MOUNT}}" }
+        },
+        "directory": {
+          "type": "string",
+          "x-onyxia": { "overwriteDefaultWith": "{{vault.VAULT_TOP_DIR}}" }
+        }
+      }
+    },
+    "git": {
+      "type": "object",
+      "title": "Git (auto)",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "name": {
+          "type": "string",
+          "x-onyxia": { "overwriteDefaultWith": "{{git.name}}" }
+        },
+        "email": {
+          "type": "string",
+          "x-onyxia": { "overwriteDefaultWith": "{{git.email}}" }
+        },
+        "token": {
+          "type": "string",
+          "x-onyxia": {
+            "hidden": true,
+            "overwriteDefaultWith": "{{git.token}}"
+          }
+        }
+      }
+    },
+    "security": {
+      "type": "object",
+      "title": "Sécurité",
+      "properties": {
+        "networkPolicy": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true }
+          }
         }
       }
     },
@@ -67,6 +267,7 @@
       "properties": {
         "suspend": {
           "type": "boolean",
+          "title": "Suspend (pause pods)",
           "default": false
         }
       }

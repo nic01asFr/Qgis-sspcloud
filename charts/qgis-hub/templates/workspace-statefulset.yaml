@@ -1,0 +1,89 @@
+{{/*
+Sprint Day 5 Phase 1.2 (2026-08-04) : StatefulSet qgis-workspace (QGIS Desktop
+noVNC). Absorbe le manifest historique `sessions.py:_statefulset_manifest`
+(sessions.py:280-383). Le hub garde sessions.create_session() en self-heal.
+
+Pattern identique :
+- image `ghcr.io/nic01asfr/qgisremotemcp:latest`
+- 3 ports : MCP 8100 + API 8080 + VNC 6080
+- WORKSPACE_OWNER env obligatoire (utilise par les tools BigQgisMCP pour scope)
+- USER_RECIPES_DIR pointe sur symlink maintenu par activate_pod_code
+- HUB_API_KEY via secretKeyRef (pour publish_artifact vers hub)
+- PVC 10Gi rook-ceph-block (data cache, .qgz projets)
+*/}}
+{{- if and .Values.workspace.enabled .Values.oidc.username }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qgis-workspace-{{ .Values.oidc.username }}
+  labels:
+    {{- include "qgis-hub.labels" . | nindent 4 }}
+    app: qgis-workspace
+    owner: {{ .Values.oidc.username | quote }}
+spec:
+  serviceName: qgis-workspace-{{ .Values.oidc.username }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qgis-workspace
+      owner: {{ .Values.oidc.username | quote }}
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+      annotations:
+        "helm.sh/resource-policy": keep
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: rook-ceph-block
+      resources:
+        requests:
+          storage: {{ .Values.workspace.persistence.size | default "10Gi" }}
+  template:
+    metadata:
+      labels:
+        app: qgis-workspace
+        owner: {{ .Values.oidc.username | quote }}
+    spec:
+      containers:
+      - name: qgis
+        image: "{{ .Values.workspace.image.repository }}:{{ .Values.workspace.image.tag }}"
+        imagePullPolicy: {{ .Values.workspace.image.pullPolicy | default "Always" }}
+        ports:
+        - containerPort: 8100
+        - containerPort: 8080
+        - containerPort: 6080
+        env:
+        - name: MULTI_USER_MODE
+          value: "false"
+        - name: WORKSPACE_OWNER
+          value: {{ .Values.oidc.username | quote }}
+        - name: QGIS_RESOLUTION
+          value: "1920x1080x24"
+        - name: MCP_PORT
+          value: "8100"
+        - name: VNC_HOST
+          value: localhost
+        - name: DATA_DIR
+          value: /data
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: USER_RECIPES_DIR
+          value: /data/studies/active/recipes
+        - name: HUB_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: qgis-hub-apikey
+              key: HUB_API_KEY
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8100
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 18
+        resources:
+          {{- toYaml .Values.workspace.resources | nindent 10 }}
+{{- end }}

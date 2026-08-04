@@ -1,0 +1,28 @@
+{{- if and .Values.workspace.enabled .Values.oidc.username }}
+{{/* Sprint Day 5 Phase 1.2 : Service ClusterIP workspace (3 ports).
+     Utilise par le hub pour proxy /workspace/vnc/* (main.py:1089-1201) via
+     DNS interne `qgis-workspace-{user}.{ns}.svc.cluster.local`. Pas
+     d'exposition publique (le hub proxy tout). */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: qgis-workspace-{{ .Values.oidc.username }}
+  labels:
+    {{- include "qgis-hub.labels" . | nindent 4 }}
+    app: qgis-workspace
+    owner: {{ .Values.oidc.username | quote }}
+spec:
+  selector:
+    app: qgis-workspace
+    owner: {{ .Values.oidc.username | quote }}
+  ports:
+  - name: mcp
+    port: 8100
+    targetPort: 8100
+  - name: api
+    port: 8080
+    targetPort: 8080
+  - name: vnc
+    port: 6080
+    targetPort: 6080
+{{- end }}
