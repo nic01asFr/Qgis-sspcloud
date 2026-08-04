@@ -1027,16 +1027,28 @@ async def _is_inter_pod_authorized(request: "Request") -> bool:
 
 
 def _portal_login_redirect_url(request: "Request") -> str:
-    """URL portail pour login utilisateur. Fallback hardcode si PORTAL_URL absent."""
+    """URL de redirection pour login utilisateur.
+
+    Sprint Day 5 Phase 1.3 (2026-08-04) : redirige vers la page hub
+    /onboarding au lieu du portail nic01asfr externe. Cela absorbe le
+    role bootstrap du portail cote hub (Phase 1.1 endpoint /onboarding
+    + /auth/token-login). Le nom de la fonction est conserve pour
+    retro-compat avec les 3 usages middleware, mais la cible a change.
+
+    Fallback env `PORTAL_URL` conserve pour deploiement transitoire
+    (permet de forcer portail externe pendant la migration Day 5) mais
+    par defaut on redirige vers hub-hosted /onboarding.
+    """
     import os
     portal = os.environ.get("PORTAL_URL", "").rstrip("/")
-    if not portal:
-        # Convention SSPCloud : portail admin nic01asfr (par defaut)
-        portal = "https://user-nic01asfr-qgis-mcp-portal-bridge.user.lab.sspcloud.fr"
-    # Le portail redirigera vers `next` apres validation token
-    next_url = str(request.url)
-    from urllib.parse import quote
-    return f"{portal}/?next={quote(next_url, safe='')}"
+    if portal:
+        # Legacy : forcer portail externe si PORTAL_URL set (migration transitoire)
+        from urllib.parse import quote
+        next_url = str(request.url)
+        return f"{portal}/?next={quote(next_url, safe='')}"
+    # Day 5 : page onboarding hostee cote hub (meme domaine, pas de cross-tenant)
+    base = str(request.base_url).rstrip("/")
+    return f"{base}/onboarding"
 
 
 async def oidc_auth_middleware(request: "Request", call_next):
