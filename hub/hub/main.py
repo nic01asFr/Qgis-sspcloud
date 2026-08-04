@@ -2428,6 +2428,160 @@ async def _proxy_to_geoai(request: Request, target_url: str) -> Response:
     )
 
 
+# ── Sprint Day 5 Phase 1 (2026-08-04) : bootstrap OIDC hub (remplace portail) ──
+
+@app.get("/onboarding", response_class=HTMLResponse)
+async def hub_onboarding(request: Request):
+    """Page d'onboarding hub qui remplace le portail nic01asfr.
+
+    L'user y arrive quand il n'a aucun cookie valide (bootstrap initial ou
+    perte cookies). Il colle son token OIDC SSPCloud (issu de /account/k8sCodeSnippets).
+    Le POST /auth/token-login valide via JWKS Keycloak + pose 2 cookies :
+      - `oidc_token` avec Domain=.user.lab.sspcloud.fr (partage cross-subdomain
+        pour que agent voit le meme cookie sans re-saisie)
+      - `hub_api_key` (Day 4 auto-set idempotent en aval du middleware apres
+        1er acces OIDC valide)
+
+    Sprint Day 5 : cette page absorbe le role Etape 1/3 du portail. Etapes
+    2/3 (LLM key) et 3/3 (deploiement pods) seront absorbees par le chart
+    Helm Onyxia (Values UI) + endpoint futur /desk/onboarding-status.
+    """
+    onyxia_user = os.environ.get("ONYXIA_USER", "")
+    account_url = "https://datalab.sspcloud.fr/account/k8sCodeSnippets"
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Connexion QGIS Service — CEREMA</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
+<style>
+body{{font-family:Marianne,arial,sans-serif;max-width:720px;margin:60px auto;padding:0 20px}}
+h1{{color:#000091;font-size:24px}}
+.step{{background:#f5f5fe;border-left:4px solid #000091;padding:16px 20px;margin:20px 0;border-radius:2px}}
+textarea{{width:100%;min-height:120px;font-family:monospace;font-size:11px;padding:8px;border:1px solid #ddd;border-radius:2px}}
+button{{background:#000091;color:#fff;padding:10px 24px;border:none;border-radius:2px;font-size:14px;cursor:pointer;font-family:inherit}}
+button:hover{{background:#1212ff}}
+a{{color:#000091}}
+.hint{{color:#666;font-size:12px;margin-top:4px}}
+</style>
+</head>
+<body>
+<h1>🗺 QGIS Service — Connexion</h1>
+<p>Bienvenue{f' <b>{onyxia_user}</b>' if onyxia_user else ''}. Colle ton token
+OIDC SSPCloud pour te connecter au service. Une fois connecté, tu n'auras
+plus besoin de cette étape pendant 90 jours (cookie stable).</p>
+
+<div class="step">
+<h2>Étape 1/1 · Colle ton token OIDC</h2>
+<p>Ouvre <a href="{account_url}" target="_blank">ton compte SSPCloud</a>,
+copie le champ <code>id-token</code> (commence par <code>eyJhbGciOiJSUzI1Ni…</code>)
+et colle-le ci-dessous.</p>
+
+<form method="POST" action="/auth/token-login">
+  <textarea name="token" placeholder="eyJhbGciOiJSUzI1Ni…" required></textarea>
+  <p class="hint">Le token est stocké en cookie httponly, valide ~1h côté OIDC
+  puis remplacé par un cookie <code>hub_api_key</code> stable 90 jours (auto-set).</p>
+  <button type="submit">Se connecter →</button>
+</form>
+</div>
+
+<p style="color:#888;font-size:12px;margin-top:40px">
+QGIS Service · CEREMA — Sprint Day 5 (portail absorbé côté hub).
+</p>
+</body>
+</html>""")
+
+
+@app.post("/auth/token-login")
+async def hub_token_login(request: Request):
+    """POST du form /onboarding : valide token OIDC + pose cookies.
+
+    Remplace `POST /auth/token-login` du portail nic01asfr (Passerelle repo).
+    Meme comportement : nettoie le token, valide via JWKS, verifie
+    preferred_username == ONYXIA_USER, pose cookie `oidc_token` avec
+    Domain=.user.lab.sspcloud.fr pour propagation cross-subdomain vers agent.
+    Redirect vers `/` (qui redirige lui-meme vers /workspace).
+
+    Le cookie `hub_api_key` (Day 4 auto-set) sera pose automatiquement au
+    prochain acces protege par le middleware OIDC (idempotent).
+    """
+    form = await request.form()
+    raw = form.get("token") or ""
+    token = raw.strip().replace("\n", "").replace("\r", "").replace(" ", "")
+
+    if not token:
+        return RedirectResponse("/onboarding?error=token_vide", status_code=302)
+
+    # Refuse les refresh_token HS512
+    try:
+        import base64 as _b64
+        header = json.loads(_b64.b64decode(token.split('.')[0] + '==').decode())
+        alg = header.get('alg', '')
+        payload = json.loads(_b64.b64decode(token.split('.')[1] + '==').decode())
+        typ = payload.get('typ', '')
+    except Exception:
+        return RedirectResponse("/onboarding?error=token_malforme", status_code=302)
+    if alg.startswith('HS') or typ == 'Refresh':
+        return RedirectResponse("/onboarding?error=mauvais_type_token", status_code=302)
+
+    # Valide OIDC via JWKS Keycloak SSPCloud
+    try:
+        user_info = auth._validate_oidc_token(token)
+    except HTTPException as exc:
+        return RedirectResponse(
+            f"/onboarding?error=token_invalide&detail={exc.detail}",
+            status_code=302,
+        )
+
+    # Verifie ownership pod (equivalent middleware etape 5)
+    claimed_user = user_info.get("username", "")
+    onyxia_user = os.environ.get("ONYXIA_USER", "")
+    if onyxia_user and claimed_user != onyxia_user:
+        return RedirectResponse(
+            f"/onboarding?error=mauvais_espace&detail=Cet+espace+appartient+a+{onyxia_user}",
+            status_code=302,
+        )
+
+    # Calcul TTL depuis exp du token
+    try:
+        expires_in = max(0, int(payload.get("exp", 0) - time.time()))
+    except Exception:
+        expires_in = 3600
+
+    response = RedirectResponse("/", status_code=302)
+    # Cookie oidc_token cross-subdomain (Domain=.user.lab.sspcloud.fr) pour
+    # partage hub + agent (le workspace n'utilise que l'auth interne du hub).
+    # Sans ce domain, l'agent iframe (subdomain qgis-agent) ne verrait pas
+    # le cookie -> boucle 401. Meme comportement que le portail supprime.
+    response.set_cookie(
+        "oidc_token", token,
+        httponly=True, secure=True,
+        max_age=expires_in or 3600,
+        samesite="lax",
+        domain=".user.lab.sspcloud.fr",
+    )
+    log.info(
+        "auth/token-login OK pour user %s (exp %ds)",
+        claimed_user, expires_in,
+    )
+    return response
+
+
+@app.get("/auth/logout")
+async def hub_logout():
+    """Clear tous les cookies auth (equivalent portail /auth/logout).
+
+    Efface `oidc_token` (Domain=. et sans domain, pour couvrir les 2 cas
+    portail-set et hub-set) + `hub_api_key`. Redirect vers /onboarding.
+    """
+    response = RedirectResponse("/onboarding", status_code=302)
+    # Clear oidc_token dans les 2 domains (legacy portail + nouveau hub)
+    response.delete_cookie("oidc_token", domain=".user.lab.sspcloud.fr")
+    response.delete_cookie("oidc_token")
+    response.delete_cookie("hub_api_key")
+    return response
+
+
 # ── Login navigateur via clé API dans l'URL ──────────────────────────────────
 
 @app.get("/login", response_class=HTMLResponse)

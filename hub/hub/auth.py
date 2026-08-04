@@ -893,6 +893,16 @@ _OIDC_MIDDLEWARE_PUBLIC = (
     # _validate_api_key valide contre Secret K8s pod-scoped -> cle
     # invalide = pas de cookie pose, page HTML "Cle invalide".
     "/login",
+    # Sprint Day 5 Phase 1 (2026-08-04) : /onboarding + /auth/token-login
+    # absorbent le role de bootstrap du portail nic01asfr. Le user colle son
+    # token OIDC dans /onboarding (form HTML), POST vers /auth/token-login qui
+    # valide le token via JWKS Keycloak SSPCloud + pose cookie oidc_token
+    # cross-subdomain (Domain=.user.lab.sspcloud.fr) + cookie hub_api_key
+    # (Day 4 auto-set idempotent). Objectif : disparition portail au profit
+    # d'un chart Helm Onyxia officiel. Ces routes DOIVENT etre publiques
+    # car l'user arrive sans cookie (bootstrap initial).
+    "/onboarding",
+    "/auth/token-login",
 )
 
 # Routes inter-pods : Bearer HUB_API_KEY = clé hub partagée entre hub et agent
