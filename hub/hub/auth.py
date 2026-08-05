@@ -430,13 +430,13 @@ async def _validate_api_key(key: str) -> dict | None:
         return None
     # 0) Fast-path env var (Phase 1.7-A) : source de verite unique = env
     # injectee par chart au boot du pod. Zero appel API K8s pour cette validation.
+    # Fix Phase 1.7-B (2026-08-05) : n'utilise QUE ONYXIA_USER (env var
+    # standard SSPCloud) au lieu de _NAMESPACE module-level qui pouvait
+    # etre invisible dans certains contextes async middleware -> NameError.
     import os as _os
     env_key = _os.environ.get("HUB_API_KEY", "").strip()
     if env_key and key == env_key:
-        username = (
-            _os.environ.get("ONYXIA_USER", "")
-            or (_NAMESPACE.removeprefix("user-") if _NAMESPACE else "")
-        )
+        username = _os.environ.get("ONYXIA_USER", "").strip()
         return {
             "username": username,
             "role": "admin" if username in _ADMIN_USERS else "user",
@@ -1175,7 +1175,11 @@ async def oidc_auth_middleware(request: "Request", call_next):
                 request.state.oidc_user = _cookie_user
                 return await call_next(request)
         except Exception as exc:
-            log.warning("middleware: hub_api_key cookie validation failed : %s", exc)
+            import traceback as _tb
+            log.warning(
+                "middleware: hub_api_key cookie validation failed : %s\n%s",
+                exc, _tb.format_exc(),
+            )
 
     # 4. Routes UI : cookie OIDC obligatoire (fallback si pas de hub_api_key)
     token = request.cookies.get("oidc_token") or ""
