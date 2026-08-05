@@ -1,5 +1,17 @@
 # ONBOARDING — qgis-sspcloud
 
+> **Sprint Day 5 (2026-08-05) — DOCUMENT PARTIELLEMENT OBSOLÈTE.**
+>
+> Le flow d'onboarding user via portail admin (`nic01asfr`) est retiré au
+> profit d'une installation user-autonome via `helm install`. Voir :
+>
+> - Utilisateur final : [QUICKSTART.md](QUICKSTART.md) (3 étapes)
+> - Développeur/admin : ce document (sections 2, 3, 4 encore pertinentes)
+>
+> Sections obsolètes : celles qui décrivent `PORTAL_URL`, `SECURITY_PASSWORD`,
+> le magic URL `/login?key=`, le pod admin portail. Voir plan Phase 2/3 :
+> [docs/spec-day5-plan-complet.md](docs/spec-day5-plan-complet.md).
+
 Guide pas-à-pas pour un nouveau développeur ou administrateur du service.
 
 Version 2026-08-02 · Sprint isolation Day 3.1c CLOS.

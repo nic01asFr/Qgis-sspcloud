@@ -3,25 +3,32 @@
 Vue d'ensemble technique du service qgis-sspcloud : composants, flux, isolation,
 contrat d'orchestration études/projets/sessions.
 
-Version 2026-08-02 · Sprint isolation Day 3.1c CLOS.
+Version 2026-08-05 · Sprint Day 5 Phase 2 CLOS (chart 1.2.0, portail retiré).
 
 ---
 
 ## 1. Composants du service
 
-Le service se compose de 4 pods déployés dans le namespace K8s `user-<username>`
-via Helm charts Onyxia :
+**Sprint Day 5 (chart 1.2.0)** : le portail admin `nic01asfr` est retiré.
+Le service se compose de **3 pods** déployés via `helm install qgis-hub`
+depuis le terminal Jupyter Onyxia de l'user (namespace `user-<username>`) :
 
 | Pod | Rôle | Image | Ingress public |
 |---|---|---|---|
-| `jupyter-python-<hash>-0` (hub) | API REST FastAPI, orchestrateur central | `ghcr.io/nic01asfr/qgis-hub:latest` | `user-<u>-qgis.user.lab.sspcloud.fr` |
-| `qgis-agent-0` (agent) | LLM tool-runner, exécute recettes/prompts | `ghcr.io/nic01asfr/qgis-agent:latest` | `user-<u>-qgis-agent.user.lab.sspcloud.fr` |
-| `qgis-workspace-<u>-0` (workspace) | QGIS Desktop + BigQgisMCP tools | `ghcr.io/nic01asfr/qgisremotemcp:latest` | novnc ingress |
-| `qgis-mcp-portal-bridge-jupyter-python-0` (portail) | Onboarding OIDC, échange tokens | `inseefrlab/onyxia-jupyter-python` | `user-<u>-qgis-mcp-portal-bridge.user.lab.sspcloud.fr` |
+| `qgis-hub-0` | API REST FastAPI, orchestrateur central, proxy /agent same-origin | `ghcr.io/nic01asfr/qgis-hub:latest` | `user-<u>-qgis.user.lab.sspcloud.fr` |
+| `qgis-agent-0` | LLM tool-runner, chat SSE, tool-calls, mémoire | `ghcr.io/nic01asfr/qgis-agent:latest` | `user-<u>-qgis-agent.user.lab.sspcloud.fr` |
+| `qgis-workspace-<u>-0` | QGIS Desktop noVNC + BigQgisMCP tools | `ghcr.io/nic01asfr/qgisremotemcp:latest` | ingress interne |
 
 **Coordination** : le hub est le point d'entrée unique. Il proxy les
-requêtes vers le workspace (BigQgisMCP) et l'agent. Le workspace tourne
-sur un PVC `ReadWriteOnce` → une seule instance QGIS par user.
+requêtes vers le workspace (BigQgisMCP) et l'agent (via /agent proxy
+same-origin Phase 1.7-B). Le workspace tourne sur un PVC `ReadWriteOnce`
+→ une seule instance QGIS par user.
+
+**Authentification** (Phase 2-1) : un seul credential `HUB_API_KEY`
+(Secret K8s `qgis-hub-apikey` chart-managed, source unique). Le user
+tape sa clé dans le form `/login` (POST body, zero exposition URL).
+Cookie `hub_api_key` httponly 90j auto-set après validation. Ownership
+check contre `ONYXIA_USER` défense in depth (Day 4.1).
 
 ---
 

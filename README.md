@@ -74,23 +74,36 @@ Cf. [docs/blocks-and-deliverables-model.md §9 backlog](docs/blocks-and-delivera
 
 ## Installation
 
+**Sprint Day 5 (2026-08-05)** : chart Helm autonome, zero admin requis.
+
+**Quickstart** : voir [QUICKSTART.md](QUICKSTART.md) (3 étapes ~3 min).
+
+Résumé express :
+
 1. Connecte-toi sur [datalab.sspcloud.fr](https://datalab.sspcloud.fr)
-2. Lance un service (Jupyter ou VSCode) avec **`kubernetes.role: edit`**
-3. Dans le terminal du service, colle :
+2. Lance un service Jupyter avec **`kubernetes.role: edit`**
+3. Dans le terminal, colle :
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/install.sh | bash
 ```
 
-4. Le script déploie l'agent et le hub (~60s), puis affiche l'URL de ton bureau personnel.
+Le script fait `helm install qgis-hub qgis-sspcloud/qgis-hub` (chart 1.2.0+),
+déploie les 3 pods (~90s), et affiche ta clé HUB_API_KEY personnelle + URL.
+
+**Premier accès web** : va sur `<URL>/login`, colle ta clé HUB_API_KEY.
+Cookie 90j auto-set → workspace accessible.
 
 ## Architecture
 
 ```
-qgis-agent    → Agent IA (chat, mémoire LLM, /desk)
-qgis-mcp-bridge → Hub QGIS (tools MCP, études, publications)
-qgis-workspace  → QGIS Desktop noVNC (démarré à la demande)
+qgis-hub       → Hub API + desk web (tools MCP, études, publications, proxy /agent)
+qgis-agent     → Agent IA (chat conversationnel, mémoire LLM, tool-runner)
+qgis-workspace → QGIS Desktop noVNC (démarré à la demande)
 ```
+
+Détails : [ARCHITECTURE.md](ARCHITECTURE.md) — plan Sprint Day 5 :
+[docs/spec-day5-plan-complet.md](docs/spec-day5-plan-complet.md).
 
 ## Images Docker
 
