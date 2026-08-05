@@ -903,6 +903,13 @@ _OIDC_MIDDLEWARE_PUBLIC = (
     # car l'user arrive sans cookie (bootstrap initial).
     "/onboarding",
     "/auth/token-login",
+    # Sprint Day 5 Phase 1.6 (2026-08-05) : bootstrap via password (Option B,
+    # pattern SSPCloud jupyter-python). Le password vient de env var
+    # SECURITY_PASSWORD injectee par le chart Helm (values.security.password).
+    # POST form -> validation -> pose cookie hub_api_key 90j. Zero exposition
+    # URL (password dans body, pas en query). Plus sur que /login?key= qui
+    # avait la cle en query. Publique car user arrive sans cookie.
+    "/login-password",
 )
 
 # Routes inter-pods : Bearer HUB_API_KEY = clé hub partagée entre hub et agent

@@ -76,6 +76,12 @@ spec:
             - name: VAULT_MOUNT
               value: {{ .Values.vault.mount | quote }}
             {{- end }}
+            {{- /* Sprint Day 5 Phase 1.6 (2026-08-05) : password bootstrap
+                   Option B. Le user tape ce password dans /login-password form
+                   pour poser cookie hub_api_key 90j au 1er acces. Value vient
+                   de values.security.password (chart-generated ou user-set). */}}
+            - name: SECURITY_PASSWORD
+              value: {{ .Values.security.password | quote }}
           {{- if .Values.persistence.enabled }}
           volumeMounts:
             - name: home

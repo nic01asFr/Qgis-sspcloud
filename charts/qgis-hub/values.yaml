@@ -60,6 +60,11 @@ git:
   token: ""
 
 security:
+  # Sprint Day 5 Phase 1.6 : password bootstrap (Option B, pattern SSPCloud).
+  # Le user tape ce password au 1er acces web (/login-password form POST).
+  # Vide -> chart genere randAlphaNum 16 au moment de l'install (via
+  # values.schema.json + Onyxia UI auto-fill). Visible dans Onyxia UI
+  # onglet "Values de Helm" post-install.
   password: ""
   networkPolicy:
     enabled: true

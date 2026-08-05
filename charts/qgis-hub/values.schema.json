@@ -254,6 +254,15 @@
       "type": "object",
       "title": "Sécurité",
       "properties": {
+        "password": {
+          "type": "string",
+          "title": "Password d'accès web",
+          "description": "Auto-généré au premier install (visible dans les Values après). Sert au bootstrap du cookie hub_api_key via /login-password form POST (aucune exposition URL).",
+          "default": "",
+          "x-onyxia": {
+            "overwriteDefaultWith": "{{project.password}}"
+          }
+        },
         "networkPolicy": {
           "type": "object",
           "properties": {

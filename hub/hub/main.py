@@ -2582,6 +2582,139 @@ async def hub_logout():
     return response
 
 
+# ── Sprint Day 5 Phase 1.6 (2026-08-05) : bootstrap via password (Option B) ──
+# Pattern SSPCloud standard (jupyter-python, n8n) : le user tape un password
+# saisi dans les Values Onyxia UI au moment de l'install. Zero token dans URL
+# (POST form body, jamais dans logs/historique/referrer).
+
+@app.get("/login-password", response_class=HTMLResponse)
+async def hub_login_password_form(request: Request, error: str = ""):
+    """Page HTML form pour saisir le password chart.
+
+    Zero exposition URL : le password arrive dans le body POST du form, jamais
+    en query string. Combine avec HTTPS -> pas dans logs nginx-ingress ni dans
+    logs uvicorn (bodies non loggees par defaut).
+
+    Utilise l'env var SECURITY_PASSWORD injectee par le chart Helm (values
+    security.password). Absent -> page indique "password non configure".
+    """
+    security_password = os.environ.get("SECURITY_PASSWORD", "").strip()
+    onyxia_user = os.environ.get("ONYXIA_USER", "")
+    if not security_password:
+        return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8">
+<title>QGIS Service — Erreur configuration</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
+<style>body{{font-family:Marianne,arial,sans-serif;max-width:640px;margin:60px auto;padding:0 20px}}</style>
+</head><body>
+<h1>QGIS Service — Configuration incomplete</h1>
+<p>Le password n'a pas ete configure au moment de l'install du chart Helm.</p>
+<p>Reinstalle le chart avec un password : <code>--set security.password=&lt;ton-password&gt;</code></p>
+<p>Sinon, connecte-toi via ton token OIDC : <a href="/onboarding">/onboarding</a>.</p>
+</body></html>""", status_code=200)
+
+    err_html = ""
+    if error == "invalid_password":
+        err_html = '<p style="color:#ce0500;background:#fee;padding:10px;border-left:4px solid #ce0500;border-radius:2px">Password incorrect. Regarde tes Values Onyxia UI &gt; security.password.</p>'
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Connexion QGIS Service — CEREMA</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
+<style>
+body{{font-family:Marianne,arial,sans-serif;max-width:640px;margin:60px auto;padding:0 20px}}
+h1{{color:#000091;font-size:24px}}
+.step{{background:#f5f5fe;border-left:4px solid #000091;padding:16px 20px;margin:20px 0;border-radius:2px}}
+input[type=password]{{width:100%;padding:10px;border:1px solid #ddd;border-radius:2px;font-family:monospace;font-size:14px;box-sizing:border-box}}
+button{{background:#000091;color:#fff;padding:10px 24px;border:none;border-radius:2px;font-size:14px;cursor:pointer;font-family:inherit;margin-top:8px}}
+button:hover{{background:#1212ff}}
+a{{color:#000091}}
+.hint{{color:#666;font-size:12px;margin-top:4px}}
+.alt{{margin-top:30px;padding-top:20px;border-top:1px solid #ddd;color:#666;font-size:13px}}
+</style>
+</head>
+<body>
+<h1>🗺 QGIS Service — Connexion</h1>
+<p>Bienvenue{f' <b>{onyxia_user}</b>' if onyxia_user else ''}. Tape ton password d'acces.
+Une fois connecte, tu n'auras plus besoin de cette etape pendant 90 jours (cookie stable).</p>
+
+{err_html}
+
+<div class="step">
+<h2>Etape 1/1 &middot; Password d'acces</h2>
+<p>Le password a ete genere au moment du <code>helm install</code>. Retrouve-le :</p>
+<ul>
+<li>Onyxia UI &gt; Mes services &gt; qgis-hub &gt; onglet <b>Values de Helm</b> &gt; <code>security.password</code></li>
+<li>Ou via kubectl : <code>kubectl get secret sh.helm.release.v1.qgis-hub.v1 -o jsonpath='{{{{.data.release}}}}' | base64 -d | base64 -d | gunzip | jq -r '.chart.values.security.password'</code></li>
+</ul>
+
+<form method="POST" action="/login-password">
+  <input type="password" name="password" placeholder="Ton password (chart values)" required autocomplete="off" autofocus>
+  <p class="hint">Le password est envoye en POST body (jamais en URL, jamais dans les logs). Cookie httponly TTL 90 jours.</p>
+  <button type="submit">Se connecter &rarr;</button>
+</form>
+</div>
+
+<div class="alt">
+<b>Alternative :</b> si tu preferes le bootstrap via token OIDC SSPCloud (chemin de secours), va sur
+<a href="/onboarding">/onboarding</a>.
+</div>
+
+<p style="color:#888;font-size:12px;margin-top:40px">
+QGIS Service &middot; CEREMA &middot; Sprint Day 5 Phase 1.6 (portail absorbe, pattern SSPCloud password).
+</p>
+</body>
+</html>""")
+
+
+@app.post("/login-password")
+async def hub_login_password(request: Request):
+    """POST du form /login-password : valide password + pose cookie hub_api_key.
+
+    Compare le password saisi (form body, jamais en URL) contre SECURITY_PASSWORD
+    env var injectee par le chart Helm. Si match -> pose cookie hub_api_key 90j
+    (comme /login?key= mais avec zero exposition URL) + redirect vers /.
+
+    Le cookie oidc_token n'est PAS pose ici (pas necessaire cote hub : le check
+    ONYXIA_USER se fait sur hub_api_key via _validate_api_key auth.py:404).
+    Pour l'agent iframe qui aujourd'hui exige un cookie OIDC cross-subdomain,
+    voir Phase 2 (retrait middleware OIDC agent au profit d'un proxy /agent
+    same-origin ou d'un cookie hub_api_key cross-subdomain).
+    """
+    security_password = os.environ.get("SECURITY_PASSWORD", "").strip()
+    if not security_password:
+        return RedirectResponse("/login-password", status_code=302)
+
+    form = await request.form()
+    submitted = (form.get("password") or "").strip()
+    if not submitted or submitted != security_password:
+        return RedirectResponse("/login-password?error=invalid_password", status_code=302)
+
+    # Password OK -> mint/recup HUB_API_KEY du user courant
+    onyxia_user = os.environ.get("ONYXIA_USER", "")
+    try:
+        api_key = await auth.create_or_get_api_key(onyxia_user)
+    except Exception as exc:
+        log.warning("login-password: create_or_get_api_key echec pour %s : %s",
+                    onyxia_user, exc)
+        return RedirectResponse("/login-password?error=key_mint_failed", status_code=302)
+
+    if not api_key:
+        return RedirectResponse("/login-password?error=key_mint_failed", status_code=302)
+
+    response = RedirectResponse("/", status_code=302)
+    response.set_cookie(
+        "hub_api_key", api_key,
+        httponly=True, secure=True,
+        max_age=90 * 24 * 3600, samesite="lax",
+        path="/",
+    )
+    log.info("login-password OK pour user %s (cookie hub_api_key pose 90j)",
+             onyxia_user)
+    return response
+
+
 # ── Login navigateur via clé API dans l'URL ──────────────────────────────────
 
 @app.get("/login", response_class=HTMLResponse)

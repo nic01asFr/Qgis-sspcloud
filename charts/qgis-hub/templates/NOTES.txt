@@ -1,0 +1,70 @@
+Sprint Day 5 Phase 1.6 (2026-08-05) — Chart qgis-hub {{ .Chart.Version }} installé.
+
+═══════════════════════════════════════════════════════════════════════════════
+ QGIS Service — CEREMA — 3 pods déployés
+═══════════════════════════════════════════════════════════════════════════════
+
+📡 URL principale (Hub + Desk web) :
+   https://{{ .Values.ingress.hostname }}
+
+🤖 URL Agent LLM (chat conversationnel, iframe) :
+   {{- if .Values.agent.enabled }}
+   https://{{ .Values.agent.ingress.hostname | default (printf "%s-agent" (.Values.ingress.hostname | replace "-qgis." "-qgis-agent.")) }}
+   {{- else }}
+   (Agent désactivé dans les Values)
+   {{- end }}
+
+═══════════════════════════════════════════════════════════════════════════════
+ 🔑 Premier accès web — 2 options
+═══════════════════════════════════════════════════════════════════════════════
+
+OPTION A (recommandée) — Password saisi via form POST :
+
+  1. Va sur : https://{{ .Values.ingress.hostname }}/login-password
+  2. Ton password est visible dans Onyxia UI :
+       Mes services > qgis-hub > "Values de Helm" > security.password
+  3. Copie-le, colle-le dans le form, clique "Se connecter"
+  4. Cookie hub_api_key 90j auto-set → workspace accessible
+
+  Sécurité : password envoyé en POST body (jamais en URL, jamais dans logs).
+
+OPTION B (secours) — Token OIDC SSPCloud :
+
+  1. Va sur : https://{{ .Values.ingress.hostname }}/onboarding
+  2. Colle ton id-token depuis https://datalab.sspcloud.fr/account/k8sCodeSnippets
+  3. Cookie posé automatiquement
+
+═══════════════════════════════════════════════════════════════════════════════
+ 🔧 Récupérer ton password via kubectl (en secours)
+═══════════════════════════════════════════════════════════════════════════════
+
+Si tu ne peux pas ouvrir Onyxia UI, récupère depuis le Secret Helm :
+
+  kubectl get secret sh.helm.release.v1.qgis-hub.v1 -n {{ .Release.Namespace }} \
+    -o jsonpath='{.data.release}' | base64 -d | base64 -d | gunzip \
+    | jq -r '.chart.values.security.password'
+
+Ou depuis les env vars du pod hub :
+
+  kubectl exec -n {{ .Release.Namespace }} qgis-hub-0 -- printenv SECURITY_PASSWORD
+
+═══════════════════════════════════════════════════════════════════════════════
+ 📚 Documentation
+═══════════════════════════════════════════════════════════════════════════════
+
+- Guide user : https://github.com/nic01asFr/Qgis-sspcloud/blob/main/USER_GUIDE.md
+- Architecture : https://github.com/nic01asFr/Qgis-sspcloud/blob/main/ARCHITECTURE.md
+- Ops (runbook) : https://github.com/nic01asFr/Qgis-sspcloud/blob/main/OPS.md
+
+═══════════════════════════════════════════════════════════════════════════════
+ ⚙️  Pods déployés (vérification)
+═══════════════════════════════════════════════════════════════════════════════
+
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/managed-by=Helm
+
+Attendus (~90s pour ready) :
+  - qgis-hub-0 (Hub API + desk web)
+  - qgis-agent-0 (Agent LLM, si agent.enabled)
+  - qgis-workspace-{{ .Values.oidc.username }}-0 (QGIS Desktop, si workspace.enabled)
+
+Enjoy ! 🗺
