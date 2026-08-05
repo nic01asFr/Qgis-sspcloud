@@ -49,9 +49,24 @@ Ou depuis les env vars du pod hub :
   kubectl exec -n {{ .Release.Namespace }} qgis-hub-0 -- printenv SECURITY_PASSWORD
 
 ═══════════════════════════════════════════════════════════════════════════════
+ 🤖 Cle LLM (agent IA)
+═══════════════════════════════════════════════════════════════════════════════
+
+Apres le premier login, va sur https://{{ .Values.ingress.hostname }}/workspace
+et ouvre le bloc "Cle LLM (agent IA)". Recupere une cle sur :
+
+  https://llm.lab.sspcloud.fr  (onglet API keys)
+
+Colle-la et clique Enregistrer -> l'agent recharge en RAM (zero downtime).
+
+⚠️  Ephemere : la cle survit tant que le pod agent tourne. Sur redeploy
+    du chart (helm upgrade), retape-la. Persistance PVC prevue en Phase 2.
+
+═══════════════════════════════════════════════════════════════════════════════
  📚 Documentation
 ═══════════════════════════════════════════════════════════════════════════════
 
+- Quickstart : https://github.com/nic01asFr/Qgis-sspcloud/blob/main/QUICKSTART.md
 - Guide user : https://github.com/nic01asFr/Qgis-sspcloud/blob/main/USER_GUIDE.md
 - Architecture : https://github.com/nic01asFr/Qgis-sspcloud/blob/main/ARCHITECTURE.md
 - Ops (runbook) : https://github.com/nic01asFr/Qgis-sspcloud/blob/main/OPS.md

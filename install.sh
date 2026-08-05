@@ -1,308 +1,93 @@
 #!/bin/bash
-# install.sh — Installe le service QGIS Agent dans ton espace SSPCloud.
-# À exécuter depuis un terminal dans un service Onyxia (kubernetes.role: edit requis).
+# install.sh — Installe le service QGIS Hub dans ton espace SSPCloud.
+#
+# A executer depuis un terminal jupyter Onyxia (kubernetes.role: edit requis).
+# Nouveau flow Day 5 (2026-08-05) : chart Helm packageur qgis-hub (3 pods).
 #
 # Usage :
 #   curl -fsSL https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/install.sh | bash
+#
+# Zero admin pod requis. Le user est autonome de bout en bout.
 
 set -e
 
-REPO="https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main"
-HUB_IMAGE="ghcr.io/nic01asfr/qgis-hub:latest"
-AGENT_IMAGE="ghcr.io/nic01asfr/qgis-agent:latest"
+REPO="qgis-sspcloud"
+CHART_URL="https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/helm-repo"
+RELEASE="qgis-hub"
 
+# Detection namespace (POD_NAMESPACE ou SA token)
 SA_NS_FILE="/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 NAMESPACE="${KUBERNETES_NAMESPACE:-}"
 if [ -z "$NAMESPACE" ] && [ -f "$SA_NS_FILE" ]; then
     NAMESPACE=$(cat "$SA_NS_FILE")
 fi
 USERNAME="${ONYXIA_USER:-${NAMESPACE#user-}}"
-
 if [ -z "$USERNAME" ] || [ -z "$NAMESPACE" ]; then
-    echo "ERREUR : impossible de détecter le namespace."
+    echo "ERREUR : impossible de detecter le namespace SSPCloud."
+    echo "Lance ce script depuis un terminal jupyter Onyxia."
     exit 1
 fi
 
-echo ""
-echo "╔══════════════════════════════════════════════════════╗"
-echo "║   Installation QGIS Agent — $USERNAME"
-echo "╚══════════════════════════════════════════════════════╝"
-echo ""
-
-_apply() {
-    # Écrit un manifest YAML dans un fichier tmp et l'applique
-    local name="$1"; shift
-    local tmp; tmp=$(mktemp /tmp/manifest-XXXXXX.yaml)
-    python3 - "$tmp" "$@" <<'PYEOF'
-import sys, os
-dest = sys.argv[1]
-data = os.environ.get('MANIFEST_YAML', '')
-open(dest, 'w').write(data)
-PYEOF
-    MANIFEST_YAML="$1" python3 -c "
-import sys, os
-open(sys.argv[1], 'w').write(os.environ['MANIFEST_YAML'])
-" "$tmp"
-    kubectl apply -f "$tmp" -n "$NAMESPACE" 2>&1
-    rm -f "$tmp"
-}
-
-# Fonction pour appliquer un manifest YAML passé via stdin (heredoc dans un pipe)
-_kubectl_apply() {
-    python3 -c "
-import sys, subprocess
-data = sys.stdin.read()
-r = subprocess.run(['kubectl', 'apply', '-f', '-', '-n', '$NAMESPACE'],
-    input=data, capture_output=False, text=True)
-"
-}
-
-echo "▸ Déploiement hub QGIS (qgis-mcp-bridge)..."
-python3 - <<PYEOF
-import subprocess, os
-
-ns = '$NAMESPACE'
-username = '$USERNAME'
-hub_image = '$HUB_IMAGE'
-repo = '$REPO'
-name = 'qgis-mcp-bridge'
-host = f'user-{username}-{name}-0.user.lab.sspcloud.fr'
-
-manifest = f"""apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {name}
-  namespace: {ns}
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: {name}
-  namespace: {ns}
-  labels:
-    app: {name}
-spec:
-  serviceName: {name}
-  replicas: 1
-  selector:
-    matchLabels:
-      app: {name}
-  template:
-    metadata:
-      labels:
-        app: {name}
-    spec:
-      serviceAccountName: {name}
-      containers:
-      - name: hub
-        image: {hub_image}
-        imagePullPolicy: Always
-        command: ["/bin/bash", "-c"]
-        args: ["curl -fsSL {repo}/server_init.sh | bash"]
-        ports:
-        - containerPort: 8888
-        env:
-        - name: SERVICE_NAME
-          value: qgis-mcp
-        - name: SERVER_MODULE
-          value: hub.main:app
-        - name: SERVER_PORT
-          value: "8888"
-        - name: ONYXIA_USER
-          value: "{username}"
-        - name: SSPCLOUD_NAMESPACE
-          value: "{ns}"
-        readinessProbe:
-          httpGet:
-            path: /
-            port: 8888
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          failureThreshold: 30
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: {name}
-  namespace: {ns}
-  labels:
-    app: {name}
-spec:
-  selector:
-    app: {name}
-  ports:
-  - port: 8888
-    targetPort: 8888
-    name: http
-  clusterIP: None
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: {name}-svc
-  namespace: {ns}
-spec:
-  selector:
-    app: {name}
-  ports:
-  - port: 8888
-    targetPort: 8888
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: {name}
-  namespace: {ns}
-  annotations:
-    kubernetes.io/ingress.class: onyxia
-spec:
-  ingressClassName: onyxia
-  rules:
-  - host: {host}
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: {name}-svc
-            port:
-              number: 8888
-"""
-
-r = subprocess.run(['kubectl', 'apply', '-f', '-', '-n', ns],
-    input=manifest, capture_output=True, text=True)
-print(r.stdout or r.stderr)
-PYEOF
-
-echo "▸ Déploiement agent IA (qgis-agent)..."
-python3 - <<PYEOF
-import subprocess, os
-
-ns = '$NAMESPACE'
-username = '$USERNAME'
-agent_image = '$AGENT_IMAGE'
-repo = '$REPO'
-name = 'qgis-agent'
-host = f'user-{username}-{name}-0.user.lab.sspcloud.fr'
-
-manifest = f"""apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {name}
-  namespace: {ns}
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: {name}
-  namespace: {ns}
-  labels:
-    app: {name}
-spec:
-  serviceName: {name}
-  replicas: 1
-  selector:
-    matchLabels:
-      app: {name}
-  template:
-    metadata:
-      labels:
-        app: {name}
-    spec:
-      serviceAccountName: {name}
-      containers:
-      - name: agent
-        image: {agent_image}
-        imagePullPolicy: Always
-        command: ["/bin/bash", "-c"]
-        args: ["curl -fsSL {repo}/server_init.sh | bash"]
-        ports:
-        - containerPort: 8888
-        env:
-        - name: SERVICE_NAME
-          value: qgis-agent
-        - name: SERVER_MODULE
-          value: agent.main:app
-        - name: SERVER_PORT
-          value: "8888"
-        - name: ONYXIA_USER
-          value: "{username}"
-        - name: SSPCLOUD_NAMESPACE
-          value: "{ns}"
-        readinessProbe:
-          httpGet:
-            path: /
-            port: 8888
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          failureThreshold: 30
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: {name}
-  namespace: {ns}
-spec:
-  selector:
-    app: {name}
-  ports:
-  - port: 8888
-    targetPort: 8888
-    name: http
-  clusterIP: None
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: {name}-svc
-  namespace: {ns}
-spec:
-  selector:
-    app: {name}
-  ports:
-  - port: 8888
-    targetPort: 8888
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: {name}
-  namespace: {ns}
-spec:
-  ingressClassName: onyxia
-  rules:
-  - host: {host}
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: {name}-svc
-            port:
-              number: 8888
-"""
-
-r = subprocess.run(['kubectl', 'apply', '-f', '-', '-n', ns],
-    input=manifest, capture_output=True, text=True)
-print(r.stdout or r.stderr)
-PYEOF
+# Helm config dans /home/onyxia/work (persistent, PVC)
+export HELM_CONFIG_HOME="${HELM_CONFIG_HOME:-/home/onyxia/work/.helm-config}"
+export HELM_CACHE_HOME="${HELM_CACHE_HOME:-/home/onyxia/work/.helm-cache}"
+export HELM_DATA_HOME="${HELM_DATA_HOME:-/home/onyxia/work/.helm-data}"
+mkdir -p "$HELM_CONFIG_HOME" "$HELM_CACHE_HOME" "$HELM_DATA_HOME"
 
 echo ""
-echo "⏳ Attente démarrage hub + agent (~90s)..."
-kubectl rollout status statefulset/qgis-mcp-bridge -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-kubectl rollout status statefulset/qgis-agent -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-
-DESK_URL="https://user-${USERNAME}-qgis-mcp-bridge-0.user.lab.sspcloud.fr/desk"
-
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║  Installation QGIS Hub — $USERNAME"
+echo "║  Namespace : $NAMESPACE"
+echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
-echo "╔══════════════════════════════════════════════════════╗"
-echo "║   ✓ Installation terminée !"
-echo "║"
-echo "║   Ton bureau de travail QGIS :"
-echo "║   $DESK_URL"
-echo "║"
-echo "║   Bookmarke ce lien — c'est ton espace personnel."
-echo "╚══════════════════════════════════════════════════════╝"
+
+# Etape 1 : ajouter le repo Helm
+echo "▸ Etape 1/4 : ajout du repo Helm qgis-sspcloud"
+helm repo add "$REPO" "$CHART_URL" 2>&1 | tail -2
+helm repo update "$REPO" 2>&1 | tail -2
+
+# Etape 2 : install ou upgrade (idempotent)
 echo ""
+echo "▸ Etape 2/4 : helm install qgis-hub (chart derniere version)"
+if helm list -n "$NAMESPACE" | grep -q "^$RELEASE\s"; then
+    echo "  Release deja presente -> upgrade"
+    helm upgrade "$RELEASE" "$REPO/qgis-hub" -n "$NAMESPACE" --reuse-values 2>&1 | tail -3
+else
+    helm install "$RELEASE" "$REPO/qgis-hub" -n "$NAMESPACE" 2>&1 | tail -3
+fi
+
+# Etape 3 : attente rollout
+echo ""
+echo "▸ Etape 3/4 : attente demarrage pods (~90s)"
+for sts in qgis-hub qgis-agent qgis-workspace-"$USERNAME"; do
+    kubectl rollout status "statefulset/$sts" -n "$NAMESPACE" --timeout=180s 2>/dev/null \
+        && echo "  $sts ready" \
+        || echo "  $sts pas encore ready (verifier kubectl get pods -n $NAMESPACE)"
+done
+
+# Etape 4 : recup credentials
+echo ""
+echo "▸ Etape 4/4 : ta cle personnelle HUB_API_KEY"
+KEY=$(kubectl get secret qgis-hub-apikey -n "$NAMESPACE" -o jsonpath='{.data.HUB_API_KEY}' | base64 -d 2>/dev/null)
+if [ -z "$KEY" ]; then
+    echo "  (Secret qgis-hub-apikey pas encore genere. Relance le script dans 30s.)"
+else
+    HUB_URL="https://user-${USERNAME}-qgis.user.lab.sspcloud.fr"
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║  Installation terminee — tes acces"
+    echo "╠══════════════════════════════════════════════════════════════╣"
+    echo "║  URL web (bookmark) :"
+    echo "║    $HUB_URL"
+    echo "║"
+    echo "║  Cle API personnelle (MCP + auth cookie) :"
+    echo "║    $KEY"
+    echo "║"
+    echo "║  Configuration MCP (Claude Desktop, Cursor, Cline) :"
+    echo "║    $HUB_URL/auth/apikey  (retourne JSON pret a coller)"
+    echo "║"
+    echo "║  Cle LLM (a saisir sur /workspace apres login) :"
+    echo "║    https://llm.lab.sspcloud.fr > API keys"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+fi

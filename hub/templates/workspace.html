@@ -195,6 +195,55 @@
   {% endif %}
 
   {# ═════════════════════════════════════════════════════════════════════
+     Sprint Day 5 Phase 1.7-C (2026-08-05) : bloc "Clé LLM agent IA".
+     Le user peut configurer sa cle LLM (SSPCloud llm.lab.sspcloud.fr
+     ou compatible OpenAI). POST /workspace/llm-key -> webhook agent
+     /api/reload-llm-key zero downtime (aucun restart pod). Ephemere :
+     survit tant que le pod agent tourne ; sur redeploy chart, retaper.
+     Persistance PVC prevue Phase 2+.
+     ════════════════════════════════════════════════════════════════════ #}
+  <details class="fr-callout fr-callout--brown-caramel fr-mb-4w"
+           style="padding:12px 16px;font-size:13px">
+    <summary style="cursor:pointer;font-weight:600;color:#845d29">
+      🤖 Clé LLM (agent IA) — configuration de l'assistant
+    </summary>
+    <div class="fr-mt-2w">
+      <p style="margin:0 0 8px 0">
+        L'agent IA a besoin d'une clé LLM pour répondre. Récupère-la sur
+        <a href="https://llm.lab.sspcloud.fr" target="_blank">llm.lab.sspcloud.fr</a>
+        (onglet <b>API keys</b>) ou utilise ta clé OpenAI compatible.
+      </p>
+      {% if llm_key_status_msg %}
+      <div style="background:{{ '#e6f7e6' if llm_key_status_ok else '#fdecea' }};
+                  color:{{ '#0a5c0a' if llm_key_status_ok else '#a11414' }};
+                  padding:8px 10px;border-radius:4px;margin-bottom:8px;font-size:12px">
+        {{ llm_key_status_msg }}
+      </div>
+      {% endif %}
+      <form method="POST" action="/workspace/llm-key" style="display:flex;gap:8px;align-items:flex-end">
+        <div style="flex:1">
+          <label for="llm_key_input" style="display:block;font-size:11px;color:#666;
+                 text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">
+            Clé LLM (jamais affichée en clair après soumission)
+          </label>
+          <input type="password" name="llm_api_key" id="llm_key_input" required
+                 placeholder="sk-..." autocomplete="off"
+                 style="width:100%;padding:8px 10px;border:1px solid #ddd;
+                        border-radius:4px;font-family:monospace;font-size:12px" />
+        </div>
+        <button type="submit" class="fr-btn fr-btn--sm">
+          Enregistrer
+        </button>
+      </form>
+      <p style="margin:8px 0 0 0;color:#666;font-size:11px">
+        La clé est propagée en RAM au pod agent (zéro downtime). Elle
+        n'est pas persistée sur disque : à retaper après un redeploy du
+        service. Chart Helm 1.1.x — persistance PVC prévue en Phase 2.
+      </p>
+    </div>
+  </details>
+
+  {# ═════════════════════════════════════════════════════════════════════
      HERO — action principale contextuelle.
      - Si etude active : bouton 'Continuer mon travail sur X' + indic bureau
      - Si vierge (jamais cree d'etude) : bouton 'Demarrer ma premiere etude'

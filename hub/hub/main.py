@@ -11549,7 +11549,67 @@ async def workspace_page(request: Request):
     if not _jinja:
         raise HTTPException(503, "Templates non disponibles")
     ctx = await _desk_context()
+    # Sprint Day 5 Phase 1.7-C (2026-08-05) : propage status feedback llm-key
+    # form (query string ?llm_key=updated|error|invalid, pose apres POST).
+    llm_flag = request.query_params.get("llm_key", "")
+    if llm_flag == "updated":
+        ctx["llm_key_status_ok"] = True
+        ctx["llm_key_status_msg"] = "Clé LLM mise à jour (agent rechargé, zéro downtime)."
+    elif llm_flag == "empty":
+        ctx["llm_key_status_ok"] = False
+        ctx["llm_key_status_msg"] = "Clé vide — saisis une valeur non vide."
+    elif llm_flag == "error":
+        ctx["llm_key_status_ok"] = False
+        ctx["llm_key_status_msg"] = (
+            "Échec propagation agent (webhook /api/reload-llm-key). "
+            "Réessaie ou consulte les logs kubectl logs qgis-agent-0."
+        )
     return _jinja.TemplateResponse(request, "workspace.html", ctx)
+
+
+@app.post("/workspace/llm-key")
+async def workspace_set_llm_key(request: Request):
+    """Sprint Day 5 Phase 1.7-C (2026-08-05) : configure la cle LLM de l'agent.
+
+    Form POST /workspace/llm-key {llm_api_key: str} -> webhook agent
+    POST /api/reload-llm-key {llm_api_key: str} (X-Hub-Auth: HUB_API_KEY).
+    L'agent met a jour os.environ["LLM_API_KEY"] en RAM (aucun restart pod,
+    zero downtime). Persistance ephemere : survit tant que le pod tourne.
+
+    Auth : le middleware oidc_auth_middleware a deja valide (cookie
+    hub_api_key ou OIDC) avec ownership check ONYXIA_USER.
+    """
+    form = await request.form()
+    llm_key = (form.get("llm_api_key") or "").strip()
+    if not llm_key:
+        return RedirectResponse("/workspace?llm_key=empty", status_code=303)
+
+    hub_key = os.environ.get("HUB_API_KEY", "").strip()
+    if not hub_key:
+        hub_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+
+    ns = _NAMESPACE or f"user-{_ONYXIA_USER}"
+    webhook = f"http://qgis-agent.{ns}.svc.cluster.local:8888/api/reload-llm-key"
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.post(
+                webhook,
+                json={"llm_api_key": llm_key},
+                headers={"X-Hub-Auth": hub_key,
+                         "Content-Type": "application/json"},
+            )
+        if r.status_code != 200:
+            log.warning(
+                "llm-key: webhook agent status=%d body=%s",
+                r.status_code, r.text[:200],
+            )
+            return RedirectResponse("/workspace?llm_key=error", status_code=303)
+    except Exception as exc:
+        log.warning("llm-key: webhook agent unreachable : %s", exc)
+        return RedirectResponse("/workspace?llm_key=error", status_code=303)
+
+    log.info("llm-key: propage OK pour %s (zero downtime)", _ONYXIA_USER)
+    return RedirectResponse("/workspace?llm_key=updated", status_code=303)
 
 
 # Anchor des tâches background lancées par /workspace/wake — sinon asyncio
