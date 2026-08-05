@@ -52,6 +52,17 @@ spec:
               value: /home/onyxia/work/qgis-hub-data
             - name: ONYXIA_USER
               value: {{ .Values.oidc.username | quote }}
+            {{- /* Sprint Day 5 Phase 1.7-A (2026-08-05) : Fix RBAC racine.
+                   Le hub lit HUB_API_KEY via env var (kubelet injecte depuis
+                   Secret K8s qgis-hub-apikey) au lieu de via K8s API (qui
+                   necessitait RoleBinding get secrets - retire Phase 1.5
+                   pour eviter forbidden install user). Pattern identique
+                   agent + workspace. Source unique = Secret K8s chart-managed. */}}
+            - name: HUB_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: qgis-hub-apikey
+                  key: HUB_API_KEY
             {{- if .Values.s3.enabled }}
             - name: AWS_ACCESS_KEY_ID
               value: {{ .Values.s3.accessKeyId | quote }}

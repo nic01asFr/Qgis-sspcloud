@@ -309,6 +309,18 @@ async def create_or_get_api_key(username: str) -> str:
 
     Idempotent — le portail / _bootstrap_agent peuvent l'appeler n fois.
     """
+    # 0) Fast-path env var (Sprint Day 5 Phase 1.7-A, 2026-08-05).
+    # Le chart injecte HUB_API_KEY via secretKeyRef depuis Secret K8s
+    # qgis-hub-apikey (source de verite unique). Evite dependance
+    # K8s API get secrets (RoleBinding retire Phase 1.5). Le Secret
+    # existe forcement (cree par chart hook pre-install randAlphaNum).
+    import os as _os
+    env_key = _os.environ.get("HUB_API_KEY", "").strip()
+    if env_key:
+        _cached_key["value"] = env_key
+        _cached_key["ts"] = time.time()
+        return env_key
+
     # 1) Cache memoire
     now = time.time()
     if _cached_key["value"] and (now - _cached_key["ts"]) < _CACHE_TTL:
@@ -404,12 +416,33 @@ async def revoke_api_key(username: str) -> None:
 async def _validate_api_key(key: str) -> dict | None:
     """Valide une cle API hub.
 
-    Compare contre le Secret de la namespace courante (post-refonte) ET
-    contre la DB legacy si elle existe (compat upgrade en cours).
+    Sprint Day 5 Phase 1.7-A (2026-08-05) : Fix RBAC racine.
+    Ordre de validation :
+    0) Fast-path env var HUB_API_KEY (injectee par chart via secretKeyRef Secret
+       K8s qgis-hub-apikey). Source unique, evite dependance K8s API get secrets
+       (RoleBinding retire Phase 1.5 pour eviter forbidden install user).
+    1) Secret K8s direct read via _k8s_get_secret_value (fallback si env absent,
+       necessite RoleBinding get secrets - marche pour SA `default` du namespace
+       user Onyxia si role=edit).
+    2) DB legacy (compat upgrade en cours, cle emise avant refonte Secret).
     """
     if not key:
         return None
-    # 1) Secret (source de verite)
+    # 0) Fast-path env var (Phase 1.7-A) : source de verite unique = env
+    # injectee par chart au boot du pod. Zero appel API K8s pour cette validation.
+    import os as _os
+    env_key = _os.environ.get("HUB_API_KEY", "").strip()
+    if env_key and key == env_key:
+        username = (
+            _os.environ.get("ONYXIA_USER", "")
+            or (_NAMESPACE.removeprefix("user-") if _NAMESPACE else "")
+        )
+        return {
+            "username": username,
+            "role": "admin" if username in _ADMIN_USERS else "user",
+            "source": "apikey_env",
+        }
+    # 1) Secret K8s direct (fallback si env absent OU cle differente)
     if _NAMESPACE:
         current = await _k8s_get_secret_value(_SECRET_NAME, _NAMESPACE, _SECRET_KEY)
         if current and current == key:
