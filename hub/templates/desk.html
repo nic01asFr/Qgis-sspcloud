@@ -1750,7 +1750,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <div style="width:28px;height:28px;border:3px solid #e3e3fd;border-top-color:#000091;border-radius:50%;animation:spin 1s linear infinite"></div>
         <p style="font-size:.85rem;color:#666;margin:0">Agent IA en démarrage…</p>
       </div>
-      <iframe src="{{ agent_url }}/?embed=1" allow="microphone; clipboard-write" style="display:none"></iframe>
+      <iframe src="/agent/?embed=1" allow="microphone; clipboard-write" style="display:none"></iframe>
     </div>
 
     <!-- Pane Mémoire -->
@@ -3103,8 +3103,12 @@ async function wakeWorkspace() {
 
 // ── Loader agent IA : spinner + auto-retry toutes les 5s ─────────────────────
 (function() {
-  const agentUrl = '{{ agent_url }}';
-  // Sprint Composants Phase 4a : expose globalement pour _signalUiContext
+  // Sprint Day 5 Phase 1.7-B (2026-08-05) : proxy /agent same-origin.
+  // Etait '{{ agent_url }}' (URL absolue cross-subdomain qui exigeait
+  // cookie oidc_token Domain=.user.lab.sspcloud.fr). Maintenant on tape
+  // le hub proxy /agent/{path} qui delegue via Bearer HUB_API_KEY +
+  // X-Hub-Proxy-User. Zero dependance cookie cross-subdomain.
+  const agentUrl = '/agent';
   window.__AGENT_URL__ = agentUrl;
   // session_id : essaie sessionStorage puis fallback uuid simple
   if (!window.sessionStorage.getItem('agent_session_id')) {

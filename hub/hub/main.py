@@ -11936,6 +11936,177 @@ async def _agent_call(method: str, path: str, **kwargs):
         return await c.request(method, path, headers=headers, **kwargs)
 
 
+# ── Sprint Day 5 Phase 1.7-B (2026-08-05) : proxy /agent same-origin ────────
+# Elimine dependance cookie oidc_token cross-subdomain pour iframe agent.
+# Le hub proxifie toutes les routes agent UI (racine chat, /chat SSE,
+# /sessions, /journal, etc.) et injecte l'auth deleguee via
+# Bearer HUB_API_KEY + X-Hub-Proxy-User (validee middleware agent branche 3bis).
+# L'iframe desk.html cible src="/agent/?embed=1" (meme origine hub).
+_AGENT_INTERNAL_URL = os.getenv(
+    "AGENT_INTERNAL_URL", "http://qgis-agent:8888",
+).rstrip("/")
+
+_AGENT_PROXY_HOP_HEADERS = {
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+    "te", "trailers", "transfer-encoding", "upgrade", "host", "cookie",
+}
+
+
+async def _hub_proxy_current_user(request: Request) -> str:
+    """User authentifie pour delegation vers agent.
+
+    Le middleware oidc_auth_middleware pose request.state.oidc_user avant
+    l'endpoint. Fallback : decode cookie hub_api_key. Ultime : _ONYXIA_USER
+    (pod owner, cas iframe post-login juste bootstrappe).
+    """
+    user = getattr(request.state, "oidc_user", "") or ""
+    if user:
+        return user
+    key = request.cookies.get("hub_api_key", "") or ""
+    if key.startswith("qgis_"):
+        info = await auth._validate_api_key(key)
+        if info:
+            return info.get("username", "") or _ONYXIA_USER
+    return _ONYXIA_USER
+
+
+_AGENT_PROXY_HTML_SHIM = b"""
+<script>
+/* Sprint Day 5 Phase 1.7-B : shim fetch/XHR/EventSource pour prefixer les
+   URLs absolues par /agent/ quand la page est chargee via hub proxy.
+   L'iframe est same-origin hub, donc fetch("/api/chat") taperait le hub
+   au lieu de l'agent. On intercepte et prefixe. */
+(function() {
+  var PREFIX = "/agent";
+  function _rewrite(url) {
+    if (typeof url !== "string") return url;
+    if (url.startsWith("/") && !url.startsWith("/agent/") && !url.startsWith("//")) {
+      return PREFIX + url;
+    }
+    return url;
+  }
+  var _fetch = window.fetch;
+  window.fetch = function(input, init) {
+    if (typeof input === "string") return _fetch(_rewrite(input), init);
+    if (input && typeof input.url === "string") {
+      var newUrl = _rewrite(input.url);
+      if (newUrl !== input.url) input = new Request(newUrl, input);
+    }
+    return _fetch(input, init);
+  };
+  var _XHR = window.XMLHttpRequest.prototype.open;
+  window.XMLHttpRequest.prototype.open = function(m, u) {
+    arguments[1] = _rewrite(u);
+    return _XHR.apply(this, arguments);
+  };
+  if (window.EventSource) {
+    var _ES = window.EventSource;
+    window.EventSource = function(u, o) { return new _ES(_rewrite(u), o); };
+    window.EventSource.prototype = _ES.prototype;
+    ["CONNECTING","OPEN","CLOSED"].forEach(function(k){
+      window.EventSource[k] = _ES[k];
+    });
+  }
+})();
+</script>
+"""
+
+
+@app.api_route(
+    "/agent/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+    include_in_schema=False,
+)
+async def hub_proxy_agent(path: str, request: Request):
+    """Proxy same-origin hub -> agent avec delegation auth.
+
+    Phase 1.7-B. L'iframe desk.html tape /agent/?embed=1 (meme origine hub,
+    cookie hub_api_key suffit). Le hub proxifie vers qgis-agent:8888 en
+    injectant :
+      - Authorization: Bearer HUB_API_KEY (inter-pod trusted)
+      - X-Hub-Proxy-User: <username> (identite deleguee, ownership check
+        cote agent contre ONYXIA_USER du pod)
+
+    Streaming compatible SSE (POST /chat, GET /context/render/{sid}). Reecrit
+    l'HTML retourne via shim fetch/XHR/EventSource (pas de reecriture DOM
+    fragile, juste un intercepteur global qui prefixe /agent/ aux URLs
+    absolues).
+    """
+    api_key = os.environ.get("HUB_API_KEY", "").strip()
+    if not api_key:
+        api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+    proxy_user = await _hub_proxy_current_user(request)
+
+    target_path = "/" + path if path else "/"
+    if request.url.query:
+        target_path = f"{target_path}?{request.url.query}"
+
+    fwd_headers = {
+        k: v for k, v in request.headers.items()
+        if k.lower() not in _AGENT_PROXY_HOP_HEADERS
+    }
+    fwd_headers["Authorization"] = f"Bearer {api_key}"
+    fwd_headers["X-Hub-Proxy-User"] = proxy_user
+
+    body_bytes = await request.body()
+
+    client = httpx.AsyncClient(
+        base_url=_AGENT_INTERNAL_URL,
+        timeout=httpx.Timeout(600.0, connect=10.0),
+    )
+    try:
+        req = client.build_request(
+            method=request.method,
+            url=target_path,
+            headers=fwd_headers,
+            content=body_bytes,
+        )
+        upstream = await client.send(req, stream=True)
+    except Exception as exc:
+        await client.aclose()
+        log.warning("proxy /agent%s echec : %s", target_path, exc)
+        return JSONResponse(
+            {"detail": f"agent unreachable: {exc}"}, status_code=502,
+        )
+
+    resp_headers = {
+        k: v for k, v in upstream.headers.items()
+        if k.lower() not in _AGENT_PROXY_HOP_HEADERS
+        and k.lower() not in ("content-length", "content-encoding")
+    }
+    content_type = upstream.headers.get("content-type", "")
+    if "text/event-stream" in content_type:
+        resp_headers["Cache-Control"] = "no-cache"
+        resp_headers["X-Accel-Buffering"] = "no"
+
+    is_html = content_type.startswith("text/html")
+
+    async def _stream():
+        try:
+            if is_html:
+                # Buffer complet + injection shim avant </head>
+                buf = b""
+                async for chunk in upstream.aiter_raw():
+                    buf += chunk
+                idx = buf.lower().find(b"</head>")
+                if idx >= 0:
+                    buf = buf[:idx] + _AGENT_PROXY_HTML_SHIM + buf[idx:]
+                yield buf
+            else:
+                async for chunk in upstream.aiter_raw():
+                    yield chunk
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        _stream(),
+        status_code=upstream.status_code,
+        headers=resp_headers,
+        media_type=content_type or None,
+    )
+
+
 # ── V1.5 Sprint 1.3 : proxies /desk/recipes/* pour la UI desk ────────────────
 # Pattern symetrique a /desk/study-files (auth implicite via _ONYXIA_USER +
 # middleware OIDC Phase 0ter qui bloque les strangers). La UI desk dans le

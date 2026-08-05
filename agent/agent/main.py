@@ -232,6 +232,37 @@ async def agent_oidc_middleware(request: Request, call_next):
             )
             if presented == expected:
                 return await call_next(request)
+
+    # 3bis. Sprint Day 5 Phase 1.7-B (2026-08-05) : hub proxy same-origin.
+    # Le hub proxifie /agent/{path} vers ce pod agent pour eviter le cookie
+    # oidc_token cross-subdomain (fragile, cassait iframe si domain change).
+    # Le hub a DEJA valide l'auth end-user (cookie hub_api_key ou OIDC) avant
+    # de proxifier -> l'agent fait confiance a la delegation si :
+    #   - Bearer HUB_API_KEY (prouve venue du hub, inter-pod trusted)
+    #   - X-Hub-Proxy-User: <username> (identite deleguee)
+    #   - <username> == ONYXIA_USER (ownership check, defense in depth)
+    # S'applique a TOUTES les routes UI (racine chat, /chat SSE, /sessions,
+    # /journal, etc.) qui exigeaient un cookie OIDC.
+    expected = os.environ.get("HUB_API_KEY", "").strip()
+    if expected:
+        auth_hdr = request.headers.get("authorization", "")
+        presented = (
+            auth_hdr.removeprefix("Bearer ").strip()
+            if auth_hdr.startswith("Bearer ") else ""
+        )
+        proxy_user = request.headers.get("x-hub-proxy-user", "").strip()
+        pod_owner = os.environ.get("ONYXIA_USER", "").strip()
+        if (
+            presented == expected
+            and proxy_user
+            and (not pod_owner or proxy_user == pod_owner)
+        ):
+            request.state.oidc_user = proxy_user
+            request.state.oidc_claims = {
+                "preferred_username": proxy_user,
+                "source": "hub_proxy",
+            }
+            return await call_next(request)
     # 4. UI : cookie OIDC obligatoire
     token = request.cookies.get("oidc_token") or ""
     if not token:
