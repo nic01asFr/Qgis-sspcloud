@@ -11588,7 +11588,10 @@ async def workspace_set_llm_key(request: Request):
     if not hub_key:
         hub_key = await auth.create_or_get_api_key(_ONYXIA_USER)
 
-    ns = _NAMESPACE or f"user-{_ONYXIA_USER}"
+    # _NAMESPACE est defini dans auth.py, pas dans main.py. Utiliser
+    # _ONYXIA_USER (module-level ici) qui donne bien user-<u> par convention
+    # SSPCloud (namespace = user-<preferred_username>).
+    ns = f"user-{_ONYXIA_USER}" if _ONYXIA_USER else auth._NAMESPACE
     webhook = f"http://qgis-agent.{ns}.svc.cluster.local:8888/api/reload-llm-key"
     try:
         async with httpx.AsyncClient(timeout=10) as c:
