@@ -1275,20 +1275,17 @@ async def _desk_context() -> dict:
         # Sprint UX-3 Commit 3 (2026-06-21) : projet actif + liste des projets
         # de l'etude active (pour dropdown switch dans desk header).
         "active_project": None, "projects_in_active_study": [],
-        # Sprint UX Day 4.3a (2026-08-03) : cle API personnelle du user +
-        # URL magique /login?key=... pour permettre au user de revenir sans
-        # passer par le portail OIDC. Expose UNIQUEMENT dans le template
-        # workspace/desk auquel il accede via son propre pod authentifie
-        # (cookie OIDC ou hub_api_key deja valide) -> zero risque de fuite.
+        # Sprint UX Day 4.3a (2026-08-03) : cle API personnelle du user
+        # exposee dans le template workspace/desk. Le user copie sa cle
+        # pour la coller dans /login form au 1er acces autre navigateur.
+        # Phase 2-1 (2026-08-05) : hub_login_magic_url RETIRE (etait /login?key=,
+        # exposition URL). Le seul flow reste form POST sur /login.
         "hub_api_key": None,
-        "hub_login_magic_url": None,
     }
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
-        # Day 4.3a : expose cle + URL magique dans le context template
-        if api_key and _HUB_URL:
+        if api_key:
             ctx["hub_api_key"] = api_key
-            ctx["hub_login_magic_url"] = f"{_HUB_URL.rstrip('/')}/login?key={api_key}"
         headers = {"Authorization": f"Bearer {api_key}"}
         async with httpx.AsyncClient(timeout=8, base_url=_SELF_URL) as c:
             for path, cb in [
@@ -2582,165 +2579,158 @@ async def hub_logout():
     return response
 
 
-# ── Sprint Day 5 Phase 1.6 (2026-08-05) : bootstrap via password (Option B) ──
-# Pattern SSPCloud standard (jupyter-python, n8n) : le user tape un password
-# saisi dans les Values Onyxia UI au moment de l'install. Zero token dans URL
-# (POST form body, jamais dans logs/historique/referrer).
+# ── Sprint Day 5 Phase 2-1 (2026-08-05) : /login unifie via HUB_API_KEY ─────
+# Refonte : le user tape directement sa cle HUB_API_KEY (visible dans Onyxia
+# UI ou via kubectl get secret qgis-hub-apikey). Remplace :
+#   - GET /login?key=... (magic URL, cle en clair dans URL/logs/referrer)
+#   - GET /login-password (form password chart-genere, ephemere apres redeploy)
+# Un seul chemin canonique = un seul credential = alignement avec le pattern
+# n8n / jupyter-python SSPCloud.
 
-@app.get("/login-password", response_class=HTMLResponse)
-async def hub_login_password_form(request: Request, error: str = ""):
-    """Page HTML form pour saisir le password chart.
+@app.get("/login", response_class=HTMLResponse)
+async def hub_login_form(request: Request, error: str = "", key: str = ""):
+    """Page HTML form pour saisir la cle HUB_API_KEY.
 
-    Zero exposition URL : le password arrive dans le body POST du form, jamais
-    en query string. Combine avec HTTPS -> pas dans logs nginx-ingress ni dans
-    logs uvicorn (bodies non loggees par defaut).
-
-    Utilise l'env var SECURITY_PASSWORD injectee par le chart Helm (values
-    security.password). Absent -> page indique "password non configure".
+    Phase 2-1. La cle est envoyee en POST body (jamais en URL, jamais dans
+    logs nginx-ingress ni uvicorn). Compat : si `?key=` present dans l'URL
+    (legacy magic URL), on redirect immediat vers /login form propre pour
+    forcer le user a coller la cle dans le form (evite la persistence dans
+    historique navigateur + referrer + logs).
     """
-    security_password = os.environ.get("SECURITY_PASSWORD", "").strip()
+    if key:
+        # Legacy magic URL : redirect immediatement (evite exposition URL)
+        return RedirectResponse("/login", status_code=302)
     onyxia_user = os.environ.get("ONYXIA_USER", "")
-    if not security_password:
-        return HTMLResponse(f"""<!DOCTYPE html>
-<html lang="fr"><head><meta charset="UTF-8">
-<title>QGIS Service — Erreur configuration</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
-<style>body{{font-family:Marianne,arial,sans-serif;max-width:640px;margin:60px auto;padding:0 20px}}</style>
-</head><body>
-<h1>QGIS Service — Configuration incomplete</h1>
-<p>Le password n'a pas ete configure au moment de l'install du chart Helm.</p>
-<p>Reinstalle le chart avec un password : <code>--set security.password=&lt;ton-password&gt;</code></p>
-<p>Sinon, connecte-toi via ton token OIDC : <a href="/onboarding">/onboarding</a>.</p>
-</body></html>""", status_code=200)
-
     err_html = ""
-    if error == "invalid_password":
-        err_html = '<p style="color:#ce0500;background:#fee;padding:10px;border-left:4px solid #ce0500;border-radius:2px">Password incorrect. Regarde tes Values Onyxia UI &gt; security.password.</p>'
+    if error == "invalid_key":
+        err_html = '<p style="color:#ce0500;background:#fee;padding:10px;border-left:4px solid #ce0500;border-radius:2px">Cle invalide. Verifie qu\'elle commence par <code>qgis_</code> et correspond a la valeur du Secret K8s.</p>'
+    elif error == "empty":
+        err_html = '<p style="color:#ce0500;background:#fee;padding:10px;border-left:4px solid #ce0500;border-radius:2px">Colle ta cle API dans le champ ci-dessous.</p>'
     return HTMLResponse(f"""<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>Connexion QGIS Service — CEREMA</title>
+<title>Connexion QGIS Service - CEREMA</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
 <style>
 body{{font-family:Marianne,arial,sans-serif;max-width:640px;margin:60px auto;padding:0 20px}}
 h1{{color:#000091;font-size:24px}}
 .step{{background:#f5f5fe;border-left:4px solid #000091;padding:16px 20px;margin:20px 0;border-radius:2px}}
-input[type=password]{{width:100%;padding:10px;border:1px solid #ddd;border-radius:2px;font-family:monospace;font-size:14px;box-sizing:border-box}}
+input[type=password]{{width:100%;padding:10px;border:1px solid #ddd;border-radius:2px;font-family:monospace;font-size:12px;box-sizing:border-box}}
 button{{background:#000091;color:#fff;padding:10px 24px;border:none;border-radius:2px;font-size:14px;cursor:pointer;font-family:inherit;margin-top:8px}}
 button:hover{{background:#1212ff}}
 a{{color:#000091}}
 .hint{{color:#666;font-size:12px;margin-top:4px}}
 .alt{{margin-top:30px;padding-top:20px;border-top:1px solid #ddd;color:#666;font-size:13px}}
+code{{font-size:11px;background:#efeffb;padding:2px 6px;border-radius:2px}}
 </style>
 </head>
 <body>
-<h1>🗺 QGIS Service — Connexion</h1>
-<p>Bienvenue{f' <b>{onyxia_user}</b>' if onyxia_user else ''}. Tape ton password d'acces.
+<h1>QGIS Service - Connexion</h1>
+<p>Bienvenue{f' <b>{onyxia_user}</b>' if onyxia_user else ''}. Colle ta cle API personnelle.
 Une fois connecte, tu n'auras plus besoin de cette etape pendant 90 jours (cookie stable).</p>
 
 {err_html}
 
 <div class="step">
-<h2>Etape 1/1 &middot; Password d'acces</h2>
-<p>Le password a ete genere au moment du <code>helm install</code>. Retrouve-le :</p>
+<h2>Cle API personnelle (HUB_API_KEY)</h2>
+<p>Recupere-la dans :</p>
 <ul>
-<li>Onyxia UI &gt; Mes services &gt; qgis-hub &gt; onglet <b>Values de Helm</b> &gt; <code>security.password</code></li>
-<li>Ou via kubectl : <code>kubectl get secret sh.helm.release.v1.qgis-hub.v1 -o jsonpath='{{{{.data.release}}}}' | base64 -d | base64 -d | gunzip | jq -r '.chart.values.security.password'</code></li>
+<li>Onyxia UI &gt; Mes services &gt; qgis-hub &gt; onglet <b>Values</b> ou <b>Env</b> &gt; <code>HUB_API_KEY</code></li>
+<li>Ou via kubectl depuis ton terminal Jupyter :
+<br><code>kubectl get secret qgis-hub-apikey -o jsonpath='{{{{.data.HUB_API_KEY}}}}' | base64 -d</code></li>
 </ul>
 
-<form method="POST" action="/login-password">
-  <input type="password" name="password" placeholder="Ton password (chart values)" required autocomplete="off" autofocus>
-  <p class="hint">Le password est envoye en POST body (jamais en URL, jamais dans les logs). Cookie httponly TTL 90 jours.</p>
-  <button type="submit">Se connecter &rarr;</button>
+<form method="POST" action="/login">
+  <input type="password" name="api_key" placeholder="qgis_..." required autocomplete="off" autofocus>
+  <p class="hint">Envoyee en POST body (jamais en URL). Cookie httponly TTL 90 jours.</p>
+  <button type="submit">Se connecter</button>
 </form>
 </div>
 
 <div class="alt">
-<b>Alternative :</b> si tu preferes le bootstrap via token OIDC SSPCloud (chemin de secours), va sur
-<a href="/onboarding">/onboarding</a>.
+<b>Alternative :</b> chemin secours via token OIDC SSPCloud - <a href="/onboarding">/onboarding</a>.
 </div>
 
 <p style="color:#888;font-size:12px;margin-top:40px">
-QGIS Service &middot; CEREMA &middot; Sprint Day 5 Phase 1.6 (portail absorbe, pattern SSPCloud password).
+QGIS Service - CEREMA - Sprint Day 5 Phase 2-1 (single credential, plus de password chart-genere).
 </p>
 </body>
 </html>""")
 
 
-@app.post("/login-password")
-async def hub_login_password(request: Request):
-    """POST du form /login-password : valide password + pose cookie hub_api_key.
+@app.post("/login")
+async def hub_login_submit(request: Request):
+    """POST du form /login : valide la cle HUB_API_KEY + pose cookie 90j.
 
-    Compare le password saisi (form body, jamais en URL) contre SECURITY_PASSWORD
-    env var injectee par le chart Helm. Si match -> pose cookie hub_api_key 90j
-    (comme /login?key= mais avec zero exposition URL) + redirect vers /.
+    Phase 2-1. Compare la cle saisie contre :
+      1) env HUB_API_KEY (fast-path _validate_api_key, source unique Secret K8s)
+      2) fallback Secret K8s direct (compat si RoleBinding present)
+      3) fallback DB legacy (compat upgrade)
 
-    Le cookie oidc_token n'est PAS pose ici (pas necessaire cote hub : le check
-    ONYXIA_USER se fait sur hub_api_key via _validate_api_key auth.py:404).
-    Pour l'agent iframe qui aujourd'hui exige un cookie OIDC cross-subdomain,
-    voir Phase 2 (retrait middleware OIDC agent au profit d'un proxy /agent
-    same-origin ou d'un cookie hub_api_key cross-subdomain).
+    Si valide, pose cookie hub_api_key TTL 90j + redirect /workspace.
     """
-    security_password = os.environ.get("SECURITY_PASSWORD", "").strip()
-    if not security_password:
-        return RedirectResponse("/login-password", status_code=302)
-
     form = await request.form()
-    submitted = (form.get("password") or "").strip()
-    if not submitted or submitted != security_password:
-        return RedirectResponse("/login-password?error=invalid_password", status_code=302)
+    submitted = (form.get("api_key") or "").strip()
+    if not submitted:
+        return RedirectResponse("/login?error=empty", status_code=302)
+    if not submitted.startswith("qgis_"):
+        return RedirectResponse("/login?error=invalid_key", status_code=302)
 
-    # Password OK -> mint/recup HUB_API_KEY du user courant
-    onyxia_user = os.environ.get("ONYXIA_USER", "")
-    try:
-        api_key = await auth.create_or_get_api_key(onyxia_user)
-    except Exception as exc:
-        log.warning("login-password: create_or_get_api_key echec pour %s : %s",
-                    onyxia_user, exc)
-        return RedirectResponse("/login-password?error=key_mint_failed", status_code=302)
+    user = await auth._validate_api_key(submitted)
+    if not user:
+        return RedirectResponse("/login?error=invalid_key", status_code=302)
 
-    if not api_key:
-        return RedirectResponse("/login-password?error=key_mint_failed", status_code=302)
+    # Sprint securite Day 4.1 : ownership check (cle X sur pod Y -> 403)
+    pod_user = os.environ.get("ONYXIA_USER", "")
+    if pod_user and user.get("username", "") != pod_user:
+        log.warning(
+            "login: cle valide '%s' mais mauvais pod owner '%s'",
+            user.get("username"), pod_user,
+        )
+        return HTMLResponse(
+            f"<p>Cette cle appartient a <b>{user.get('username')}</b>. "
+            f"Ce pod appartient a <b>{pod_user}</b>. Connecte-toi sur ton "
+            f"propre espace via <a href='/onboarding'>/onboarding</a>.</p>",
+            status_code=403,
+        )
 
-    response = RedirectResponse("/", status_code=302)
+    response = RedirectResponse("/workspace", status_code=302)
     response.set_cookie(
-        "hub_api_key", api_key,
+        "hub_api_key", submitted,
         httponly=True, secure=True,
         max_age=90 * 24 * 3600, samesite="lax",
         path="/",
     )
-    log.info("login-password OK pour user %s (cookie hub_api_key pose 90j)",
-             onyxia_user)
+    log.info("login OK pour user %s (cookie hub_api_key pose 90j)",
+             user.get("username", "?"))
     return response
 
 
-# ── Login navigateur via clé API dans l'URL ──────────────────────────────────
+# ── Compat descendante Phase 2-1 (2026-08-05) : redirect legacy routes ──
+# /login-password (Phase 1.6) et /login?key= (Day 4.2) redirigent vers
+# le nouveau /login unifie. Retirer ces alias apres 3 mois de coexistence.
 
-@app.get("/login", response_class=HTMLResponse)
-async def hub_login(key: str = "", request: Request = None):
+@app.get("/login-password", include_in_schema=False)
+async def hub_login_password_form_legacy(request: Request, error: str = ""):
+    """Page HTML form pour saisir le password chart.
+
+    Phase 2-1 (2026-08-05) : le password chart-genere est retire. On accepte
+    encore les GET pour compat (bookmarks utilisateurs), mais redirect 301
+    vers /login unifie. Retirer definitivement apres 3 mois de coexistence.
     """
-    Permet l'accès navigateur au hub via la clé API dans l'URL.
-    Usage : https://user-xxx-qgis-mcp-bridge.../login?key=qgis_xxx_...
-    Pose un cookie httponly et redirige vers GET /.
+    return RedirectResponse("/login", status_code=301)
+
+
+@app.post("/login-password", include_in_schema=False)
+async def hub_login_password_submit_legacy(request: Request):
+    """Alias legacy Phase 2-1 : redirect vers /login unifie.
+
+    Les form submits legacy avec `?password=` sont ignores (le body form est
+    perdu au redirect 307, mais on prefere 301 vers form propre pour forcer
+    le user a coller sa cle API a la place du password chart-genere).
     """
-    if not key or not key.startswith("qgis_"):
-        return HTMLResponse("""<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;margin-top:80px">
-<h2>🗺 QgisRemoteMCP</h2>
-<p>Accès : <code>https://votre-hub/login?key=votre_cle_api</code></p>
-<p style="color:#888">La clé API est disponible sur le portail d'onboarding.</p>
-</body></html>""")
-
-    user = await auth._validate_api_key(key)
-    if not user:
-        return HTMLResponse("<p>Clé invalide ou expirée.</p>", status_code=401)
-
-    response = RedirectResponse("/", status_code=302)
-    response.set_cookie(
-        "hub_api_key", key,
-        httponly=True, secure=True, max_age=90 * 24 * 3600, samesite="lax",
-    )
-    return response
+    return RedirectResponse("/login", status_code=301)
 
 
 # ── Interface web hub ─────────────────────────────────────────────────────────
@@ -9325,8 +9315,7 @@ async def _serve_published_audience_gate(
         return Response(
             content=(
                 '{"detail":"Livrable non-public (audience=' + audience + ').'
-                ' Identification requise.","portal_url":"'
-                + (os.getenv("PORTAL_URL", "") or "/")
+                ' Identification requise.","portal_url":"/onboarding'
                 + '?next=' + (request.url.path if request else "/") + '"}'
             ),
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -10786,13 +10775,12 @@ async def update_agent_config(request: Request):
 
         existing_env = (r.json().get("spec", {}).get("template", {})
                         .get("spec", {}).get("containers", [{}])[0].get("env", []))
-        # PORTAL_URL est patché à la volée pour que le bandeau "clé LLM
-        # manquante" côté UI agent puisse appeler la popup refresh sur
-        # le bon portail (cross-origin maîtrisé).
+        # Sprint Day 5 Phase 2-2 (2026-08-05) : PORTAL_URL retire du patch.
+        # Le portail nic01asfr est archive Phase 3-A. Le bandeau agent chat
+        # redirige maintenant vers /workspace bloc "Cle LLM" (form user).
         patch_vars = {
             "HUB_API_KEY": hub_api_key,
             "LLM_API_KEY": llm_api_key,
-            "PORTAL_URL":  portal_url,
         }
         # Fix 2026-06-05 : ne retirer du existing_env QUE les vars qu'on va
         # effectivement remplacer (valeur non vide). Sinon le filter ci-dessous

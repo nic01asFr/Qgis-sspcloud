@@ -87,12 +87,11 @@ spec:
             - name: VAULT_MOUNT
               value: {{ .Values.vault.mount | quote }}
             {{- end }}
-            {{- /* Sprint Day 5 Phase 1.6 (2026-08-05) : password bootstrap
-                   Option B. Le user tape ce password dans /login-password form
-                   pour poser cookie hub_api_key 90j au 1er acces. Value vient
-                   de values.security.password (chart-generated ou user-set). */}}
-            - name: SECURITY_PASSWORD
-              value: {{ .Values.security.password | quote }}
+            {{- /* Sprint Day 5 Phase 2-1 (2026-08-05) : SECURITY_PASSWORD
+                   RETIRE. Le password chart-genere Phase 1.6 est remplace
+                   par un unique credential HUB_API_KEY (Secret K8s injecte
+                   ci-dessus). L'user tape sa cle API dans /login form.
+                   Simplification : 1 credential, 1 flow. Cf. Phase 2-1. */}}
           {{- if .Values.persistence.enabled }}
           volumeMounts:
             - name: home

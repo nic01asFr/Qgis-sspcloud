@@ -916,15 +916,11 @@ _OIDC_MIDDLEWARE_PUBLIC = (
     # fait path.startswith(p + "/") donc "/static" sans trailing slash matche
     # "/static/geo-components.js" via "/static/".
     "/static",
-    # Sprint UX Auth Persistante Day 4.2 (2026-08-03) : /login?key=... doit
-    # etre accessible SANS cookie OIDC pour permettre au user de poser son
-    # cookie hub_api_key apres perte cache ou depuis un autre navigateur.
-    # Sans whitelist, le middleware redirigeait vers portail avant que
-    # /login puisse traiter la cle -> flow impossible (chicken-and-egg).
-    # Aucun secret expose : la cle arrive dans l'URL (leak URL logs
-    # possible mais equivalent au token OIDC eyJ colle dans le portail).
-    # _validate_api_key valide contre Secret K8s pod-scoped -> cle
-    # invalide = pas de cookie pose, page HTML "Cle invalide".
+    # Sprint Day 5 Phase 2-1 (2026-08-05) : /login unifie (form POST cle
+    # HUB_API_KEY). Publique car user arrive sans cookie au 1er acces.
+    # Zero exposition URL : la cle est saisie dans le form body (POST),
+    # jamais en query string. Ancien flow /login?key= (Day 4.2) retire :
+    # le GET /login avec `?key=` fait un redirect immediat vers /login form.
     "/login",
     # Sprint Day 5 Phase 1 (2026-08-04) : /onboarding + /auth/token-login
     # absorbent le role de bootstrap du portail nic01asfr. Le user colle son
@@ -936,12 +932,9 @@ _OIDC_MIDDLEWARE_PUBLIC = (
     # car l'user arrive sans cookie (bootstrap initial).
     "/onboarding",
     "/auth/token-login",
-    # Sprint Day 5 Phase 1.6 (2026-08-05) : bootstrap via password (Option B,
-    # pattern SSPCloud jupyter-python). Le password vient de env var
-    # SECURITY_PASSWORD injectee par le chart Helm (values.security.password).
-    # POST form -> validation -> pose cookie hub_api_key 90j. Zero exposition
-    # URL (password dans body, pas en query). Plus sur que /login?key= qui
-    # avait la cle en query. Publique car user arrive sans cookie.
+    # Sprint Day 5 Phase 2-1 (2026-08-05) : /login-password legacy garde
+    # pour redirect 301 vers /login (compat bookmarks users). Retirer apres
+    # 3 mois. Publique car aucun secret ne transite (juste redirect).
     "/login-password",
 )
 
@@ -1075,18 +1068,11 @@ def _portal_login_redirect_url(request: "Request") -> str:
     + /auth/token-login). Le nom de la fonction est conserve pour
     retro-compat avec les 3 usages middleware, mais la cible a change.
 
-    Fallback env `PORTAL_URL` conserve pour deploiement transitoire
-    (permet de forcer portail externe pendant la migration Day 5) mais
-    par defaut on redirige vers hub-hosted /onboarding.
+    Sprint Day 5 Phase 2-2 (2026-08-05) : PORTAL_URL fallback RETIRE. Le
+    portail nic01asfr n'existe plus (Phase 3-A l'archive definitivement).
+    Toujours redirect vers hub-hosted /onboarding (meme domaine, zero
+    cross-tenant, zero cookie cross-subdomain).
     """
-    import os
-    portal = os.environ.get("PORTAL_URL", "").rstrip("/")
-    if portal:
-        # Legacy : forcer portail externe si PORTAL_URL set (migration transitoire)
-        from urllib.parse import quote
-        next_url = str(request.url)
-        return f"{portal}/?next={quote(next_url, safe='')}"
-    # Day 5 : page onboarding hostee cote hub (meme domaine, pas de cross-tenant)
     base = str(request.base_url).rstrip("/")
     return f"{base}/onboarding"
 

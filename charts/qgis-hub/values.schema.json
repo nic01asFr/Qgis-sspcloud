@@ -253,16 +253,8 @@
     "security": {
       "type": "object",
       "title": "Sécurité",
+      "description": "Sprint Day 5 Phase 2-1 (2026-08-05) : security.password RETIRE. Un seul credential HUB_API_KEY (Secret K8s auto-généré). L'user tape sa clé dans /login form.",
       "properties": {
-        "password": {
-          "type": "string",
-          "title": "Password d'accès web",
-          "description": "Auto-généré au premier install (visible dans les Values après). Sert au bootstrap du cookie hub_api_key via /login-password form POST (aucune exposition URL).",
-          "default": "",
-          "x-onyxia": {
-            "overwriteDefaultWith": "{{project.password}}"
-          }
-        },
         "networkPolicy": {
           "type": "object",
           "properties": {

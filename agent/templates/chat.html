@@ -722,7 +722,9 @@ if (typeof marked !== 'undefined' && marked.use) {
   const msgInput = document.getElementById('message-input');
   if (!banner || !verifyBtn) return;
 
-  const PORTAL_URL = "{{ portal_url or '' }}";
+  // Sprint Day 5 Phase 2-2 (2026-08-05) : PORTAL_URL retire (portail
+  // nic01asfr archive Phase 3-A). Toute config LLM passe par /workspace/llm-key
+  // form user (Phase 1.7-C) qui appelle webhook agent /api/reload-llm-key.
   let pollTimer = null;
   let lastHasLlm = null;
 
@@ -811,85 +813,32 @@ if (typeof marked !== 'undefined' && marked.use) {
     verifyStatus.textContent = 'Vérification en cours…';
 
     try {
-      // Proxy same-origin via l'agent (POST /api/refresh-llm-config). Le
-      // serveur agent appelle le hub avec HUB_API_KEY -- pas de popup
-      // cross-origin (bloquee par les navigateurs apres async), pas de
-      // PORTAL_URL a configurer cote frontend. Le pod agent va redemarrer
-      // si une nouvelle cle est detectee -- on attend ensuite le retour
-      // ready via _waitForAgentReady (retry resilient au HTML 502 ingress).
-      let proxyOk = false;
+      // Sprint Day 5 Phase 2-2 : appel proxy same-origin uniquement.
+      // Le portail nic01asfr n'existe plus, plus de fallback popup.
+      // Si la cle est absente, on invite le user a la configurer via
+      // /workspace bloc "Cle LLM (agent IA)" (Phase 1.7-C form user).
       try {
-        const pr = await fetch('/api/refresh-llm-config', {
+        await fetch('/api/refresh-llm-config', {
           method: 'POST',
           headers: {'Accept': 'application/json'},
         });
-        if (pr.ok) {
-          proxyOk = true;
-        }
       } catch (_e) {
-        // proxy down -> fallback popup vers portail (legacy path)
+        /* proxy down : on retentera au poll */
       }
 
-      // Fallback popup uniquement si proxy KO ET PORTAL_URL configure
-      let popup = null;
-      if (!proxyOk && PORTAL_URL) {
-        const refreshUrl = PORTAL_URL.replace(/\/$/, '') + '/api/refresh-llm-config';
-        popup = window.open(refreshUrl, '_llm_refresh',
-                           'width=520,height=320,noopener=0');
-      }
-
-      // Délai initial 8s (vs 4s avant) — laisse au pod agent le temps de
-      // démarrer la phase de Pull/Running. Puis retry resilient jusqu'à 45s.
-      await new Promise(r => setTimeout(r, 8000));
-      const data = await _waitForAgentReady(15);
-      if (popup) { try { popup.close(); } catch(e) {} }
-
-      // Force refresh visuel du bandeau via pollStatus interne (qui met à
-      // jour lastHasLlm + setBannerVisible)
+      await new Promise(r => setTimeout(r, 5000));
+      const data = await _waitForAgentReady(10);
       lastHasLlm = null;
       await pollStatus();
 
       if (data.has_llm_key) {
         verifyStatus.className = 'verify-status ok';
         verifyStatus.textContent = 'Clé LLM détectée. Tu peux maintenant chatter !';
-      } else if (!popup && PORTAL_URL) {
-        // Le proxy hub a repondu OK mais l'agent n'a TOUJOURS pas de cle :
-        // typiquement le hub a appele _bootstrap_agent() qui n'a rien
-        // trouve cote Secret K8s (cas user vierge, OWUI api_key pas encore
-        // generee). Bascule auto sur le portail qui sait fetch OWUI via
-        // le cookie OIDC user (cf. portal /api/refresh-llm-config).
-        verifyStatus.className = 'verify-status';
-        verifyStatus.textContent =
-          'Recuperation de la cle depuis Open WebUI…';
-        const refreshUrl = PORTAL_URL.replace(/\/$/, '') + '/api/refresh-llm-config';
-        popup = window.open(refreshUrl, '_llm_refresh',
-                            'width=520,height=320,noopener=0');
-        // Le portail fait OWUI + POST hub /admin/agent-config en quelques
-        // secondes -> re-poll /api/status pour detecter has_llm_key=true.
-        await new Promise(r => setTimeout(r, 6000));
-        let finalData = data;
-        try {
-          finalData = await _waitForAgentReady(15);
-        } catch (_e) {}
-        try { if (popup) popup.close(); } catch (_e) {}
-        lastHasLlm = null;
-        await pollStatus();
-        if (finalData && finalData.has_llm_key) {
-          verifyStatus.className = 'verify-status ok';
-          verifyStatus.textContent =
-            'Cle LLM recuperee automatiquement depuis Open WebUI.';
-        } else {
-          verifyStatus.className = 'verify-status err';
-          verifyStatus.textContent =
-            'Aucune cle disponible. Connecte-toi une fois sur '
-            + 'llm.lab.sspcloud.fr (SSO) pour creer ton compte, puis '
-            + 'relance la verification.';
-        }
       } else {
         verifyStatus.className = 'verify-status err';
         verifyStatus.textContent =
-          'Pas de cle trouvee. Connecte-toi sur llm.lab.sspcloud.fr (SSO) '
-          + 'puis reessaie.';
+          'Pas de clé configurée. Va sur /workspace et ouvre le bloc '
+          + '"Clé LLM (agent IA)" pour saisir ta clé (llm.lab.sspcloud.fr).';
       }
     } catch (e) {
       verifyStatus.className = 'verify-status err';

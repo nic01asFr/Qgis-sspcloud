@@ -15,38 +15,28 @@ Sprint Day 5 Phase 1.6 (2026-08-05) — Chart qgis-hub {{ .Chart.Version }} inst
    {{- end }}
 
 ═══════════════════════════════════════════════════════════════════════════════
- 🔑 Premier accès web — 2 options
+ 🔑 Premier accès web (Phase 2-1 : single credential)
 ═══════════════════════════════════════════════════════════════════════════════
 
-OPTION A (recommandée) — Password saisi via form POST :
+Sprint Day 5 Phase 2-1 (2026-08-05) : un seul credential = HUB_API_KEY.
 
-  1. Va sur : https://{{ .Values.ingress.hostname }}/login-password
-  2. Ton password est visible dans Onyxia UI :
-       Mes services > qgis-hub > "Values de Helm" > security.password
-  3. Copie-le, colle-le dans le form, clique "Se connecter"
-  4. Cookie hub_api_key 90j auto-set → workspace accessible
+  1. Récupère ta clé HUB_API_KEY :
 
-  Sécurité : password envoyé en POST body (jamais en URL, jamais dans logs).
+     kubectl get secret qgis-hub-apikey -n {{ .Release.Namespace }} \
+       -o jsonpath='{.data.HUB_API_KEY}' | base64 -d
 
-OPTION B (secours) — Token OIDC SSPCloud :
+     Alternative Onyxia UI : Mes services > qgis-hub > onglet Env > HUB_API_KEY.
 
-  1. Va sur : https://{{ .Values.ingress.hostname }}/onboarding
-  2. Colle ton id-token depuis https://datalab.sspcloud.fr/account/k8sCodeSnippets
-  3. Cookie posé automatiquement
+  2. Va sur : https://{{ .Values.ingress.hostname }}/login
 
-═══════════════════════════════════════════════════════════════════════════════
- 🔧 Récupérer ton password via kubectl (en secours)
-═══════════════════════════════════════════════════════════════════════════════
+  3. Colle ta clé dans le form (envoyée en POST body, jamais en URL).
 
-Si tu ne peux pas ouvrir Onyxia UI, récupère depuis le Secret Helm :
+  4. Cookie hub_api_key 90j auto-set → workspace accessible.
 
-  kubectl get secret sh.helm.release.v1.qgis-hub.v1 -n {{ .Release.Namespace }} \
-    -o jsonpath='{.data.release}' | base64 -d | base64 -d | gunzip \
-    | jq -r '.chart.values.security.password'
+Chemin secours (token OIDC SSPCloud) :
 
-Ou depuis les env vars du pod hub :
-
-  kubectl exec -n {{ .Release.Namespace }} qgis-hub-0 -- printenv SECURITY_PASSWORD
+  https://{{ .Values.ingress.hostname }}/onboarding
+  (colle id-token depuis https://datalab.sspcloud.fr/account/k8sCodeSnippets)
 
 ═══════════════════════════════════════════════════════════════════════════════
  🤖 Cle LLM (agent IA)

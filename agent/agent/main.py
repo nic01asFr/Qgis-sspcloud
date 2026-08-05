@@ -186,21 +186,12 @@ def _portal_login_url_agent(request: Request) -> str:
     Redirige vers la page hub /onboarding (meme domaine racine
     .user.lab.sspcloud.fr) au lieu du portail nic01asfr externe.
 
-    Le hub /onboarding pose le cookie oidc_token avec Domain=.user.lab.
-    sspcloud.fr -> visible cross-subdomain par cet agent au prochain
-    acces. Fallback PORTAL_URL conserve pour migration transitoire.
+    Sprint Day 5 Phase 2-2 (2026-08-05) : PORTAL_URL fallback RETIRE.
+    Toujours utiliser HUB_URL/onboarding (env injecte par chart).
     """
-    portal = os.getenv("PORTAL_URL", "").rstrip("/")
-    if portal:
-        from urllib.parse import quote
-        return f"{portal}/?next={quote(str(request.url), safe='')}"
-    # Day 5 : hub /onboarding calcule depuis HUB_URL (env injecte au boot)
     hub_url = os.getenv("HUB_URL", "").rstrip("/")
     if hub_url:
         return f"{hub_url}/onboarding"
-    # Ultime fallback : path relatif (le user tombera sur son propre agent
-    # 401 sans URL absolue -> lui-meme redirect vers /onboarding via cross-domain
-    # cookie fallback / ou message d'erreur clair)
     return "/onboarding"
 
 
@@ -886,7 +877,7 @@ async def index(request: Request):
     return templates.TemplateResponse(request, "chat.html", {
         "profile_id":      profile_id,
         "hub_url":         _HUB_URL,
-        "portal_url":      os.getenv("PORTAL_URL", ""),
+        "portal_url":      "",  # Phase 2-2 (2026-08-05) : PORTAL_URL retire (obsolete)
         "sessions":        sessions,
         "projects":        projects[:5],
         "session_id":      session_id,

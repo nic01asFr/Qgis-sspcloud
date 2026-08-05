@@ -60,12 +60,10 @@ git:
   token: ""
 
 security:
-  # Sprint Day 5 Phase 1.6 : password bootstrap (Option B, pattern SSPCloud).
-  # Le user tape ce password au 1er acces web (/login-password form POST).
-  # Vide -> chart genere randAlphaNum 16 au moment de l'install (via
-  # values.schema.json + Onyxia UI auto-fill). Visible dans Onyxia UI
-  # onglet "Values de Helm" post-install.
-  password: ""
+  # Sprint Day 5 Phase 2-1 (2026-08-05) : security.password RETIRE.
+  # Le password chart-genere Phase 1.6 est remplace par un unique
+  # credential HUB_API_KEY (Secret K8s qgis-hub-apikey). L'user tape
+  # sa cle API dans /login form. Simplification : 1 credential, 1 flow.
   networkPolicy:
     enabled: true
     from:
