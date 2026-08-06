@@ -1136,26 +1136,49 @@ async def proxy_workspace_vnc_http(path: str, request: Request):
 async def proxy_workspace_vnc_ws(client_ws: WebSocket):
     """Reverse proxy WebSocket pour le canal noVNC (binary frames bidirectionnel).
     Le middleware HTTP middleware ne s'applique PAS aux upgrades WS (FastAPI bug).
-    On verifie manuellement le cookie OIDC avant accept.
+    On verifie manuellement l'auth avant accept.
+
+    Sprint Day 5 fix (2026-08-06) : accepte cookie hub_api_key (Phase 2-1
+    canonique) EN PRIORITE, sinon fallback cookie oidc_token (legacy).
+    Sans ce fix, iframe noVNC dans /desk affichait "connection closed"
+    car user n'a plus de cookie oidc_token depuis Phase 2-1.
     """
-    # Auth manuelle pour WebSocket (middleware HTTP ne s'applique pas)
-    token = client_ws.cookies.get("oidc_token") or ""
-    if not token:
-        await client_ws.close(code=4401, reason="No OIDC cookie")
-        return
-    try:
-        from jwt import decode as _jwt_decode
-        signing_key = auth._jwks.get_signing_key_from_jwt(token)
-        claims = _jwt_decode(
-            token, signing_key.key, algorithms=["RS256"],
-            options={"verify_aud": False},
-        )
-        if claims.get("preferred_username") != _ONYXIA_USER:
-            await client_ws.close(code=4403, reason=f"Owner mismatch (expected {_ONYXIA_USER})")
+    # Priorite 1 : cookie hub_api_key (Phase 2-1 flow canonique)
+    hub_cookie = client_ws.cookies.get("hub_api_key", "") or ""
+    if hub_cookie.startswith("qgis_"):
+        try:
+            user_info = await auth._validate_api_key(hub_cookie)
+            if user_info and user_info.get("username") == _ONYXIA_USER:
+                # Auth OK via hub_api_key -> saute vers accept ci-dessous
+                pass
+            elif user_info:
+                await client_ws.close(code=4403, reason=f"Owner mismatch (expected {_ONYXIA_USER})")
+                return
+            else:
+                hub_cookie = ""  # invalide -> tentative fallback OIDC
+        except Exception as exc:
+            log.warning("ws /workspace/vnc: hub_api_key validation echec: %s", exc)
+            hub_cookie = ""
+
+    # Priorite 2 (fallback) : cookie oidc_token (legacy, pre-Phase 2-1)
+    if not hub_cookie:
+        token = client_ws.cookies.get("oidc_token") or ""
+        if not token:
+            await client_ws.close(code=4401, reason="No auth cookie (hub_api_key ou oidc_token)")
             return
-    except Exception as exc:
-        await client_ws.close(code=4401, reason=f"Token invalide: {exc}")
-        return
+        try:
+            from jwt import decode as _jwt_decode
+            signing_key = auth._jwks.get_signing_key_from_jwt(token)
+            claims = _jwt_decode(
+                token, signing_key.key, algorithms=["RS256"],
+                options={"verify_aud": False},
+            )
+            if claims.get("preferred_username") != _ONYXIA_USER:
+                await client_ws.close(code=4403, reason=f"Owner mismatch (expected {_ONYXIA_USER})")
+                return
+        except Exception as exc:
+            await client_ws.close(code=4401, reason=f"Token invalide: {exc}")
+            return
 
     # Tunnel WS bidirectionnel : client_ws <-> upstream noVNC websockify
     # Subprotocol "binary" : noVNC client moderne ne le demande PAS (la version
