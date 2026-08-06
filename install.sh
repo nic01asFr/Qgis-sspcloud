@@ -27,6 +27,24 @@ if [ -z "$USERNAME" ] || [ -z "$NAMESPACE" ]; then
     exit 1
 fi
 
+# Sprint Day 5 fix (2026-08-06) : detecte la SA du pod jupyter courant
+# (qui a le ClusterRole `edit` provisionne par Onyxia). Le hub doit
+# utiliser CETTE MEME SA pour pouvoir kubectl get/patch sts (scale
+# workspace, patch env agent, create ingress novnc). L'user OIDC
+# SSPCloud ne peut pas creer de RoleBinding, donc la SA custom
+# qgis-hub reste sans droits -> boucle infinie "Bureau endormi".
+SERVICE_ACCOUNT="${KUBERNETES_SERVICE_ACCOUNT:-}"
+if [ -z "$SERVICE_ACCOUNT" ]; then
+    # Fallback : deduire depuis le pod jupyter courant
+    SERVICE_ACCOUNT=$(kubectl get pod "$(hostname)" -n "$NAMESPACE" \
+        -o jsonpath='{.spec.serviceAccountName}' 2>/dev/null || echo "")
+fi
+if [ -z "$SERVICE_ACCOUNT" ]; then
+    echo "AVERTISSEMENT : impossible de detecter la SA du pod jupyter."
+    echo "  Le hub utilisera 'default' (kubectl scale workspace echouera Forbidden)."
+    SERVICE_ACCOUNT="default"
+fi
+
 # Domaine SSPCloud standard (peut etre override via env K8S_DOMAIN)
 K8S_DOMAIN="${K8S_DOMAIN:-user.lab.sspcloud.fr}"
 
@@ -41,6 +59,7 @@ echo "+==============================================================+"
 echo "|  Installation QGIS Hub - $USERNAME"
 echo "|  Namespace : $NAMESPACE"
 echo "|  Domaine   : $K8S_DOMAIN"
+echo "|  SA (herite Onyxia edit) : $SERVICE_ACCOUNT"
 echo "+==============================================================+"
 echo ""
 
@@ -60,6 +79,10 @@ cat > "$VALUES_FILE" <<EOF
 # Auto-genere par install.sh depuis env vars pod jupyter Onyxia
 oidc:
   username: "$USERNAME"
+
+# SA heritee du pod jupyter (ClusterRole edit provisionne Onyxia)
+serviceAccount:
+  name: "$SERVICE_ACCOUNT"
 
 ingress:
   enabled: true

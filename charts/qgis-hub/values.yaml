@@ -25,6 +25,14 @@ persistence:
 kubernetes:
   role: edit
 
+# Sprint Day 5 fix 2026-08-06 : SA heritee du pod jupyter user
+# (ClusterRole edit provisionne Onyxia). Sans ca, hub kubectl scale
+# workspace echoue Forbidden -> UI "Bureau endormi" permanent.
+# install.sh detecte KUBERNETES_SERVICE_ACCOUNT et l'inject ici.
+# Valeur par defaut "default" ne marche PAS (SA sans droits).
+serviceAccount:
+  name: ""
+
 resources:
   requests:
     cpu: 100m
