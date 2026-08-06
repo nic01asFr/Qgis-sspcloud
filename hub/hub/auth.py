@@ -1068,13 +1068,14 @@ def _portal_login_redirect_url(request: "Request") -> str:
     + /auth/token-login). Le nom de la fonction est conserve pour
     retro-compat avec les 3 usages middleware, mais la cible a change.
 
-    Sprint Day 5 Phase 2-2 (2026-08-05) : PORTAL_URL fallback RETIRE. Le
-    portail nic01asfr n'existe plus (Phase 3-A l'archive definitivement).
-    Toujours redirect vers hub-hosted /onboarding (meme domaine, zero
-    cross-tenant, zero cookie cross-subdomain).
+    Sprint Day 5 Phase 2-2 (2026-08-05) + fix 2026-08-06 : redirect vers
+    /login (form cle HUB_API_KEY) au lieu de /onboarding (token OIDC).
+    Le user vierge sort de install.sh avec sa cle imprimee -> /login est
+    le flow canonique Phase 2-1. /onboarding reste dispo en secours mais
+    n'est plus la cible par defaut du redirect middleware.
     """
     base = str(request.base_url).rstrip("/")
-    return f"{base}/onboarding"
+    return f"{base}/login"
 
 
 async def oidc_auth_middleware(request: "Request", call_next):

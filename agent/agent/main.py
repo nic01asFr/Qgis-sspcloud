@@ -183,16 +183,17 @@ def _get_jwks_client():
 def _portal_login_url_agent(request: Request) -> str:
     """URL de redirection pour login utilisateur (Day 5 Phase 1.3, 2026-08-04).
 
-    Redirige vers la page hub /onboarding (meme domaine racine
-    .user.lab.sspcloud.fr) au lieu du portail nic01asfr externe.
+    Redirige vers la page hub /login (form cle HUB_API_KEY, Phase 2-1) au
+    lieu du portail nic01asfr externe.
 
-    Sprint Day 5 Phase 2-2 (2026-08-05) : PORTAL_URL fallback RETIRE.
-    Toujours utiliser HUB_URL/onboarding (env injecte par chart).
+    Sprint Day 5 Phase 2-2 (2026-08-05) + fix 2026-08-06 : cible /login
+    (form cle) au lieu de /onboarding (token OIDC obscur). Le flow user
+    vierge canonique = install.sh -> cle imprimee -> /login form.
     """
     hub_url = os.getenv("HUB_URL", "").rstrip("/")
     if hub_url:
-        return f"{hub_url}/onboarding"
-    return "/onboarding"
+        return f"{hub_url}/login"
+    return "/login"
 
 
 @app.middleware("http")

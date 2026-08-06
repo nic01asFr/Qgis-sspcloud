@@ -2,7 +2,7 @@ apiVersion: v2
 name: qgis-hub
 description: Service QGIS Desktop + Agent IA pour agents CEREMA sur SSPCloud
 type: application
-version: 1.2.0
+version: 1.2.1
 appVersion: "latest"
 home: https://github.com/nic01asFr/Qgis-sspcloud
 keywords:
