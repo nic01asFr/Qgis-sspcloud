@@ -1,116 +1,103 @@
-# QGIS Agent — SSPCloud
+# QGIS Hub — SSPCloud
 
-Service QGIS géospatial pour agents CEREMA sur SSPCloud Onyxia.  
-QGIS Desktop + Agent IA + Mémoire long terme.
+Service géospatial CEREMA sur SSPCloud Onyxia :
+**QGIS Desktop + Agent IA + connecteur MCP** installable en **3 minutes** par
+l'utilisateur, sans intervention admin.
 
-**État actuel** : Vagues A + B + E1 + E2 + **E3 sprints 1-3** LIVRÉES
-(tag `v1.9.0-sprint-2-3-e3`, 2026-06-29).
+**Chart Helm stable** : `qgis-hub 1.2.5` (2026-08-06, Sprint Day 5 clos).
 
-Pipeline E2E `load → scene_manifest → component → update_assembly →
-publish` + storymap métier avec grammaire narrative
-(intro/section/conclusion/appendix) + 6 patterns canoniques + trio
-cartographe + cartographie thématique riche (Jenks + ColorBrewer + 6
-fonds + interactions + proportional/heatmap + légende riche) + **éditeur
-BlockNote block-based** intégré au desk avec 13 custom blocks (DOM +
-iframe) + autosave 30s + optimistic concurrency control vs agent IA.
-216/216 tests pytest PASSED.
+---
 
-**Tags publiés** (Vague E2 BlockNote + Vague E3 sprints 1-3 alignement) :
-- `v1.6.5-vague-e1-composition-libre` (UX libre composition agent IA)
-- `v1.6.6-storymap-metier-base` (polish DSFR + 6 patterns métier + trio cartographe)
-- `v1.6.7-carto-metier-base` (symbologie + interactions + fonds + viz + légende)
-- `v1.7.0-blocknote-editor` (éditeur block-based 13 custom blocks + autosave + bouton desk)
-- `v1.7.1-audit-fixes` (5 P0 audit + truncation + code mort -514 LOC)
-- `v1.7.2-p1p2-optims` (parallèle + force-overwrite + Cache-Control + whitelist OIDC)
-- `v1.7.3-fullwidth` (container 100% + width:100% custom blocks)
-- `v1.7.4-roundtrip-section` (frontière sections via heading H2 vide)
-- `v1.7.5-consolidation` (audit roadmap + footer dynamique + 8 tests pytest)
-- `v1.8.0-sprint1-e3` (alignement reste de l'app : 4 P0 - D2/D3/D4 partiel/D5/D9)
-- `v1.9.0-sprint-2-3-e3` ⭐ (sprint 2+3 essentiels : 8 P1+P2 - D1/D6/D8 + DSFR theming + monitoring)
+## Démarrage rapide
 
-**Marie peut maintenant** (production v1.9.0) :
-- Demander à l'agent IA via chat (Vague E1)
-- Éditer visuellement via BlockNote — bouton "📝 BlockNote" sur card livrable desk
-- Voir le rendu DSFR strict en temps réel via bouton "👁 Aperçu DSFR" dans l'éditeur
-- Composer storymaps via 6 patterns métier canoniques (Vague E2 base)
-- Visualiser avec carto thématique riche (Vague E2 carto)
-- Éditer les métadonnées (titre/audience/sections) via modal "🔧 Métadonnées" expert
-- Bénéficier d'un theming DSFR cohérent en édition vs publication (police Marianne)
-
-**Acquis architecturaux** (Vague E3 sprints 1-3) :
-- Pas de pollution DB/PVC : BlockNote `update_component` au save (vs create-only) — drift D3
-- OCC `version_num_source` bidirectionnel (agent IA + modal E1 + BlockNote) — drifts D2 + D5
-- 12/13 ComponentKind rendus (vs 10/13 avant) : `media_embed` + `iframe_grist` livrés — drift D4 partiel
-- AssemblyKind filtré au schéma (évite 501 sur dashboard/sheet_a4) — drift D9
-- Tests paramétrés `ComponentKind ↔ runtime ↔ helper` (anti-régression future) — drift D8
-- Monitoring serveur erreurs JS clients (`/api/log/client-error` + ring buffer 100) — D-QGIS-010 acté
-- 273/273 pytest tests PASSED.
-
-**Vague E3 sprint 4 + V2 différés** :
-- 8.9 scene_3d Three.js fill-extrusion render (~1j)
-- 8.12 Création composant via slash menu BlockNote (~5-8h)
-- 8.15 Draft buffer BlockNote + tool agent `get_draft_blocks` (V2)
-- 8.16 Block `recipe_output` exécutable live (V2)
-- 8.17 CRDT Yjs multi-user collab (V2)
-- kinds avancés : audit_chain_narrative + reliability_matrix
-- AuditChain enrichi (Phase, VariableReliability, contributors)
-- layout sidecar Esri scrollytelling + multi-cartes synchronisées
-- `@media print` A4
-
-Cf. [docs/blocks-and-deliverables-model.md §9 backlog](docs/blocks-and-deliverables-model.md).
-
-> **Charte de fonctionnement de l'agent** (vision produit, principes,
-> roadmap, invariants) : voir [docs/CHARTE_AGENT.md](docs/CHARTE_AGENT.md).
-> Document évolutif à relire avant toute décision technique.
-
-> **Bilan session courante** : [BILAN_SESSION_2026_06_29.md](BILAN_SESSION_2026_06_29.md)
->
-> **Décisions architecturales** : [docs/decisions/](docs/decisions/) (ADR)
->
-> **Pipeline publication** : axe wikichat
-> [qgis-sspcloud-publication-flow-axis](~/.wikichat/knowledge/qgis-sspcloud-publication-flow-axis.md)
-> + [docs/scene-manifest-v0.2-contract.md](docs/scene-manifest-v0.2-contract.md)
-> (livrable pour Passerelle-Archi Lead #6 geoai-kit `applyManifestToMap`)
-
-## Installation
-
-**Sprint Day 5 (2026-08-05)** : chart Helm autonome, zero admin requis.
-
-**Quickstart** : voir [QUICKSTART.md](QUICKSTART.md) (3 étapes ~3 min).
-
-Résumé express :
-
-1. Connecte-toi sur [datalab.sspcloud.fr](https://datalab.sspcloud.fr)
-2. Lance un service Jupyter avec **`kubernetes.role: edit`**
-3. Dans le terminal, colle :
+Depuis un terminal Jupyter Onyxia (`kubernetes.role: edit`) :
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/install.sh | bash
 ```
 
-Le script fait `helm install qgis-hub qgis-sspcloud/qgis-hub` (chart 1.2.0+),
-déploie les 3 pods (~90s), et affiche ta clé HUB_API_KEY personnelle + URL.
+Le script déploie 3 pods (hub + agent + workspace), génère ta clé
+`HUB_API_KEY`, imprime l'URL de ton bureau. Ouvre `<URL>/login`, colle la
+clé, cookie 90j auto-set → workspace accessible.
 
-**Premier accès web** : va sur `<URL>/login`, colle ta clé HUB_API_KEY.
-Cookie 90j auto-set → workspace accessible.
+**Guides** :
+- [QUICKSTART.md](QUICKSTART.md) — 3 étapes user (résumé)
+- [docs/day5-user-guide-visuel.md](docs/day5-user-guide-visuel.md) — 7 étapes illustrées avec screenshots
+- [docs/day5-migration-guide.md](docs/day5-migration-guide.md) — migration users legacy (portail nic01asfr → chart)
 
 ## Architecture
 
 ```
 qgis-hub       → Hub API + desk web (tools MCP, études, publications, proxy /agent)
-qgis-agent     → Agent IA (chat conversationnel, mémoire LLM, tool-runner)
+qgis-agent     → Agent IA (chat SSE, mémoire, tool-runner LLM)
 qgis-workspace → QGIS Desktop noVNC (démarré à la demande)
 ```
 
-Détails : [ARCHITECTURE.md](ARCHITECTURE.md) — plan Sprint Day 5 :
-[docs/spec-day5-plan-complet.md](docs/spec-day5-plan-complet.md).
+**Un seul credential** = `HUB_API_KEY` (Secret K8s, cookie 90j, Bearer MCP).
+**Proxy same-origin** = iframe agent + noVNC servis via hub, zéro cookie
+cross-subdomain.
+
+Détails : [ARCHITECTURE.md](ARCHITECTURE.md) · Plan Sprint Day 5 :
+[docs/spec-day5-plan-complet.md](docs/spec-day5-plan-complet.md) · Runbook :
+[OPS.md](OPS.md) · Setup dev : [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Images Docker
 
-- `ghcr.io/nic01asfr/qgis-agent:latest`
-- `ghcr.io/nic01asfr/qgis-hub:latest`
+- `ghcr.io/nic01asfr/qgis-hub:latest` (Dockerfile.hub)
+- `ghcr.io/nic01asfr/qgis-agent:latest` (Dockerfile.agent)
+- `ghcr.io/nic01asfr/qgisremotemcp:latest` (workspace, rebuild manuel)
 
-Buildées automatiquement par GitHub Actions à chaque push sur `main`.
+Build automatique par GitHub Actions sur push `main`
+([`build.yml`](.github/workflows/build.yml)). Publish chart Helm auto sur
+[`helm-repo/`](helm-repo/) → consommé par `install.sh`.
+
+## Ce que le service permet
+
+- **Analyse géospatiale** : QGIS Desktop complet + BigQgisMCP tools + accès
+  IGN, Géorisques, OSM, DVF, INSEE
+- **Assistant IA** : chat conversationnel LLM SSPCloud (`qwen3-6-35b-moe`),
+  tool-calling QGIS, mémoire 3 couches (session, étude, user)
+- **Publications** : storymaps DSFR interactives, PDF A4, datasets GeoJSON —
+  URL publique stable
+- **Éditeur block-based** : BlockNote avec 13 custom blocks + autosave +
+  DSFR strict + optimistic concurrency control vs agent IA
+- **Connecteur MCP** : Claude Desktop, Cursor, Cline, claude.ai (transport
+  Streamable HTTP, `Bearer HUB_API_KEY`)
+
+## Récupérer la config MCP
+
+```bash
+curl -H "Authorization: Bearer $(kubectl get secret qgis-hub-apikey \
+  -o jsonpath='{.data.HUB_API_KEY}' | base64 -d)" \
+  -X POST https://user-<toi>-qgis.user.lab.sspcloud.fr/auth/apikey | python -m json.tool
+```
+
+Retourne un JSON `claude_config` prêt à copier dans
+`claude_desktop_config.json` (ou équivalent Cursor/Cline).
+
+## Historique (Vagues antérieures)
+
+Le service a suivi plusieurs vagues avant Sprint Day 5 (chart 1.2.5) :
+
+- **Vague A + B** — MCP tools + persistance études
+- **Vague E1** — composition libre agent IA
+- **Vague E2** — storymap métier (6 patterns) + carto thématique + éditeur
+  BlockNote (13 blocks, autosave, OCC, DSFR)
+- **Vague E3 sprints 1-3** (tag `v1.9.0-sprint-2-3-e3`, 2026-06-29) —
+  alignement pipeline `load → scene_manifest → component → update_assembly
+  → publish` + monitoring serveur erreurs JS
+- **Sprints isolation Day 3/4** (2026-08-02) — session-scoped active_sid +
+  cookie hub_api_key 90j auto-set + cross-tenant defense in depth
+- **Sprint Day 5** (2026-08-05→06) — chart Helm autonome + suppression
+  portail admin + single credential + proxy same-origin (chart 1.2.5)
+
+Bilans détaillés : [docs/history/](docs/history/) · ADR : [docs/decisions/](docs/decisions/).
+
+## Charte agent (vision produit)
+
+Voir [docs/CHARTE_AGENT.md](docs/CHARTE_AGENT.md) — vision, principes,
+invariants d'explicabilité. À relire avant toute décision technique
+affectant l'agent.
 
 ## Invariants d'architecture
 

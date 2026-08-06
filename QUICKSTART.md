@@ -1,6 +1,6 @@
 # QUICKSTART — QGIS Hub sur SSPCloud
 
-**Sprint Day 5 (2026-08-05) — installation user autonome sans admin.**
+**Sprint Day 5 (2026-08-06) — chart 1.2.5 — installation user autonome sans admin.**
 
 Ce guide t'installe le service QGIS Hub (Hub + Agent IA + Workspace QGIS Desktop)
 dans ton espace SSPCloud en **3 minutes** depuis un terminal Jupyter Onyxia.

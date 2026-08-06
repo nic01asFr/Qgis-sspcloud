@@ -3,7 +3,11 @@
 Guide utilisateur (agent CEREMA) pour tirer parti du service : études,
 projets, analyses géospatiales, publications, connecteur MCP externe.
 
-Version 2026-08-02 · Sprint isolation Day 3.1c CLOS.
+Version 2026-08-06 · Sprint Day 5 CLOS · chart Helm 1.2.5.
+
+> **Installation depuis zéro** : voir [QUICKSTART.md](QUICKSTART.md)
+> (3 étapes) ou [docs/day5-user-guide-visuel.md](docs/day5-user-guide-visuel.md)
+> (7 étapes illustrées avec screenshots).
 
 ---
 
@@ -25,17 +29,20 @@ Version 2026-08-02 · Sprint isolation Day 3.1c CLOS.
 ## 2. Accès au service
 
 - **Desk web** : `https://user-<toi>-qgis.user.lab.sspcloud.fr/desk`
-  (auth SSPCloud auto)
-- **Connecteur MCP** : à configurer dans Claude Desktop /
-  `claude_desktop_config.json` (voir [ONBOARDING.md](ONBOARDING.md) §6)
+- **Connecteur MCP** : `<URL>/auth/apikey` retourne un JSON prêt à coller
+  dans `claude_desktop_config.json` ou équivalent (voir §6 ci-dessous)
 
-**Auth persistante (Day 4)** : le portail OIDC te sert une seule fois
-au bootstrap (onboarding initial). Ensuite un cookie `hub_api_key` (TTL
-90 jours) te maintient authentifié dans le navigateur : plus besoin de
-recoller ton token OIDC à chaque expiration cookie Keycloak. Ta clé API
-personnelle (`qgis_<user>_...`) est disponible sur `/workspace` ou via
-`GET /auth/apikey`. Si tu perds ton cookie (cache navigateur effacé,
-autre PC), tu peux le reposer via `https://user-<toi>-qgis.user.lab.sspcloud.fr/login?key=<ta-cle>`.
+**Auth Sprint Day 5** : un seul credential = `HUB_API_KEY` (Secret K8s).
+Récupération :
+```bash
+kubectl get secret qgis-hub-apikey -o jsonpath='{.data.HUB_API_KEY}' | base64 -d
+```
+Ou depuis Onyxia UI → Mes services → qgis-hub → env `HUB_API_KEY`.
+
+**Premier accès web** : `<URL>/login` → form → colle la clé → cookie
+`hub_api_key` httponly 90j auto-set → workspace accessible pendant 3 mois
+sans re-login. Perte de cookie ? Retape sur `/login` (form POST, jamais
+en URL). Chemin secours OIDC : `/onboarding`.
 
 ## 3. Workflow type : créer une étude et publier une carte
 
@@ -198,7 +205,7 @@ Vérifie :
 - L'étude est bien active (via `study_list`)
 - Le fichier source existe (`export_web_map` retourne un path
   `/data/...`)
-- Ton HUB_API_KEY est valide (peut expirer, refresh via portail)
+- Ton HUB_API_KEY est valide (récupérable via `kubectl get secret qgis-hub-apikey`)
 
 ### "QGIS Desktop montre un projet vide alors que je viens de charger"
 Bug potentiel divergence session-scoped/desk. Signale-le. Workaround
@@ -208,7 +215,8 @@ projet.
 ## 10. Aller plus loin
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) : détails techniques
-- [ONBOARDING.md](ONBOARDING.md) : setup admin/dev
+- [DEVELOPMENT.md](DEVELOPMENT.md) : setup dev + build local
 - [OPS.md](OPS.md) : runbook opérationnel
+- [docs/history/ONBOARDING-legacy.md](docs/history/ONBOARDING-legacy.md) : ancien flow admin/portail (archive)
 - Recettes disponibles : voir section "RECETTES" du panneau ressources
   desk (ex : "Diagnostic du parc bâti par période de construction")

@@ -1,6 +1,6 @@
 # Guide utilisateur — QGIS Hub SSPCloud
 
-**Sprint Day 5 (2026-08-06) · chart 1.2.2 · installation user-autonome.**
+**Sprint Day 5 (2026-08-06) · chart 1.2.5 · installation user-autonome.**
 
 Ce guide te fait passer de **zéro** (compte SSPCloud vierge, aucun service
 installé) à **un bureau QGIS + agent IA opérationnel** en ~5 minutes.
@@ -145,9 +145,20 @@ Clique **💬 Bureau de travail** (footer) ou navigue vers `/desk`.
 - **Panneau central** — Canvas QGIS (endormi au 1er accès, se réveille sur commande)
 - **Panneau droit** — Iframe agent IA (chat conversationnel)
 
-Le bureau QGIS est en scale=0 pour économiser les ressources SSPCloud.
-Clique **Réveiller le bureau** (~35s de démarrage) ou envoie une
-commande à l'agent qui le réveillera automatiquement au besoin.
+Après quelques secondes, le bureau QGIS se connecte via noVNC :
+
+![Bureau QGIS VNC connecté](screenshots/day5-quickstart/06-desk-vnc-connecte.jpg)
+
+*« Connected to qgis-workspace-nicolaslaval-0:99 »* + Canvas actif.
+
+### Test agent
+
+Envoie un message dans le chat pour vérifier le LLM :
+
+![Chat agent réponse LLM réelle](screenshots/day5-quickstart/05-chat-llm-reponse-reelle.jpg)
+
+Le message traverse le proxy hub `/agent/*` same-origin en SSE stream.
+Latence typique : ~5-30s (dépend charge SSPCloud + model warm-up).
 
 ---
 

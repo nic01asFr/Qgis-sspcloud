@@ -559,4 +559,4 @@ d'éditer simultanément.
 - ADR : [D-QGIS-005](decisions/D-QGIS-005-composants-format-v0-1.md) (Component V0.1) + [D-QGIS-006](decisions/D-QGIS-006-component-source-strate-aligned.md) (Source Strate) + [D-QGIS-008](decisions/D-QGIS-008-helper-pre-render-composant.md) (helper unifié) + [D-QGIS-009](decisions/D-QGIS-009-vague-e1-ux-libre-composition.md) (Vague E1 UX libre) + [D-QGIS-010](decisions/D-QGIS-010-blocknote-editor-blocks-based.md) (BlockNote)
 - API : [docs/api/blocknote-editor.md](api/blocknote-editor.md)
 - Plan : [docs/blocknote-editor-plan.md](blocknote-editor-plan.md)
-- Bilan : [BILAN_SESSION_2026_06_29.md](../BILAN_SESSION_2026_06_29.md)
+- Bilan : [BILAN_SESSION_2026_06_29.md](history/BILAN_SESSION_2026_06_29.md)

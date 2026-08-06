@@ -3,7 +3,13 @@
 Runbook opérationnel : monitoring, incidents fréquents, procédures de
 maintenance.
 
-Version 2026-08-02 · Sprint isolation Day 3.1c CLOS.
+Version 2026-08-06 · Sprint Day 5 CLOS · chart Helm 1.2.5.
+
+> **Contexte** : depuis Sprint Day 5, chaque user déploie son propre
+> service via `helm install qgis-hub` depuis son terminal Jupyter Onyxia
+> (SA `jupyter-python-<hash>` avec `edit` role). Aucun pod admin central
+> requis. Les procédures ci-dessous s'exécutent depuis le terminal
+> Jupyter du user concerné (self-service).
 
 ---
 
@@ -17,9 +23,10 @@ Version 2026-08-02 · Sprint isolation Day 3.1c CLOS.
 | `/diagnostics/isolation` | Bearer HUB_API_KEY | switches physiques, locks, session_active_state stats, day3_priority |
 | `/diagnostics/mcp-sessions` | Cookie OIDC | sessions MCP par user + divergence DB |
 
-Depuis pod jupyter admin :
+Depuis le terminal Jupyter de l'user :
 ```bash
-curl -H "Authorization: Bearer $HUB_API_KEY" \
+KEY=$(kubectl get secret qgis-hub-apikey -o jsonpath='{.data.HUB_API_KEY}' | base64 -d)
+curl -H "Authorization: Bearer $KEY" \
   https://user-<u>-qgis.user.lab.sspcloud.fr/diagnostics/isolation | jq
 ```
 
@@ -42,10 +49,20 @@ curl -X POST -H "Authorization: Bearer <OLD_KEY>" \
   https://user-<u>-qgis.user.lab.sspcloud.fr/api/reload-hub-key
 ```
 
-### 2.2 LLM_API_KEY (portail webhook)
+### 2.2 LLM_API_KEY (Sprint Day 5 Phase 1.7-C)
 
-Portail SSPCloud gère cette clé. Webhook `/api/reload-llm-key` recharge
-la clé sans restart. Voir mémoire `[[reference_option_alpha_webhook_llm]]`.
+Le portail admin n'existe plus. L'user saisit sa clé dans
+`/workspace` → bloc **"🤖 Clé LLM (agent IA)"** → form POST.
+
+Endpoint hub `POST /workspace/llm-key` :
+1. Valide auth (cookie `hub_api_key` ou OIDC)
+2. Appelle webhook interne agent `POST /api/reload-llm-key`
+   (`X-Hub-Auth: HUB_API_KEY`)
+3. Agent met à jour `os.environ["LLM_API_KEY"]` en RAM → zéro downtime
+
+**Ephémère** : la clé survit tant que le pod agent tourne. Sur
+`helm upgrade` qui patche `agent-statefulset`, le pod agent est recréé →
+retape la clé sur `/workspace`. Persistance PVC dans backlog 4-A.
 
 ### 2.3 STS MinIO SSPCloud (⚠ expire 7j)
 
