@@ -15,7 +15,16 @@ spec:
       labels:
         {{- include "qgis-hub.selectorLabels" . | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "qgis-hub.fullname" . }}
+      {{- /* Sprint Day 5 fix 2026-08-06 : utilise SA `default` du namespace user
+             (qui a RoleBinding automatique vers ClusterRole `edit` via Onyxia
+             provisioning). La SA custom `qgis-hub` n'a AUCUN RoleBinding car
+             les users OIDC SSPCloud ne peuvent pas creer de Role/RoleBinding
+             (Phase 1.5). Consequence sans ce fix : sessions.py::_ss_replicas
+             (kubectl get sts) echoue Forbidden -> replicas retourne 0 ->
+             status=SLEEPING -> bouton 'Reveiller le bureau' ne marche pas
+             (le kubectl scale echoue aussi). Utiliser default = 1 credential
+             SA cluster-role = 1 flow. */}}
+      serviceAccountName: default
       securityContext:
         fsGroup: 100
       {{- if .Values.persistence.enabled }}
