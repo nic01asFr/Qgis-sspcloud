@@ -199,6 +199,48 @@ def _get_s3_client(owner: str = ""):
     return client, bucket, endpoint
 
 
+# ── Diagnostic des erreurs S3 ─────────────────────────────────────────────────
+
+# Codes renvoyes par MinIO/S3 quand les identifiants ne sont plus valables.
+# Sur SSPCloud, les acces au stockage sont des jetons temporaires (STS) d'une
+# duree de 7 jours : une semaine apres l'installation, toute publication
+# echoue. Sans traduction, l'utilisateur ne voyait qu'une trace technique et
+# concluait que "le service ne marche plus".
+_S3_EXPIRED_CODES = (
+    "ExpiredToken", "ExpiredTokenException", "TokenRefreshRequired",
+    "InvalidToken", "InvalidAccessKeyId", "SignatureDoesNotMatch",
+    "AccessDenied",
+)
+
+_S3_EXPIRED_MESSAGE = (
+    "Tes accès au stockage SSPCloud ont expiré (ils sont valables 7 jours). "
+    "Relance l'installation depuis un terminal de ton service Jupyter pour les "
+    "renouveler : "
+    "curl -fsSL https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/install.sh | bash"
+)
+
+
+def is_s3_credentials_expired(exc: Exception) -> bool:
+    """Vrai si l'exception traduit des identifiants de stockage perimes."""
+    code = ""
+    resp = getattr(exc, "response", None)
+    if isinstance(resp, dict):
+        code = (resp.get("Error") or {}).get("Code", "") or ""
+    haystack = f"{code} {exc}"
+    return any(c in haystack for c in _S3_EXPIRED_CODES)
+
+
+def explain_s3_error(exc: Exception) -> str:
+    """Message destine a l'utilisateur pour une erreur de stockage.
+
+    Renvoie une consigne actionnable quand les identifiants ont expire,
+    et sinon la description technique d'origine.
+    """
+    if is_s3_credentials_expired(exc):
+        return _S3_EXPIRED_MESSAGE
+    return f"{type(exc).__name__}: {exc}"
+
+
 # ── Helpers chemins ───────────────────────────────────────────────────────────
 
 def _safe_slug(slug: str) -> str:
@@ -304,13 +346,26 @@ def publish(owner: str, kind: str, slug: str, content: bytes,
     else:
         extra_kwargs = {}
 
-    client.put_object(
-        Bucket=bucket, Key=key, Body=content,
-        ContentType=ct,
-        ACL=s3_acl,
-        Metadata=metadata,
-        **extra_kwargs,
-    )
+    try:
+        client.put_object(
+            Bucket=bucket, Key=key, Body=content,
+            ContentType=ct,
+            ACL=s3_acl,
+            Metadata=metadata,
+            **extra_kwargs,
+        )
+    except Exception as exc:
+        # Les acces au stockage SSPCloud sont des jetons temporaires (7 jours).
+        # Passe ce delai, l'ecriture echoue et l'utilisateur ne voyait qu'une
+        # trace botocore : il en concluait que le service etait casse. On
+        # remonte une consigne actionnable a la place.
+        if is_s3_credentials_expired(exc):
+            log.error(
+                "publish %s/%s : identifiants de stockage expires (%s)",
+                owner, slug, type(exc).__name__,
+            )
+            raise RuntimeError(_S3_EXPIRED_MESSAGE) from exc
+        raise
     url = public_url(endpoint, bucket, key)
     info = {
         "url":      url,
