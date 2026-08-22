@@ -1377,7 +1377,10 @@ async def patch_user_preferences(request: Request):
     """Mise à jour partielle des préférences user. Body JSON {key:value, ...}."""
     body = await request.json()
     if not isinstance(body, dict):
-        return {"error": "body doit être un objet JSON"}
+        # 400 et non 200 : le hub relaie fidelement le code, et l'interface
+        # du bureau conclut au succes sur `r.ok`. Une erreur renvoyee en 200
+        # affichait donc une confirmation alors que rien n'etait enregistre.
+        raise HTTPException(400, "body doit être un objet JSON")
     for k, v in body.items():
         await memory.set_profile_value(k, v)
     return await memory.get_full_profile()
@@ -1394,7 +1397,7 @@ async def add_insight_endpoint(request: Request):
     """Ajout manuel d'un insight (source=explicit). Body {key, value}."""
     body = await request.json()
     if not body.get("key") or not body.get("value"):
-        return {"error": "key et value requis"}
+        raise HTTPException(400, "key et value requis")
     iid = await memory.add_insight(
         key=body["key"], value=body["value"],
         source="explicit", confidence=1.0, username="user",
@@ -1477,11 +1480,11 @@ async def patch_memory_section(request: Request):
     key = body.get("key", "").strip()
     content = body.get("content", "")
     if not key:
-        return {"error": "key requis"}
+        raise HTTPException(400, "key requis")
     try:
         await memory.set_memory_section(key, content, "user")
     except ValueError as exc:
-        return {"error": str(exc)}
+        raise HTTPException(400, str(exc)) from exc
     return {"saved": True, "key": key}
 
 

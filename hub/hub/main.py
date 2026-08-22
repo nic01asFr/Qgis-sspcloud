@@ -12719,18 +12719,34 @@ async def desk_get_memory():
     return r.json()
 
 
+# Correctif 2026-08-22 : ces routes relayaient le corps de la reponse de
+# l'agent en repondant systematiquement 200, meme quand l'agent refusait la
+# requete. L'interface du bureau conclut au succes sur `r.ok` (desk.html) :
+# une section de memoire invalide affichait donc une confirmation alors que
+# rien n'etait enregistre. On propage desormais le code de l'agent.
+def _relayer(r):
+    """Relaie la reponse de l'agent en conservant son code HTTP."""
+    try:
+        contenu = r.json()
+    except Exception:
+        contenu = {"detail": (r.text or "")[:200]}
+    if r.status_code >= 400:
+        return JSONResponse(contenu, status_code=r.status_code)
+    return contenu
+
+
 @app.patch("/desk/memory")
 async def desk_patch_memory(request: Request):
     body = await request.json()
     r = await _agent_call("PATCH", "/user/memory", json=body)
-    return r.json()
+    return _relayer(r)
 
 
 @app.patch("/desk/memory/preferences")
 async def desk_set_pref(request: Request):
     body = await request.json()
     r = await _agent_call("PATCH", "/user/preferences", json=body)
-    return r.json()
+    return _relayer(r)
 
 
 @app.delete("/desk/memory/preferences/{key}", status_code=204)
@@ -12742,7 +12758,7 @@ async def desk_del_pref(key: str):
 async def desk_add_insight(request: Request):
     body = await request.json()
     r = await _agent_call("POST", "/user/insights", json=body)
-    return r.json()
+    return _relayer(r)
 
 
 @app.delete("/desk/memory/insights/{insight_id}", status_code=204)
