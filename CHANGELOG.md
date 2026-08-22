@@ -3,6 +3,52 @@
 Versions du chart Helm `qgis-hub` (publié via GitHub Actions dans
 [`helm-repo/`](helm-repo/)) et jalons majeurs du service.
 
+## 1.3.0 · 2026-08-22
+
+**Une commande, plus aucun jeton à retrouver.** Le parcours d'installation
+ne dépend plus de `kubectl` ni d'un token OIDC.
+
+**Clé d'accès visible** — `install.sh` génère (ou relit) la clé et la passe
+en value `security.apiKey`. Elle apparaît dans Onyxia > Mes services et
+dans les notes d'installation, comme le mot de passe du chart Jupyter
+officiel. Le `lookup` sur les Secrets disparaît du chemin nominal : il
+faisait échouer l'installation depuis un Jupyter au rôle par défaut.
+
+**Service visible dans Onyxia** — `install.sh` crée le Secret de
+métadonnées `sh.onyxia.release.v1.qgis-hub` (clés `owner`, `friendlyName`,
+`catalog`, `share`). Sans lui, une release installée en ligne de commande
+restait absente de l'interface, même si `helm list` la voyait.
+
+**Clé LLM reprise du profil et conservée** — trois défauts corrigés :
+1. le placeholder `{{userProfileValues.aiAssistant.apiKey}}` n'existe pas ;
+   les formats réels sont `user.profile.aiAssistant.*` (alimenté) et
+   `{{ai.activeProvider.*}}` (repli). Les deux sont gérés ;
+2. `install.sh` lit le profil dans Vault
+   (`onyxia-kv/{user}/.onyxia/userProfileStr`), que la ligne de commande
+   n'interrogeait pas ;
+3. la clé n'était écrite qu'en RAM du pod agent : nouveau Secret
+   `qgis-llm-apikey` + `secretKeyRef optional`, elle survit aux
+   redémarrages et aux `helm upgrade`.
+
+Les valeurs du profil sont désormais nettoyées (`trim`) — un modèle saisi
+avec des espaces de bord était rejeté par l'API LLM.
+
+**Config MCP réparée** — `POST /auth/apikey` renvoyait `hub_url: ""` et un
+`claude_config` avec `"url": "/mcp"`, inutilisable par Claude Desktop.
+L'endpoint lisait `os.getenv("HUB_URL")` alors que le chart n'injectait
+cette variable que dans le pod agent (récidive du travers interdit par
+l'invariant n°3). Le chart l'injecte maintenant dans les deux pods.
+
+**Lien « Ouvrir » d'Onyxia** — il pointait vers le chat de l'agent.
+Onyxia prend le premier Ingress du manifeste sans le trier, et Helm suit
+l'ordre alphabétique des templates. Renommés en `ingress-1-hub.yaml` et
+`ingress-2-agent.yaml`. Au passage, le repli de hostname de l'agent
+produisait un hôte invalide (`…sspcloud.fr-agent`) : centralisé dans le
+helper `qgis-hub.agentHostname`.
+
+**Alerte clé LLM sur `/workspace`** — le bureau la signalait déjà, mais la
+page d'atterrissage restait muette alors que le bloc est replié.
+
 ## 1.2.5 · 2026-08-06
 
 **Fix WebSocket noVNC** — endpoint `/workspace/vnc/websockify` accepte

@@ -1,3 +1,20 @@
+{{/*
+Correctif 2026-08-22 : le nom de ce fichier porte un numero d'ordre.
+
+Onyxia construit la liste d'URLs d'un service en parcourant les Ingress du
+manifeste Helm, SANS les trier (cf. ServiceUrlResolver.getServiceUrls dans
+onyxia-api : `client.load(manifest).items()` puis boucle directe). La
+premiere URL trouvee devient le lien "Ouvrir" de l'interface.
+
+Or Helm assemble le manifeste dans l'ordre alphabetique des fichiers de
+templates. Avec les anciens noms (`agent-ingress.yaml` et `ingress.yaml`),
+l'agent passait devant : le bouton "Ouvrir" d'Onyxia envoyait l'utilisateur
+sur le chat au lieu du bureau de travail.
+
+D'ou `ingress-1-hub.yaml` et `ingress-2-agent.yaml` : l'ordre devient
+explicite et le hub reste l'URL principale. Renommer les fichiers ne change
+aucun nom de ressource Kubernetes -- aucun impact sur le deploiement.
+*/}}
 {{- if .Values.ingress.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress

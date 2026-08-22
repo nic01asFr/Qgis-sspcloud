@@ -193,8 +193,20 @@
      survit tant que le pod agent tourne ; sur redeploy chart, retaper.
      Persistance PVC prevue Phase 2+.
      ════════════════════════════════════════════════════════════════════ #}
+  {# Correctif 2026-08-22 : alerte tant que la cle LLM manque. Sans elle,
+     l'assistant ne repond pas, et le bloc ci-dessous etant replie par
+     defaut, rien ne le signalait sur cette page. #}
+  {% if llm_key_missing %}
+  <div class="fr-alert fr-alert--warning fr-mb-3w">
+    <h3 class="fr-alert__title">Assistant IA en attente de configuration</h3>
+    <p>Ta clé LLM n'est pas renseignée : l'assistant ne peut pas répondre.
+       Ouvre le bloc ci-dessous pour la saisir (moins d'une minute).</p>
+  </div>
+  {% endif %}
+
   <details class="fr-callout fr-callout--brown-caramel fr-mb-4w"
-           style="padding:12px 16px;font-size:13px">
+           style="padding:12px 16px;font-size:13px"
+           {% if llm_key_missing %}open{% endif %}>
     <summary style="cursor:pointer;font-weight:600;color:#845d29">
       🤖 Clé LLM (agent IA) — configuration de l'assistant
     </summary>
@@ -227,9 +239,10 @@
         </button>
       </form>
       <p style="margin:8px 0 0 0;color:#666;font-size:11px">
-        La clé est propagée en RAM au pod agent (zéro downtime). Elle
-        n'est pas persistée sur disque : à retaper après un redeploy du
-        service. Chart Helm 1.1.x — persistance PVC prévue en Phase 2.
+        La clé est enregistrée dans un secret Kubernetes de ton espace et
+        activée immédiatement (aucune interruption). Tu n'auras pas à la
+        ressaisir : elle est conservée après un redémarrage ou une mise à
+        jour du service.
       </p>
     </div>
   </details>

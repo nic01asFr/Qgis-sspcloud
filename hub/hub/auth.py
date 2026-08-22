@@ -190,6 +190,48 @@ async def _k8s_create_secret(name: str, namespace: str, key: str, value: str) ->
         return False
 
 
+async def _k8s_upsert_secret(name: str, namespace: str, key: str, value: str) -> bool:
+    """Cree OU met a jour un Secret namespace-level.
+
+    Difference avec `_k8s_create_secret` : celui-ci traite le 409
+    AlreadyExists comme un succes sans rien ecrire, donc il ne peut pas
+    servir a REMPLACER une valeur existante. Ici on tente d'abord un
+    merge-patch (met a jour si present), puis on retombe sur un create
+    si le Secret n'existe pas encore (404).
+
+    Utilise par POST /workspace/llm-key pour persister la cle LLM : sans
+    ca, la cle ne vivait qu'en RAM du pod agent et disparaissait au
+    premier redemarrage (constat terrain : has_llm_key=false 16 jours
+    apres une configuration reussie).
+    """
+    if not namespace:
+        return False
+    token = _k8s_sa_token()
+    if not token:
+        return False
+    url = f"{_K8S_HOST}/api/v1/namespaces/{namespace}/secrets/{name}"
+    payload = {"data": {key: base64.b64encode(value.encode()).decode()}}
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=10) as c:
+            r = await c.patch(
+                url,
+                headers={"Authorization": f"Bearer {token}",
+                         "Content-Type": "application/merge-patch+json"},
+                json=payload,
+            )
+        if r.status_code == 200:
+            return True
+        if r.status_code == 404:
+            # Secret absent : premiere configuration -> create
+            return await _k8s_create_secret(name, namespace, key, value)
+        log.warning("k8s upsert_secret %s/%s echec %d : %s",
+                    namespace, name, r.status_code, r.text[:200])
+        return False
+    except Exception as exc:
+        log.warning("k8s upsert_secret %s/%s exception : %s", namespace, name, exc)
+        return False
+
+
 async def _k8s_delete_secret(name: str, namespace: str) -> bool:
     """Supprime un Secret. Idempotent (404 = deja absent = OK)."""
     if not namespace:

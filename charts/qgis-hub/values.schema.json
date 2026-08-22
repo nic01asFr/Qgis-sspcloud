@@ -116,28 +116,65 @@
     },
     "llm": {
       "type": "object",
-      "title": "Clé LLM",
-      "description": "Clé API pour l'agent LLM. Utilise SSPCloud LLM (llm.lab.sspcloud.fr) par défaut.",
+      "title": "Assistant IA",
+      "description": "Configuration du modèle de langage de l'agent. Pré-remplie automatiquement depuis ton profil SSPCloud (Mon compte > Assistant IA) quand le service est lancé depuis le catalogue Onyxia.",
       "properties": {
         "apiKey": {
           "type": "string",
-          "title": "LLM API key",
-          "description": "Récupère depuis llm.lab.sspcloud.fr > API keys, ou saisis ta clé OpenAI compatible.",
+          "title": "Clé API",
+          "description": "Reprise de ton profil SSPCloud. Sinon, récupère-la sur llm.lab.sspcloud.fr (onglet API keys) ou saisis une clé compatible OpenAI.",
           "default": "",
           "x-onyxia": {
             "hidden": true,
-            "overwriteDefaultWith": "{{userProfileValues.aiAssistant.apiKey}}"
+            "overwriteDefaultWith": "user.profile.aiAssistant.apiKey"
           }
         },
         "baseUrl": {
           "type": "string",
-          "title": "Base URL",
-          "default": "https://llm.lab.sspcloud.fr/api"
+          "title": "URL de l'API",
+          "default": "https://llm.lab.sspcloud.fr/api",
+          "x-onyxia": {
+            "overwriteDefaultWith": "user.profile.aiAssistant.apiBase"
+          }
         },
         "model": {
           "type": "string",
-          "title": "Model (optionnel)",
-          "default": ""
+          "title": "Modèle",
+          "default": "",
+          "x-onyxia": {
+            "overwriteDefaultWith": "user.profile.aiAssistant.model"
+          }
+        },
+        "provider": {
+          "type": "object",
+          "title": "Fournisseur IA (format récent Onyxia)",
+          "description": "Repli si le profil historique est vide. Renseigné automatiquement par Onyxia, ne pas saisir à la main.",
+          "properties": {
+            "apiKey": {
+              "type": "string",
+              "default": "",
+              "x-onyxia": {
+                "hidden": true,
+                "overwriteDefaultWith": "{{ai.activeProvider.apiKey}}"
+              }
+            },
+            "apiBase": {
+              "type": "string",
+              "default": "",
+              "x-onyxia": {
+                "hidden": true,
+                "overwriteDefaultWith": "{{ai.activeProvider.apiBase}}"
+              }
+            },
+            "selectedModel": {
+              "type": "string",
+              "default": "",
+              "x-onyxia": {
+                "hidden": true,
+                "overwriteDefaultWith": "{{ai.activeProvider.selectedModel}}"
+              }
+            }
+          }
         }
       }
     },
@@ -253,8 +290,14 @@
     "security": {
       "type": "object",
       "title": "Sécurité",
-      "description": "Sprint Day 5 Phase 2-1 (2026-08-05) : security.password RETIRE. Un seul credential HUB_API_KEY (Secret K8s auto-généré). L'user tape sa clé dans /login form.",
+      "description": "Un seul identifiant pour tout le service : la clé d'accès ci-dessous sert au site web et au connecteur MCP.",
       "properties": {
+        "apiKey": {
+          "type": "string",
+          "title": "Clé d'accès personnelle",
+          "description": "Générée par install.sh au format qgis_{utilisateur}_{aléatoire}. Affichée ici et dans les notes d'installation pour que tu la retrouves sans commande. Laisser vide pour un tirage automatique (clé alors non affichée).",
+          "default": ""
+        },
         "networkPolicy": {
           "type": "object",
           "properties": {

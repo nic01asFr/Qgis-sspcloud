@@ -10478,17 +10478,27 @@ async def get_api_key(user: dict = Depends(auth.get_current_user)):
     Idempotent : retourne toujours la même clé pour un utilisateur donné.
     """
     key = await auth.create_or_get_api_key(user["username"])
-    hub_url = os.getenv("HUB_URL", "")
+    # Correctif 2026-08-22 : utiliser _HUB_URL et NON os.getenv("HUB_URL").
+    # Le chart n'injecte pas HUB_URL dans le pod hub (seulement dans le pod
+    # agent), donc os.getenv renvoyait "" et le bloc claude_config sortait
+    # avec "url": "/mcp" -- une URL relative qu'aucun client MCP ne peut
+    # utiliser. Constate en production le 2026-08-22 : la configuration
+    # annoncee comme "prete a copier" etait inexploitable.
+    # _HUB_URL retombe sur l'URL derivee de ONYXIA_USER quand l'env est
+    # absent. Meme piege que le bug historique de l'agent (cf. invariant 3
+    # du README : toujours _HUB_URL, jamais os.getenv).
+    hub_url = _HUB_URL
+    mcp_url = f"{hub_url}/mcp" if hub_url else "/mcp"
     return {
         "api_key": key,
         "username": user["username"],
         "hub_url": hub_url,
-        "mcp_url": f"{hub_url}/mcp" if hub_url else "/mcp",
+        "mcp_url": mcp_url,
         "claude_config": {
             "mcpServers": {
                 "qgis": {
                     "type": "http",
-                    "url": f"{hub_url}/mcp" if hub_url else "/mcp",
+                    "url": mcp_url,
                     "headers": {"Authorization": f"Bearer {key}"},
                 }
             }
@@ -11560,12 +11570,45 @@ async def workspace_page(request: Request):
     if not _jinja:
         raise HTTPException(503, "Templates non disponibles")
     ctx = await _desk_context()
+
+    # Correctif 2026-08-22 : signaler l'absence de cle LLM.
+    # Le bureau /desk affiche deja un bandeau explicite, mais /workspace --
+    # la page d'atterrissage apres connexion -- ne montrait rien : le bloc
+    # "Cle LLM" est un accordeon replie, donc un nouvel arrivant ne pouvait
+    # pas deviner que son assistant etait muet. On interroge /api/status de
+    # l'agent (route publique, sans secret) pour ouvrir le bloc et afficher
+    # une alerte tant que la cle manque.
+    # Non bloquant et timeout court : si l'agent ne repond pas, on n'affirme
+    # rien plutot que d'alarmer a tort.
+    ctx["llm_key_missing"] = False
+    try:
+        ns = f"user-{_ONYXIA_USER}" if _ONYXIA_USER else auth._NAMESPACE
+        async with httpx.AsyncClient(timeout=3) as c:
+            r = await c.get(
+                f"http://qgis-agent.{ns}.svc.cluster.local:8888/api/status"
+            )
+        if r.status_code == 200:
+            ctx["llm_key_missing"] = not r.json().get("has_llm_key", True)
+    except Exception as exc:
+        log.debug("workspace: statut agent indisponible : %s", exc)
+
     # Sprint Day 5 Phase 1.7-C (2026-08-05) : propage status feedback llm-key
     # form (query string ?llm_key=updated|error|invalid, pose apres POST).
     llm_flag = request.query_params.get("llm_key", "")
     if llm_flag == "updated":
         ctx["llm_key_status_ok"] = True
-        ctx["llm_key_status_msg"] = "Clé LLM mise à jour (agent rechargé, zéro downtime)."
+        ctx["llm_key_status_msg"] = (
+            "Clé LLM enregistrée et activée (agent rechargé, zéro downtime). "
+            "Elle est conservée : plus besoin de la ressaisir après un redémarrage."
+        )
+    elif llm_flag == "volatile":
+        # Cle active mais non persistee : on ne laisse pas croire que c'est acquis.
+        ctx["llm_key_status_ok"] = False
+        ctx["llm_key_status_msg"] = (
+            "Clé LLM activée, mais NON conservée : le service n'a pas pu écrire "
+            "le Secret Kubernetes. Elle sera perdue au prochain redémarrage. "
+            "Vérifie que ton service Jupyter a bien le rôle Kubernetes « edit »."
+        )
     elif llm_flag == "empty":
         ctx["llm_key_status_ok"] = False
         ctx["llm_key_status_msg"] = "Clé vide — saisis une valeur non vide."
@@ -11582,10 +11625,22 @@ async def workspace_page(request: Request):
 async def workspace_set_llm_key(request: Request):
     """Sprint Day 5 Phase 1.7-C (2026-08-05) : configure la cle LLM de l'agent.
 
-    Form POST /workspace/llm-key {llm_api_key: str} -> webhook agent
-    POST /api/reload-llm-key {llm_api_key: str} (X-Hub-Auth: HUB_API_KEY).
-    L'agent met a jour os.environ["LLM_API_KEY"] en RAM (aucun restart pod,
-    zero downtime). Persistance ephemere : survit tant que le pod tourne.
+    Form POST /workspace/llm-key {llm_api_key: str} -> deux effets
+    complementaires :
+
+    1. PERSISTANCE : upsert du Secret K8s `qgis-llm-apikey`. L'agent le lit
+       via secretKeyRef au demarrage (cf. agent-statefulset.yaml), donc la
+       cle survit aux redemarrages de pod et aux `helm upgrade`.
+    2. PROPAGATION A CHAUD : webhook agent POST /api/reload-llm-key
+       (X-Hub-Auth: HUB_API_KEY) qui met a jour os.environ["LLM_API_KEY"]
+       en RAM. Zero downtime, cle active immediatement.
+
+    Les deux sont necessaires : Kubernetes ne repropage pas un secretKeyRef
+    a un pod deja demarre, et la RAM ne survit pas au redemarrage.
+
+    Correctif 2026-08-22 : avant cette version seul (2) existait -> la cle
+    etait perdue au premier restart du pod agent (constat terrain :
+    has_llm_key=false 16 jours apres une configuration validee).
 
     Auth : le middleware oidc_auth_middleware a deja valide (cookie
     hub_api_key ou OIDC) avec ownership check ONYXIA_USER.
@@ -11603,6 +11658,20 @@ async def workspace_set_llm_key(request: Request):
     # _ONYXIA_USER (module-level ici) qui donne bien user-<u> par convention
     # SSPCloud (namespace = user-<preferred_username>).
     ns = f"user-{_ONYXIA_USER}" if _ONYXIA_USER else auth._NAMESPACE
+
+    # (1) Persistance. Non bloquant : si le SA n'a pas les droits, on
+    # propage quand meme en RAM, mais l'utilisateur est averti que la cle
+    # ne survivra pas au redemarrage.
+    persisted = await auth._k8s_upsert_secret(
+        "qgis-llm-apikey", ns, "LLM_API_KEY", llm_key,
+    )
+    if not persisted:
+        log.warning(
+            "llm-key: Secret qgis-llm-apikey non persiste (droits K8s ?) -- "
+            "la cle sera perdue au prochain redemarrage du pod agent."
+        )
+
+    # (2) Propagation a chaud vers le pod agent.
     webhook = f"http://qgis-agent.{ns}.svc.cluster.local:8888/api/reload-llm-key"
     try:
         async with httpx.AsyncClient(timeout=10) as c:
@@ -11622,8 +11691,15 @@ async def workspace_set_llm_key(request: Request):
         log.warning("llm-key: webhook agent unreachable : %s", exc)
         return RedirectResponse("/workspace?llm_key=error", status_code=303)
 
-    log.info("llm-key: propage OK pour %s (zero downtime)", _ONYXIA_USER)
-    return RedirectResponse("/workspace?llm_key=updated", status_code=303)
+    log.info(
+        "llm-key: propage OK pour %s (zero downtime, persiste=%s)",
+        _ONYXIA_USER, persisted,
+    )
+    # `updated` = cle active ET persistee. `volatile` = active mais non
+    # persistee (droits K8s manquants) : l'UI previent qu'elle sera perdue
+    # au prochain redemarrage plutot que de laisser croire que c'est acquis.
+    status = "updated" if persisted else "volatile"
+    return RedirectResponse(f"/workspace?llm_key={status}", status_code=303)
 
 
 # Anchor des tâches background lancées par /workspace/wake — sinon asyncio

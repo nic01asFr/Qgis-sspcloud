@@ -19,7 +19,7 @@ metadata:
 spec:
   ingressClassName: {{ .Values.ingress.ingressClassName | default "onyxia" }}
   rules:
-  - host: {{ .Values.agent.ingress.hostname | default (printf "%s-agent" (.Values.ingress.hostname | replace "-qgis." "-qgis-agent." | replace ".user.lab.sspcloud.fr" ".user.lab.sspcloud.fr")) }}
+  - host: {{ include "qgis-hub.agentHostname" . }}
     http:
       paths:
       - path: /

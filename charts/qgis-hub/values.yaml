@@ -68,10 +68,17 @@ git:
   token: ""
 
 security:
-  # Sprint Day 5 Phase 2-1 (2026-08-05) : security.password RETIRE.
-  # Le password chart-genere Phase 1.6 est remplace par un unique
-  # credential HUB_API_KEY (Secret K8s qgis-hub-apikey). L'user tape
-  # sa cle API dans /login form. Simplification : 1 credential, 1 flow.
+  # Un seul identifiant pour tout le service (site web + connecteur MCP).
+  #
+  # Renseignee par install.sh, qui relit la cle deja en place ou en genere
+  # une au format qgis_{utilisateur}_{aleatoire}. La passer en value la rend
+  # visible dans Onyxia > Mes services et dans les notes d'installation :
+  # l'utilisateur la retrouve sans aucune commande, comme le mot de passe
+  # du chart Jupyter officiel.
+  #
+  # Laisser vide reste possible : le chart tire alors une cle au sort, mais
+  # elle n'est plus consultable que via `kubectl get secret`.
+  apiKey: ""
   networkPolicy:
     enabled: true
     from:
@@ -131,10 +138,30 @@ workspace:
       cpu: 2000m
       memory: 4Gi
 
-# Cle LLM (SSPCloud llm.lab.sspcloud.fr par defaut, ou custom)
+# Assistant IA (SSPCloud llm.lab.sspcloud.fr par defaut, ou compatible OpenAI).
+#
+# Trois sources possibles, par ordre de priorite decroissante :
+#   1. UI Onyxia  -- x-onyxia resout {{ai.activeProvider.*}} depuis le profil
+#      utilisateur (Mon compte > Assistant IA). Automatique.
+#   2. install.sh -- lit le meme profil dans Vault
+#      (onyxia-kv/{user}/.onyxia/userProfileStr) et remplit ces valeurs.
+#   3. Formulaire /workspace -- l'utilisateur colle sa cle a la main.
+#
+# Dans les trois cas la cle atterrit dans le Secret K8s `qgis-llm-apikey`
+# (cf. secret-llm-apikey.yaml), lu par l'agent via secretKeyRef. Elle
+# survit donc aux redemarrages de pod et aux `helm upgrade`.
+#
+# Laisser apiKey vide ici ne casse rien : le Secret n'est alors pas cree
+# par le chart, et une cle deja saisie via le formulaire est preservee.
 llm:
-  # A remplir par l'user dans Onyxia UI. Peut aussi etre injecte depuis
-  # Vault via x-onyxia dans values.schema.json (userProfileValues.aiAssistant.apiKey)
+  # Format historique Onyxia (user.profile.aiAssistant.*) : c'est celui
+  # qui est reellement alimente aujourd'hui. Prioritaire.
   apiKey: ""
   baseUrl: "https://llm.lab.sspcloud.fr/api"
   model: ""
+  # Format recent Onyxia (ai.activeProvider.*) : utilise en repli si le
+  # format historique est vide. Voir _helpers.tpl pour la fusion.
+  provider:
+    apiKey: ""
+    apiBase: ""
+    selectedModel: ""

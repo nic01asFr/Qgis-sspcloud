@@ -48,6 +48,91 @@ fi
 # Domaine SSPCloud standard (peut etre override via env K8S_DOMAIN)
 K8S_DOMAIN="${K8S_DOMAIN:-user.lab.sspcloud.fr}"
 
+# ---------------------------------------------------------------------------
+# Cle LLM : recuperation depuis le profil Onyxia stocke dans Vault.
+#
+# Le chart declare `{{ai.activeProvider.apiKey}}` dans values.schema.json,
+# mais ce placeholder n'est resolu QUE par l'UI Onyxia. En install CLI il
+# reste lettre morte -- c'est pourquoi l'agent demarrait sans cle.
+#
+# Onyxia range les preferences utilisateur dans Vault sous
+#   onyxia-kv/data/{user}/.onyxia/userProfileStr
+# dont le champ `value` contient un JSON :
+#   {"userProfileValues": {"aiAssistant": {"apiKey": ..., "apiBase": ...,
+#                                          "model": ..., "enabled": ...}}}
+#
+# Necessite que le service Jupyter ait ete lance avec l'option Vault
+# activee (VAULT_TOKEN present). Sinon on laisse vide : l'utilisateur
+# saisira sa cle dans le formulaire /workspace, qui la persistera aussi.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Cle d'acces au service (HUB_API_KEY).
+#
+# Elle est generee ICI, pas par le chart, pour deux raisons :
+#   - passee en value Helm, elle devient visible dans Onyxia > Mes services
+#     et dans les notes d'installation : l'utilisateur la retrouve sans
+#     jamais taper de commande ni recuperer de jeton Kubernetes ;
+#   - le chart n'a plus besoin de `lookup` sur les Secrets, ce qui evitait
+#     l'echec d'installation depuis un Jupyter au role par defaut.
+#
+# Idempotence : on relit toujours la cle existante avant d'en generer une.
+# Sans ca, une reinstallation changerait la cle et invaliderait les cookies
+# de 90 jours deja poses dans les navigateurs de l'utilisateur.
+# ---------------------------------------------------------------------------
+HUB_KEY_VALUE=$(kubectl get secret qgis-hub-apikey -n "$NAMESPACE" \
+    -o jsonpath='{.data.HUB_API_KEY}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+if [ -z "$HUB_KEY_VALUE" ]; then
+    _rand=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' | cut -c1-32)
+    HUB_KEY_VALUE="qgis_${USERNAME}_${_rand}"
+    echo "Cle d'acces : nouvelle cle generee"
+else
+    echo "Cle d'acces : cle existante conservee (tes acces restent valables)"
+fi
+
+LLM_API_KEY_VALUE=""
+LLM_BASE_URL_VALUE=""
+LLM_MODEL_VALUE=""
+if [ -n "${VAULT_TOKEN:-}" ] && [ -n "${VAULT_ADDR:-}" ]; then
+    echo "[0/5] Lecture de ta configuration IA depuis ton profil SSPCloud"
+    _vault_mount="${VAULT_MOUNT:-onyxia-kv}"
+    _profile_json=$(curl -s --max-time 15 \
+        -H "X-Vault-Token: $VAULT_TOKEN" \
+        "$VAULT_ADDR/v1/${_vault_mount}/data/${USERNAME}/.onyxia/userProfileStr" \
+        2>/dev/null || echo "")
+    if [ -n "$_profile_json" ]; then
+        # Deux niveaux de JSON : l'enveloppe Vault, puis la chaine `value`.
+        _parsed=$(printf '%s' "$_profile_json" | python3 -c '
+import json, sys
+try:
+    outer = json.load(sys.stdin)
+    raw = outer["data"]["data"]["value"]
+    ai = json.loads(raw)["userProfileValues"]["aiAssistant"]
+    # strip() obligatoire : les valeurs saisies dans l'\''interface de profil
+    # Onyxia peuvent porter des espaces de bord (constate en production :
+    # model = "  qwen3-6-35b-moe"), qui feraient rejeter le modele par
+    # l'\''API LLM. Une valeur vide vaut absence : pas de valeur factice.
+    print("\t".join([
+        (ai.get("apiKey") or "").strip(),
+        (ai.get("apiBase") or "").strip(),
+        (ai.get("model") or "").strip(),
+    ]))
+except Exception:
+    print("\t\t")
+' 2>/dev/null || printf '\t\t')
+        LLM_API_KEY_VALUE=$(printf '%s' "$_parsed" | cut -f1)
+        LLM_BASE_URL_VALUE=$(printf '%s' "$_parsed" | cut -f2)
+        LLM_MODEL_VALUE=$(printf '%s' "$_parsed" | cut -f3)
+    fi
+    if [ -n "$LLM_API_KEY_VALUE" ]; then
+        echo "  -> cle IA trouvee dans ton profil${LLM_MODEL_VALUE:+ (modele : $LLM_MODEL_VALUE)}"
+    else
+        echo "  -> aucune cle IA dans ton profil (tu pourras la saisir sur /workspace)"
+    fi
+else
+    echo "[0/5] Profil IA non consultable (option Vault non activee sur ce Jupyter)"
+    echo "  -> tu pourras saisir ta cle IA sur /workspace apres installation"
+fi
+
 # Helm config dans /home/onyxia/work (persistent, PVC)
 export HELM_CONFIG_HOME="${HELM_CONFIG_HOME:-/home/onyxia/work/.helm-config}"
 export HELM_CACHE_HOME="${HELM_CACHE_HOME:-/home/onyxia/work/.helm-cache}"
@@ -84,6 +169,11 @@ oidc:
 serviceAccount:
   name: "$SERVICE_ACCOUNT"
 
+# Cle d'acces : passee en value pour rester visible dans Onyxia et dans
+# les notes d'installation. Relue a chaque execution, donc stable.
+security:
+  apiKey: "$HUB_KEY_VALUE"
+
 ingress:
   enabled: true
   hostname: "user-${USERNAME}-qgis.${K8S_DOMAIN}"
@@ -97,6 +187,14 @@ agent:
 
 workspace:
   enabled: true
+
+# Assistant IA : repris du profil Onyxia (Vault) quand il est lisible.
+# Vide = le chart ne cree pas le Secret et ne touche pas a une cle deja
+# saisie via le formulaire /workspace.
+llm:
+  apiKey: "${LLM_API_KEY_VALUE}"
+  baseUrl: "${LLM_BASE_URL_VALUE:-https://llm.lab.sspcloud.fr/api}"
+  model: "${LLM_MODEL_VALUE}"
 
 s3:
   enabled: true
@@ -130,6 +228,37 @@ if helm list -n "$NAMESPACE" 2>/dev/null | grep -q "^$RELEASE\s"; then
     helm upgrade "$RELEASE" "$REPO/qgis-hub" -n "$NAMESPACE" -f "$VALUES_FILE" 2>&1 | tail -3
 else
     helm install "$RELEASE" "$REPO/qgis-hub" -n "$NAMESPACE" -f "$VALUES_FILE" 2>&1 | tail -3
+fi
+
+# ---------------------------------------------------------------------------
+# Enregistrement du service aupres d'Onyxia.
+#
+# Onyxia n'affiche dans "Mes services" que les releases pour lesquelles il
+# trouve un Secret de metadonnees. Sans lui, une installation faite en CLI
+# reste invisible dans l'interface, meme si `helm list` la voit : constate
+# sur qgis-hub, n8n et grist-coder, tous absents de l'UI.
+#
+# Convention lue dans le code d'onyxia-api (HelmAppsService.java) :
+#   Secret `sh.onyxia.release.v1.<release>` portant les cles
+#   owner / friendlyName / catalog / share.
+#
+# Creer ce Secret suffit donc a faire apparaitre le service dans l'UI avec
+# son lien d'acces et ses notes d'installation (la cle IA, l'URL du bureau).
+# Non bloquant : si l'ecriture echoue, le service fonctionne quand meme,
+# il reste simplement absent de la liste Onyxia.
+# ---------------------------------------------------------------------------
+echo ""
+echo "  Enregistrement du service dans l'interface Onyxia"
+if kubectl create secret generic "sh.onyxia.release.v1.${RELEASE}" \
+        -n "$NAMESPACE" \
+        --from-literal=owner="$USERNAME" \
+        --from-literal=friendlyName="QGIS Hub" \
+        --from-literal=catalog="divers" \
+        --from-literal=share=false \
+        --dry-run=client -o yaml 2>/dev/null | kubectl apply -f - >/dev/null 2>&1; then
+    echo "  -> visible dans datalab.sspcloud.fr > Mes services"
+else
+    echo "  -> non enregistre (le service reste accessible par son URL)"
 fi
 
 # Etape 4 : attente rollout

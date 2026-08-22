@@ -61,6 +61,15 @@ spec:
               value: /home/onyxia/work/qgis-hub-data
             - name: ONYXIA_USER
               value: {{ .Values.oidc.username | quote }}
+            {{- /* Correctif 2026-08-22 : HUB_URL n'etait injecte que dans le
+                   pod agent, jamais dans le hub. Resultat : POST /auth/apikey
+                   renvoyait "hub_url": "" et un claude_config inutilisable
+                   ("url": "/mcp"). Le code retombe desormais sur l'URL derivee
+                   de ONYXIA_USER, mais on injecte la valeur du chart pour que
+                   l'URL reste juste meme si le hostname d'ingress est
+                   personnalise (domaine autre que user.lab.sspcloud.fr). */}}
+            - name: HUB_URL
+              value: "https://{{ .Values.ingress.hostname }}"
             {{- /* Sprint Day 5 Phase 1.7-A (2026-08-05) : Fix RBAC racine.
                    Le hub lit HUB_API_KEY via env var (kubelet injecte depuis
                    Secret K8s qgis-hub-apikey) au lieu de via K8s API (qui

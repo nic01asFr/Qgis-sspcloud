@@ -1,56 +1,65 @@
-Sprint Day 5 Phase 1.6 (2026-08-05) — Chart qgis-hub {{ .Chart.Version }} installé.
+### Accès au service
+
+- Ouvre QGIS Service dans ton navigateur avec [ce lien](https://{{ .Values.ingress.hostname }}/login).
+{{- if (.Values.security).apiKey }}
+- Ta clé d'accès : `{{ (.Values.security).apiKey }}`
+{{- else }}
+- Ta clé d'accès n'est pas affichée ici (tirage automatique). Récupère-la avec :
+  `kubectl get secret qgis-hub-apikey -n {{ .Release.Namespace }} -o jsonpath='{.data.HUB_API_KEY}' | base64 -d`
+{{- end }}
+
+Colle cette clé dans le formulaire : elle est envoyée en corps de requête,
+jamais dans l'URL. Un cookie de 90 jours est posé — tu ne repasseras plus
+par cette étape pendant trois mois, y compris après fermeture du navigateur.
+
+Cette même clé sert au connecteur MCP (Claude Desktop, Cursor, Cline) :
+récupère la configuration prête à copier sur
+https://{{ .Values.ingress.hostname }}/auth/apikey
+
+Si tu perds la clé, elle reste affichée sur cette page. En dernier recours,
+https://{{ .Values.ingress.hostname }}/onboarding accepte un jeton OIDC
+SSPCloud (datalab.sspcloud.fr > Mon compte).
 
 ═══════════════════════════════════════════════════════════════════════════════
- QGIS Service — CEREMA — 3 pods déployés
+ Adresses du service
 ═══════════════════════════════════════════════════════════════════════════════
 
-📡 URL principale (Hub + Desk web) :
+📡 Bureau de travail (hub + carte + assistant) :
    https://{{ .Values.ingress.hostname }}
 
-🤖 URL Agent LLM (chat conversationnel, iframe) :
+🤖 Assistant seul (chat) :
    {{- if .Values.agent.enabled }}
-   https://{{ .Values.agent.ingress.hostname | default (printf "%s-agent" (.Values.ingress.hostname | replace "-qgis." "-qgis-agent.")) }}
+   https://{{ include "qgis-hub.agentHostname" . }}
    {{- else }}
-   (Agent désactivé dans les Values)
+   (assistant désactivé)
    {{- end }}
-
-═══════════════════════════════════════════════════════════════════════════════
- 🔑 Premier accès web (Phase 2-1 : single credential)
-═══════════════════════════════════════════════════════════════════════════════
-
-Sprint Day 5 Phase 2-1 (2026-08-05) : un seul credential = HUB_API_KEY.
-
-  1. Récupère ta clé HUB_API_KEY :
-
-     kubectl get secret qgis-hub-apikey -n {{ .Release.Namespace }} \
-       -o jsonpath='{.data.HUB_API_KEY}' | base64 -d
-
-     Alternative Onyxia UI : Mes services > qgis-hub > onglet Env > HUB_API_KEY.
-
-  2. Va sur : https://{{ .Values.ingress.hostname }}/login
-
-  3. Colle ta clé dans le form (envoyée en POST body, jamais en URL).
-
-  4. Cookie hub_api_key 90j auto-set → workspace accessible.
-
-Chemin secours (token OIDC SSPCloud) :
-
-  https://{{ .Values.ingress.hostname }}/onboarding
-  (colle id-token depuis https://datalab.sspcloud.fr/account/k8sCodeSnippets)
 
 ═══════════════════════════════════════════════════════════════════════════════
  🤖 Cle LLM (agent IA)
 ═══════════════════════════════════════════════════════════════════════════════
 
-Apres le premier login, va sur https://{{ .Values.ingress.hostname }}/workspace
-et ouvre le bloc "Cle LLM (agent IA)". Recupere une cle sur :
+{{- if .Values.llm.apiKey }}
+✅ Cle IA deja configuree (reprise de ton profil SSPCloud).
+   L'assistant est operationnel, rien a faire.
+{{- if .Values.llm.model }}
+   Modele : {{ .Values.llm.model }}
+{{- end }}
 
-  https://llm.lab.sspcloud.fr  (onglet API keys)
+Pour en changer : https://{{ .Values.ingress.hostname }}/workspace
+bloc "Cle LLM (agent IA)".
+{{- else }}
+Aucune cle IA n'a ete trouvee dans ton profil SSPCloud. Sans elle,
+l'assistant ne peut pas repondre.
 
-Colle-la et clique Enregistrer -> l'agent recharge en RAM (zero downtime).
+  1. Recupere une cle sur https://llm.lab.sspcloud.fr (onglet API keys)
+     -- ou renseigne ton profil : datalab.sspcloud.fr > Mon compte >
+     Assistant IA, puis relance l'installation.
+  2. Va sur https://{{ .Values.ingress.hostname }}/workspace
+  3. Ouvre le bloc "Cle LLM (agent IA)", colle la cle, Enregistrer.
+{{- end }}
 
-⚠️  Ephemere : la cle survit tant que le pod agent tourne. Sur redeploy
-    du chart (helm upgrade), retape-la. Persistance PVC prevue en Phase 2.
+La cle est conservee dans un Secret Kubernetes de ton espace : elle
+survit aux redemarrages de pod et aux mises a jour du service.
 
 ═══════════════════════════════════════════════════════════════════════════════
  📚 Documentation
