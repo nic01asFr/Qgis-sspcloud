@@ -147,7 +147,7 @@
   <details class="fr-callout fr-callout--brown-caramel fr-mb-4w"
            style="padding:12px 16px;font-size:13px">
     <summary style="cursor:pointer;font-weight:600;color:#845d29">
-      🔑 Ma clé d'accès personnelle (pour éviter de repasser par le portail)
+      🔑 Ma clé d'accès personnelle
     </summary>
     <div class="fr-mt-2w">
       <p style="margin:0 0 8px 0">
@@ -208,11 +208,11 @@
            style="padding:12px 16px;font-size:13px"
            {% if llm_key_missing %}open{% endif %}>
     <summary style="cursor:pointer;font-weight:600;color:#845d29">
-      🤖 Clé LLM (agent IA) — configuration de l'assistant
+      🤖 Assistant IA — clé de connexion
     </summary>
     <div class="fr-mt-2w">
       <p style="margin:0 0 8px 0">
-        L'agent IA a besoin d'une clé LLM pour répondre. Récupère-la sur
+        L'assistant a besoin d'une clé pour répondre. Récupère-la sur
         <a href="https://llm.lab.sspcloud.fr" target="_blank">llm.lab.sspcloud.fr</a>
         (onglet <b>API keys</b>) ou utilise ta clé OpenAI compatible.
       </p>
@@ -227,7 +227,7 @@
         <div style="flex:1">
           <label for="llm_key_input" style="display:block;font-size:11px;color:#666;
                  text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">
-            Clé LLM (jamais affichée en clair après soumission)
+            Clé de connexion (jamais réaffichée après enregistrement)
           </label>
           <input type="password" name="llm_api_key" id="llm_key_input" required
                  placeholder="sk-..." autocomplete="off"

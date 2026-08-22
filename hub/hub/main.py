@@ -2675,8 +2675,14 @@ async def hub_login_form(request: Request, error: str = "", key: str = ""):
 {_FAVICON_TAG}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
 <style>
-body{{font-family:Marianne,arial,sans-serif;max-width:640px;margin:60px auto;padding:0 20px}}
+body{{font-family:Marianne,arial,sans-serif;max-width:640px;margin:40px auto 60px;padding:0 20px}}
 h1{{color:#000091;font-size:24px}}
+.brand-row{{display:flex;align-items:center;gap:20px;
+  padding-bottom:16px;margin-bottom:28px;border-bottom:1px solid #ddd}}
+.brand-row .fr-logo{{margin:0}}
+.brand-op{{display:flex;flex-direction:column;gap:2px}}
+.brand-op .op{{font-weight:700;font-size:15px;color:#000091;letter-spacing:.4px}}
+.brand-op .sub{{font-size:11.5px;color:#666}}
 .step{{background:#f5f5fe;border-left:4px solid #000091;padding:16px 20px;margin:20px 0;border-radius:2px}}
 input[type=password]{{width:100%;padding:10px;border:1px solid #ddd;border-radius:2px;font-family:monospace;font-size:12px;box-sizing:border-box}}
 button{{background:#000091;color:#fff;padding:10px 24px;border:none;border-radius:2px;font-size:14px;cursor:pointer;font-family:inherit;margin-top:8px}}
@@ -2688,6 +2694,17 @@ code{{font-size:11px;background:#efeffb;padding:2px 6px;border-radius:2px}}
 </style>
 </head>
 <body>
+<!-- Bloc-marque : /login etait la seule page du service sans identite
+     institutionnelle, alors que /workspace et /desk affichent Marianne et
+     CEREMA. C'est pourtant la porte d'entree du service. -->
+<header role="banner" class="brand-row">
+  <p class="fr-logo">République<br>Française</p>
+  <div class="brand-op">
+    <span class="op">CEREMA</span>
+    <span class="sub">QGIS Service</span>
+  </div>
+</header>
+
 <main role="main">
 <h1>QGIS Service — Connexion</h1>
 <p>Bienvenue{f' <b>{onyxia_user}</b>' if onyxia_user else ''}. Colle ta clé d'accès
@@ -11643,14 +11660,14 @@ async def workspace_page(request: Request):
     if llm_flag == "updated":
         ctx["llm_key_status_ok"] = True
         ctx["llm_key_status_msg"] = (
-            "Clé LLM enregistrée et activée (agent rechargé, zéro downtime). "
+            "Clé enregistrée, l'assistant est opérationnel immédiatement. "
             "Elle est conservée : plus besoin de la ressaisir après un redémarrage."
         )
     elif llm_flag == "volatile":
         # Cle active mais non persistee : on ne laisse pas croire que c'est acquis.
         ctx["llm_key_status_ok"] = False
         ctx["llm_key_status_msg"] = (
-            "Clé LLM activée, mais NON conservée : le service n'a pas pu écrire "
+            "Clé activée, mais NON conservée : le service n'a pas pu écrire "
             "le Secret Kubernetes. Elle sera perdue au prochain redémarrage. "
             "Vérifie que ton service Jupyter a bien le rôle Kubernetes « edit »."
         )

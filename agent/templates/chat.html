@@ -577,16 +577,16 @@ body.embed .msg .bubble pre{max-width:100%}
          redirige vers /workspace bloc "Clé LLM (agent IA)" form user
          (le portail nic01asfr avec section AI Assistant est retiré). -->
     <div id="llm-banner" class="llm-banner" role="status" aria-live="polite">
-      <h4>Agent IA en attente — clé LLM manquante</h4>
-      <p>L'agent peut piloter QGIS mais ne peut pas répondre au chat tant
-        que ta clé LLM n'est pas configurée. Procédure (~1 min) :</p>
+      <h4>Assistant IA à configurer</h4>
+      <p>L'assistant peut déjà piloter QGIS, mais il lui faut une clé pour
+        dialoguer avec toi. Environ une minute :</p>
       <ol>
         <li>Ouvre <a href="https://llm.lab.sspcloud.fr/" target="_blank" rel="noopener">
           llm.lab.sspcloud.fr</a> → menu profil →
           <strong>Réglages</strong> → <strong>Compte</strong> →
           section <strong>Clés API</strong> → copie ta clé.</li>
         <li>Va sur <a href="/workspace" target="_top" rel="noopener">/workspace</a>
-          → déroule le bloc <strong>🤖 Clé LLM (agent IA)</strong> →
+          → déroule le bloc <strong>🤖 Assistant IA — clé de connexion</strong> →
           colle la clé → <strong>Enregistrer</strong>.
           <em>(active immédiatement, sans interruption — et conservée : tu
           n'auras pas à la ressaisir)</em></li>
@@ -835,12 +835,12 @@ if (typeof marked !== 'undefined' && marked.use) {
 
       if (data.has_llm_key) {
         verifyStatus.className = 'verify-status ok';
-        verifyStatus.textContent = 'Clé LLM détectée. Tu peux maintenant chatter !';
+        verifyStatus.textContent = 'Clé détectée. L’assistant est prêt !';
       } else {
         verifyStatus.className = 'verify-status err';
         verifyStatus.textContent =
           'Pas de clé configurée. Va sur /workspace et ouvre le bloc '
-          + '"Clé LLM (agent IA)" pour saisir ta clé (llm.lab.sspcloud.fr).';
+          + '"Assistant IA — clé de connexion" (llm.lab.sspcloud.fr).';
       }
     } catch (e) {
       verifyStatus.className = 'verify-status err';
