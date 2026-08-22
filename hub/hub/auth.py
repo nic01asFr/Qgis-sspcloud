@@ -978,6 +978,10 @@ _OIDC_MIDDLEWARE_PUBLIC = (
     "/p",
     # Sprint sec-rgpd P0-3 (2026-07-19) : robots.txt statique public.
     "/robots.txt",
+    # Correctif 2026-08-22 : icone d'onglet. Sans whitelist, le middleware
+    # repondait 401 a chaque page et polluait la console du navigateur.
+    # Aucun secret dans une icone.
+    "/favicon.ico",
     # Audit v1.7.2 P1 #3 (D-QGIS-010) : bundle Vite BlockNote = JS/CSS pur
     # statique, AUCUN secret. La page principale /editor/{sid}/assembly/{aid}
     # reste protegee OIDC (elle sert l'index.html via FileResponse). Whitelist

@@ -3,13 +3,13 @@
 Vue d'ensemble technique du service qgis-sspcloud : composants, flux, isolation,
 contrat d'orchestration études/projets/sessions.
 
-Version 2026-08-05 · Sprint Day 5 Phase 2 CLOS (chart 1.2.5, portail retiré).
+Version 2026-08-22 · chart 1.3.0.
 
 ---
 
 ## 1. Composants du service
 
-**Sprint Day 5 (chart 1.2.5)** : le portail admin `nic01asfr` est retiré.
+**Sprint Day 5 (chart 1.3.0)** : le portail admin `nic01asfr` est retiré.
 Le service se compose de **3 pods** déployés via `helm install qgis-hub`
 depuis le terminal Jupyter Onyxia de l'user (namespace `user-<username>`) :
 

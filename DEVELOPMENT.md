@@ -2,7 +2,7 @@
 
 Guide développeur : setup local, build images, redéploiement, tests.
 
-Version 2026-08-06 · Sprint Day 5 CLOS · chart Helm 1.2.5.
+Version 2026-08-22 · chart Helm 1.3.0.
 
 > Pour l'installation user, voir [QUICKSTART.md](QUICKSTART.md) et
 > [docs/day5-user-guide-visuel.md](docs/day5-user-guide-visuel.md).
@@ -134,7 +134,7 @@ rebuild automatique. Voir `Dockerfile.workspace` pour référence.
 
 Éditer `charts/qgis-hub/Chart.yaml` :
 ```yaml
-version: 1.2.5   # bump ici
+version: 1.3.0   # bump ici
 ```
 
 ### 4.2 Package + regen index
@@ -143,7 +143,7 @@ version: 1.2.5   # bump ici
 helm package charts/qgis-hub -d helm-repo/
 helm repo index helm-repo/ --url https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/helm-repo
 git add charts/qgis-hub/ helm-repo/qgis-hub-<version>.tgz helm-repo/index.yaml
-git commit -m "chore(chart): bump 1.2.5"
+git commit -m "chore(chart): bump 1.3.0"
 git push origin main
 ```
 
@@ -162,7 +162,7 @@ helm lint charts/qgis-hub/
 Depuis un terminal Jupyter Onyxia du user cible :
 ```bash
 export HELM_CONFIG_HOME=/home/onyxia/work/.helm-config
-helm upgrade qgis-hub qgis-sspcloud/qgis-hub --version 1.2.5 \
+helm upgrade qgis-hub qgis-sspcloud/qgis-hub --version 1.3.0 \
     --reuse-values \
     --set serviceAccount.name="$KUBERNETES_SERVICE_ACCOUNT" \
     -n user-<toi>

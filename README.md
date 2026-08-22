@@ -4,26 +4,33 @@ Service géospatial CEREMA sur SSPCloud Onyxia :
 **QGIS Desktop + Agent IA + connecteur MCP** installable en **3 minutes** par
 l'utilisateur, sans intervention admin.
 
-**Chart Helm stable** : `qgis-hub 1.2.5` (2026-08-06, Sprint Day 5 clos).
+**Chart Helm stable** : `qgis-hub 1.3.0` (2026-08-22).
 
 ---
 
 ## Démarrage rapide
 
-Depuis un terminal Jupyter Onyxia (`kubernetes.role: edit`) :
+Lance un service **Jupyter-python** sur [datalab.sspcloud.fr](https://datalab.sspcloud.fr)
+en réglant `Kubernetes > Enable access > role = edit` — **ce n'est pas le
+réglage par défaut**, et c'est le seul point d'attention de l'installation.
+Puis, dans un terminal du service :
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/install.sh | bash
 ```
 
-Le script déploie 3 pods (hub + agent + workspace), génère ta clé
-`HUB_API_KEY`, imprime l'URL de ton bureau. Ouvre `<URL>/login`, colle la
-clé, cookie 90j auto-set → workspace accessible.
+Le script déploie les 3 composants (hub + assistant + QGIS Desktop), reprend la
+clé de ton assistant IA depuis ton profil SSPCloud, enregistre le service dans
+ton interface Onyxia, et affiche ton adresse et ta clé d'accès. Colle-la sur
+`<URL>/login` : un cookie de 90 jours te dispense ensuite de cette étape.
+
+La clé reste consultable dans **Onyxia > Mes services > QGIS Hub**, sans aucune
+commande.
 
 **Guides** :
-- [QUICKSTART.md](QUICKSTART.md) — 3 étapes user (résumé)
-- [docs/day5-user-guide-visuel.md](docs/day5-user-guide-visuel.md) — 7 étapes illustrées avec screenshots
-- [docs/day5-migration-guide.md](docs/day5-migration-guide.md) — migration users legacy (portail nic01asfr → chart)
+- [QUICKSTART.md](QUICKSTART.md) — installation pas à pas
+- [docs/day5-user-guide-visuel.md](docs/day5-user-guide-visuel.md) — guide illustré
+- [docs/day5-migration-guide.md](docs/day5-migration-guide.md) — migration depuis l'ancien portail
 
 ## Architecture
 

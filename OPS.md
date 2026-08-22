@@ -3,7 +3,7 @@
 Runbook opérationnel : monitoring, incidents fréquents, procédures de
 maintenance.
 
-Version 2026-08-06 · Sprint Day 5 CLOS · chart Helm 1.2.5.
+Version 2026-08-22 · chart Helm 1.3.0.
 
 > **Contexte** : depuis Sprint Day 5, chaque user déploie son propre
 > service via `helm install qgis-hub` depuis son terminal Jupyter Onyxia

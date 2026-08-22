@@ -1254,6 +1254,23 @@ _AGENT_URL = (
         if _ONYXIA_USER else "")
 )
 
+# Favicon (correctif 2026-08-22).
+# Sans <link rel="icon">, le navigateur reclame /favicon.ico ; la route
+# n'existait pas et le middleware repondait 401, ce qui laissait une erreur
+# dans la console de chaque page et un onglet sans identite visuelle.
+# SVG en data URI : aucune requete reseau, donc plus de 401 possible.
+_FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+    '<rect width="32" height="32" rx="6" fill="#000091"/>'
+    '<path d="M6 22 L13 11 L18 18 L22 14 L26 22 Z" fill="#fff"/>'
+    '<circle cx="23" cy="9" r="2.5" fill="#e1000f"/>'
+    '</svg>'
+)
+_FAVICON_TAG = (
+    '<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,'
+    + urllib.parse.quote(_FAVICON_SVG) + '">'
+)
+
 # Jinja2 templates pour les pages HTML (desk, workspace)
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 _jinja = Jinja2Templates(directory=str(_TEMPLATES_DIR)) if _TEMPLATES_DIR.is_dir() else None
@@ -2610,6 +2627,21 @@ async def hub_logout():
 # Un seul chemin canonique = un seul credential = alignement avec le pattern
 # n8n / jupyter-python SSPCloud.
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Icone d'onglet, servie pour toutes les pages du service.
+
+    Sans cette route, le navigateur recevait un 401 du middleware sur chaque
+    page (erreur visible dans la console, onglet sans identite). Publique par
+    nature : une icone ne contient aucun secret.
+    """
+    return Response(
+        content=_FAVICON_SVG,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def hub_login_form(request: Request, error: str = "", key: str = ""):
     """Page HTML form pour saisir la cle HUB_API_KEY.
@@ -2626,14 +2658,21 @@ async def hub_login_form(request: Request, error: str = "", key: str = ""):
     onyxia_user = os.environ.get("ONYXIA_USER", "")
     err_html = ""
     if error == "invalid_key":
-        err_html = '<p style="color:#ce0500;background:#fee;padding:10px;border-left:4px solid #ce0500;border-radius:2px">Cle invalide. Verifie qu\'elle commence par <code>qgis_</code> et correspond a la valeur du Secret K8s.</p>'
+        err_html = ('<p role="alert" style="color:#b32100;background:#fff4f3;padding:10px;'
+                    'border-left:4px solid #ce0500;border-radius:2px">Clé refusée. Elle commence '
+                    'par <code>qgis_</code> — vérifie que tu l\'as copiée en entier.</p>')
     elif error == "empty":
-        err_html = '<p style="color:#ce0500;background:#fee;padding:10px;border-left:4px solid #ce0500;border-radius:2px">Colle ta cle API dans le champ ci-dessous.</p>'
+        err_html = ('<p role="alert" style="color:#b32100;background:#fff4f3;padding:10px;'
+                    'border-left:4px solid #ce0500;border-radius:2px">Colle ta clé d\'accès '
+                    'dans le champ ci-dessous.</p>')
     return HTMLResponse(f"""<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>Connexion QGIS Service - CEREMA</title>
+<title>Connexion — QGIS Service — CEREMA</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#000091">
+{_FAVICON_TAG}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
 <style>
 body{{font-family:Marianne,arial,sans-serif;max-width:640px;margin:60px auto;padding:0 20px}}
@@ -2649,35 +2688,41 @@ code{{font-size:11px;background:#efeffb;padding:2px 6px;border-radius:2px}}
 </style>
 </head>
 <body>
-<h1>QGIS Service - Connexion</h1>
-<p>Bienvenue{f' <b>{onyxia_user}</b>' if onyxia_user else ''}. Colle ta cle API personnelle.
-Une fois connecte, tu n'auras plus besoin de cette etape pendant 90 jours (cookie stable).</p>
+<main role="main">
+<h1>QGIS Service — Connexion</h1>
+<p>Bienvenue{f' <b>{onyxia_user}</b>' if onyxia_user else ''}. Colle ta clé d'accès
+personnelle. Une fois connecté, tu n'auras plus besoin de cette étape pendant
+90 jours, même après avoir fermé ton navigateur.</p>
 
 {err_html}
 
 <div class="step">
-<h2>Cle API personnelle (HUB_API_KEY)</h2>
-<p>Recupere-la dans :</p>
+<h2>Où trouver ta clé d'accès</h2>
 <ul>
-<li>Onyxia UI &gt; Mes services &gt; qgis-hub &gt; onglet <b>Values</b> ou <b>Env</b> &gt; <code>HUB_API_KEY</code></li>
-<li>Ou via kubectl depuis ton terminal Jupyter :
-<br><code>kubectl get secret qgis-hub-apikey -o jsonpath='{{{{.data.HUB_API_KEY}}}}' | base64 -d</code></li>
+<li>Dans le terminal où tu as lancé l'installation : elle est affichée à la fin.</li>
+<li>Ou sur <a href="https://datalab.sspcloud.fr/my-services" target="_blank"
+    rel="noopener">datalab.sspcloud.fr</a> &gt; <b>Mes services</b> &gt;
+    <b>QGIS Hub</b> &gt; notes d'installation.</li>
 </ul>
 
 <form method="POST" action="/login">
-  <input type="password" name="api_key" placeholder="qgis_..." required autocomplete="off" autofocus>
-  <p class="hint">Envoyee en POST body (jamais en URL). Cookie httponly TTL 90 jours.</p>
+  <label for="api_key">Clé d'accès</label>
+  <input id="api_key" type="password" name="api_key" placeholder="qgis_…"
+         required autocomplete="off" autofocus>
+  <p class="hint">Envoyée dans le corps de la requête, jamais dans l'adresse.</p>
   <button type="submit">Se connecter</button>
 </form>
 </div>
 
 <div class="alt">
-<b>Alternative :</b> chemin secours via token OIDC SSPCloud - <a href="/onboarding">/onboarding</a>.
+<b>Clé perdue ?</b> Tu peux aussi te connecter avec ton compte SSPCloud
+depuis <a href="/onboarding">la page de secours</a>.
 </div>
 
-<p style="color:#888;font-size:12px;margin-top:40px">
-QGIS Service - CEREMA - Sprint Day 5 Phase 2-1 (single credential, plus de password chart-genere).
+<p style="color:#666;font-size:12px;margin-top:40px">
+QGIS Service — CEREMA — plateforme d'analyse géospatiale sur SSPCloud.
 </p>
+</main>
 </body>
 </html>""")
 

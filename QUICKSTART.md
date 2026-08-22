@@ -1,127 +1,165 @@
-# QUICKSTART — QGIS Hub sur SSPCloud
+# Installer QGIS Service sur SSPCloud
 
-**Sprint Day 5 (2026-08-06) — chart 1.2.5 — installation user autonome sans admin.**
+QGIS Desktop, un assistant IA et un connecteur MCP dans ton espace SSPCloud,
+en une commande. Aucun administrateur n'intervient.
 
-Ce guide t'installe le service QGIS Hub (Hub + Agent IA + Workspace QGIS Desktop)
-dans ton espace SSPCloud en **3 minutes** depuis un terminal Jupyter Onyxia.
-
-Zero pod admin requis. Une fois installe, tu es autonome pour l'auth
-web et le MCP (Claude Desktop, Cursor, Cline).
+Chart Helm `qgis-hub` **1.3.0**.
 
 ---
 
-## Prerequis
+## Avant de commencer
 
-- Compte SSPCloud actif (https://datalab.sspcloud.fr)
-- Un service Jupyter (image `python`, `pyspark`, ou tout template Onyxia)
-  demarre dans ton espace personnel
-- Terminal du Jupyter ouvert (`Launcher > Other > Terminal`)
-
-Ton pod Jupyter doit avoir `kubernetes.role: edit` (defaut Onyxia depuis 2023).
+Un compte SSPCloud actif suffit : <https://datalab.sspcloud.fr>.
 
 ---
 
-## Installation en 3 etapes
+## 1. Lance un service Jupyter avec les droits Kubernetes
 
-### 1. Lance le one-liner
+Sur `datalab.sspcloud.fr` : **Nouveau service** → **Jupyter-python**.
 
-Dans le terminal Jupyter :
+Avant de valider, déplie **Kubernetes** et règle :
+
+```
+Kubernetes  >  Enable access from within the service : oui
+            >  Kubernetes role                       : edit
+```
+
+> **C'est le seul point d'attention de toute l'installation.** Le rôle par
+> défaut est `view`, qui ne permet pas de créer des ressources : l'installation
+> échouerait. Le script le vérifie et s'arrête avec un message explicite si le
+> compte n'a pas les droits.
+>
+> Active aussi **Vault** (coché par défaut) : c'est ce qui permet de reprendre
+> automatiquement la clé de ton assistant IA depuis ton profil SSPCloud.
+
+Lance le service, puis ouvre-le.
+
+## 2. Ouvre un terminal
+
+Dans JupyterLab : **File** → **New** → **Terminal**.
+
+## 3. Lance l'installation
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/install.sh | bash
 ```
 
-Le script :
-1. Configure Helm (repo cache dans `/home/onyxia/work/.helm-*`)
-2. Ajoute le repo `qgis-sspcloud`
-3. Lance `helm install qgis-hub qgis-sspcloud/qgis-hub`
-4. Attend le rollout des 3 pods (~90s)
-5. Extrait ta cle personnelle HUB_API_KEY depuis le Secret K8s
+Compte deux à trois minutes. Le script :
 
-Sortie finale :
+1. reprend la configuration de ton assistant IA depuis ton profil SSPCloud ;
+2. déploie trois composants — le hub, l'assistant, et QGIS Desktop ;
+3. enregistre le service dans ton interface Onyxia ;
+4. affiche ton adresse et ta clé d'accès.
 
 ```
-URL web :   https://user-<toi>-qgis.user.lab.sspcloud.fr
-Cle API  :  qgis_<toi>_<32-chars>
-MCP JSON :  <URL>/auth/apikey
++==============================================================+
+|  Installation terminee - tes acces
++==============================================================+
+|
+|  URL web (bookmark) :
+|    https://user-<toi>-qgis.user.lab.sspcloud.fr
+|
+|  Cle API personnelle (a coller dans /login) :
+|    qgis_<toi>_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+|
++==============================================================+
 ```
 
-### 2. Premier acces web
+## 4. Connecte-toi
 
-Ouvre l'URL web imprimee ci-dessus. Deux options d'auth au 1er acces :
+Ouvre l'adresse affichée, colle la clé, valide.
 
-**Option A** (recommandee) — Password saisi via form POST :
-- Va sur `<URL>/login-password`
-- Ton password est visible dans Onyxia UI :
-  Mes services > qgis-hub > "Values de Helm" > `security.password`
-- Cookie `hub_api_key` 90j auto-set apres validation
+Un cookie de 90 jours est posé : tu ne repasseras plus par cette étape pendant
+trois mois, y compris après avoir fermé ton navigateur. La clé n'apparaît
+jamais dans l'adresse.
 
-**Option B** — Token OIDC SSPCloud :
-- Va sur `<URL>/onboarding`
-- Colle ton id-token depuis https://datalab.sspcloud.fr/account/k8sCodeSnippets
-
-Une fois connecte, sur la page `/workspace`, ouvre le bloc
-**"Ma cle d'acces personnelle"** pour bookmarquer ton lien magique.
-Aux acces suivants, le cookie te reconnait automatiquement.
-
-### 3. Configure la cle LLM
-
-Sur `/workspace`, ouvre le bloc **"Cle LLM (agent IA)"** :
-- Recupere une cle sur https://llm.lab.sspcloud.fr (onglet "API keys")
-- Colle-la, clique Enregistrer
-- L'agent recharge en RAM (zero downtime, aucun restart pod)
-
-**Note ephemere** : cette cle survit tant que le pod agent tourne. Sur
-redeploy du chart, retape-la. Persistance PVC prevue Phase 2.
+**C'est terminé.** Ton bureau QGIS et ton assistant sont opérationnels.
 
 ---
 
-## Configuration MCP (optionnel)
+## Retrouver ta clé plus tard
 
-Pour connecter ton service depuis Claude Desktop, Cursor ou Cline :
+Elle reste affichée dans Onyxia : **Mes services** → **QGIS Hub** → notes
+d'installation. Relancer `install.sh` la réaffiche également, sans jamais la
+changer — tes accès en cours restent valables.
 
-```bash
-curl -s https://user-<toi>-qgis.user.lab.sspcloud.fr/auth/apikey
-```
-
-Retourne un JSON pret a coller dans ton fichier de config MCP.
+En dernier recours, `/onboarding` accepte une connexion par ton compte SSPCloud.
 
 ---
 
-## Verifier l'etat de l'installation
+## L'assistant IA
 
-Depuis le terminal Jupyter :
+Il utilise la clé configurée dans ton profil SSPCloud
+(**Mon compte** → **Assistant IA**), reprise automatiquement à l'installation.
+Elle est conservée : ni un redémarrage ni une mise à jour ne l'effacent.
+
+Si tu n'en as pas encore, ou pour en changer : bloc **Clé LLM (agent IA)** sur
+ta page d'espace de travail. Une clé se récupère sur
+<https://llm.lab.sspcloud.fr> (onglet **API keys**).
+
+---
+
+## Connecter Claude Desktop, Cursor ou Cline
 
 ```bash
-kubectl get pods -n user-<toi> -l app.kubernetes.io/managed-by=Helm
+curl -s https://user-<toi>-qgis.user.lab.sspcloud.fr/auth/apikey \
+  -X POST -b "hub_api_key=<ta-cle>" | python -m json.tool
 ```
 
-Attendus :
-- `qgis-hub-0` — Hub API + desk web (port 8888)
-- `qgis-agent-0` — Agent LLM (port 8888)
-- `qgis-workspace-<toi>-0` — QGIS Desktop noVNC (port 8888)
+Le bloc `claude_config` retourné se colle tel quel dans la configuration MCP de
+ton client. Transport Streamable HTTP, aucun proxy local à installer.
 
-Retirer :
+---
+
+## Mettre à jour, vérifier, retirer
+
+Relancer la même commande met le service à jour sans toucher à tes données ni
+à ta clé :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/install.sh | bash
+```
+
+Vérifier l'état :
+
+```bash
+kubectl get pods -n user-<toi> -l app.kubernetes.io/instance=qgis-hub
+```
+
+Attendus : `qgis-hub-0`, `qgis-agent-0`, `qgis-workspace-<toi>-0`.
+
+Retirer le service en conservant les données (les volumes sont préservés) :
+
 ```bash
 helm uninstall qgis-hub -n user-<toi>
 ```
 
+Tout supprimer, y compris les études :
+
+```bash
+helm uninstall qgis-hub -n user-<toi>
+kubectl delete pvc -n user-<toi> \
+    data-qgis-agent-0 data-qgis-workspace-<toi>-0 qgis-hub
+kubectl delete secret -n user-<toi> qgis-hub-apikey qgis-llm-apikey
+```
+
 ---
 
-## Reference
+## En cas de problème
 
-- README complet : [README.md](README.md)
-- Architecture : [ARCHITECTURE.md](ARCHITECTURE.md)
-- Ops (runbook) : [OPS.md](OPS.md)
-- SPEC Sprint Day 5 : [docs/spec-day5-plan-complet.md](docs/spec-day5-plan-complet.md)
+| Message | Cause et correction |
+|---|---|
+| `droits Kubernetes insuffisants` | Le service Jupyter est en rôle `view`. Relance-le en `edit` (étape 1). |
+| `le secret … n'appartient pas encore à la release` | Le script affiche les deux commandes de rattachement à copier, puis relance-le. |
+| L'assistant ne répond pas | Sa clé n'est pas configurée : un bandeau l'indique dans le bureau, avec la marche à suivre. |
+| Publication de livrables en échec | Les accès au stockage S3 expirent au bout de 7 jours. Relance `install.sh`. |
 
 ---
 
-## Zero admin ?
+## Pour aller plus loin
 
-Historiquement, l'installation passait par un portail admin (`nic01asfr`)
-qui provisionnait les pods d'un user via son id-token OIDC. Depuis
-Sprint Day 5, chaque user installe lui-meme via `helm install` depuis
-son propre terminal Onyxia. Le chart provisionne tout (SA, Ingress,
-Secret K8s, StatefulSets pour Hub + Agent + Workspace). Le portail
-admin est en cours de retrait (Phase 3-A).
+- [README.md](README.md) — ce que le service permet
+- [docs/day5-user-guide-visuel.md](docs/day5-user-guide-visuel.md) — guide illustré
+- [ARCHITECTURE.md](ARCHITECTURE.md) — architecture technique
+- [OPS.md](OPS.md) — exploitation
+- [CHANGELOG.md](CHANGELOG.md) — historique des versions

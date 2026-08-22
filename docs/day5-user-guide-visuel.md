@@ -1,6 +1,6 @@
 # Guide utilisateur — QGIS Hub SSPCloud
 
-**Sprint Day 5 (2026-08-06) · chart 1.2.5 · installation user-autonome.**
+**Chart 1.3.0 (2026-08-22) · installation autonome, sans administrateur.**
 
 Ce guide te fait passer de **zéro** (compte SSPCloud vierge, aucun service
 installé) à **un bureau QGIS + agent IA opérationnel** en ~5 minutes.
@@ -14,7 +14,9 @@ Testé E2E Chrome le 2026-08-06 sur un environnement fraîchement provisionné.
 
 - Un compte SSPCloud actif (https://datalab.sspcloud.fr)
 - Un service Jupyter démarré dans ton espace personnel avec la permission
-  `kubernetes.role: edit` (défaut Onyxia depuis 2023)
+  `kubernetes.role: edit` — **ce n'est pas le réglage par défaut**
+  (Onyxia propose `view`, insuffisant pour installer). Active aussi Vault
+  pour que la clé de l'assistant IA soit reprise de ton profil.
 
 C'est tout. Pas besoin de pod admin, pas besoin de token OIDC à coller.
 
@@ -280,7 +282,7 @@ ont été découverts et corrigés lors du parcours :
 | Redirect racine `/` → `/onboarding` (token OIDC obscur) au lieu de `/login` | 1.2.1 → 1.2.2 | `_portal_login_redirect_url` cible `/login` (Phase 2-1 canonique) |
 | Bandeau "clé LLM manquante" dans chat pointait vers `datalab.sspcloud.fr/account > AI Assistant` (portail admin retiré) | 1.2.2 | Bandeau pointe `/workspace` bloc "🤖 Clé LLM (agent IA)" (Phase 1.7-C form user) |
 
-Chart stable actuel : **1.2.2**.
+Chart stable actuel : **1.3.0**.
 
 ---
 
