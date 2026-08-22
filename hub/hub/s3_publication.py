@@ -101,6 +101,33 @@ _CATALOG_PREFIX = "qgis-workspace/catalog"
 _creds_cache: dict[str, Any] = {"ts": 0, "data": None}
 _CREDS_TTL = 3600  # re-lit le secret toutes les heures (token STS rotation)
 
+# Marge avant expiration : un jeton valable moins longtemps que ca est traite
+# comme perime, sinon une publication demarree juste avant l'echeance echoue
+# en cours de route.
+_STS_MARGE_S = 120
+
+
+def _sts_encore_valide(creds: dict[str, str]) -> bool:
+    """Vrai si le jeton de session porte une echeance encore dans le futur.
+
+    Les jetons S3 de SSPCloud sont des JWT dont le champ `exp` porte la date
+    d'expiration. Un jeton sans `exp` lisible (creds long-lived, format
+    inattendu) est considere comme valide : on ne rejette que ce dont on est
+    sur qu'il est perime.
+    """
+    token = (creds or {}).get("AWS_SESSION_TOKEN", "")
+    if not token or token.count(".") != 2:
+        return True
+    try:
+        charge = token.split(".")[1]
+        charge += "=" * (-len(charge) % 4)
+        exp = json.loads(base64.urlsafe_b64decode(charge)).get("exp")
+        if not exp:
+            return True
+        return float(exp) > time.time() + _STS_MARGE_S
+    except Exception:
+        return True
+
 
 def _s3_creds_from_env(owner: str = "") -> dict[str, str] | None:
     """Creds S3 depuis l'env du pod (Onyxia injecte AWS_* + bucket lors du
@@ -121,7 +148,12 @@ def _s3_creds_from_env(owner: str = "") -> dict[str, str] | None:
         "AWS_ACCESS_KEY_ID":     akid,
         "AWS_SECRET_ACCESS_KEY": os.getenv("AWS_SECRET_ACCESS_KEY", ""),
         "AWS_SESSION_TOKEN":     os.getenv("AWS_SESSION_TOKEN", ""),
-        "AWS_S3_ENDPOINT":       os.getenv("AWS_S3_ENDPOINT", "minio.lab.sspcloud.fr"),
+        # Le chart injecte AWS_ENDPOINT_URL, Onyxia AWS_S3_ENDPOINT : on
+        # accepte les deux. Sans cela, seule la valeur codee en dur restait,
+        # juste par chance aujourd'hui et fausse des que l'endpoint change.
+        "AWS_S3_ENDPOINT":       (os.getenv("AWS_S3_ENDPOINT")
+                                  or os.getenv("AWS_ENDPOINT_URL")
+                                  or "minio.lab.sspcloud.fr"),
         "AWS_DEFAULT_REGION":    os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
         "SSPCLOUD_BUCKET":       bucket,
     }
@@ -133,24 +165,61 @@ def _read_passerelle_s3_creds(owner: str = "") -> dict[str, str]:
         return _creds_cache["data"]
 
     # 1) Secret K8s passerelle-s3-creds (déploiement avec creds long-lived).
+    #
+    # Correctif 2026-08-23 : le secret ne l'emporte plus aveuglement. Sur
+    # l'instance de reference, un secret laisse par un ancien deploiement
+    # portait un jeton expire depuis 27 jours, alors que le pod recevait des
+    # identifiants valides du launcher Onyxia. Toute publication echouait sur
+    # "Connection was closed before we received a valid response", sans que
+    # rien ne designe la cause : le catalogue restait vide et le diagnostic
+    # pointait le reseau. On verifie donc l'echeance avant de retenir le
+    # secret, et on bascule sur l'environnement s'il est perime.
+    secret_creds = None
     r = subprocess.run(
         ["kubectl", "get", "secret", _SECRET_NAME, "-o", "json"],
         capture_output=True, text=True, timeout=10,
     )
     if r.returncode == 0:
-        data = json.loads(r.stdout)["data"]
-        decoded = {k: base64.b64decode(v).decode() for k, v in data.items()}
-        _creds_cache["data"] = decoded
-        _creds_cache["ts"] = now
-        return decoded
+        try:
+            data = json.loads(r.stdout)["data"]
+            secret_creds = {
+                k: base64.b64decode(v).decode() for k, v in data.items()
+            }
+        except Exception as exc:
+            log.warning("secret %s illisible : %s", _SECRET_NAME, exc)
 
-    # 2) Fallback env (onboarding Onyxia standard : pas de secret dédié, mais
-    #    AWS_* injectés dans le pod hub par le launcher datalab).
+    if secret_creds and _sts_encore_valide(secret_creds):
+        _creds_cache["data"] = secret_creds
+        _creds_cache["ts"] = now
+        return secret_creds
+
+    # 2) Environnement du pod (onboarding Onyxia standard : pas de secret
+    #    dédié, mais AWS_* injectés par le launcher datalab). Sert aussi de
+    #    recours quand le secret existe mais porte un jeton perime.
     env_creds = _s3_creds_from_env(owner)
     if env_creds and env_creds.get("SSPCLOUD_BUCKET"):
+        if secret_creds:
+            log.warning(
+                "secret %s ignore : jeton de session expire. Bascule sur les "
+                "identifiants du pod. Supprimer ce secret s'il n'est plus "
+                "utilise : kubectl delete secret %s",
+                _SECRET_NAME, _SECRET_NAME,
+            )
         _creds_cache["data"] = env_creds
         _creds_cache["ts"] = now
         return env_creds
+
+    # 3) Dernier recours : le secret perime vaut mieux que rien, l'appel S3
+    #    remontera une erreur explicite plutot qu'une absence de creds.
+    if secret_creds:
+        log.error(
+            "secret %s expire ET environnement incomplet : la publication va "
+            "echouer. Relance install.sh pour renouveler les acces.",
+            _SECRET_NAME,
+        )
+        _creds_cache["data"] = secret_creds
+        _creds_cache["ts"] = now
+        return secret_creds
 
     raise RuntimeError(
         f"Creds S3 indisponibles : secret {_SECRET_NAME} absent "
