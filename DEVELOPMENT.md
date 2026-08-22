@@ -126,6 +126,15 @@ depuis le repo [BigQgisMCP](https://github.com/nic01asFr/BigQgisMCP)
 (~30min). Décommenter le job `build-workspace` dans `build.yml` pour
 rebuild automatique. Voir `Dockerfile.workspace` pour référence.
 
+**Ce que l'image embarque** — et qui ne peut donc pas être corrigé depuis
+ce dépôt : le catalogue de sources (`datasources.json`), les recettes, les
+skills MCP, les gabarits de mise en page et tout `src/`. Rien n'est monté
+en volume en production : une correction dans BigQgisMCP n'atteint le
+service qu'après rebuild + push de l'image, et aucun signal n'indique que
+l'image déployée a divergé. Les projets `.qgz` existants conservent par
+ailleurs les définitions de couches enregistrées : une source corrigée ne
+prend effet qu'au rechargement de la couche.
+
 ---
 
 ## 4. Chart Helm — dev + release
