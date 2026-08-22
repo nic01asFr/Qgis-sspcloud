@@ -162,11 +162,24 @@ async def _k8s_create_secret(name: str, namespace: str, key: str, value: str) ->
     token = _k8s_sa_token()
     if not token:
         return False
+    # Memes metadonnees d'appartenance Helm que dans _k8s_upsert_secret :
+    # un Secret cree ici en self-heal doit rester adoptable par Helm, sinon
+    # il bloque les `helm upgrade` suivants.
+    release = os.environ.get("HELM_RELEASE_NAME", "qgis-hub")
     body = {
         "apiVersion": "v1",
         "kind": "Secret",
         "type": "Opaque",
-        "metadata": {"name": name, "namespace": namespace},
+        "metadata": {
+            "name": name,
+            "namespace": namespace,
+            "labels": {"app.kubernetes.io/managed-by": "Helm"},
+            "annotations": {
+                "meta.helm.sh/release-name": release,
+                "meta.helm.sh/release-namespace": namespace,
+                "helm.sh/resource-policy": "keep",
+            },
+        },
         "data": {key: base64.b64encode(value.encode()).decode()},
     }
     try:
@@ -210,7 +223,28 @@ async def _k8s_upsert_secret(name: str, namespace: str, key: str, value: str) ->
     if not token:
         return False
     url = f"{_K8S_HOST}/api/v1/namespaces/{namespace}/secrets/{name}"
-    payload = {"data": {key: base64.b64encode(value.encode()).decode()}}
+    # Metadonnees d'appartenance Helm.
+    #
+    # Sans elles, Helm refuse d'adopter un Secret preexistant et TOUT
+    # `helm upgrade` ulterieur echoue :
+    #   "Secret qgis-llm-apikey exists and cannot be imported into the
+    #    current release: invalid ownership metadata"
+    # Le cas se produit des qu'un utilisateur saisit sa cle LLM via
+    # /workspace avant une mise a jour du service : le Secret est cree ici,
+    # par l'API Kubernetes, donc hors du suivi Helm. Constate en conditions
+    # reelles le 2026-08-22.
+    release = os.environ.get("HELM_RELEASE_NAME", "qgis-hub")
+    payload = {
+        "metadata": {
+            "labels": {"app.kubernetes.io/managed-by": "Helm"},
+            "annotations": {
+                "meta.helm.sh/release-name": release,
+                "meta.helm.sh/release-namespace": namespace,
+                "helm.sh/resource-policy": "keep",
+            },
+        },
+        "data": {key: base64.b64encode(value.encode()).decode()},
+    }
     try:
         async with httpx.AsyncClient(verify=False, timeout=10) as c:
             r = await c.patch(

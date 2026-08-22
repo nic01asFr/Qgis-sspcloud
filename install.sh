@@ -223,11 +223,51 @@ echo "  -> $VALUES_FILE"
 # Etape 3 : install ou upgrade (idempotent)
 echo ""
 echo "[3/5] helm install/upgrade qgis-hub"
-if helm list -n "$NAMESPACE" 2>/dev/null | grep -q "^$RELEASE\s"; then
+# Le resultat de helm est capture AVANT tout pipe : `cmd | tail` renvoie le
+# code de sortie de `tail`, donc un echec d'installation passait inapercu et
+# le script affichait quand meme "Installation terminee" (constate en
+# conditions reelles le 2026-08-22, deux fois : droits insuffisants, puis
+# Secret non adoptable). On sort desormais en erreur, avec le diagnostic.
+# `|| _helm_rc=$?` est indispensable : avec `set -e`, une commande qui echoue
+# arreterait le script avant meme qu'on puisse lire son code de sortie.
+_helm_log="/tmp/qgis-hub-helm-$USERNAME.log"
+_helm_rc=0
+if helm list -n "$NAMESPACE" 2>/dev/null | grep -q "^$RELEASE[[:space:]]"; then
     echo "  Release deja presente -> upgrade"
-    helm upgrade "$RELEASE" "$REPO/qgis-hub" -n "$NAMESPACE" -f "$VALUES_FILE" 2>&1 | tail -3
+    _action="upgrade"
+    helm upgrade "$RELEASE" "$REPO/qgis-hub" -n "$NAMESPACE" \
+        -f "$VALUES_FILE" >"$_helm_log" 2>&1 || _helm_rc=$?
 else
-    helm install "$RELEASE" "$REPO/qgis-hub" -n "$NAMESPACE" -f "$VALUES_FILE" 2>&1 | tail -3
+    _action="install"
+    helm install "$RELEASE" "$REPO/qgis-hub" -n "$NAMESPACE" \
+        -f "$VALUES_FILE" >"$_helm_log" 2>&1 || _helm_rc=$?
+fi
+tail -3 "$_helm_log"
+
+if [ "$_helm_rc" -ne 0 ]; then
+    echo ""
+    echo "ERREUR : le helm $_action a echoue. Le service n'est PAS a jour."
+    echo ""
+    if grep -q "cannot be imported into the current release" "$_helm_log"; then
+        _orphan=$(grep -oE 'Secret "[^"]+"' "$_helm_log" | head -1 | tr -d '"' | awk '{print $2}')
+        echo "  Cause : le secret '$_orphan' existe mais n'appartient pas encore"
+        echo "  a la release Helm. Rattache-le puis relance ce script :"
+        echo ""
+        echo "    kubectl label secret $_orphan -n $NAMESPACE \\"
+        echo "        app.kubernetes.io/managed-by=Helm --overwrite"
+        echo "    kubectl annotate secret $_orphan -n $NAMESPACE \\"
+        echo "        meta.helm.sh/release-name=$RELEASE \\"
+        echo "        meta.helm.sh/release-namespace=$NAMESPACE --overwrite"
+    elif grep -qE "forbidden|Forbidden" "$_helm_log"; then
+        echo "  Cause : droits Kubernetes insuffisants."
+        echo "  Relance ton service Jupyter avec, dans ses parametres :"
+        echo "    Kubernetes > Enable access > role = edit"
+        echo "  (le role par defaut, 'view', ne permet pas d'installer.)"
+    else
+        echo "  Detail complet : $_helm_log"
+    fi
+    echo ""
+    exit 1
 fi
 
 # ---------------------------------------------------------------------------
