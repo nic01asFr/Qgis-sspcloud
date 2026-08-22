@@ -322,6 +322,11 @@
         <span class="sep">·</span>
         <span>⭐ {{ s.default_project.label }}</span>
         {% endif %}
+        {# Repere temporel : seul moyen de distinguer deux etudes homonymes. #}
+        {% if s.last_active_label %}
+        <span class="sep">·</span>
+        <span title="Dernière ouverture de cette étude">🕘 {{ s.last_active_label }}</span>
+        {% endif %}
       </div>
       <div class="study-actions">
         {% if s.id == active_study_id %}

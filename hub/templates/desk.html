@@ -879,6 +879,14 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       <div class="publi-list" id="resources-layers-list">
         <div class="publi-empty">Chargement…</div>
       </div>
+      {# Filet quand la carte est blanche alors que des couches sont
+         chargees : QGIS peut avoir redemarre seul dans le pod, auquel cas
+         la vue reste sur l'etendue par defaut. Voir POST /desk/recadrer. #}
+      <button type="button" id="btn-recadrer" class="fr-btn fr-btn--sm fr-btn--secondary"
+              style="margin-top:10px;width:100%"
+              title="Ajuste la vue sur l'étendue des couches chargées">
+        Recadrer la carte
+      </button>
     </div>
 
     {# Sprint Composants Phase 2 (2026-06-25) : onglet "Composants" — unités
@@ -2727,15 +2735,39 @@ window.addEventListener('DOMContentLoaded', () => {
 // Helper fetch avec timeout (AbortController). Sans cela, /desk/layers ou
 // /desk/study-files peut etre en attente indefiniment cote ingress -> l'UI
 // reste sur "Chargement..." sans recours.
-async function _fetchWithTimeout(url, timeoutMs = 12000) {
+// `options` ajouté le 2026-08-22 : le helper forçait un GET, ce qui rendait
+// impossible d'appeler un endpoint POST en réutilisant le garde-temps.
+async function _fetchWithTimeout(url, timeoutMs = 12000, options = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    return await fetch(url, {cache: 'no-store', signal: ctrl.signal});
+    return await fetch(url, {cache: 'no-store', signal: ctrl.signal, ...options});
   } finally {
     clearTimeout(t);
   }
 }
+
+// Recadrage manuel de la carte. Filet quand le canvas reste blanc alors que
+// des couches sont chargées : QGIS peut redémarrer seul dans le pod (relancé
+// par supervisord après un plantage), auquel cas la vue reste sur l'étendue
+// par défaut sans que le hub puisse le détecter — le pod, lui, n'a pas bougé.
+async function recadrerCarte(btn) {
+  if (!btn) return;
+  const libelle = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Recadrage…';
+  try {
+    const r = await _fetchWithTimeout('/desk/recadrer', 26000, {method: 'POST'});
+    const d = await r.json().catch(() => ({}));
+    btn.textContent = r.ok && d.ok ? '✓ Carte recadrée' : 'Bureau injoignable';
+  } catch (e) {
+    btn.textContent = 'Bureau injoignable';
+  }
+  setTimeout(() => { btn.textContent = libelle; btn.disabled = false; }, 2500);
+}
+document.addEventListener('click', (e) => {
+  if (e.target && e.target.id === 'btn-recadrer') recadrerCarte(e.target);
+});
 
 // Couches QGIS — consomme /desk/layers (hub), qui interroge MCP get_project_info.
 // Distingue 3 états : workspace endormi / projet vide / projet avec couches.

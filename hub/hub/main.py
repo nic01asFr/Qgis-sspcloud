@@ -1303,6 +1303,36 @@ PROFILE_LABELS = {
 }
 
 
+def _libelle_anciennete(ts) -> str:
+    """Transforme un horodatage Unix en repere temporel lisible.
+
+    Ajoute le 2026-08-22 : deux etudes portant le meme nom s'affichaient
+    cote a cote sans rien pour les distinguer. La date de derniere ouverture
+    leve l'ambiguite sans alourdir la carte.
+    """
+    try:
+        ts = int(ts)
+    except (TypeError, ValueError):
+        return ""
+    if ts <= 0:
+        return ""
+    ecart = int(time.time()) - ts
+    if ecart < 0:
+        return "à l'instant"
+    if ecart < 3600:
+        minutes = ecart // 60
+        return "à l'instant" if minutes < 2 else f"il y a {minutes} min"
+    if ecart < 86400:
+        heures = ecart // 3600
+        return "il y a 1 heure" if heures == 1 else f"il y a {heures} heures"
+    jours = ecart // 86400
+    if jours == 1:
+        return "hier"
+    if jours < 7:
+        return f"il y a {jours} jours"
+    return time.strftime("le %d/%m/%Y", time.localtime(ts))
+
+
 async def _desk_context() -> dict:
     """Agrège le contexte workspace depuis les modules internes du hub."""
     ctx: dict = {
@@ -1344,6 +1374,14 @@ async def _desk_context() -> dict:
                         cb(r.json())
                 except Exception:
                     pass
+            # Repere temporel sur chaque etude : sans lui, deux etudes de meme
+            # nom sont indiscernables dans la liste (constate en revue UI).
+            for _s in ctx.get("studies") or []:
+                if isinstance(_s, dict):
+                    _s["last_active_label"] = _libelle_anciennete(
+                        _s.get("last_active") or _s.get("created_at")
+                    )
+
             # Sprint UX-3 Commit 3 (2026-06-21) : projet actif + projets de
             # l'etude active (alimente le menu deroulant header desk).
             if ctx.get("active_study_id"):
@@ -12710,6 +12748,49 @@ async def desk_add_insight(request: Request):
 @app.delete("/desk/memory/insights/{insight_id}", status_code=204)
 async def desk_del_insight(insight_id: int):
     await _agent_call("DELETE", f"/user/insights/{insight_id}")
+
+
+@app.post("/desk/recadrer")
+async def desk_recadrer():
+    """Recadre la carte QGIS sur l'etendue des couches chargees.
+
+    Ajoute le 2026-08-22. L'activation d'une etude recadre deja la vue
+    (cf. studies.activate_pod_code), mais QGIS peut redemarrer seul a
+    l'interieur du pod -- supervisord le relance apres un plantage, ce qui a
+    ete observe en production :
+
+        WARN exited: qgis (exit status 1; not expected)
+        INFO spawned: 'qgis' with pid 2580
+
+    Dans ce cas QGIS recharge son dernier projet (les couches sont donc
+    listees) mais personne ne rejoue l'activation : la vue reste sur
+    l'etendue par defaut et l'utilisateur voit une carte blanche alors que
+    ses couches sont cochees. Le pod n'ayant pas redemarre, le hub le croit
+    toujours pret et ne declenche aucune reactivation.
+
+    Cette action rend la main a l'utilisateur sans avoir a diagnostiquer la
+    cause : elle rejoue simplement le recadrage.
+    """
+    try:
+        out = await _execute_python_in_workspace(
+            _ONYXIA_USER,
+            "from qgis.utils import iface\n"
+            "from qgis.core import QgsProject\n"
+            "n = len(QgsProject.instance().mapLayers())\n"
+            "if iface is not None:\n"
+            "    iface.mapCanvas().zoomToFullExtent()\n"
+            "    iface.mapCanvas().refresh()\n"
+            "result = {'layers': n}\n"
+            "print(f'RECADRE n_layers={n}')\n",
+            timeout=25,
+        )
+        return {"ok": True, "detail": (out or "").strip()[:200]}
+    except Exception as exc:
+        log.warning("desk/recadrer : %s", exc)
+        return JSONResponse(
+            {"ok": False, "detail": "Le bureau n'a pas répondu. Réessaie dans un instant."},
+            status_code=503,
+        )
 
 
 @app.get("/desk/layers")
