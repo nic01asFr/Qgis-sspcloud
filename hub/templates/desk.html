@@ -143,12 +143,22 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .hdr-center a.back-link:hover{text-decoration:underline}
 
 /* Menu dropdown études */
-.study-menu{position:relative}
+/* Fix #3b (2026-08-22) : le trigger avait `max-width:380px` en dur, sans
+   rapport avec la place reellement disponible. Dans une fenetre de ~850px,
+   .center-content ne fait que 256px : le trigger debordait de 113px et
+   passait sous le bouton d'affichage du chat -> on lisait
+   "Pr(bulle)rincipal". La cause n'etait pas le padding du header (deja
+   corrige) mais l'absence de `min-width:0` sur .study-menu, qui empechait
+   le conteneur flex de comprimer son enfant.
+   `max-width:100%` borne le trigger a son parent ; l'ellipsis existant sur
+   .study-name fait le reste. .study-menu garde overflow:visible, sinon le
+   menu deroulant des projets serait coupe. */
+.study-menu{position:relative;min-width:0}
 .study-trigger{background:var(--background-alt-blue-france);
   color:var(--text-title-blue-france);padding:6px 12px;border-radius:3px;
   font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;
   border:1px solid var(--border-action-low-blue-france);cursor:pointer;
-  font-family:inherit;line-height:1.2;max-width:380px;overflow:hidden}
+  font-family:inherit;line-height:1.2;max-width:100%;overflow:hidden}
 /* Truncate progressive : titre étude prend priorité, profile peut disparaître
    en viewport étroit, puis l'étude elle-même tronque en ellipsis. min-width:0
    sur le flex parent pour activer le shrink. */
