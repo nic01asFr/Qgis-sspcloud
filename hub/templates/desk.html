@@ -2756,14 +2756,21 @@ async function recadrerCarte(btn) {
   const libelle = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Recadrage…';
+  let message;
   try {
     const r = await _fetchWithTimeout('/desk/recadrer', 26000, {method: 'POST'});
     const d = await r.json().catch(() => ({}));
-    btn.textContent = r.ok && d.ok ? '✓ Carte recadrée' : 'Bureau injoignable';
+    // Le serveur distingue les cas (bureau en veille, injoignable…) : on
+    // reprend son message plutôt que d'annoncer « injoignable » à tort.
+    message = (r.ok && d.ok) ? '✓ Carte recadrée'
+                             : (d.detail || 'Bureau injoignable');
   } catch (e) {
-    btn.textContent = 'Bureau injoignable';
+    message = 'Bureau injoignable';
   }
-  setTimeout(() => { btn.textContent = libelle; btn.disabled = false; }, 2500);
+  btn.textContent = message;
+  // Un message d'erreur reste lisible plus longtemps qu'une confirmation.
+  setTimeout(() => { btn.textContent = libelle; btn.disabled = false; },
+             message.startsWith('✓') ? 2500 : 5000);
 }
 document.addEventListener('click', (e) => {
   if (e.target && e.target.id === 'btn-recadrer') recadrerCarte(e.target);

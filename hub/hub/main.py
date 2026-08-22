@@ -12771,6 +12771,21 @@ async def desk_recadrer():
     Cette action rend la main a l'utilisateur sans avoir a diagnostiquer la
     cause : elle rejoue simplement le recadrage.
     """
+    # Ne jamais reveiller le workspace depuis ce bouton. _execute_python_in_
+    # workspace passe par _get_or_create_session, qui CREE la session si elle
+    # est absente : un clic sur un bureau endormi aurait declenche un reveil
+    # complet (~35 s, creation de pod) la ou l'utilisateur voulait seulement
+    # recadrer. Meme garde que /desk/layers.
+    try:
+        sess = await sessions.list_sessions(_ONYXIA_USER)
+        if not sess or sess[0].get("status") != sessions.SESSION_READY:
+            return JSONResponse(
+                {"ok": False, "detail": "Le bureau est en veille. Réveille-le d'abord."},
+                status_code=409,
+            )
+    except Exception:
+        pass
+
     try:
         out = await _execute_python_in_workspace(
             _ONYXIA_USER,

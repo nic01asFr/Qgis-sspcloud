@@ -65,6 +65,33 @@ K8S_DOMAIN="${K8S_DOMAIN:-user.lab.sspcloud.fr}"
 # activee (VAULT_TOKEN present). Sinon on laisse vide : l'utilisateur
 # saisira sa cle dans le formulaire /workspace, qui la persistera aussi.
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Controle des droits, avant toute action.
+#
+# L'echec est deja rattrape apres le helm, mais tardivement : l'utilisateur
+# attend une minute pour apprendre qu'il devait cocher une case. Surtout, la
+# lecture de la cle existante juste en dessous echoue silencieusement sans
+# droits `get secrets` -- on genererait alors une nouvelle cle, invalidant
+# les cookies de 90 jours deja poses dans les navigateurs.
+#
+# Le role par defaut d'un service Jupyter Onyxia est `view`, qui ne permet
+# ni de lire un Secret ni de creer quoi que ce soit.
+# ---------------------------------------------------------------------------
+if ! kubectl auth can-i get secrets -n "$NAMESPACE" >/dev/null 2>&1; then
+    echo ""
+    echo "ERREUR : ton service Jupyter n'a pas les droits Kubernetes requis."
+    echo ""
+    echo "  Relance-le en reglant, dans ses parametres :"
+    echo "    Kubernetes > Enable access from within the service : oui"
+    echo "    Kubernetes > Kubernetes role                       : edit"
+    echo ""
+    echo "  Le role propose par defaut est 'view' : il ne permet pas"
+    echo "  d'installer un service."
+    echo ""
+    exit 1
+fi
+
 # ---------------------------------------------------------------------------
 # Cle d'acces au service (HUB_API_KEY).
 #

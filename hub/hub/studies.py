@@ -1670,17 +1670,56 @@ if qgz.exists():
         try:
             from qgis.utils import iface
             if iface is not None:
-                # Auto-zoom sur l'étendue de toutes les couches visibles : sans ça
-                # le canvas reste sur l'extent par défaut (souvent vide) et l'user
-                # voit Layers ✓ mais map blanche → confusion.
+                # Auto-zoom sur l'étendue des couches : sans ça le canvas reste
+                # sur l'extent par défaut et l'user voit Layers ✓ mais map
+                # blanche → confusion.
+                #
+                # Correctif 2026-08-22 : zoomToFullExtent() prend TOUTES les
+                # couches, y compris celles dont l'étendue est vide ou
+                # indéterminée. Une seule couche de ce type (typiquement un
+                # flux WMS que le provider n'a pas pu interroger, qui rapporte
+                # une taille 0x0) suffisait à produire une emprise aberrante :
+                # les données réelles devenaient un point invisible, donc une
+                # carte blanche malgré des couches valides.
+                # On calcule donc l'emprise nous-mêmes en n'agrégeant que les
+                # couches valides à étendue non nulle, et on ne retombe sur
+                # zoomToFullExtent que si aucune ne convient.
+                _ext = None
+                _ignorees = []
                 try:
-                    iface.zoomToActiveLayer()
+                    from qgis.core import QgsProject as _QP
+                    for _l in _QP.instance().mapLayers().values():
+                        try:
+                            if not _l.isValid():
+                                _ignorees.append(_l.name())
+                                continue
+                            _e = _l.extent()
+                            if _e is None or _e.isEmpty() or _e.isNull():
+                                _ignorees.append(_l.name())
+                                continue
+                            if _ext is None:
+                                _ext = _e
+                            else:
+                                # combineExtentWith modifie en place et ne
+                                # retourne rien : on garde _ext.
+                                _ext.combineExtentWith(_e)
+                        except Exception:
+                            _ignorees.append(getattr(_l, "name", lambda: "?")())
                 except Exception:
-                    pass
+                    _ext = None
                 try:
-                    iface.mapCanvas().zoomToFullExtent()
+                    if _ext is not None and not _ext.isEmpty():
+                        _ext.scale(1.05)  # marge visuelle
+                        iface.mapCanvas().setExtent(_ext)
+                    else:
+                        iface.mapCanvas().zoomToFullExtent()
                 except Exception:
-                    pass
+                    try:
+                        iface.mapCanvas().zoomToFullExtent()
+                    except Exception:
+                        pass
+                if _ignorees:
+                    print(f"ZOOM_COUCHES_IGNOREES {{_ignorees}}")
                 iface.mapCanvas().refresh()
         except Exception:
             pass
