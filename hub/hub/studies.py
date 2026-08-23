@@ -1357,11 +1357,54 @@ async def count_projects(sid: str, include_archived: bool = False) -> int:
 # de l'etude devient actif).
 
 async def get_active_project_id(owner: str) -> str | None:
+    """Le projet actif de l'utilisateur, en rattrapant l'état incohérent.
+
+    Constaté en production le 2026-08-23 : `active_study` contenait une ligne,
+    `active_project` aucune. C'est un état qui se referme sur lui-même —
+    `pid_for_save` reste None, donc le dual-write n'écrit jamais le
+    `projects/{pid}/project.qgz` que la base annonce pourtant, donc le hub ne
+    trouve aucun projet et affiche « aucun projet actif ». Rien ne le répare :
+    `/studies/{sid}/activate` enregistre bien le projet, mais une étude déjà
+    active n'est jamais réactivée.
+
+    Une étude active qui possède un projet principal a forcément un projet
+    actif : c'est celui-là. On le rétablit au lieu de rendre None et de laisser
+    l'incohérence se propager.
+    """
     async with aiosqlite.connect(_DB_PATH) as db:
         row = await (await db.execute(
             "SELECT pid FROM active_project WHERE owner = ?", (owner,)
         )).fetchone()
-    return row[0] if row else None
+        if row:
+            return row[0]
+
+        # Rattrapage : le projet principal de l'étude active, s'il existe.
+        row = await (await db.execute(
+            """
+            SELECT p.pid FROM study_projects p
+            JOIN active_study a ON a.sid = p.sid
+            WHERE a.owner = ? AND p.owner = ? AND p.status = 'active'
+            ORDER BY p.is_default DESC, p.created_at ASC
+            LIMIT 1
+            """,
+            (owner, owner),
+        )).fetchone()
+        if not row:
+            return None
+
+        pid = row[0]
+        await db.execute(
+            "INSERT OR REPLACE INTO active_project (owner, pid) VALUES (?, ?)",
+            (owner, pid),
+        )
+        await db.commit()
+
+    import logging as _logging
+    _logging.getLogger("hub.studies").info(
+        "Projet actif absent pour %s : rétabli sur le projet principal de "
+        "l'étude active (pid=%s)", owner, pid,
+    )
+    return pid
 
 
 async def set_active_project(owner: str, pid: str) -> None:
