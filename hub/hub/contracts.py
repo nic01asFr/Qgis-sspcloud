@@ -52,6 +52,69 @@ CONTRATS: dict[str, dict[str, Any]] = {
 }
 
 
+# Le contrat de la scène cartographique ne nous appartient pas : il fait
+# autorité chez Widgets-Grist, où Atlas, qgis2grist et ZEBRA le lisent. Nous
+# en embarquons une copie pour pouvoir valider hors ligne ce que nous
+# produisons — jamais pour le redéfinir. À resynchroniser quand il bouge.
+SCENE_MANIFEST_REFERENCE = "scene-manifest-0.2.2.schema.json"
+
+
+def schema_scene() -> dict[str, Any]:
+    """Le contrat de scène tel que le lisent les runtimes de l'écosystème."""
+    return json.loads(
+        (_DOSSIER / SCENE_MANIFEST_REFERENCE).read_text(encoding="utf-8")
+    )
+
+
+def valider_scene(manifest: dict[str, Any]) -> list[str]:
+    """Ce qui empêcherait un runtime de lire cette scène.
+
+    Rend la liste des écarts, vide si la scène est conforme. On vérifie les
+    exigences du contrat de référence — pas davantage : une scène qui porte des
+    champs en plus reste valide, c'est ainsi que le schéma est écrit, et c'est
+    ce qui nous laisse la place d'évoluer.
+
+    Volontairement sans dépendance à `jsonschema` : cette fonction tourne dans
+    le chemin de production, et un garde-fou qui change de comportement selon
+    ce qui est installé ne garde rien.
+    """
+    schema = schema_scene()
+    ecarts: list[str] = []
+
+    for champ in schema.get("required", []):
+        if champ not in manifest:
+            ecarts.append(f"champ requis absent à la racine : {champ}")
+
+    attendues = (schema.get("properties", {}).get("version") or {}).get("enum")
+    version = manifest.get("version")
+    if attendues and version is not None and version not in attendues:
+        ecarts.append(
+            f"version « {version} » hors du contrat (attendu : "
+            f"{', '.join(attendues)})"
+        )
+
+    couches = manifest.get("layers")
+    if couches is None:
+        return ecarts
+    if not isinstance(couches, list):
+        ecarts.append("`layers` doit être une liste")
+        return ecarts
+
+    exigees = (
+        schema.get("definitions", {}).get("layer", {}).get("required", [])
+    )
+    for i, couche in enumerate(couches):
+        if not isinstance(couche, dict):
+            ecarts.append(f"couche {i} : objet attendu")
+            continue
+        for champ in exigees:
+            if champ not in couche:
+                nom = couche.get("id") or couche.get("name") or f"#{i}"
+                ecarts.append(f"couche {nom} : champ requis absent : {champ}")
+
+    return ecarts
+
+
 def _charger_classe(entree: dict[str, Any]) -> type:
     import importlib
     return getattr(importlib.import_module(entree["module"]), entree["classe"])

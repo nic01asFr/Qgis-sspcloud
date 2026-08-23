@@ -88,6 +88,54 @@ def test_le_component_reference_une_scene_par_url():
     assert "scene_manifest_url" in source.get("properties", {})
 
 
+class TestValidationDesScenes:
+    """Le « Sprint C-2 » : ce qui empeche une scene illisible de repartir.
+
+    Il etait annonce en commentaire dans main.py depuis juin sans jamais etre
+    fait. Son absence est ce qui a laisse nos scenes refusees par tous les
+    consommateurs pendant des mois, faute de `version` a la racine.
+    """
+
+    def _scene(self, **extra):
+        return {"version": "0.2.2",
+                "layers": [{"id": "b", "name": "Batiments"}], **extra}
+
+    def test_une_scene_conforme_passe(self):
+        assert contracts.valider_scene(self._scene()) == []
+
+    def test_l_absence_de_version_est_signalee(self):
+        """Le defaut exact qu'on a vecu."""
+        s = self._scene(); del s["version"]
+        assert any("version" in e for e in contracts.valider_scene(s))
+
+    def test_l_ancienne_graphie_de_version_est_refusee(self):
+        """`V0.2` etait notre graphie ; le contrat attend `0.2.1` ou `0.2.2`."""
+        ecarts = contracts.valider_scene(self._scene(version="V0.2"))
+        assert any("hors du contrat" in e for e in ecarts)
+
+    def test_une_couche_sans_nom_est_signalee_par_son_identifiant(self):
+        """Un diagnostic doit designer la couche fautive, pas dire « invalide »."""
+        s = {"version": "0.2.2", "layers": [{"id": "batiments"}]}
+        ecarts = contracts.valider_scene(s)
+        assert any("batiments" in e and "name" in e for e in ecarts)
+
+    def test_les_champs_en_plus_restent_acceptes(self):
+        """Le contrat est tolerant par construction : c'est ce qui nous laisse
+        evoluer sans casser les lecteurs."""
+        s = self._scene(manifest_version="V0.2", provenance={"study_id": "abc"})
+        assert contracts.valider_scene(s) == []
+
+    def test_des_couches_qui_ne_sont_pas_une_liste(self):
+        assert contracts.valider_scene({"version": "0.2.2", "layers": "x"})
+
+    def test_la_validation_ne_depend_pas_d_une_bibliotheque_optionnelle(self):
+        """Elle tourne en production : un garde-fou qui change de comportement
+        selon ce qui est installe ne garde rien."""
+        import inspect
+        src = inspect.getsource(contracts.valider_scene)
+        assert "jsonschema" not in src or "sans dépendance" in src
+
+
 def test_les_fichiers_publies_sont_du_json_lisible():
     """Ils sont servis tels quels : une virgule de trop et le contrat est mort."""
     for nom in contracts.CONTRATS:

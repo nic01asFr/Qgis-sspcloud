@@ -4011,12 +4011,27 @@ async def build_scene_manifest_endpoint(
         previous_hash=previous_hash,
     )
     latest = await studies.scene_manifest_get_latest(pid)
+
+    # Validation contre le contrat de reference -- le « Sprint C-2 » annonce
+    # en commentaire depuis juin. Ici c'est NOUS qui produisons : un ecart est
+    # un defaut de notre cote, pas une faute de l'appelant. On ne bloque donc
+    # pas son travail, mais on le dit fort -- dans les logs et dans la reponse.
+    # C'est precisement le silence qui avait laisse nos scenes illisibles par
+    # tous les consommateurs pendant des mois.
+    from hub import contracts
+    ecarts = contracts.valider_scene(manifest_data)
+    if ecarts:
+        log.warning(
+            "Scene manifest non conforme (pid=%s) : %s", pid, " | ".join(ecarts)
+        )
+
     return {
         "manifest": manifest_data,
         "scene_hash": scene_hash,
         "version_num": latest.get("version_num") if latest else 1,
         "n_layers": n_layers,
         "size_bytes": size_bytes,
+        "conformite": {"conforme": not ecarts, "ecarts": ecarts},
     }
 
 
@@ -4043,8 +4058,18 @@ async def put_scene_manifest_endpoint(
     except Exception:
         raise HTTPException(400, "Body JSON invalide")
 
-    # Sprint C-2 fera la validation Pydantic stricte avec SceneManifest
-    # depuis vendor. Ici on serialise tel-quel + scene_hash.
+    # Contrairement au build, la scene vient d'ailleurs : on refuse ce qu'aucun
+    # runtime ne saura lire, plutot que de l'ecrire sur le PVC et de laisser la
+    # panne se decouvrir a l'affichage. L'appelant recoit la liste des ecarts,
+    # pas un « invalide » sec.
+    from hub import contracts
+    ecarts = contracts.valider_scene(manifest_data)
+    if ecarts:
+        raise HTTPException(400, {
+            "erreur": "Scene Manifest non conforme au contrat publié",
+            "contrat": f"{contracts.BASE_PUBLIQUE}/index.json",
+            "ecarts": ecarts,
+        })
     import json as _json
     canonical = _json.dumps(manifest_data, sort_keys=True, ensure_ascii=False)
     try:

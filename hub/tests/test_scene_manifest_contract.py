@@ -5,10 +5,10 @@ externe : le contrat publie exige `version` a la racine, nous ecrivions
 `manifest_version`. Une seule absence, mais eliminatoire -- et invisible, parce
 que rien ne validait. Ces tests rendent la regression bruyante.
 
-Le schema de `fixtures/` est une copie de celui publie a
+Le schema de reference est embarque dans le paquet (hub/schemas/), copie de
 https://nic01asfr.github.io/Widgets-Grist/schemas/scene-manifest-0.2.2.schema.json
-Copie et non telechargee, pour que la CI ne depende pas du reseau : a
-resynchroniser quand le contrat publie bouge.
+Copie et non telechargee : il sert aussi dans le chemin de production, ou l'on
+ne depend pas du reseau. A resynchroniser quand le contrat publie bouge.
 
 Ce qui n'est PAS teste ici : qu'Atlas sache charger les couches. Il ne le sait
 pas -- il ne resout que des tables Grist, pas des fichiers GeoJSON. Valider le
@@ -24,10 +24,9 @@ import pytest
 
 import hub.studies as studies
 
-_SCHEMA = json.loads(
-    (Path(__file__).parent / "fixtures" / "scene-manifest-0.2.2.schema.json")
-    .read_text(encoding="utf-8")
-)
+from hub import contracts
+
+_SCHEMA = contracts.schema_scene()
 
 
 def _scene_exemple() -> dict:
