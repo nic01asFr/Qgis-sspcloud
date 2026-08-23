@@ -32,19 +32,29 @@ from __future__ import annotations
 
 from typing import Any
 
+from hub import scene_layers
+
 
 # Defaut DSFR fallback (gris CEREMA pour valeurs non-matched)
 DEFAULT_FALLBACK_COLOR = "#9e9e9e"
 
 
 def geometry_to_layer_type(geometry_type: str) -> tuple[str, str]:
-    """Retourne (maplibre_layer_type, paint_color_prop)."""
-    g = (geometry_type or "Polygon").lower()
-    if g in ("point", "multipoint"):
+    """Retourne (maplibre_layer_type, paint_color_prop).
+
+    Correctif 2026-08-23 : la liste des graphies linaires etait `linestring` et
+    `multilinestring` -- pas `line`, qui est justement ce que notre propre
+    producteur ecrit (studies.py). Toute couche lineaire d'une scene du hub
+    tombait donc dans le `fill` par defaut et se rendait comme un polygone :
+    routes, cours d'eau et reseaux dessines en aplat. On passe par le lecteur
+    unique, qui ramene toutes les graphies a la forme courte.
+    """
+    g = scene_layers.type_geometrie({"geometry_type": geometry_type}, "polygon")
+    if g == "point":
         return "circle", "circle-color"
-    if g in ("linestring", "multilinestring"):
+    if g == "line":
         return "line", "line-color"
-    # Polygon / MultiPolygon / default
+    # Polygon / MultiPolygon / defaut
     return "fill", "fill-color"
 
 
@@ -243,6 +253,6 @@ def manifest_to_maplibre_layers(manifest: dict[str, Any]) -> list[dict[str, Any]
         layer_id = f"sm-{layer.get('id', 'unknown')}"
         source_id = f"sm-{layer.get('id', 'unknown')}-src"
         style = layer.get("style", {})
-        geom = layer.get("geometry_type", "Polygon")
+        geom = scene_layers.type_geometrie(layer, "polygon")
         layers_out.append(apply_style_to_layer(layer_id, source_id, style, geom))
     return layers_out

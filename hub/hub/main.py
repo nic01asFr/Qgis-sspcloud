@@ -46,7 +46,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.websockets import WebSocketDisconnect
 from pathlib import Path
 
-from hub import auth, sessions
+from hub import auth, scene_layers, sessions
 try:
     from hub import profile_manager
     _PROFILES_AVAILABLE = True
@@ -5620,13 +5620,15 @@ async def component_source_layers_endpoint(
         lid = l.get("id", f"layer_{i_l}")
         # Properties keys : on tente de lire le premier feature du GeoJSON
         properties_keys: list[str] = []
-        geojson_inline = l.get("geojson")
-        geojson_path = l.get("geojson_path")
+        # Le lecteur unique tolere les graphies des trois contrats qui ont
+        # coexiste (cf. hub/scene_layers.py) : les manifests deja ecrits sur
+        # PVC restent lisibles sans migration.
+        origine = scene_layers.origine_donnees(l)
         try:
             features = []
-            if geojson_inline:
-                features = (geojson_inline.get("features") or [])[:1]
-            elif geojson_path:
+            if origine and origine[0] == "inline":
+                features = (origine[1].get("features") or [])[:1]
+            elif origine and origine[0] == "fichier":
                 # Lecture sample : on lit le fichier complet mais on n'en
                 # extrait que la 1ere feature. Coute 1 read pod par layer
                 # affiche dans le form, acceptable (Marie n'edite qu'un comp
@@ -5646,7 +5648,7 @@ async def component_source_layers_endpoint(
         result_layers.append({
             "id": lid,
             "name": l.get("name", lid),
-            "geometry_type": l.get("geometry_type", "unknown"),
+            "geometry_type": scene_layers.type_geometrie(l, "unknown"),
             "n_features": l.get("n_features"),
             "properties_keys": properties_keys,
         })
@@ -6467,8 +6469,11 @@ async def _build_interactive_map_ctx(
                     # Visibility filter (V1.13 P0b-1) : skip si Marie a masque
                     if override.get("visible") is False:
                         continue
-                    geojson_path = l.get("geojson_path")
-                    geojson = l.get("geojson")  # fallback inline legacy
+                    # Lecteur unique : accepte geojson_path, source.path,
+                    # data_url et source.table (cf. hub/scene_layers.py).
+                    origine = scene_layers.origine_donnees(l)
+                    geojson_path = scene_layers.chemin_fichier(l)
+                    geojson = origine[1] if origine and origine[0] == "inline" else None
                     if not geojson and geojson_path:
                         try:
                             gj_code = studies.read_scene_layer_geojson_pod_code(sid, scene_pid, lid)
@@ -6497,7 +6502,7 @@ async def _build_interactive_map_ctx(
                             "name": override.get("name_override") or l.get("name", lid),
                             "geojson": geojson,
                             "style": l.get("style", {}),
-                            "geometry_type": l.get("geometry_type", "polygon"),
+                            "geometry_type": scene_layers.type_geometrie(l, "polygon"),
                             "n_features": l.get("n_features", 0),
                             # V1.13 P0b-1 : opacity propagee au paint MapLibre
                             "opacity": float(override.get("opacity", 1.0)) if override else 1.0,
