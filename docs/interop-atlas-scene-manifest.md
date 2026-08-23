@@ -31,22 +31,35 @@ Le vendor du hub est **identique** à l'autorité `cerema-offre-de-service`
 (diff vide, V0.2.2). Le drift redouté par `hub/hub/vendor/VENDORED_FROM.md`
 n'existe pas.
 
-### Mais deux contrats différents portent le même numéro
+### Trois contrats coexistaient — un seul est atteignable
 
-C'est le vrai obstacle, et il n'est pas dans le hub.
+| Où | Version | Servi ? | Qui l'utilise |
+|---|---|---|---|
+| `cerema-offre-de-service/shared/io/scene_manifest.py` (Pydantic) | 0.2.2 strict | code seul | vendorisé par le hub, jamais appelé pour valider |
+| `Widgets-Grist/published/schemas/` (JSON Schema) | 0.2.2 tolérant | **oui, HTTP 200** | Atlas, qgis2grist, ZEBRA |
+| `Passerelle/sdk/js/geo-components/schemas/` (905 lignes) | 0.3.2 riche | **404** | hub qgis-sspcloud, cerema-livrables |
 
-| | Modèle Pydantic `cerema-offre-de-service` | JSON Schema publié (lu par Atlas) |
-|---|---|---|
-| requis racine | `format`, `version`, `scene_id`, `scene_hash`, `crs`, `bbox`, `source`, `layers` | `version`, `layers` |
-| requis couche | `id`, `name`, `order`, `geomType`, `data_url` | `name` |
-| géométrie | `geomType` littéral `Polygon` | `geometry_type` **ou** `geomType`, libre |
-| origine donnée | `data_url` | `source`, chaîne ou objet |
-| absents de l'autre | — | `classification`, `meta`, `terrain` |
+Le `$schema` que `recipes_web` écrit pointe même vers une quatrième adresse,
+`cerema.github.io/geo-components/…`, qui n'a jamais existé.
 
-Les deux s'appellent « Scene Manifest 0.2.2 ». L'un est strict et fermé, l'autre
-tolérant et ouvert. **Aucun producteur ne peut satisfaire les deux sans savoir
-lequel fait autorité.** C'est la décision à prendre en premier, et elle dépasse
-qgis-sspcloud.
+**Arbitrage rendu le 2026-08-23.** geo-components était l'idée de base, Atlas en
+est la version aboutie — même lignée, pas une rupture avec la décision du
+2026-07-09. La référence est donc **le contrat que lit Atlas**, à compléter avec
+ce que le 0.3.2 avait d'utile. Charge à nous d'adapter l'ensemble.
+
+### Les deux schémas se complètent au lieu de se recouvrir
+
+C'est ce qui rend « compléter Atlas pour servir partout » actionnable.
+
+| | Apporte |
+|---|---|
+| **0.3.2 seulement** — l'habillage de publication autoportante | `legend`, `scalebar`, `north_arrow`, `sky`, `source_text`, `caveat`, `provenance`, `produced_at`, `camera_presets`, `basemap`, `basemap_switcher`, `zone`, `projection`, `counters`, `custom_layers`, `extensions` |
+| **Atlas seulement** — la scène vivante | `story`, `classification`, `meta`, `terrain` ; par couche `controls`, `fields`, `fetch`, `limits`, `profile`, `visibility` (chargement progressif / LOD) |
+| **communs** | racine `layers`, `title`, `subtitle`, `terrain` ; couche `id`, `name`, `geometry_type`, `source`, `style` |
+
+geo-components était pensé pour *publier une page*, Atlas pour *explorer une
+scène*. Ce qui manque à Atlas pour rendre une page S3 autoportante, c'est
+exactement la première colonne.
 
 ### Le hub est à une ligne du schéma d'Atlas
 
@@ -80,12 +93,13 @@ est déjà en place et indifférent à la provenance.
 
 ## Les trois chantiers, dans l'ordre des dépendances
 
-### 0. Trancher le contrat
+### 0. Trancher le contrat — fait
 
-Décider lequel des deux « 0.2.2 » fait autorité, ou les réconcilier
-explicitement (le strict comme profil de validation, le tolérant comme surface
-de lecture). Sans cela, chaque projet continue de viser une cible différente.
-Décision inter-projets — à porter en axe transverse.
+Le contrat lu par Atlas fait référence. Reste à en tirer les conséquences :
+porter dans Atlas l'habillage de publication du 0.3.2 (tableau ci-dessus),
+réaligner le Pydantic strict, et décider du sort des `$schema` qui pointent vers
+des adresses inexistantes — soit publier les schémas de Passerelle à une adresse
+stable, soit retirer une référence qui ment.
 
 ### 1. Socle — le producteur devient conforme
 
@@ -116,7 +130,10 @@ Les trois imports à couper sont connus : `defaultLayerVisible` et
 12 lignes — un parseur de booléen, à remonter au noyau).
 
 C'est dans cette couche « hôte » que s'ajoute l'origine GeoJSON par URL, à côté
-de l'origine table Grist.
+de l'origine table Grist. Et c'est au noyau que revient l'habillage de
+publication hérité du 0.3.2 — légende, échelle, flèche nord, sources,
+avertissement, presets caméra : ce qui distingue une page qu'on imprime d'une
+scène qu'on explore.
 
 Le paquet publié aujourd'hui est un **manifeste de widget Grist**
 (`package.json` → `grist.widgetId`), pas un package consommable. Il lui faut un
