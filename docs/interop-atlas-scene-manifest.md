@@ -85,7 +85,26 @@ qgis2grist via Scene Manifest V0.2 »*. Atlas résout chaque couche vers une
 n'existe aucun chemin « charger un GeoJSON depuis une URL ».
 
 Or le hub produit des couches qui pointent vers des **fichiers GeoJSON sur PVC**.
-Un manifest du hub peut donc être parfaitement valide et rester vide à l'écran.
+
+Et le mode de défaillance est pire que « vide à l'écran ». L'agent Atlas l'a
+précisé en relisant son code (`scene-loader.js:102`) :
+
+```js
+const tableName = ml.source?.table || ml.id;
+... fetchTable(tableName) ... catch -> console.warn -> continue
+```
+
+Quand `source` ne porte pas de table, on retombe sur `ml.id` **comme nom de
+table**, la lecture échoue, et la couche est passée **silencieusement**. Rien ne
+distingue une couche qui a échoué d'une couche qu'on aurait choisi de ne pas
+afficher. Sur nos scènes ce n'est pas un cas limite mais le cas nominal : notre
+`source` est un objet de provenance du projet, jamais une origine de donnée.
+
+D'où une distinction utile, due à Atlas : **rendre l'échec visible est
+séparable d'ajouter les URL**, et bien moins coûteux. Une couche qui ne se
+résout pas doit le dire — nom, origine attendue, raison. Cela ne touche pas au
+format, et garde sa valeur une fois les URL en place, puisque le cas « URL
+injoignable hors ligne » existera toujours.
 
 **C'est là qu'est le travail réel** : donner à Atlas une seconde origine de
 données. Le reste — `rowsToGeoJSON`, la symbolisation, les contrôles, le récit —
