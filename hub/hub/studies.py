@@ -2399,6 +2399,69 @@ try:
         }},
         "layers": [],
     }}
+    # ── Origine des couches ────────────────────────────────────────────
+    # Jusqu'ici une couche WMS n'avait AUCUNE origine dans le manifest : on
+    # declarait « une couche raster nommee X, en bleu » sans dire ou elle est.
+    # Une couche WFS devenait une copie GeoJSON figee, le lien avec le flux
+    # perdu. Le service compte pourtant 54 sources externes au catalogue.
+    #
+    # On porte desormais l'origine, et sa CLASSE -- car producteur et
+    # consommateur doivent en tirer des conclusions opposees :
+    #
+    #   externe   WMS/WMTS/XYZ/WFS : le client lit directement, on ne copie rien
+    #   atelier   PostGIS, fichier local : le navigateur ne peut PAS y acceder
+    #             (la base est en ClusterIP), il faut materialiser avant publication
+    #   fichier   deja materialise par nos soins
+    #
+    # Aucun identifiant n'est jamais recopie : une datasource PostGIS porte
+    # utilisateur et mot de passe, et un manifest est fait pour circuler.
+    def _origine(couche):
+        try:
+            fournisseur = (couche.providerType() or "").lower()
+            brut = couche.source() or ""
+        except Exception:
+            return None
+        params = {{}}
+        for morceau in brut.split("&"):
+            if "=" in morceau:
+                cle, _, val = morceau.partition("=")
+                params[cle.strip()] = val.strip()
+
+        if fournisseur in ("wms", "wmts"):
+            # QGIS range les tuiles XYZ sous le fournisseur wms : c'est le
+            # champ `type` de la datasource qui les distingue.
+            if params.get("type") == "xyz":
+                return {{"type": "xyz", "classe": "externe",
+                        "url": params.get("url", "")}}
+            sortie = {{"type": params.get("tileMatrixSet") and "wmts" or "wms",
+                      "classe": "externe", "url": params.get("url", "")}}
+            for cle in ("layers", "format", "crs", "styles", "tileMatrixSet"):
+                if params.get(cle):
+                    sortie[cle] = params[cle]
+            return sortie
+
+        if fournisseur == "wfs":
+            sortie = {{"type": "wfs", "classe": "externe",
+                      "url": params.get("url", "")}}
+            for cle in ("typename", "srsname", "version"):
+                if params.get(cle):
+                    sortie[cle] = params[cle]
+            return sortie
+
+        if fournisseur in ("postgres", "postgis", "mssql", "oracle", "spatialite"):
+            # Volontairement sans hote, port, utilisateur ni mot de passe : la
+            # base n'est joignable que depuis le cluster, un client ne s'y
+            # connectera jamais. Il a seulement besoin de savoir pourquoi.
+            return {{"type": "base", "classe": "atelier",
+                    "fournisseur": fournisseur,
+                    "table": params.get("table", "")}}
+
+        if fournisseur in ("ogr", "gdal", "delimitedtext"):
+            return {{"type": "fichier", "classe": "atelier"}}
+        if fournisseur == "memory":
+            return {{"type": "memoire", "classe": "atelier"}}
+        return {{"type": fournisseur or "inconnu", "classe": "atelier"}} if fournisseur else None
+
     # Defaults StyleDeclarative single par couche (Sprint C-2 ajoutera form
     # editor pour personnaliser kind/field/stops).
     DEFAULT_COLORS = [
@@ -2454,6 +2517,12 @@ try:
                     }},
                 }},
             }}
+            # L'origine, quand QGIS sait la dire. Une couche externe garde son
+            # flux ; une couche d'atelier annonce qu'elle devra etre
+            # materialisee avant qu'un navigateur puisse l'afficher.
+            _src = _origine(layer)
+            if _src:
+                layer_entry["source"] = _src
             # Export GeoJSON complet (vector) vers fichier PVC dedie - Phase 4b
             if geom == "vector" and hasattr(layer, "getFeatures"):
                 try:
