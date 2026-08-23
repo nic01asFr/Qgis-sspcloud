@@ -21,17 +21,31 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
    a 3 lignes (header 48px + canvas 1fr + status 32px). Le brand
    'CEREMA · QGIS' du desk-header pointe vers /workspace pour revenir
    a la vue cockpit. */
+/* Correctif 2026-08-23 : le panneau Ressources devient une COLONNE de la
+   grille au lieu d'un calque par-dessus le canvas.
+   Il etait en position:fixed et recouvrait QGIS sur ~286px, masquant la
+   barre d'outils et surtout le panneau Couches natif -- l'outil central
+   d'un bureau QGIS. La reponse retenue jusqu'ici (le garder ferme par
+   defaut, cf. Sprint UX-3) ne reglait rien : le defaut revenait des qu'on
+   l'ouvrait.
+   Colonne a 0 quand ferme, a --publi-w quand ouvert : le canvas se reduit
+   au lieu d'etre masque. En dessous de 1100px l'ecran est trop etroit pour
+   trois colonnes, on repasse alors en calque (cf. media query). */
 .desk{display:grid;
-  grid-template-columns:1fr 6px var(--chat-w,340px);
+  grid-template-columns:0 1fr 6px var(--chat-w,340px);
   grid-template-rows:48px 1fr 32px;
   grid-template-areas:
-    "header header header"
-    "canvas h2  chat"
-    "status status status";
-  height:100vh;width:100vw;background:#f4f4f6}
+    "header header header header"
+    "publi  canvas h2  chat"
+    "status status status status";
+  height:100vh;width:100vw;background:#f4f4f6;
+  transition:grid-template-columns .2s ease}
+.desk.show-publi{grid-template-columns:var(--publi-w,260px) 1fr 6px var(--chat-w,340px)}
 
-/* Variant quand chat replié : canvas plein */
-.desk.no-chat{grid-template-columns:1fr 0 0}
+/* Variant quand chat replié : canvas plein. Quatre valeurs, comme la grille
+   de base — publi, canvas, poignee, chat — sinon les zones se decalent. */
+.desk.no-chat{grid-template-columns:0 1fr 0 0}
+.desk.no-chat.show-publi{grid-template-columns:var(--publi-w,260px) 1fr 0 0}
 
 /* ── Header : 2 cols (centre + chat) ──────────────────────────── */
 .desk-header{grid-area:header;background:#fff;border-bottom:1px solid var(--border-default-grey);
@@ -219,16 +233,14 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   padding:4px 10px;background:var(--background-alt-grey);border-radius:2px}
 .desk-header a{color:var(--text-action-high-blue-france);font-size:12px;text-decoration:none}
 
-/* ── Drawer Publications (overlay) ─────────────────────────────
-   Publi est TOUJOURS un drawer overlay qui glisse depuis la gauche.
-   Ne réduit pas la zone canvas (z-index:30 par-dessus). */
-.desk-publi{position:fixed;top:48px;bottom:32px;left:0;
-  width:var(--publi-w,260px);max-width:85vw;z-index:30;
+/* ── Panneau Ressources ────────────────────────────────────────
+   Colonne de la grille en large (ne recouvre plus le canvas), calque
+   glissant en dessous de 1100px ou l'ecran ne tient pas trois colonnes. */
+.desk-publi{grid-area:publi;
   background:#fff;border-right:1px solid var(--border-default-grey);
-  box-shadow:0 0 28px rgba(0,0,0,.18);
-  transform:translateX(-110%);transition:transform .2s ease;
-  display:flex;flex-direction:column;overflow:hidden}
-.desk.show-publi .desk-publi{transform:translateX(0)}
+  display:flex;flex-direction:column;overflow:hidden;
+  min-width:0;visibility:hidden}
+.desk.show-publi .desk-publi{visibility:visible}
 
 /* Header du drawer (anciennement hdr-left dans la navbar) */
 .publi-drawer-header{display:flex;align-items:center;justify-content:space-between;
@@ -438,15 +450,30 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .desk-status .recent-tool{color:var(--text-action-high-blue-france);font-weight:500}
 
 /* Backdrop : actif quand publi drawer est ouvert (overlay) */
-.desk-backdrop{display:block;position:fixed;top:48px;right:0;bottom:32px;left:0;
+/* Le voile n'a de sens qu'en mode calque : en colonne, le panneau ne
+   recouvre rien, assombrir le canvas serait gratuit. */
+.desk-backdrop{display:none;position:fixed;top:48px;right:0;bottom:32px;left:0;
   background:rgba(0,0,0,.25);z-index:25;opacity:0;pointer-events:none;
   transition:opacity .15s ease}
-.desk.show-publi .desk-backdrop{opacity:1;pointer-events:auto}
+@media(max-width:1100px){
+  .desk-backdrop{display:block}
+  .desk.show-publi .desk-backdrop{opacity:1;pointer-events:auto}
+}
 
 /* ── Mode narrow (<1100px) : chat reste sidebar, juste plus étroite par défaut.
    Si le canvas devient trop petit, clampLayoutToViewport() réduit chat. */
 @media(max-width:1100px){
   .handle{display:none}
+  /* Trop etroit pour trois colonnes : le panneau Ressources redevient un
+     calque glissant, avec son voile. C'est le seul cas ou recouvrir le
+     canvas se justifie -- il n'y a pas la place de faire autrement. */
+  .desk, .desk.show-publi{grid-template-columns:0 1fr 6px var(--chat-w,340px)}
+  .desk.no-chat, .desk.no-chat.show-publi{grid-template-columns:0 1fr 0 0}
+  .desk-publi{position:fixed;top:48px;bottom:32px;left:0;z-index:30;
+    width:var(--publi-w,260px);max-width:85vw;visibility:visible;
+    box-shadow:0 0 28px rgba(0,0,0,.18);
+    transform:translateX(-110%);transition:transform .2s ease}
+  .desk.show-publi .desk-publi{transform:translateX(0)}
 }
 
 /* Très petit : la navbar centrale se compresse (brand + étude reste lisible) */

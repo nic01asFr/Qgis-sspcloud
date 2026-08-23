@@ -12565,12 +12565,22 @@ async def desk_study_files():
             f"sid = {active_sid!r}\n"
             "base = Path(f'/data/studies/{sid}')\n"
             "out = []\n"
+            # Correctif 2026-08-23 : le listing prenait tout, sans filtre.
+            # L'utilisateur voyait donc 'batiment_xxx.gpkg.aux.xml' (6 Mo)
+            # presente comme une donnee de son etude, a cote du .gpkg
+            # legitime. Ce sont des fichiers techniques ecrits par GDAL/QGIS
+            # (index spatial, journal, cache de statistiques) : ils gonflent
+            # le poids percu du travail et n'ont aucun sens pour un charge
+            # d'etudes. On ne montre que les fichiers qu'il a produits.
+            "IGNORES = ('.aux.xml', '.gpkg-shm', '.gpkg-wal', '.qgz~',\n"
+            "           '.lock', '.tmp', '.cpg', '.qix')\n"
             "if base.exists():\n"
             "    for sub, kind in [('data','data'),('exports','export')]:\n"
             "        d = base / sub\n"
             "        if d.exists():\n"
             "            for p in sorted(d.rglob('*')):\n"
-            "                if p.is_file():\n"
+            "                if p.is_file() and not p.name.startswith('.') \\\n"
+            "                        and not p.name.endswith(IGNORES):\n"
             "                    sz = p.stat().st_size\n"
             "                    out.append({'name': p.name, 'kind': kind,\n"
             "                                'size_kb': round(sz/1024, 1),\n"

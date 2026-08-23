@@ -135,67 +135,6 @@
 <section class="fr-py-4w">
 <div class="fr-container">
 
-  {# ═════════════════════════════════════════════════════════════════════
-     Sprint UX Day 4.3a (2026-08-03) : bloc "Ma cle d'acces personnelle".
-     Le user retient sa cle une seule fois pour ne plus avoir a repasser
-     par le portail OIDC (Sprint Day 4 auth persistante). Repliable, pas
-     tape a l'oeil : par defaut ferme, click pour afficher.
-     Securise : cette page /workspace est deja gated par middleware OIDC
-     ou cookie hub_api_key -> la cle n'est visible que pour l'user auth.
-     ════════════════════════════════════════════════════════════════════ #}
-  {% if hub_api_key %}
-  <details class="fr-callout fr-callout--brown-caramel fr-mb-4w"
-           style="padding:12px 16px;font-size:13px">
-    <summary style="cursor:pointer;font-weight:600;color:#845d29">
-      🔑 Ma clé d'accès personnelle
-    </summary>
-    <div class="fr-mt-2w">
-      <p style="margin:0 0 8px 0">
-        <b>Une fois retenue, tu n'as plus besoin du portail OIDC.</b>
-        Garde-la de côté : elle te reconnecte depuis n'importe quel
-        navigateur, pour 90 jours à chaque fois.
-      </p>
-      <div style="background:#fff;border:1px solid #ddd;border-radius:4px;
-                  padding:10px;margin-bottom:8px;font-family:monospace;
-                  font-size:11.5px;word-break:break-all">
-        <div style="color:#666;font-size:10px;text-transform:uppercase;
-                    letter-spacing:.5px;margin-bottom:4px">Clé API</div>
-        <div id="hub-api-key-value">{{ hub_api_key }}</div>
-      </div>
-      {# Sprint Day 5 Phase 2-1 (2026-08-05) : bloc "lien magique" retire.
-         Le magic URL /login?key= etait une exposition de la cle dans l'URL
-         (leak logs nginx-ingress + historique navigateur + Referer header).
-         Remplace par : au 1er acces autre navigateur, l'user va sur /login
-         et colle sa cle API dans le form (POST body, zero URL). #}
-      <div style="display:flex;gap:8px">
-        <button type="button" class="fr-btn fr-btn--sm fr-btn--secondary"
-                onclick="navigator.clipboard.writeText(document.getElementById('hub-api-key-value').textContent).then(()=>this.textContent='✓ Clé copiée')">
-          📋 Copier la clé
-        </button>
-      </div>
-      <p style="margin:12px 0 0 0;color:#666;font-size:11px">
-        Cette clé sert aussi au connecteur MCP (Claude Desktop, Cursor,
-        Cline) — voir <a href="/auth/apikey">/auth/apikey</a> pour la
-        configuration prête à copier. Tu la retrouves également dans
-        <a href="https://datalab.sspcloud.fr/my-services" target="_blank"
-        rel="noopener">Onyxia &gt; Mes services</a> &gt; QGIS Hub &gt; notes
-        d'installation.
-      </p>
-    </div>
-  </details>
-  {% endif %}
-
-  {# ═════════════════════════════════════════════════════════════════════
-     Sprint Day 5 Phase 1.7-C (2026-08-05) : bloc "Clé LLM agent IA".
-     Le user peut configurer sa cle LLM (SSPCloud llm.lab.sspcloud.fr
-     ou compatible OpenAI). POST /workspace/llm-key -> webhook agent
-     /api/reload-llm-key zero downtime (aucun restart pod). Ephemere :
-     survit tant que le pod agent tourne ; sur redeploy chart, retaper.
-     Persistance PVC prevue Phase 2+.
-     ════════════════════════════════════════════════════════════════════ #}
-  {# Correctif 2026-08-22 : alerte tant que la cle LLM manque. Sans elle,
-     l'assistant ne repond pas, et le bloc ci-dessous etant replie par
-     defaut, rien ne le signalait sur cette page. #}
   {% if llm_key_missing %}
   <div class="fr-alert fr-alert--warning fr-mb-3w">
     <h3 class="fr-alert__title">Assistant IA en attente de configuration</h3>
@@ -204,48 +143,6 @@
   </div>
   {% endif %}
 
-  <details class="fr-callout fr-callout--brown-caramel fr-mb-4w"
-           style="padding:12px 16px;font-size:13px"
-           {% if llm_key_missing %}open{% endif %}>
-    <summary style="cursor:pointer;font-weight:600;color:#845d29">
-      🤖 Assistant IA — clé de connexion
-    </summary>
-    <div class="fr-mt-2w">
-      <p style="margin:0 0 8px 0">
-        L'assistant a besoin d'une clé pour répondre. Récupère-la sur
-        <a href="https://llm.lab.sspcloud.fr" target="_blank">llm.lab.sspcloud.fr</a>
-        (onglet <b>API keys</b>) ou utilise ta clé OpenAI compatible.
-      </p>
-      {% if llm_key_status_msg %}
-      <div style="background:{{ '#e6f7e6' if llm_key_status_ok else '#fdecea' }};
-                  color:{{ '#0a5c0a' if llm_key_status_ok else '#a11414' }};
-                  padding:8px 10px;border-radius:4px;margin-bottom:8px;font-size:12px">
-        {{ llm_key_status_msg }}
-      </div>
-      {% endif %}
-      <form method="POST" action="/workspace/llm-key" style="display:flex;gap:8px;align-items:flex-end">
-        <div style="flex:1">
-          <label for="llm_key_input" style="display:block;font-size:11px;color:#666;
-                 text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">
-            Clé de connexion (jamais réaffichée après enregistrement)
-          </label>
-          <input type="password" name="llm_api_key" id="llm_key_input" required
-                 placeholder="sk-..." autocomplete="off"
-                 style="width:100%;padding:8px 10px;border:1px solid #ddd;
-                        border-radius:4px;font-family:monospace;font-size:12px" />
-        </div>
-        <button type="submit" class="fr-btn fr-btn--sm">
-          Enregistrer
-        </button>
-      </form>
-      <p style="margin:8px 0 0 0;color:#666;font-size:11px">
-        La clé est enregistrée dans un secret Kubernetes de ton espace et
-        activée immédiatement (aucune interruption). Tu n'auras pas à la
-        ressaisir : elle est conservée après un redémarrage ou une mise à
-        jour du service.
-      </p>
-    </div>
-  </details>
 
   {# ═════════════════════════════════════════════════════════════════════
      HERO — action principale contextuelle.
@@ -539,6 +436,128 @@
     ici ce qu'il apprend de toi (zones favorites, sujets récurrents…).
   </div>
   {% endif %}
+
+
+  {# ═════════════════════════════════════════════════════════════════════
+     PARAMETRES — deplaces du haut de page le 2026-08-23.
+     Ces deux depliants occupaient la zone la plus visible pour des reglages
+     consultes deux fois par an, repoussant "Continuer mon travail" a 470px
+     du haut. La cle de l'assistant est desormais reprise du profil SSPCloud
+     et conservee : ce bloc ne sert plus qu'en cas de changement.
+     L'alerte, elle, reste en tete : elle signale une action requise.
+     ════════════════════════════════════════════════════════════════════ #}
+  <div class="section-title fr-mt-5w">
+    <h2>Paramètres</h2>
+  </div>
+  <p class="section-desc">
+    Ta clé d'accès et la configuration de l'assistant. Tu n'as normalement
+    pas besoin d'y revenir.
+  </p>
+  {# ═════════════════════════════════════════════════════════════════════
+     Sprint UX Day 4.3a (2026-08-03) : bloc "Ma cle d'acces personnelle".
+     Le user retient sa cle une seule fois pour ne plus avoir a repasser
+     par le portail OIDC (Sprint Day 4 auth persistante). Repliable, pas
+     tape a l'oeil : par defaut ferme, click pour afficher.
+     Securise : cette page /workspace est deja gated par middleware OIDC
+     ou cookie hub_api_key -> la cle n'est visible que pour l'user auth.
+     ════════════════════════════════════════════════════════════════════ #}
+  {% if hub_api_key %}
+  <details class="fr-callout fr-callout--brown-caramel fr-mb-4w"
+           style="padding:12px 16px;font-size:13px">
+    <summary style="cursor:pointer;font-weight:600;color:#845d29">
+      🔑 Ma clé d'accès personnelle
+    </summary>
+    <div class="fr-mt-2w">
+      <p style="margin:0 0 8px 0">
+        <b>Une fois retenue, tu n'as plus besoin du portail OIDC.</b>
+        Garde-la de côté : elle te reconnecte depuis n'importe quel
+        navigateur, pour 90 jours à chaque fois.
+      </p>
+      <div style="background:#fff;border:1px solid #ddd;border-radius:4px;
+                  padding:10px;margin-bottom:8px;font-family:monospace;
+                  font-size:11.5px;word-break:break-all">
+        <div style="color:#666;font-size:10px;text-transform:uppercase;
+                    letter-spacing:.5px;margin-bottom:4px">Clé API</div>
+        <div id="hub-api-key-value">{{ hub_api_key }}</div>
+      </div>
+      {# Sprint Day 5 Phase 2-1 (2026-08-05) : bloc "lien magique" retire.
+         Le magic URL /login?key= etait une exposition de la cle dans l'URL
+         (leak logs nginx-ingress + historique navigateur + Referer header).
+         Remplace par : au 1er acces autre navigateur, l'user va sur /login
+         et colle sa cle API dans le form (POST body, zero URL). #}
+      <div style="display:flex;gap:8px">
+        <button type="button" class="fr-btn fr-btn--sm fr-btn--secondary"
+                onclick="navigator.clipboard.writeText(document.getElementById('hub-api-key-value').textContent).then(()=>this.textContent='✓ Clé copiée')">
+          📋 Copier la clé
+        </button>
+      </div>
+      <p style="margin:12px 0 0 0;color:#666;font-size:11px">
+        Cette clé sert aussi au connecteur MCP (Claude Desktop, Cursor,
+        Cline) — voir <a href="/auth/apikey">/auth/apikey</a> pour la
+        configuration prête à copier. Tu la retrouves également dans
+        <a href="https://datalab.sspcloud.fr/my-services" target="_blank"
+        rel="noopener">Onyxia &gt; Mes services</a> &gt; QGIS Hub &gt; notes
+        d'installation.
+      </p>
+    </div>
+  </details>
+  {% endif %}
+
+  {# ═════════════════════════════════════════════════════════════════════
+     Sprint Day 5 Phase 1.7-C (2026-08-05) : bloc "Clé LLM agent IA".
+     Le user peut configurer sa cle LLM (SSPCloud llm.lab.sspcloud.fr
+     ou compatible OpenAI). POST /workspace/llm-key -> webhook agent
+     /api/reload-llm-key zero downtime (aucun restart pod). Ephemere :
+     survit tant que le pod agent tourne ; sur redeploy chart, retaper.
+     Persistance PVC prevue Phase 2+.
+     ════════════════════════════════════════════════════════════════════ #}
+  {# Correctif 2026-08-22 : alerte tant que la cle LLM manque. Sans elle,
+     l'assistant ne repond pas, et le bloc ci-dessous etant replie par
+     defaut, rien ne le signalait sur cette page. #}
+  <details class="fr-callout fr-callout--brown-caramel fr-mb-4w"
+           style="padding:12px 16px;font-size:13px"
+           {% if llm_key_missing %}open{% endif %}>
+    <summary style="cursor:pointer;font-weight:600;color:#845d29">
+      🤖 Assistant IA — clé de connexion
+    </summary>
+    <div class="fr-mt-2w">
+      <p style="margin:0 0 8px 0">
+        L'assistant a besoin d'une clé pour répondre. Récupère-la sur
+        <a href="https://llm.lab.sspcloud.fr" target="_blank">llm.lab.sspcloud.fr</a>
+        (onglet <b>API keys</b>) ou utilise ta clé OpenAI compatible.
+      </p>
+      {% if llm_key_status_msg %}
+      <div style="background:{{ '#e6f7e6' if llm_key_status_ok else '#fdecea' }};
+                  color:{{ '#0a5c0a' if llm_key_status_ok else '#a11414' }};
+                  padding:8px 10px;border-radius:4px;margin-bottom:8px;font-size:12px">
+        {{ llm_key_status_msg }}
+      </div>
+      {% endif %}
+      <form method="POST" action="/workspace/llm-key" style="display:flex;gap:8px;align-items:flex-end">
+        <div style="flex:1">
+          <label for="llm_key_input" style="display:block;font-size:11px;color:#666;
+                 text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">
+            Clé de connexion (jamais réaffichée après enregistrement)
+          </label>
+          <input type="password" name="llm_api_key" id="llm_key_input" required
+                 placeholder="sk-..." autocomplete="off"
+                 style="width:100%;padding:8px 10px;border:1px solid #ddd;
+                        border-radius:4px;font-family:monospace;font-size:12px" />
+        </div>
+        <button type="submit" class="fr-btn fr-btn--sm">
+          Enregistrer
+        </button>
+      </form>
+      <p style="margin:8px 0 0 0;color:#666;font-size:11px">
+        La clé est enregistrée dans un secret Kubernetes de ton espace et
+        activée immédiatement (aucune interruption). Tu n'auras pas à la
+        ressaisir : elle est conservée après un redémarrage ou une mise à
+        jour du service.
+      </p>
+    </div>
+  </details>
+
+
 
 </div>
 </section>
