@@ -2523,6 +2523,30 @@ try:
             _src = _origine(layer)
             if _src:
                 layer_entry["source"] = _src
+            # L'emprise, en WGS84. Un client qui ne detient pas les entites --
+            # parce qu'elles sont derriere une URL, des tuiles ou un flux --
+            # ne peut pas la calculer : sans elle, il ne sait pas ou regarder
+            # et la scene s'ouvre sur l'ocean. Ce qu'il ne peut pas deriver
+            # sur place, nous le declarons.
+            # Les couches raster et les services externes en ont une aussi :
+            # c'est meme le seul renseignement de cadrage qu'ils donneront
+            # jamais, faute d'entites a parcourir.
+            try:
+                _e = layer.extent() if hasattr(layer, "extent") else None
+                if _e is not None and not _e.isEmpty():
+                    _lc = layer.crs() if hasattr(layer, "crs") else None
+                    if _lc is not None and _lc.isValid() and _lc.authid() != "EPSG:4326":
+                        from qgis.core import QgsCoordinateReferenceSystem as _C4
+                        from qgis.core import QgsCoordinateTransform as _T4
+                        from qgis.core import QgsProject as _P4
+                        _e = _T4(_lc, _C4("EPSG:4326"),
+                                 _P4.instance()).transformBoundingBox(_e)
+                    layer_entry["bbox"] = [
+                        round(_e.xMinimum(), 7), round(_e.yMinimum(), 7),
+                        round(_e.xMaximum(), 7), round(_e.yMaximum(), 7),
+                    ]
+            except Exception as _bb_exc:
+                print(f"SCENE_MANIFEST_BBOX_ERR layer={{name}} err={{_bb_exc}}")
             # Export GeoJSON complet (vector) vers fichier PVC dedie - Phase 4b
             if geom == "vector" and hasattr(layer, "getFeatures"):
                 try:
@@ -2590,6 +2614,26 @@ try:
                     layer_entry["n_features"] = len(features)
                     layer_entry["geojson_size_bytes"] = len(txt_fc)
                     layer_entry["crs"] = "EPSG:4326"
+                    # Repli : une couche dont QGIS n'a pas encore calcule
+                    # l'etendue n'aurait aucune emprise. Les entites sont la,
+                    # deja en 4326 -- on la deduit d'elles.
+                    if "bbox" not in layer_entry and features:
+                        _xs, _ys = [], []
+                        def _parcourir(c):
+                            if not isinstance(c, (list, tuple)) or not c:
+                                return
+                            if isinstance(c[0], (int, float)) and len(c) >= 2:
+                                _xs.append(c[0]); _ys.append(c[1])
+                            else:
+                                for _sc in c:
+                                    _parcourir(_sc)
+                        for _f in features:
+                            _parcourir((_f.get("geometry") or {{}}).get("coordinates"))
+                        if _xs and _ys:
+                            layer_entry["bbox"] = [
+                                round(min(_xs), 7), round(min(_ys), 7),
+                                round(max(_xs), 7), round(max(_ys), 7),
+                            ]
                 except Exception as _geo_exc:
                     print(f"SCENE_MANIFEST_GEOJSON_ERR layer={{name}} err={{_geo_exc}}")
             manifest["layers"].append(layer_entry)
