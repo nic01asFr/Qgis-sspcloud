@@ -1,0 +1,32 @@
+{
+  "$id": "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas/index.json",
+  "description": "Contrats publiés par qgis-sspcloud.",
+  "contracts": [
+    {
+      "name": "component",
+      "version": "0.1",
+      "description": "Une brique de livrable : carte, graphique, tableau, indicateur, texte, frise. Déclare d'où viennent ses données, comment elle se rend, et par quoi elle est paramétrée.",
+      "url": "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas/component-0.1.schema.json"
+    },
+    {
+      "name": "assembly",
+      "version": "0.1",
+      "description": "Un livrable : une mise en page de composants, avec sa chaîne d'audit.",
+      "url": "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas/assembly-0.1.schema.json"
+    }
+  ],
+  "related": [
+    {
+      "name": "scene-manifest",
+      "version": "0.2.2",
+      "description": "La scène cartographique. Contrat de référence, publié par Widgets-Grist — nous le consommons, nous ne le redéfinissons pas.",
+      "url": "https://nic01asfr.github.io/Widgets-Grist/schemas/scene-manifest-0.2.2.schema.json"
+    },
+    {
+      "name": "formdef",
+      "version": "1.0",
+      "description": "Le formulaire. Même autorité.",
+      "url": "https://nic01asfr.github.io/Widgets-Grist/schemas/formdef-1.0.schema.json"
+    }
+  ]
+}

@@ -1,0 +1,644 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas/assembly-0.1.schema.json",
+  "description": "Assemblage Sprint Composants V0.1.\n\nVersionné via `assemblies_index` DB. `content_hash` = SHA256 du manifest\nsérialisé canonique. `audit_chain` est OBLIGATOIRE au moment du publish\nsur S3.",
+  "$defs": {
+    "AssemblyFooter": {
+      "description": "Footer DSFR obligatoire sur publications CEREMA (V1.1 livré tag v1.0).\n\nSources : Géorisques, IGN, OSM, etc.\nAudit trail ref : pointe vers `exports_index` ou `audit_chain.signed_hash`\nDisclaimer : ex. PPRi non opposable juridiquement",
+      "properties": {
+        "sources": {
+          "description": "Format Source Strate : {corpus, ref_id, millesime, authority, licence, url} — pour citation directe DSFR",
+          "items": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "audit_trail_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ex. 'exports_index:1234' ou audit_chain.signed_hash",
+          "title": "Audit Trail Ref"
+        },
+        "disclaimer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Mention légale obligatoire (PPRi, ZNIEFF, etc.) — cf. mémoire livrables_cerema_audit_v1_1_v1_5",
+          "title": "Disclaimer"
+        },
+        "cerema_mentions_legales": {
+          "default": true,
+          "description": "Bloc mentions légales CEREMA inclus par défaut",
+          "title": "Cerema Mentions Legales",
+          "type": "boolean"
+        }
+      },
+      "title": "AssemblyFooter",
+      "type": "object"
+    },
+    "AssemblyLayout": {
+      "description": "Layout structurel selon le `kind` d'assemblage.",
+      "properties": {
+        "type": {
+          "enum": [
+            "scroll_vertical",
+            "grid",
+            "paginated",
+            "tab",
+            "fullscreen",
+            "modal"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/AssemblySection"
+          },
+          "title": "Sections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "AssemblyLayout",
+      "type": "object"
+    },
+    "AssemblySection": {
+      "description": "Section d'un assemblage. Une storymap a typiquement intro + sections +\nconclusion + appendix. Une `sheet_a4` a juste des sections paginées.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "intro",
+            "section",
+            "conclusion",
+            "appendix"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "narrative_md": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Markdown via Marked.js dans le renderer Jinja2",
+          "title": "Narrative Md"
+        },
+        "components": {
+          "description": "Liste de références ou composants inline. Format : [{'ref': 'cid'}, {'inline': {...Component manifest...}}]",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Components",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "AssemblySection",
+      "type": "object"
+    },
+    "AuditChain": {
+      "description": "Audit trail OBLIGATOIRE sur tout `Assembly` publié sur S3.\n\nSérialisation canonique (sort_keys=True, separators=(\",\",\":\"),\nensure_ascii=True) puis SHA256 = `integrity_hash`. Permet ancrage\ntamper-evident.\n\nD-FORMAT-008 (2026-06-29) : rename `signed_hash` → `integrity_hash`.\nDistinction INTÉGRITÉ (SHA256, ce champ) ≠ SIGNATURE (Ed25519,\ncohérent Scene Manifest V0.2.2 sidecar `.sig` futur). Le legacy\n`signed_hash` reste accessible via property avec DeprecationWarning\npendant 1 release de grâce (suppression v1.7).",
+      "properties": {
+        "aid": {
+          "description": "Référence Assembly.id (12 hex)",
+          "title": "Aid",
+          "type": "string"
+        },
+        "sid": {
+          "description": "Référence Étude.id (12 hex)",
+          "title": "Sid",
+          "type": "string"
+        },
+        "owner": {
+          "description": "Username CEREMA OIDC",
+          "title": "Owner",
+          "type": "string"
+        },
+        "classification": {
+          "default": "cerema_internal",
+          "enum": [
+            "public",
+            "cerema_internal",
+            "restricted",
+            "confidential"
+          ],
+          "title": "Classification",
+          "type": "string"
+        },
+        "scene_hashes": {
+          "description": "Snapshots Scene Manifest des projets contributeurs",
+          "items": {
+            "type": "string"
+          },
+          "title": "Scene Hashes",
+          "type": "array"
+        },
+        "components_refs": {
+          "description": "IDs des composants référencés dans l'assemblage",
+          "items": {
+            "type": "string"
+          },
+          "title": "Components Refs",
+          "type": "array"
+        },
+        "recipes_used": {
+          "description": "Slugs des recipes ayant produit les composants",
+          "items": {
+            "type": "string"
+          },
+          "title": "Recipes Used",
+          "type": "array"
+        },
+        "tool_calls_made": {
+          "description": "Trace globale agrégée",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Tool Calls Made",
+          "type": "array"
+        },
+        "llm_provenance": {
+          "items": {
+            "$ref": "#/$defs/LLMProvenance"
+          },
+          "title": "Llm Provenance",
+          "type": "array"
+        },
+        "sources": {
+          "description": "Sources citées (Strate Source aligned). Cf. hub/hub/models/VENDORED_FROM.md procédure resync.",
+          "items": {
+            "$ref": "#/$defs/Source"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "source_chunk_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Chunk Ids",
+          "type": "array"
+        },
+        "source_excerpts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Excerpts",
+          "type": "array"
+        },
+        "confidence_score": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Confidence posée explicitement par producteur. Le min() Strate est appliqué EN AVAL par consommateur.",
+          "title": "Confidence Score"
+        },
+        "confidence_level": {
+          "anyOf": [
+            {
+              "enum": [
+                "STRONG",
+                "MEDIUM",
+                "WEAK",
+                "UNRELIABLE"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence Level"
+        },
+        "confidence_factors": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConfidenceFactors"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "consensus_level": {
+          "default": "UNKNOWN",
+          "enum": [
+            "UNANIMOUS",
+            "MAJORITY",
+            "SPLIT",
+            "CONTRADICTED",
+            "UNKNOWN"
+          ],
+          "title": "Consensus Level",
+          "type": "string"
+        },
+        "has_contradictory_claim": {
+          "default": false,
+          "title": "Has Contradictory Claim",
+          "type": "boolean"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "integrity_hash": {
+          "default": "",
+          "description": "SHA256 canonical de l'audit_chain. INTÉGRITÉ tamper-evident (pas signature crypto). Calculé via compute_integrity_hash().",
+          "title": "Integrity Hash",
+          "type": "string"
+        }
+      },
+      "required": [
+        "aid",
+        "sid",
+        "owner"
+      ],
+      "title": "AuditChain",
+      "type": "object"
+    },
+    "ComponentProvenance": {
+      "description": "Provenance individuelle d'un composant créé (par agent IA ou user).\n\nUtilisé sur `Component.provenance` ET sur `Assembly.provenance` (les 2\nréutilisent ce model — option C D-QGIS-009 Vague E1 2026-06-29).\nRéférencé depuis `AuditChain` quand un assemblage agrège plusieurs\ncomposants.",
+      "properties": {
+        "created_by": {
+          "default": "agent",
+          "enum": [
+            "agent",
+            "user",
+            "library_template"
+          ],
+          "title": "Created By",
+          "type": "string"
+        },
+        "recipe_used": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ex. 'risque_inondation@v3'",
+          "title": "Recipe Used"
+        },
+        "tool_calls_made": {
+          "description": "Trace passive existante des tool_calls. Pattern Phase 11.",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Tool Calls Made",
+          "type": "array"
+        },
+        "scene_hash_at_creation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Snapshot du Scene Manifest au moment de la création",
+          "title": "Scene Hash At Creation"
+        },
+        "llm_provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LLMProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cloned_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Référence vers l'entité source si clonée (cid pour Component, aid pour Assembly). None = créé from scratch.",
+          "title": "Cloned From"
+        }
+      },
+      "title": "ComponentProvenance",
+      "type": "object"
+    },
+    "ConfidenceFactors": {
+      "description": "Facteurs détaillés de calcul de la confiance (audit cliquable).\n\nAdapté du pattern MobSciDat (formule multifactorielle 4 signaux) MAIS\nrecalibré pour livrables spatiaux : `measurement_ratio` MobSciDat (qui\ndistingue MESURE vs ESTIME en données mobilité) remplacé par\n`tool_validation_ratio` (% de tool_calls non-erreur).\n\nPondérations à arbitrer Sprint Composants Phase 3 :\n- source_count (palier non-linéaire 0→0.0, 1→0.30, 2→0.65, 3+→0.75+)\n- authority_mean (palier ≥0.90→1.0, ≥0.75→0.95, ≥0.60→0.70)\n- freshness (décroissance temporelle <1an→~1.0, <2ans→~0.5)\n- tool_validation_ratio (% tool_calls success / total)",
+      "properties": {
+        "source_count": {
+          "default": 0,
+          "title": "Source Count",
+          "type": "integer"
+        },
+        "authority_mean": {
+          "default": 0.0,
+          "title": "Authority Mean",
+          "type": "number"
+        },
+        "freshness": {
+          "default": 0.0,
+          "title": "Freshness",
+          "type": "number"
+        },
+        "tool_validation_ratio": {
+          "default": 1.0,
+          "title": "Tool Validation Ratio",
+          "type": "number"
+        }
+      },
+      "title": "ConfidenceFactors",
+      "type": "object"
+    },
+    "LLMProvenance": {
+      "description": "Reproductibilité d'un appel LLM ayant produit du contenu signé.\n\nAméliore le pattern MobSciDat (qui a seulement `prompt_hash VARCHAR(16)`\navec model_id implicite dans le prompt sérialisé). Pour les livrables\npublics CEREMA reproductibles, on exige l'explicite.",
+      "properties": {
+        "prompt_hash": {
+          "description": "SHA256(prompt + model_id + seed + temperature)[:16]",
+          "title": "Prompt Hash",
+          "type": "string"
+        },
+        "model_id": {
+          "description": "ex. 'qwen3-6-35b-moe@vllm-0.22'",
+          "title": "Model Id",
+          "type": "string"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature"
+        },
+        "tool_calls_count": {
+          "default": 0,
+          "title": "Tool Calls Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "prompt_hash",
+        "model_id"
+      ],
+      "title": "LLMProvenance",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "description": "Citation d'une source référentielle officielle.\n\nAligned with atlas/model.py:Source @ 2026-06-29 (Strate).\nVoir hub/hub/models/VENDORED_FROM.md pour procédure resync.\n\nInvariants :\n- `extra=\"forbid\"` : strict, pas de champ inconnu\n- `frozen=True` : immutable (cohérent canonicalisation audit_chain)\n- `confidence` ≠ Source (vit sur Validity côté Strate). qgis-sspcloud\n  n'auto-calcule PAS depuis sources[] (Invariant 6 audit-trail).",
+      "properties": {
+        "corpus": {
+          "description": "ex. 'code_environnement', 'BD TOPO IGN', 'SDAGE-RM'",
+          "title": "Corpus",
+          "type": "string"
+        },
+        "ref_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Identifiant unitaire dans le corpus (nullable)",
+          "title": "Ref Id"
+        },
+        "millesime": {
+          "description": "Date / version (ex. '2024', 'v2024-Q3')",
+          "title": "Millesime",
+          "type": "string"
+        },
+        "authority": {
+          "description": "ex. 'IGN', 'DGALN', 'Agence de l'eau RMC'",
+          "title": "Authority",
+          "type": "string"
+        },
+        "licence": {
+          "default": "Licence Ouverte 2.0",
+          "description": "Default données publiques françaises",
+          "title": "Licence",
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "URL canonique de la source (optionnel)",
+          "title": "Url"
+        },
+        "statut": {
+          "$ref": "#/$defs/Statut",
+          "default": "presomption_haute",
+          "description": "Statut de vérification"
+        }
+      },
+      "required": [
+        "corpus",
+        "millesime",
+        "authority"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "Statut": {
+      "description": "Statut de vérification d'une Source citée.\n\nAligned with atlas/model.py:Source @ 2026-06-29 (Strate).\nConfirmé par Strate-Architect msg wikichat 52e1bcba.",
+      "enum": [
+        "verifie",
+        "presomption_haute",
+        "a_verifier"
+      ],
+      "title": "Statut",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "id": {
+      "description": "aid (12 hex uuid4)",
+      "pattern": "^[0-9a-f]{12}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "assembly_version": {
+      "default": "V0.1",
+      "description": "Semver du schema Assembly lui-même",
+      "title": "Assembly Version",
+      "type": "string"
+    },
+    "sid": {
+      "description": "Étude (scope assemblage = sid, pas pid)",
+      "pattern": "^[0-9a-f]{12}$",
+      "title": "Sid",
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "storymap_narrative_dsfr",
+        "dashboard",
+        "sheet_a4",
+        "modal_embed",
+        "atlas_immersive"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "maxLength": 5000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "theme": {
+      "default": "dsfr",
+      "description": "DSFR ou variante custom",
+      "title": "Theme",
+      "type": "string"
+    },
+    "audience": {
+      "default": "cerema_internal",
+      "enum": [
+        "public",
+        "cerema_internal",
+        "restricted",
+        "confidential"
+      ],
+      "title": "Audience",
+      "type": "string"
+    },
+    "layout": {
+      "$ref": "#/$defs/AssemblyLayout"
+    },
+    "footer": {
+      "$ref": "#/$defs/AssemblyFooter"
+    },
+    "audit_chain": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AuditChain"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "OBLIGATOIRE au publish. None tant que draft. Calculé par endpoint POST /assemblies/{aid}/publish (Sprint Composants Phase 3)."
+    },
+    "provenance": {
+      "$ref": "#/$defs/ComponentProvenance"
+    }
+  },
+  "required": [
+    "id",
+    "sid",
+    "kind",
+    "title",
+    "layout"
+  ],
+  "title": "Assembly",
+  "type": "object"
+}

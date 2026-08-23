@@ -4297,6 +4297,42 @@ def _check_components_enabled():
         )
 
 
+# ── Contrats publiés ─────────────────────────────────────────────────────────
+#
+# Publics et sans authentification, par nécessité : un contrat auquel on ne
+# peut pas se référer n'en est pas un. C'est ce qui manquait au Component
+# Manifest — il vivait en Pydantic dans le hub, quand le Scene Manifest et
+# FormDef sont servis à une adresse stable et citable.
+#
+# À ne pas confondre avec `/schema/{entity_type}` juste en dessous, qui reste
+# l'introspection vivante destinée à l'agent (kinds, exemples, cas d'usage).
+# Ici, le contrat figé : ce sur quoi un autre projet peut s'engager.
+
+@app.get("/schemas/index.json")
+async def contrats_index_endpoint():
+    """Ce qui est publié, où, et à quoi ça sert."""
+    from hub import contracts
+    return JSONResponse(
+        contracts.index(),
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@app.get("/schemas/{fichier}")
+async def contrat_endpoint(fichier: str):
+    """Un contrat, par son nom versionné — `component-0.1.schema.json`."""
+    from hub import contracts
+    # Un nom de fichier arrivant de l'extérieur ne sert jamais à composer un
+    # chemin : on le cherche parmi les contrats connus, et rien d'autre.
+    for nom, entree in contracts.CONTRATS.items():
+        if fichier == f"{nom}-{entree['version']}.schema.json":
+            return JSONResponse(
+                contracts.lire(nom),
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
+    raise HTTPException(404, f"Contrat inconnu : {fichier}")
+
+
 # ── Schema introspection (méta-cognition agent IA P0) ────────────────────────
 
 @app.get("/schema/{entity_type}")

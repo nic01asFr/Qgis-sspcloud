@@ -982,6 +982,10 @@ _OIDC_MIDDLEWARE_PUBLIC = (
     # repondait 401 a chaque page et polluait la console du navigateur.
     # Aucun secret dans une icone.
     "/favicon.ico",
+    # Les contrats publies. Un contrat derriere authentification n'en est pas
+    # un : aucun projet tiers ne peut s'y referer. Ne sert que des schemas,
+    # aucune donnee d'etude (cf. hub/contracts.py).
+    "/schemas",
     # Audit v1.7.2 P1 #3 (D-QGIS-010) : bundle Vite BlockNote = JS/CSS pur
     # statique, AUCUN secret. La page principale /editor/{sid}/assembly/{aid}
     # reste protegee OIDC (elle sert l'index.html via FileResponse). Whitelist

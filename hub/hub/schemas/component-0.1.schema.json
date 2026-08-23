@@ -1,0 +1,371 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas/component-0.1.schema.json",
+  "description": "Composant Sprint Composants V0.1.\n\nVersionné via `components_index` DB (INSERT-only audit trail, pattern\nrecipes_index V1.5). `content_hash` = SHA256 du manifest sérialisé\ncanonique (exclut id + version_num + provenance.created_at).",
+  "$defs": {
+    "ComponentProvenance": {
+      "description": "Provenance individuelle d'un composant créé (par agent IA ou user).\n\nUtilisé sur `Component.provenance` ET sur `Assembly.provenance` (les 2\nréutilisent ce model — option C D-QGIS-009 Vague E1 2026-06-29).\nRéférencé depuis `AuditChain` quand un assemblage agrège plusieurs\ncomposants.",
+      "properties": {
+        "created_by": {
+          "default": "agent",
+          "enum": [
+            "agent",
+            "user",
+            "library_template"
+          ],
+          "title": "Created By",
+          "type": "string"
+        },
+        "recipe_used": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ex. 'risque_inondation@v3'",
+          "title": "Recipe Used"
+        },
+        "tool_calls_made": {
+          "description": "Trace passive existante des tool_calls. Pattern Phase 11.",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Tool Calls Made",
+          "type": "array"
+        },
+        "scene_hash_at_creation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Snapshot du Scene Manifest au moment de la création",
+          "title": "Scene Hash At Creation"
+        },
+        "llm_provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LLMProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cloned_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Référence vers l'entité source si clonée (cid pour Component, aid pour Assembly). None = créé from scratch.",
+          "title": "Cloned From"
+        }
+      },
+      "title": "ComponentProvenance",
+      "type": "object"
+    },
+    "ComponentRendering": {
+      "description": "Indications de rendu côté browser. Le hub décide le template Jinja2.",
+      "properties": {
+        "runtime": {
+          "enum": [
+            "maplibre",
+            "maplibre_three",
+            "chartjs",
+            "datatables",
+            "marked",
+            "html",
+            "iframe"
+          ],
+          "title": "Runtime",
+          "type": "string"
+        },
+        "container_size": {
+          "default": "responsive",
+          "description": "ex. 'responsive', 'fixed_400x400', 'aspect-16-9'",
+          "title": "Container Size",
+          "type": "string"
+        },
+        "theme": {
+          "default": "dsfr",
+          "description": "DSFR ou variante custom",
+          "title": "Theme",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtime"
+      ],
+      "title": "ComponentRendering",
+      "type": "object"
+    },
+    "ComponentSource": {
+      "description": "Pointe vers les données consommées par le composant.\n\n`scope` discriminant :\n- `project`  : projet QGIS d'une étude qgis-sspcloud (sid + pid)\n- `study`    : étude entière (agrégation cross-projets)\n- `external` : URL absolue (CSV S3, GeoJSON S3, image, etc.)\n- `geomind`  : primitive `describe(point)` Strate / Geomind\n               (4e producteur DATA — cf. solution-geomind-axis)",
+      "properties": {
+        "scope": {
+          "enum": [
+            "project",
+            "study",
+            "external",
+            "geomind"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "sid": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Étude.id (12 hex)",
+          "title": "Sid"
+        },
+        "pid": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Projet.id (12 hex)",
+          "title": "Pid"
+        },
+        "scene_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Snapshot Scene Manifest référencé",
+          "title": "Scene Hash"
+        },
+        "scene_manifest_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ex. /studies/{sid}/projects/{pid}/scene_manifest",
+          "title": "Scene Manifest Url"
+        },
+        "data_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "URL des données. Peut être absolue (S3) ou relative au hub (/files/studies/{sid}/projects/{pid}/exports/aleas.geojson).",
+          "title": "Data Url"
+        },
+        "geomind_query": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Params pour describe(point). Format : {point:[lon,lat], scope:['referentiel'|'document'|...], instance:'strate'|'cerema-amenagement'|...}",
+          "title": "Geomind Query"
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "title": "ComponentSource",
+      "type": "object"
+    },
+    "LLMProvenance": {
+      "description": "Reproductibilité d'un appel LLM ayant produit du contenu signé.\n\nAméliore le pattern MobSciDat (qui a seulement `prompt_hash VARCHAR(16)`\navec model_id implicite dans le prompt sérialisé). Pour les livrables\npublics CEREMA reproductibles, on exige l'explicite.",
+      "properties": {
+        "prompt_hash": {
+          "description": "SHA256(prompt + model_id + seed + temperature)[:16]",
+          "title": "Prompt Hash",
+          "type": "string"
+        },
+        "model_id": {
+          "description": "ex. 'qwen3-6-35b-moe@vllm-0.22'",
+          "title": "Model Id",
+          "type": "string"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temperature"
+        },
+        "tool_calls_count": {
+          "default": 0,
+          "title": "Tool Calls Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "prompt_hash",
+        "model_id"
+      ],
+      "title": "LLMProvenance",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "id": {
+      "description": "cid (12 hex uuid4)",
+      "pattern": "^[0-9a-f]{12}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "component_version": {
+      "default": "V0.1",
+      "description": "Semver du schema Component lui-même",
+      "title": "Component Version",
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "interactive_map",
+        "scene_3d",
+        "chart",
+        "kpi_badge",
+        "legend",
+        "narrative_text",
+        "data_table",
+        "media_embed",
+        "iframe_grist",
+        "kpi_grid",
+        "heading",
+        "quote",
+        "separator",
+        "timeline"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "classification": {
+      "default": "cerema_internal",
+      "enum": [
+        "public",
+        "cerema_internal",
+        "restricted",
+        "confidential"
+      ],
+      "title": "Classification",
+      "type": "string"
+    },
+    "source": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ComponentSource"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Source data du composant. Obligatoire pour kinds data-driven (interactive_map, chart, data_table, scene_3d, narrative_text avec data_url notes.md). Optionnel pour kinds purement compositionnels Vague E2 (heading, quote, separator, kpi_grid, image_gallery, button) qui n'ont pas de source de données externe."
+    },
+    "params": {
+      "additionalProperties": true,
+      "description": "Params kind-specific (ex: bbox, basemap, field, stops…)",
+      "title": "Params",
+      "type": "object"
+    },
+    "rendering": {
+      "$ref": "#/$defs/ComponentRendering"
+    },
+    "provenance": {
+      "$ref": "#/$defs/ComponentProvenance"
+    }
+  },
+  "required": [
+    "id",
+    "kind",
+    "title",
+    "rendering"
+  ],
+  "title": "Component",
+  "type": "object"
+}
