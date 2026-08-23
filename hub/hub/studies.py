@@ -2614,6 +2614,84 @@ try:
                     layer_entry["n_features"] = len(features)
                     layer_entry["geojson_size_bytes"] = len(txt_fc)
                     layer_entry["crs"] = "EPSG:4326"
+                    # ── Ce qu'un client ne pourra pas deriver sans les entites
+                    # Un runtime qui recoit une couche par URL, par tuiles ou
+                    # par flux ne detient pas les entites : il ne peut donc ni
+                    # graduer une symbologie (il lui faut min/max), ni
+                    # categoriser (il lui faut les valeurs distinctes), ni
+                    # decider d'un repli en points (il lui faut la taille
+                    # moyenne des objets). On le calcule ici, ou les entites
+                    # sont deja sous la main -- le parcours est gratuit.
+                    try:
+                        _stats = {{}}
+                        _nb = 0
+                        for _f in features:
+                            for _k, _v in (_f.get("properties") or {{}}).items():
+                                _s = _stats.setdefault(
+                                    _k, {{"n": 0, "min": None, "max": None,
+                                         "valeurs": set(), "trop": False}})
+                                if isinstance(_v, bool) or not isinstance(_v, (int, float)):
+                                    if len(_s["valeurs"]) < 50:
+                                        _s["valeurs"].add(str(_v)[:80])
+                                    else:
+                                        _s["trop"] = True
+                                else:
+                                    _s["min"] = _v if _s["min"] is None else min(_s["min"], _v)
+                                    _s["max"] = _v if _s["max"] is None else max(_s["max"], _v)
+                                _s["n"] += 1
+                        _sortie = {{}}
+                        for _k, _s in _stats.items():
+                            _d = {{"n_renseignes": _s["n"]}}
+                            if _s["min"] is not None:
+                                _d["min"], _d["max"] = _s["min"], _s["max"]
+                            if _s["valeurs"]:
+                                # Au-dela de 50 modalites, categoriser n'a plus
+                                # de sens : on dit qu'il y en a trop plutot que
+                                # d'en livrer une liste tronquee, qui ferait
+                                # croire a un inventaire complet.
+                                if _s["trop"]:
+                                    _d["valeurs_distinctes"] = "plus de 50"
+                                else:
+                                    _d["valeurs_distinctes"] = sorted(_s["valeurs"])
+                            _sortie[_k] = _d
+                        if _sortie:
+                            layer_entry["attribute_stats"] = _sortie
+                    except Exception as _st_exc:
+                        print(f"SCENE_MANIFEST_STATS_ERR layer={{name}} err={{_st_exc}}")
+
+                    # L'empan moyen des objets, en metres. Sert a decider si
+                    # une couche doit se rendre en points a petite echelle.
+                    # Approximation assumee : un degre de latitude vaut environ
+                    # 111 320 m, la longitude est corrigee par le cosinus. La
+                    # precision demandee est un ordre de grandeur, pas une
+                    # mesure geodesique.
+                    try:
+                        import math as _m
+                        _empans = []
+                        for _f in features[::max(1, len(features) // 200)]:
+                            _xs2, _ys2 = [], []
+                            def _pts(c):
+                                if not isinstance(c, (list, tuple)) or not c:
+                                    return
+                                if isinstance(c[0], (int, float)) and len(c) >= 2:
+                                    _xs2.append(c[0]); _ys2.append(c[1])
+                                else:
+                                    for _sc in c:
+                                        _pts(_sc)
+                            _pts((_f.get("geometry") or {{}}).get("coordinates"))
+                            if len(_xs2) < 2:
+                                continue
+                            _lat = sum(_ys2) / len(_ys2)
+                            _dx = (max(_xs2) - min(_xs2)) * 111320 * _m.cos(_m.radians(_lat))
+                            _dy = (max(_ys2) - min(_ys2)) * 111320
+                            _empans.append(_m.hypot(_dx, _dy))
+                        if _empans:
+                            _empans.sort()
+                            layer_entry["span_moyen_m"] = round(
+                                _empans[len(_empans) // 2], 1)
+                    except Exception as _sp_exc:
+                        print(f"SCENE_MANIFEST_SPAN_ERR layer={{name}} err={{_sp_exc}}")
+
                     # Repli : une couche dont QGIS n'a pas encore calcule
                     # l'etendue n'aurait aucune emprise. Les entites sont la,
                     # deja en 4326 -- on la deduit d'elles.
