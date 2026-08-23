@@ -270,11 +270,15 @@ async def execute_recipe_pure(
             )
 
     # 2. Squelette du manifest.
+    #
+    # Pas de `$schema` ici. Chaque livrable en publiait un qui pointait vers
+    # https://cerema.github.io/geo-components/... -- un domaine qui n'a jamais
+    # existe (404 sur le schema comme sur la racine). L'adresse du contrat 0.3.2
+    # n'est pas publiee non plus. Mieux vaut ne rien annoncer qu'annoncer une
+    # reference introuvable : un lecteur qui suit un $schema mort n'apprend rien
+    # et perd confiance dans le reste. Le champ reviendra le jour ou le contrat
+    # de reference aura une adresse stable (cf. docs/interop-atlas-scene-manifest.md).
     manifest: dict[str, Any] = {
-        "$schema": (
-            "https://cerema.github.io/geo-components/schemas/"
-            f"scene_manifest/{recipe.manifest_version}.json"
-        ),
         "manifest_version": recipe.manifest_version,
         "produced_at": timestamp,
         "title": recipe.title,
@@ -392,11 +396,8 @@ async def execute_recipe_pure(
     if render_step.target == "assembly":
         # POC : on emballe le manifest composant dans un mini-assembly.
         component_manifest = copy.deepcopy(manifest)
+        # Meme raison qu'au squelette : l'adresse annoncee n'existe pas.
         assembly_manifest: dict[str, Any] = {
-            "$schema": (
-                "https://cerema.github.io/geo-components/schemas/"
-                "assembly_manifest/0.3.1.json"
-            ),
             "manifest_version": recipe.manifest_version,
             "produced_at": timestamp,
             "title": recipe.title,
