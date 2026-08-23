@@ -58,6 +58,27 @@ CONTRATS: dict[str, dict[str, Any]] = {
 # produisons — jamais pour le redéfinir. À resynchroniser quand il bouge.
 SCENE_MANIFEST_REFERENCE = "scene-manifest-0.2.2.schema.json"
 
+# L'empreinte du fichier chez son auteur, telle que publiée dans
+# https://nic01asfr.github.io/Widgets-Grist/schemas/index.json
+#
+# C'était le seul endroit où une divergence pouvait s'installer en silence :
+# une copie ne se vérifie pas toute seule, et rapatrier le schéma entier à
+# chaque usage, personne ne le fait. Depuis que l'index porte une empreinte,
+# comparer deux kilo-octets suffit. Le test qui l'utilise échoue si notre copie
+# s'écarte — c'est ce qui la rend digne de confiance, pas la bonne volonté.
+SCENE_MANIFEST_EMPREINTE = "sha256:3fd18b1c9db7aae2"
+SCENE_MANIFEST_OCTETS = 10633
+SCENE_MANIFEST_INDEX_AMONT = (
+    "https://nic01asfr.github.io/Widgets-Grist/schemas/index.json"
+)
+
+
+def empreinte_scene() -> tuple[str, int]:
+    """L'empreinte de notre copie, dans la forme publiée en amont."""
+    import hashlib
+    octets = (_DOSSIER / SCENE_MANIFEST_REFERENCE).read_bytes()
+    return f"sha256:{hashlib.sha256(octets).hexdigest()[:16]}", len(octets)
+
 
 def schema_scene() -> dict[str, Any]:
     """Le contrat de scène tel que le lisent les runtimes de l'écosystème."""

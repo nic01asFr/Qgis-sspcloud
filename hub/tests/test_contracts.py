@@ -88,6 +88,35 @@ def test_le_component_reference_une_scene_par_url():
     assert "scene_manifest_url" in source.get("properties", {})
 
 
+class TestCopieDuContratDeScene:
+    """Notre copie du 0.2.2 dit-elle encore la meme chose que l'original ?
+
+    Elle ne nous appartient pas : le contrat fait autorite chez Widgets-Grist.
+    On l'embarque pour valider hors ligne, ce qui cree le seul endroit ou une
+    divergence pouvait s'installer sans que personne la voie -- une copie ne se
+    verifie pas toute seule. Depuis que l'index amont publie une empreinte,
+    comparer deux kilo-octets suffit.
+    """
+
+    def test_notre_copie_correspond_a_l_original(self):
+        empreinte, octets = contracts.empreinte_scene()
+        assert (empreinte, octets) == (
+            contracts.SCENE_MANIFEST_EMPREINTE, contracts.SCENE_MANIFEST_OCTETS
+        ), (
+            "notre copie du scene-manifest s'est ecartee de l'original.\n"
+            f"Compare avec {contracts.SCENE_MANIFEST_INDEX_AMONT} : si l'amont a "
+            f"bouge, resynchronise le fichier ET les constantes ; si c'est nous "
+            f"qui avons modifie une copie, remets-la en etat -- on ne modifie pas "
+            f"un contrat dont on n'est pas l'auteur."
+        )
+
+    def test_l_empreinte_attendue_est_dans_la_forme_publiee_en_amont(self):
+        """`sha256:` + 16 hex : la forme que porte l'index de Widgets-Grist.
+        Une empreinte mal formee ne serait comparee a rien."""
+        import re
+        assert re.fullmatch(r"sha256:[0-9a-f]{16}", contracts.SCENE_MANIFEST_EMPREINTE)
+
+
 class TestValidationDesScenes:
     """Le « Sprint C-2 » : ce qui empeche une scene illisible de repartir.
 
