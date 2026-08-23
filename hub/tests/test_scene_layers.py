@@ -81,6 +81,47 @@ class TestOrigineDonnees:
         assert origine_donnees(couche) == ("fichier", "/data/x.geojson")
 
 
+class TestProvenanceProjet:
+    """`source` designait deux choses opposees selon le niveau.
+
+    A la racine, la provenance du projet ; au niveau d'une couche, l'origine
+    des donnees -- la ou les runtimes vont chercher quoi lire. Le jour ou
+    `layer.source` devient une union discriminee d'origine, un meme document
+    aurait porte les deux sens. On a renomme la racine en `provenance` pendant
+    que le champ n'etait encore lu nulle part.
+    """
+
+    def test_la_nouvelle_graphie_est_lue(self):
+        from hub.scene_layers import provenance_projet
+        m = {"provenance": {"producer": "qgis-sspcloud/hub", "study_id": "abc"}}
+        assert provenance_projet(m)["study_id"] == "abc"
+
+    def test_les_manifests_deja_ecrits_restent_lisibles(self):
+        """Ceux du PVC portent encore `source` -- aucune migration a faire."""
+        from hub.scene_layers import provenance_projet
+        m = {"source": {"project_qgs": "/data/x.qgz", "study_id": "abc"}}
+        assert provenance_projet(m)["study_id"] == "abc"
+
+    def test_la_nouvelle_graphie_prime(self):
+        from hub.scene_layers import provenance_projet
+        m = {"provenance": {"study_id": "neuf"}, "source": {"study_id": "vieux"}}
+        assert provenance_projet(m)["study_id"] == "neuf"
+
+    def test_sans_rien_on_rend_un_dictionnaire_vide(self):
+        from hub.scene_layers import provenance_projet
+        assert provenance_projet({}) == {}
+
+    def test_une_source_de_couche_n_est_pas_une_provenance(self):
+        """Le piege qu'on ferme : une origine de donnee ne doit jamais etre
+        prise pour la provenance du projet."""
+        from hub.scene_layers import origine_donnees, provenance_projet
+        couche = {"source": {"table": "Batiments"}}
+        assert origine_donnees(couche) == ("table", "Batiments")
+        # provenance_projet ne s'applique pas a une couche : on ne l'appelle
+        # jamais dessus. Le test documente la frontiere.
+        assert provenance_projet({"provenance": {"study_id": "abc"}})["study_id"] == "abc"
+
+
 class TestRegressionLignesRenduesEnAplat:
     """Les couches lineaires du hub etaient rendues comme des polygones.
 

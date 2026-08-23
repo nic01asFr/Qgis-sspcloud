@@ -2341,7 +2341,15 @@ try:
         "manifest_version": "V0.2",
         "manifest_id": str(uuid.uuid4()),
         "title": proj.title() or "Scene Manifest",
-        "source": {{
+        # `provenance`, et non `source`. Le mot etait pris deux fois pour deux
+        # sens opposes : ici la provenance du projet, mais `source` au niveau
+        # d'une couche designe l'origine de ses donnees -- c'est la que les
+        # runtimes vont chercher ou lire. Garder les deux dans un meme document
+        # aurait fabrique un piege que personne ne voit en lisant le schema et
+        # ou tout le monde tombe en lisant un manifest.
+        # Le champ n'etait lu nulle part : c'etait le moment de le corriger.
+        "provenance": {{
+            "producer": "qgis-sspcloud/hub",
             "project_qgs": str(proj.fileName() or ""),
             "study_id": sid,
             "project_id": pid,

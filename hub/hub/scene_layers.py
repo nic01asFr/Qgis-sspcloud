@@ -86,6 +86,25 @@ def origine_donnees(couche: dict[str, Any]) -> tuple[str, Any] | None:
     return None
 
 
+def provenance_projet(manifest: dict[str, Any]) -> dict[str, Any]:
+    """D'ou vient la scene : projet QGIS, etude, producteur.
+
+    A ne pas confondre avec l'origine des donnees d'une couche, qui se demande
+    a `origine_donnees`. Les deux ont porte le nom `source` pendant un temps --
+    au niveau du manifest pour la provenance, au niveau de la couche pour
+    l'origine. Deux sens opposes sous un meme mot : un piege invisible dans le
+    schema, evident une fois qu'on lit un manifest de travers.
+
+    Depuis le 2026-08-23 nous ecrivons `provenance`. Les manifests deja sur PVC
+    portent encore `source` : on les lit sans broncher.
+    """
+    prov = manifest.get("provenance")
+    if isinstance(prov, dict) and prov:
+        return prov
+    ancien = manifest.get("source")
+    return ancien if isinstance(ancien, dict) else {}
+
+
 def chemin_fichier(couche: dict[str, Any]) -> str | None:
     """Le chemin PVC de la couche, si c'est de là que viennent ses données.
 
