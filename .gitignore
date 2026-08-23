@@ -1,0 +1,24 @@
+# Le depot n'avait aucun .gitignore : chaque `git add -A` ramassait les
+# caches Python et les fichiers d'outillage local. Six .pyc s'etaient deja
+# glisses dans l'historique, ils sont desindexes avec ce commit.
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Node (blocknote-editor)
+node_modules/
+dist/
+
+# Outillage local, propre a la machine
+.wikichat/
+.claude/settings.local.json
+
+# Secrets et etats locaux
+.env
+*.local.yaml
+kubeconfig*
