@@ -182,6 +182,56 @@ silence, en repliant `ml.source?.table || ml.id` sur un nom de table imaginaire.
 Un consommateur doit pouvoir distinguer « je ne sais pas lire cette source » de
 « cette source n'était pas censée m'arriver ».
 
+## Les contrôles : une duplication que la bascule rend visible
+
+Nos blocs BlockNote ont été conçus avant Atlas, et ils placent le contrôle **à
+côté** de la carte : `timeline` et `legend` sont des composants frères qui la
+pilotent par un bus d'événements.
+
+```
+<geo-timeline>  ──  CustomEvent 'geo:bind' {prop:'time'}  ──▶  <geo-map>
+```
+
+Le contrat 0.2.2 place le contrôle **dans la scène** :
+
+| Contrat | Ce qu'il porte |
+|---|---|
+| `layer.controls[]` → `controlDeclarative` | `field`, `type`, `label`, `active`, `min`, `max`, `dataMin`, `dataMax`, `values`, `mode` |
+| `panelDeclarative` | `type`, `content`, `layout`, `layerId` |
+| `storyManifest` | le récit et ses étapes |
+
+Ce ne sont pas deux implémentations d'une même idée, mais deux **emplacements**
+du contrôle. Et la vérification tranche : le hub définit trois custom elements
+— `geo-map`, `geo-timeline`, `geo-legend` — dont **un seul implémente
+`applyBinding`**. Le commentaire du routeur le dit : « vers le composant carte
+target ». Le bus ne pilote donc **que des cartes**, jamais un graphique ni un
+tableau.
+
+Conséquence : quand Atlas rend la carte, `timeline` et `legend` comme
+composants séparés n'ont plus d'objet. Leur seule raison d'être était de piloter
+une carte qui ne savait pas se piloter elle-même.
+
+Le gain n'est pas qu'une brique en moins. Le bus traverse les iframes par
+`postMessage`, ce qui a imposé une liste blanche d'origines pour éviter qu'une
+iframe hostile pilote la carte d'à côté :
+
+```js
+if (!this._isAllowedOrigin(ev.origin)) { …rejeté… }
+```
+
+Un contrôle déclaré dans la scène n'a pas ce problème — il n'y a pas de message
+à valider. La surface d'attaque disparaît avec la mécanique.
+
+**Ce que cela demande au producteur** : écrire `layer.controls[]` au lieu de
+créer un composant `timeline` à côté. Le contrat prévoit déjà `dataMin`/
+`dataMax` — les bornes du contrôle s'y déclarent, sans que le client ait à
+parcourir les entités pour les trouver.
+
+**Ce que cela ne demande pas** : supprimer quoi que ce soit tout de suite. Des
+livrables publiés utilisent ces kinds ; ils doivent continuer de fonctionner.
+La bascule se fait par le producteur — les nouvelles scènes déclarent leurs
+contrôles, les anciennes gardent leurs composants frères.
+
 ## L'esprit qu'on préserve
 
 - **Un seul contrat par domaine.** Scene Manifest pour la carte, FormDef pour
