@@ -1,0 +1,272 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nic01asfr.github.io/Widgets-Grist/schemas/scene-manifest-0.2.2.schema.json",
+  "title": "Scene Manifest 0.2.2",
+  "description": "Contrat de scène cartographique, partagé entre producteurs (qgis2grist) et consommateurs (Atlas). Décrit ce qu'il faut dresser sur une carte à partir de tables Grist : couches, symbolisation déclarative, contrôles, récit. Ni le producteur ni le consommateur n'a besoin de connaître l'autre. Schéma dérivé de projects/qgis2grist/docs/SCENE-MANIFEST-v0.2.2.md et des fixtures attestées ; il décrit ce qui est réellement émis, non un idéal.",
+  "type": "object",
+  "required": ["version", "layers"],
+  "additionalProperties": true,
+
+  "properties": {
+    "version": {
+      "description": "0.2.1 = controls et story optionnels ; 0.2.2 = l'émetteur garantit controls[]. Un consommateur 0.2.1 ignore controls et story sans échouer.",
+      "enum": ["0.2.1", "0.2.2"]
+    },
+    "title": { "type": "string", "description": "Titre de la scène." },
+    "subtitle": { "type": "string" },
+    "classification": {
+      "type": "string",
+      "description": "Niveau de diffusion de la scène, tel que le producteur le déclare."
+    },
+    "meta": {
+      "type": "object",
+      "description": "Provenance et contexte. Champs libres selon le producteur.",
+      "additionalProperties": true
+    },
+    "layers": {
+      "type": "array",
+      "description": "Les couches, dans l'ordre d'empilement voulu.",
+      "items": { "$ref": "#/definitions/layer" }
+    },
+    "story": { "$ref": "#/definitions/storyManifest" },
+    "terrain": {
+      "type": "object",
+      "description": "Rattachement à la saisie de terrain : table principale et formulaires associés.",
+      "additionalProperties": true,
+      "properties": {
+        "version": { "type": "integer" },
+        "primaryTableId": { "type": ["string", "null"] },
+        "forms": { "type": "array", "items": { "type": ["string", "object"] } }
+      }
+    }
+  },
+
+  "definitions": {
+
+    "layer": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "name": {
+          "type": "string",
+          "description": "Nom de la table Grist qui porte la couche, ou identifiant stable."
+        },
+        "displayName": { "type": "string", "description": "Libellé affiché." },
+        "source": { "type": ["string", "object"], "description": "Origine de la donnée." },
+        "geometry_type": {
+          "description": "Nature géométrique. Deux orthographes circulent selon le producteur.",
+          "type": "string"
+        },
+        "geomType": { "type": "string", "description": "Variante de geometry_type." },
+        "profile": { "type": "string", "description": "Profil de rendu du producteur." },
+        "visibility": { "type": ["boolean", "string", "object"] },
+        "color": { "type": "string" },
+        "featureCount": { "type": "integer", "minimum": 0 },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": { "type": "string" },
+              "label": { "type": "string" },
+              "gType": { "type": "string", "description": "Type Grist de la colonne." }
+            }
+          }
+        },
+        "fetch": { "type": "object", "additionalProperties": true },
+        "limits": { "type": "object", "additionalProperties": true },
+        "style": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "declarative": { "$ref": "#/definitions/styleDeclarative" }
+          }
+        },
+        "controls": {
+          "type": "array",
+          "description": "Contrôles offerts sur cette couche. Optionnels en 0.2.1.",
+          "items": { "$ref": "#/definitions/controlDeclarative" }
+        }
+      }
+    },
+
+    "styleDeclarative": {
+      "description": "Symbolisation déclarée, non calculée : le consommateur applique, il ne décide pas.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "color"],
+          "additionalProperties": true,
+          "properties": {
+            "kind": { "const": "single" },
+            "color": { "type": "string" },
+            "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "field", "stops"],
+          "additionalProperties": true,
+          "properties": {
+            "kind": { "const": "categorized" },
+            "field": { "type": "string", "description": "Colonne qui porte la catégorie." },
+            "stops": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["value", "color"],
+                "additionalProperties": true,
+                "properties": {
+                  "value": { "type": ["string", "number", "boolean", "null"] },
+                  "label": { "type": "string" },
+                  "color": { "type": "string" },
+                  "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "field", "stops"],
+          "additionalProperties": true,
+          "properties": {
+            "kind": { "const": "graduated" },
+            "field": { "type": "string" },
+            "method": { "type": "string", "description": "Méthode de discrétisation, ex. linear." },
+            "stops": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["color"],
+                "additionalProperties": true,
+                "properties": {
+                  "lower": { "type": "number" },
+                  "upper": { "type": "number" },
+                  "color": { "type": "string" },
+                  "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "controlDeclarative": {
+      "type": "object",
+      "required": ["field", "type"],
+      "additionalProperties": true,
+      "properties": {
+        "field": { "type": "string", "description": "Colonne Grist visée (col.id)." },
+        "type": { "enum": ["range", "select", "time"] },
+        "label": { "type": "string", "description": "Libellé ; à défaut, le nom du champ." },
+        "active": {
+          "type": "boolean",
+          "default": false,
+          "description": "Faux à l'import : un contrôle proposé n'est pas un contrôle appliqué. Les préférences utilisateur priment sur cette valeur."
+        },
+        "min": { "type": "number", "description": "Borne basse. Epoch en millisecondes pour type time." },
+        "max": { "type": "number" },
+        "dataMin": { "type": "number", "description": "Borne observée dans la donnée — indication d'interface, pas une contrainte." },
+        "dataMax": { "type": "number" },
+        "values": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Valeurs autorisées, pour type select."
+        },
+        "mode": {
+          "enum": ["simulation"],
+          "description": "Extension : le contrôle pilote une simulation, non un filtre attributaire. À ne pas confondre avec un range ordinaire."
+        }
+      }
+    },
+
+    "storyManifest": {
+      "type": "object",
+      "required": ["steps"],
+      "additionalProperties": true,
+      "properties": {
+        "version": { "enum": ["0.2.1", "0.2.2"] },
+        "steps": { "type": "array", "items": { "$ref": "#/definitions/storyStep" } }
+      }
+    },
+
+    "storyStep": {
+      "type": "object",
+      "required": ["state"],
+      "additionalProperties": true,
+      "properties": {
+        "title": { "type": "string" },
+        "text": { "type": "string", "description": "Corps de l'étape, texte simple ou markdown." },
+        "panels": { "type": "array", "items": { "$ref": "#/definitions/panelDeclarative" } },
+        "state": { "$ref": "#/definitions/storyState" }
+      }
+    },
+
+    "storyState": {
+      "description": "L'état de la scène à cette étape. Il retient des intentions — un cadrage, des couches visibles, des filtres — et non un rendu figé : c'est ce qui permet à un récit de rester juste quand la donnée change.",
+      "type": "object",
+      "required": ["layers"],
+      "additionalProperties": true,
+      "properties": {
+        "camera": {
+          "type": "object",
+          "required": ["center"],
+          "additionalProperties": true,
+          "properties": {
+            "center": {
+              "type": "array",
+              "items": { "type": "number" },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "[longitude, latitude]."
+            },
+            "zoom": { "type": "number" },
+            "pitch": { "type": "number" },
+            "bearing": { "type": "number" }
+          }
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "projection": { "type": "string" },
+            "timeOfDay": { "type": "number", "description": "Heure du jour, pour l'ombre portée." },
+            "date": { "type": "string" }
+          }
+        },
+        "layers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": true,
+            "properties": {
+              "name": { "type": "string", "description": "Nom de couche ou identifiant de table." },
+              "visible": { "type": "boolean" },
+              "controls": { "type": "array", "items": { "$ref": "#/definitions/controlDeclarative" } },
+              "symbolization": { "type": "object", "additionalProperties": true },
+              "declarative": { "$ref": "#/definitions/styleDeclarative" }
+            }
+          }
+        }
+      }
+    },
+
+    "panelDeclarative": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "enum": ["title", "body", "legend", "layout"] },
+        "content": { "type": "string" },
+        "layout": { "enum": ["bottom-bar", "side-left", "side-right"] },
+        "layerId": { "type": "string", "description": "Couche visée, pour une légende." }
+      }
+    }
+  }
+}

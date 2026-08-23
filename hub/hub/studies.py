@@ -2333,6 +2333,11 @@ try:
     proj = QgsProject.instance()
     layers = list(proj.mapLayers().values())
     manifest = {{
+        # `version` est le champ du contrat publie (JSON Schema 0.2.2), le seul
+        # que les consommateurs externes exigent -- Atlas refusait nos scenes
+        # pour cette absence, et pour elle seule. `manifest_version` reste le
+        # temps que les 41 sites de lecture internes basculent.
+        "version": "0.2.2",
         "manifest_version": "V0.2",
         "manifest_id": str(uuid.uuid4()),
         "title": proj.title() or "Scene Manifest",
@@ -2383,6 +2388,10 @@ try:
             layer_entry = {{
                 "id": slug,
                 "name": name,
+                # L'ordre d'empilement etait porte par la seule position dans
+                # la liste. Le rendre explicite : un consommateur qui trie ou
+                # reordonne les couches ne peut pas le deviner autrement.
+                "order": i,
                 "geometry_type": ml_geom,
                 "visible": layer.isVisible() if hasattr(layer, "isVisible") else True,
                 "style": {{
