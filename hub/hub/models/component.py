@@ -69,6 +69,20 @@ class ComponentSource(BaseModel):
     """
     scope: Literal["project", "study", "external", "geomind"]
 
+    livraison: Literal["auto", "inline", "url", "tuiles", "vivant"] = Field(
+        "auto",
+        description=(
+            "Comment les données doivent parvenir au client. `scope` dit d'où "
+            "elles viennent, `livraison` dit sous quelle forme. "
+            "`inline` : dans le document — autoportant, figé, marche hors "
+            "ligne. `url` : un fichier publié à côté — livrable léger, donnée "
+            "remplaçable sans le régénérer. `tuiles` : idem en PMTiles, pour "
+            "le volume. `vivant` : aucune copie, la source est lue à "
+            "l'affichage (WMS, XYZ, WFS, table Grist). `auto` : le hub décide "
+            "selon la taille — comportement historique, défaut."
+        ),
+    )
+
     # scope=project|study
     sid: str | None = Field(
         None, description="Étude.id (12 hex)", pattern=r"^[0-9a-f]{12}$"

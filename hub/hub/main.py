@@ -3110,6 +3110,7 @@ async def _externalize_large_features(
     owner: str,
     audience: str = "cerema_internal",
     threshold_bytes: int = 500_000,
+    livraison: str = "auto",
 ) -> tuple[str, list[dict]]:
     """Externalise les layer.geojson via PMTiles (V0.4) ou geojson gzip (v1a).
 
@@ -3168,6 +3169,28 @@ async def _externalize_large_features(
     hub_base = (_HUB_URL or _SELF_URL or "").rstrip("/")
     modified = False
 
+    # Le mode de livraison, quand le composant l'a declare (contract 0.2).
+    # Jusqu'ici un seuil de 500 Ko decidait seul si les donnees partaient sur
+    # S3 -- or externaliser, c'est publier : une decision de diffusion prise
+    # par une heuristique de taille. Et le meme composant pouvait basculer de
+    # mode d'un rendu a l'autre, ce qui rendait le livrable non reproductible
+    # et obligeait tout consommateur a supporter les trois formes.
+    #
+    # `auto` reste le defaut et reproduit exactement le comportement
+    # historique : aucun composant existant ne change.
+    if livraison == "inline":
+        # Le livrable doit etre autoportant : on ne sort rien, quelle que
+        # soit la taille. Charge a l'auteur d'assumer le poids.
+        return map_layers_js, []
+    if livraison == "vivant":
+        # Aucune copie : la couche porte deja son origine (WMS, XYZ, WFS,
+        # table Grist) et le client la lit lui-meme.
+        return map_layers_js, []
+    if livraison in ("url", "tuiles"):
+        # Externalisation demandee explicitement : le seuil ne s'applique
+        # plus, meme une petite couche sort du document.
+        threshold_bytes = 0
+
     import re as _re
     import hashlib as _hl
     from hub import s3_publication as _s3
@@ -3184,7 +3207,9 @@ async def _externalize_large_features(
         n_features_source = len((gj.get("features") or []))
 
         # ── Niveau 1 : PMTiles (V0.4, comportement optimal) ─────────────
-        if _PMTILES_ENABLED:
+        # `url` demande explicitement un fichier, pas des tuiles : on saute
+        # ce niveau pour tomber sur le suivant.
+        if _PMTILES_ENABLED and livraison != "url":
             pmtiles_bytes = None
             pmt_meta = None
             # 1a. Encode geojson -> pmtiles bytes (peut echouer si lib
@@ -4348,14 +4373,17 @@ async def contrat_endpoint(fichier: str):
     """Un contrat, par son nom versionné — `component-0.1.schema.json`."""
     from hub import contracts
     # Un nom de fichier arrivant de l'extérieur ne sert jamais à composer un
-    # chemin : on le cherche parmi les contrats connus, et rien d'autre.
-    for nom, entree in contracts.CONTRATS.items():
-        if fichier == f"{nom}-{entree['version']}.schema.json":
-            return JSONResponse(
-                contracts.lire(nom),
-                headers={"Cache-Control": "public, max-age=3600"},
-            )
-    raise HTTPException(404, f"Contrat inconnu : {fichier}")
+    # chemin : on le cherche dans la table des versions servies, et rien
+    # d'autre. Les versions antérieures y figurent — une adresse publiée doit
+    # continuer de répondre, sinon la citer n'engageait à rien.
+    trouve = contracts.fichiers_servis().get(fichier)
+    if not trouve:
+        raise HTTPException(404, f"Contrat inconnu : {fichier}")
+    nom, version = trouve
+    return JSONResponse(
+        contracts.lire(nom, version),
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 # ── Schema introspection (méta-cognition agent IA P0) ────────────────────────
@@ -6836,12 +6864,16 @@ async def _build_interactive_map_ctx(
     _audience_for_features = comp_manifest.get(
         "classification", "cerema_internal",
     )
+    # Le mode declare par le composant (contract 0.2). Absent = `auto`, donc
+    # le comportement historique : le seuil de taille decide.
+    _livraison = (comp_manifest.get("source") or {}).get("livraison") or "auto"
     try:
         map_layers_js, _audit_urls = await _externalize_large_features(
             map_layers_js,
             cid=cid,
             owner=username,
             audience=_audience_for_features,
+            livraison=_livraison,
         )
         if _audit_urls:
             log.info(

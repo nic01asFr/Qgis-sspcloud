@@ -32,9 +32,18 @@ _DOSSIER = Path(__file__).parent / "schemas"
 BASE_PUBLIQUE = "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas"
 
 # Les contrats publiés, et le modèle dont chacun est tiré.
+#
+# `version` est la version courante — celle que le modèle Pydantic produit
+# aujourd'hui. `anciennes` liste les versions encore servies : une adresse
+# publiée doit continuer de répondre, sinon la citer n'engageait à rien. Leurs
+# fichiers restent figés dans `schemas/` et ne sont plus régénérés.
 CONTRATS: dict[str, dict[str, Any]] = {
     "component": {
-        "version": "0.1",
+        # 0.2 (2026-08-23) : ajout de `source.livraison`. Ajout rétrocompatible
+        # — un composant sans ce champ vaut `auto`, le comportement historique.
+        # 0.1 reste servi : son adresse a été communiquée, elle doit répondre.
+        "version": "0.2",
+        "anciennes": ["0.1"],
         "module": "hub.models.component",
         "classe": "Component",
         "resume": "Une brique de livrable : carte, graphique, tableau, "
@@ -44,12 +53,32 @@ CONTRATS: dict[str, dict[str, Any]] = {
     },
     "assembly": {
         "version": "0.1",
+        "anciennes": [],
         "module": "hub.models.assembly",
         "classe": "Assembly",
         "resume": "Un livrable : une mise en page de composants, avec sa "
                   "chaîne d'audit.",
     },
 }
+
+
+def versions_servies(nom: str) -> list[str]:
+    """Toutes les versions d'un contrat auxquelles on répond encore."""
+    e = CONTRATS[nom]
+    return [*e.get("anciennes", []), e["version"]]
+
+
+def fichiers_servis() -> dict[str, tuple[str, str]]:
+    """Nom de fichier -> (contrat, version), pour toutes les versions servies.
+
+    C'est la seule table que consulte la route publique : un nom reçu de
+    l'extérieur n'y sert jamais à composer un chemin.
+    """
+    return {
+        f"{nom}-{v}.schema.json": (nom, v)
+        for nom in CONTRATS
+        for v in versions_servies(nom)
+    }
 
 
 # Le contrat de la scène cartographique ne nous appartient pas : il fait
@@ -155,13 +184,33 @@ def generer(nom: str) -> dict[str, Any]:
     }
 
 
-def chemin(nom: str) -> Path:
-    return _DOSSIER / f"{nom}-{CONTRATS[nom]['version']}.schema.json"
+def chemin(nom: str, version: str | None = None) -> Path:
+    """Le fichier d'un contrat. Sans version : la version courante."""
+    v = version or CONTRATS[nom]["version"]
+    return _DOSSIER / f"{nom}-{v}.schema.json"
 
 
-def lire(nom: str) -> dict[str, Any]:
+def lire(nom: str, version: str | None = None) -> dict[str, Any]:
     """Le contrat tel qu'il est publié — la version figée, pas le modèle."""
-    return json.loads(chemin(nom).read_text(encoding="utf-8"))
+    return json.loads(chemin(nom, version).read_text(encoding="utf-8"))
+
+
+def _empreinte(nom: str, version: str) -> dict[str, Any]:
+    """L'empreinte du fichier servi, si on l'a déjà écrit.
+
+    Calculée sur les octets réellement servis, pas sur le modèle : c'est le
+    fichier qu'un consommateur télécharge, donc c'est lui qu'il doit pouvoir
+    vérifier. Une empreinte périmée rassure à tort — mieux vaut aucune.
+    """
+    import hashlib
+    p = chemin(nom, version)
+    if not p.exists():
+        return {}
+    octets = p.read_bytes()
+    return {
+        "empreinte": f"sha256:{hashlib.sha256(octets).hexdigest()[:16]}",
+        "octets": len(octets),
+    }
 
 
 def index() -> dict[str, Any]:
@@ -179,6 +228,19 @@ def index() -> dict[str, Any]:
                 "version": e["version"],
                 "description": e["resume"],
                 "url": f"{BASE_PUBLIQUE}/{nom}-{e['version']}.schema.json",
+                # Empreinte et taille, dans la forme que publie Widgets-Grist :
+                # comparer deux kilo-octets suffit à savoir si une copie est à
+                # jour, sans rapatrier le schéma entier — ce que personne ne
+                # fait. On s'aligne sur leur convention plutôt que d'en
+                # inventer une.
+                **_empreinte(nom, e["version"]),
+                # Les versions antérieures restent servies : une adresse
+                # publiée doit continuer de répondre.
+                **({"previous": [
+                    {"version": v,
+                     "url": f"{BASE_PUBLIQUE}/{nom}-{v}.schema.json"}
+                    for v in e.get("anciennes", [])
+                ]} if e.get("anciennes") else {}),
             }
             for nom, e in CONTRATS.items()
         ],
