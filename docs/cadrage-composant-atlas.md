@@ -150,6 +150,38 @@ celle du 0.3.2 convient telle quelle :
 Quatre des six sont déjà natifs à MapLibre. Le travail n'est pas de les
 implémenter, c'est de **ne plus les perdre**.
 
+## Trois classes de source, selon ce qui peut traverser
+
+Toutes les sources de l'atelier ne sont pas transposables en aval, et ce n'est
+pas affaire de prudence : certaines ne le peuvent **physiquement pas**.
+
+`postgres-cerema-postgresql` est un service **ClusterIP**, sans IP externe.
+QGIS, qui tourne dans le cluster, s'y connecte. Atlas, qui tourne dans le
+navigateur de l'utilisateur, ne le peut pas — même avec des identifiants
+valides. La base ne traverse pas.
+
+D'où une distinction à porter dans le contrat, parce que le producteur et le
+consommateur doivent en tirer des conséquences opposées :
+
+| Classe | Exemples | QGIS | Atlas | Ce que le producteur doit faire |
+|---|---|---|---|---|
+| **Atelier seulement** | PostGIS, GeoPackage local, fichier PVC | oui | **non** | matérialiser avant publication — tuiles, GeoJSON publié |
+| **Transposable telle quelle** | WMS, WMTS, XYZ, WFS publics | oui | oui | porter l'URL, ne rien copier |
+| **Transposable par délégation** | table Grist, service à auth client | oui | oui | porter la référence ; l'hôte fournit l'accès |
+
+La première classe justifie à elle seule la cascade d'externalisation existante :
+elle n'est pas une optimisation de poids, c'est **le seul moyen qu'une donnée
+d'atelier atteigne un navigateur**.
+
+La deuxième est celle qu'on perd aujourd'hui pour rien : un WMS public n'a
+aucune raison d'être copié, et il l'est — ou plutôt il est simplement oublié.
+
+Conséquence pratique : le manifest doit dire **de quelle classe** relève chaque
+couche. Sans cela, Atlas ne peut que tenter et échouer — ce qu'il fait déjà, en
+silence, en repliant `ml.source?.table || ml.id` sur un nom de table imaginaire.
+Un consommateur doit pouvoir distinguer « je ne sais pas lire cette source » de
+« cette source n'était pas censée m'arriver ».
+
 ## L'esprit qu'on préserve
 
 - **Un seul contrat par domaine.** Scene Manifest pour la carte, FormDef pour
