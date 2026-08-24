@@ -46,7 +46,11 @@ from fastapi.templating import Jinja2Templates
 from starlette.websockets import WebSocketDisconnect
 from pathlib import Path
 
-from hub import auth, scene_layers, sessions
+from hub import auth, sessions
+# Alias : une variable locale `scene_layers` (les couches d'une scene)
+# existe deja a deux endroits et masquait le module -- le rendu des cartes
+# echouait sur « 'list' object has no attribute 'origine_donnees' ».
+from hub import scene_layers as lecteur_couches
 try:
     from hub import profile_manager
     _PROFILES_AVAILABLE = True
@@ -5719,7 +5723,7 @@ async def component_source_layers_endpoint(
         # Le lecteur unique tolere les graphies des trois contrats qui ont
         # coexiste (cf. hub/scene_layers.py) : les manifests deja ecrits sur
         # PVC restent lisibles sans migration.
-        origine = scene_layers.origine_donnees(l)
+        origine = lecteur_couches.origine_donnees(l)
         try:
             features = []
             if origine and origine[0] == "inline":
@@ -5744,7 +5748,7 @@ async def component_source_layers_endpoint(
         result_layers.append({
             "id": lid,
             "name": l.get("name", lid),
-            "geometry_type": scene_layers.type_geometrie(l, "unknown"),
+            "geometry_type": lecteur_couches.type_geometrie(l, "unknown"),
             "n_features": l.get("n_features"),
             "properties_keys": properties_keys,
         })
@@ -6567,8 +6571,8 @@ async def _build_interactive_map_ctx(
                         continue
                     # Lecteur unique : accepte geojson_path, source.path,
                     # data_url et source.table (cf. hub/scene_layers.py).
-                    origine = scene_layers.origine_donnees(l)
-                    geojson_path = scene_layers.chemin_fichier(l)
+                    origine = lecteur_couches.origine_donnees(l)
+                    geojson_path = lecteur_couches.chemin_fichier(l)
                     geojson = origine[1] if origine and origine[0] == "inline" else None
                     if not geojson and geojson_path:
                         try:
@@ -6598,7 +6602,7 @@ async def _build_interactive_map_ctx(
                             "name": override.get("name_override") or l.get("name", lid),
                             "geojson": geojson,
                             "style": l.get("style", {}),
-                            "geometry_type": scene_layers.type_geometrie(l, "polygon"),
+                            "geometry_type": lecteur_couches.type_geometrie(l, "polygon"),
                             "n_features": l.get("n_features", 0),
                             # V1.13 P0b-1 : opacity propagee au paint MapLibre
                             "opacity": float(override.get("opacity", 1.0)) if override else 1.0,
