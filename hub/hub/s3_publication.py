@@ -540,6 +540,28 @@ def read_range(
         return None
 
 
+def _metadata_insensible_casse(brut: dict) -> dict:
+    """Les métadonnées S3, lisibles quelle que soit la casse des clés.
+
+    MinIO les traite comme des en-têtes HTTP et les rend capitalisées :
+    `audience` écrit revient en `Audience`. Un appelant qui lit la clé qu'il a
+    posée ne la retrouve donc pas -- et si cette clé commande un contrôle
+    d'accès, l'absence est interprétée comme un refus.
+
+    On conserve les clés d'origine et on ajoute leur version minuscule : rien
+    ne casse pour qui inspecte le dictionnaire, et `.get("audience")`
+    fonctionne enfin.
+    """
+    if not isinstance(brut, dict):
+        return {}
+    sortie = dict(brut)
+    for cle, valeur in brut.items():
+        minuscule = cle.lower()
+        if minuscule not in sortie:
+            sortie[minuscule] = valeur
+    return sortie
+
+
 def head(owner: str, kind: str, slug: str) -> dict | None:
     """Métadonnées d'une publication sans télécharger le body."""
     client, bucket, endpoint = _get_s3_client(owner)
@@ -552,7 +574,14 @@ def head(owner: str, kind: str, slug: str) -> dict | None:
             "size":         h["ContentLength"],
             "content_type": h.get("ContentType", ""),
             "last_modified": int(h["LastModified"].timestamp()),
-            "metadata":     h.get("Metadata", {}),
+            # Les clés de métadonnées reviennent capitalisées : nous écrivons
+            # `audience`, S3 rend `Audience`. Il les traite comme des en-têtes
+            # HTTP, où la casse ne signifie rien. Les appelants, eux, lisaient
+            # `audience` en minuscules et ne trouvaient rien -- donc toute
+            # publication déclarée publique retombait sur le défaut restrictif
+            # et répondait 401. On rend les deux graphies : celle d'origine,
+            # pour qui inspecte, et la minuscule, pour qui interroge.
+            "metadata":     _metadata_insensible_casse(h.get("Metadata", {})),
         }
     except Exception:
         return None
