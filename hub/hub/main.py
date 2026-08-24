@@ -4380,8 +4380,15 @@ async def contrat_endpoint(fichier: str):
     if not trouve:
         raise HTTPException(404, f"Contrat inconnu : {fichier}")
     nom, version = trouve
-    return JSONResponse(
-        contracts.lire(nom, version),
+    # Les octets du fichier, tels quels -- pas une resserialisation.
+    # `JSONResponse` produirait du JSON compact la ou le fichier est indente :
+    # meme contenu, octets differents, donc empreinte differente de celle que
+    # l'index annonce. Un consommateur qui verifie sa copie echouerait
+    # toujours, et une empreinte fausse rassure plus surement que pas
+    # d'empreinte du tout.
+    return Response(
+        content=contracts.chemin(nom, version).read_bytes(),
+        media_type="application/schema+json",
         headers={"Cache-Control": "public, max-age=3600"},
     )
 

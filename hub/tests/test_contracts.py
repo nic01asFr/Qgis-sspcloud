@@ -165,6 +165,29 @@ class TestValidationDesScenes:
         assert "jsonschema" not in src or "sans dépendance" in src
 
 
+def test_le_contrat_est_servi_octet_pour_octet():
+    """L'empreinte de l'index porte sur le FICHIER : il faut donc servir le
+    fichier, pas une reserialisation.
+
+    Constate en production le 2026-08-24 : `JSONResponse` rendait du JSON
+    compact la ou le fichier est indente. Meme contenu, 7178 octets au lieu de
+    11525 -- donc empreinte differente de celle annoncee. Un consommateur qui
+    verifiait sa copie aurait echoue a chaque fois, et une empreinte fausse
+    rassure plus surement que pas d'empreinte du tout.
+    """
+    import inspect
+
+    import hub.main as main
+    src = inspect.getsource(main.contrat_endpoint)
+    # On regarde ce qui est EXECUTE, pas les commentaires : le mot y figure,
+    # puisqu'ils expliquent justement pourquoi on ne s'en sert pas.
+    code = "\n".join(
+        l for l in src.splitlines() if not l.lstrip().startswith("#")
+    )
+    assert "read_bytes()" in code, "le contrat n'est pas servi depuis le fichier"
+    assert "JSONResponse" not in code, "une reserialisation casserait l'empreinte"
+
+
 def test_les_fichiers_publies_sont_du_json_lisible():
     """Ils sont servis tels quels : une virgule de trop et le contrat est mort."""
     for nom in contracts.CONTRATS:
