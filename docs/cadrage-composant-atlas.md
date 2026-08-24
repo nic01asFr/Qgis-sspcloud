@@ -244,9 +244,28 @@ contrôles, les anciennes gardent leurs composants frères.
 
 ## Ce qui reste ouvert
 
-- **L'adresse.** Nos contrats sont servis par une instance SSPCloud
-  (`user-nic01asfr-qgis…`), pas un domaine stable comme les GitHub Pages de
-  Widgets-Grist. Pour un contrat durable de l'écosystème, il faudra trancher.
+- **L'adresse — et la réserve s'est réalisée en vingt-quatre heures.** Nos
+  contrats étaient servis par une instance SSPCloud (`user-nic01asfr-qgis…`),
+  pas un domaine stable. Le hub a été supprimé dans la nuit du 23 au 24 août ;
+  `/schemas/index.json` et `/schemas/component-0.1.schema.json` renvoient 404,
+  quand ceux de Widgets-Grist répondent toujours 200.
+
+  La formule est de l'agent Atlas, après vérification : **« un contrat servi
+  depuis un service utilisateur n'est pas publié, il est exposé. La différence
+  ne se voit que le jour où le service disparaît. »**
+
+  Le point n'est pas la disparition mais que **personne ne l'ait décidée**. Une
+  adresse retirée est une promesse reprise ; celle-ci l'a été par accident — le
+  cas exact contre lequel un contrat existe. GitHub Pages n'est pas plus
+  vertueux en soi, seulement plus difficile à supprimer par mégarde.
+
+  Règle qui en découle : avant de communiquer l'adresse d'un contrat, se
+  demander qui peut la faire disparaître et par quel geste. Si la réponse
+  inclut « un clic dans une interface de gestion de services », ce n'est pas
+  une adresse de contrat. Trois voies à arbitrer — publier sur des Pages,
+  servir depuis une infrastructure qui n'est pas un service utilisateur, ou
+  assumer que les schémas restent internes et cesser de les donner comme
+  référence.
 - **Le volume, même tuilé.** `DEFER_FEATURE_THRESHOLD` (8000 entités) ne
   s'applique chez Atlas que si la couche est **déjà masquée** — une couche
   visible et lourde est chargée intégralement. Les tuiles atténuent, elles ne
