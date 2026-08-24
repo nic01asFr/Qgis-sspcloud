@@ -2581,24 +2581,55 @@ try:
                                 from qgis.PyQt.QtCore import QDateTime as _QDateTime
                             except Exception:
                                 _QDate = None
+                            # Le NULL de QGIS : un QVariant vide, que Python ne
+                            # reconnait ni comme None ni comme un type de base.
+                            try:
+                                from qgis.core import NULL as _NULL
+                            except Exception:
+                                _NULL = None
                                 _QDateTime = None
                             props = {{}}
                             for k in feat.fields().names():
                                 v = feat[k]
+                                # Une valeur absente est ABSENTE du dictionnaire.
+                                # Jamais la chaine "NULL", jamais null : les deux
+                                # se lisent comme des valeurs. Un NULL QGIS n'est
+                                # ni None ni un type Python de base -- il tombait
+                                # dans str(v) et sortait « NULL », qu'un
+                                # consommateur peignait comme la classe la plus
+                                # basse. Une donnee absente deguisee en mesure :
+                                # la carte s'affiche, complete, coloree, fausse.
+                                # Releve par l'agent Atlas sur notre 400e batiment.
                                 if v is None:
                                     continue
+                                if _NULL is not None:
+                                    try:
+                                        if v == _NULL:
+                                            continue
+                                    except Exception:
+                                        pass
                                 if isinstance(v, (bytes, bytearray)):
                                     continue
                                 if _QDate is not None and isinstance(v, _QDate):
-                                    props[k] = v.year() if v.isValid() else None
+                                    # Une date invalide est absente, elle aussi :
+                                    # ecrire None produisait un `null` en JSON.
+                                    if v.isValid():
+                                        props[k] = v.year()
                                     continue
                                 if _QDateTime is not None and isinstance(v, _QDateTime):
-                                    props[k] = v.date().year() if v.isValid() else None
+                                    if v.isValid():
+                                        props[k] = v.date().year()
                                     continue
                                 if isinstance(v, (int, float, str, bool)):
                                     props[k] = v
                                 else:
-                                    props[k] = str(v)
+                                    # Dernier recours : un type que nous ne
+                                    # connaissons pas. `str()` d'un QVariant vide
+                                    # rend « NULL » -- on l'omet plutot que de le
+                                    # laisser passer pour une valeur.
+                                    _t = str(v)
+                                    if _t not in ("NULL", "None", ""):
+                                        props[k] = _t
                             features.append({{
                                 "type": "Feature",
                                 "geometry": geom_dict,
