@@ -9577,6 +9577,26 @@ async def _serve_published_audience_gate(
     )
 
 
+@app.options("/published/{owner}/{slug}")
+@app.options("/published/{owner}/{kind}/{slug}")
+async def publication_preflight(owner: str, slug: str, kind: str = "livrable"):
+    """Le contrôle préalable qu'un navigateur envoie avant une requête à plages.
+
+    Sans réponse à ce OPTIONS, il n'envoie jamais le GET : les tuiles PMTiles
+    resteraient inaccessibles depuis une page, quelle que soit l'audience.
+
+    On ne divulgue rien ici — ni existence, ni audience. La réponse dit
+    seulement ce qu'un appel serait autorisé à faire ; c'est le GET qui décide
+    ensuite s'il répond.
+    """
+    return Response(status_code=204, headers={
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers": "Range, If-Match, If-None-Match",
+        "Access-Control-Max-Age": "3600",
+    })
+
+
 @app.get("/published/{owner}/{slug}")
 @app.get("/published/{owner}/{kind}/{slug}")
 async def serve_published(
@@ -9671,6 +9691,15 @@ async def serve_published(
             }
             if _audience != "public":
                 headers_206["X-Robots-Tag"] = "noindex, nofollow"
+            else:
+                # Meme raison qu'en 200 : sans ces en-tetes, le navigateur
+                # jette une reponse pourtant valide. Les tuiles PMTiles se
+                # lisent exclusivement par plages, donc c'est ici que le
+                # manque se voit en premier.
+                headers_206["Access-Control-Allow-Origin"] = "*"
+                headers_206["Access-Control-Expose-Headers"] = (
+                    "Content-Length, Content-Range, Accept-Ranges"
+                )
             return Response(
                 content=range_result["body"],
                 status_code=206,
@@ -9753,6 +9782,26 @@ async def serve_published(
     # audience. Empeche indexation Google/Bing des livrables non-publics.
     if _audience != "public":
         headers["X-Robots-Tag"] = "noindex, nofollow"
+    else:
+        # Une publication publique doit etre lisible par un navigateur, pas
+        # seulement par curl. Sans cet en-tete la reponse est un 200 que le
+        # navigateur jette : MapLibre rendait « AJAXError: Failed to fetch »
+        # sur une URL parfaitement servie. Le serveur ne refusait rien, il
+        # oubliait d'autoriser -- et rien dans la reponse ne disait qu'elle
+        # etait inutilisable. Releve par l'agent Atlas le 2026-08-24.
+        #
+        # `*` se justifie ici et seulement ici : l'objet est deja accessible
+        # a quiconque connait l'URL, l'en-tete ne donne donc aucun acces
+        # supplementaire. Les autres audiences n'en recoivent pas -- pour
+        # elles, la lecture passe par une identite, qu'une origine tierce
+        # n'a pas a emprunter.
+        headers["Access-Control-Allow-Origin"] = "*"
+        headers["Access-Control-Expose-Headers"] = "Content-Length, Content-Range, Accept-Ranges"
+        # Les tuiles PMTiles se lisent par plages : sans cet en-tete, le
+        # navigateur refuse la requete Range avant meme de l'envoyer.
+        if kind == "features_pmtiles":
+            headers["Access-Control-Allow-Headers"] = "Range"
+            headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
     # Sprint sec-vague0 dette OOM PMTiles V0.4 (2026-07-21) : pour kind
     # features_pmtiles servi sans Range, on annonce Accept-Ranges et Cache
     # immuable (URL avec content-hash -> jamais modifie).
