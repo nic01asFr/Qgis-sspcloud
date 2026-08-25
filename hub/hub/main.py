@@ -3108,6 +3108,85 @@ async def _execute_python_in_workspace(owner: str, code: str, timeout: int = 30)
         return text
 
 
+def _publier_scene_rendue(
+    cid: str, owner: str, titre: str, map_layers_js: str,
+    audience: str = "cerema_internal",
+) -> str | None:
+    """Publie la scène résolue, celle qu'un runtime tiers peut réellement lire.
+
+    Le Scene Manifest d'origine ne convient pas pour cela : il vit derrière
+    authentification et ses couches portent des chemins PVC. Celui-ci est pris
+    après externalisation, donc ses couches portent des URL — il est
+    autoportant, et c'est lui qu'on passe à un moteur externe.
+
+    Best-effort : un échec ne doit pas empêcher le rendu de la page. Sans la
+    scène publiée on perd l'intégration tierce, pas l'affichage.
+    """
+    try:
+        import json as _j
+
+        from hub import contracts as _c
+        from hub import s3_publication as _s3p
+
+        couches = _j.loads(map_layers_js)
+        if not isinstance(couches, list) or not couches:
+            return None
+        scene = {
+            "version": "0.2.2",
+            "title": titre or "Scène",
+            "provenance": {"producer": "qgis-sspcloud/hub", "component_id": cid},
+            "layers": couches,
+        }
+        ecarts = _c.valider_scene(scene)
+        if ecarts:
+            # On publie quand même — une scène imparfaite reste plus utile
+            # qu'aucune — mais on le dit, sinon le consommateur découvrira
+            # l'écart sans savoir qu'on le connaissait.
+            log.warning("scene publiee non conforme (%s) : %s", cid, " | ".join(ecarts))
+        info = _s3p.publish(
+            owner=owner, kind="scene", slug=f"{cid}-scene",
+            content=_j.dumps(scene, ensure_ascii=False).encode("utf-8"),
+            content_type="application/json; charset=utf-8",
+            audience=audience,
+        )
+        url = info.get("url")
+        log.info("scene publiee %s : %s", cid, url)
+        return url
+    except Exception as exc:
+        log.warning("publication de la scene %s : %s", cid, exc)
+        return None
+
+
+def _reclasser_apres_publication(layer: dict, url: str) -> None:
+    """Une couche qu'on vient de publier n'est plus une couche d'atelier.
+
+    Sans cela, la scène rendue continue d'annoncer
+    `source: {type: "fichier", classe: "atelier"}` — « rien ici n'est
+    atteignable depuis un navigateur » — alors que la donnée est en ligne et
+    lisible. Un consommateur qui applique la règle refuse la couche **avant
+    d'essayer**, et rapporte un défaut du producteur. Faux, et faux avec
+    assurance : c'est pire qu'un silence, puisque le diagnostic est affirmatif.
+
+    Relevé par l'agent Atlas le 2026-08-25, qui en fait un visage de plus dans
+    notre collection : **une déclaration qui a cessé d'être vraie**. Les autres
+    trompaient par omission ; celle-ci trompe parce qu'elle a été juste.
+
+    La classe décrit un état, pas une nature. Publier change l'état, donc la
+    classe doit suivre — c'est le seul endroit qui sait que ça vient d'arriver.
+    """
+    src = layer.get("source")
+    if not isinstance(src, dict):
+        layer["source"] = {"type": "geojson_url", "classe": "externe", "url": url}
+        return
+    if src.get("classe") == "atelier":
+        # On garde la provenance d'origine : savoir qu'elle vient d'un fichier
+        # d'atelier reste utile pour l'audit, mais elle ne dit plus où lire.
+        src["materialise_depuis"] = src.get("type")
+    src["type"] = "geojson_url"
+    src["classe"] = "externe"
+    src["url"] = url
+
+
 async def _externalize_large_features(
     map_layers_js: str,
     cid: str,
@@ -3285,6 +3364,13 @@ async def _externalize_large_features(
                     layer["bbox"] = pmt_meta["bbox"]
                     layer["min_zoom"] = pmt_meta["min_zoom"]
                     layer["max_zoom"] = pmt_meta["max_zoom"]
+                    # Meme raison qu'en geojson : une couche tuilee est en
+                    # ligne, elle ne doit plus se declarer d'atelier.
+                    _reclasser_apres_publication(layer, url)
+                    if isinstance(layer.get("source"), dict):
+                        layer["source"]["type"] = "pmtiles"
+                        layer["source"]["min_zoom"] = pmt_meta["min_zoom"]
+                        layer["source"]["max_zoom"] = pmt_meta["max_zoom"]
                     audit_data_urls.append({
                         "cid": cid,
                         "layer_id": layer_id,
@@ -3343,6 +3429,7 @@ async def _externalize_large_features(
             if isinstance(layer.get("source"), dict):
                 layer["source"].pop("data", None)
                 layer["source"].pop("geojson", None)
+            _reclasser_apres_publication(layer, url)
             audit_data_urls.append({
                 "cid": cid,
                 "layer_id": layer_id,
@@ -6896,6 +6983,14 @@ async def _build_interactive_map_ctx(
                     for u in _audit_urls
                 ],
             )
+        # La scene telle qu'elle est rendue, publiee a son tour. Le manifest
+        # d'origine vit derriere authentification et porte des chemins PVC :
+        # un runtime tiers ne peut ni le lire ni s'en servir. Celui-ci porte les
+        # URL, il est donc autoportant -- c'est lui qu'on passe a `?scene=`.
+        _publier_scene_rendue(
+            cid=cid, owner=username, titre=comp_manifest.get("title") or "",
+            map_layers_js=map_layers_js, audience=_audience_for_features,
+        )
     except Exception as exc:
         log.warning("externalize features %s : %s -> keep inline", cid, exc)
 

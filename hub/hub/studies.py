@@ -2431,10 +2431,39 @@ try:
             # QGIS range les tuiles XYZ sous le fournisseur wms : c'est le
             # champ `type` de la datasource qui les distingue.
             if params.get("type") == "xyz":
-                return {{"type": "xyz", "classe": "externe",
-                        "url": params.get("url", "")}}
+                # Les bornes de zoom sont indispensables, pas decoratives : sans
+                # elles un moteur de rendu reclame des tuiles qui n'existent pas,
+                # en boucle, et la carte n'atteint jamais son etat stable -- tout
+                # ce qui l'attend reste suspendu. Ce n'est pas une erreur de
+                # tuile, c'est un etat qui n'arrive plus.
+                # QGIS les porte sous `zmin`/`zmax`. Mesure par l'agent Atlas sur
+                # tile.openstreetmap.org, qui ne sert pas au-dela de z19.
+                sortie = {{"type": "xyz", "classe": "externe",
+                          "url": params.get("url", "")}}
+                for cle, dest in (("zmin", "min_zoom"), ("zmax", "max_zoom")):
+                    try:
+                        if params.get(cle) not in (None, ""):
+                            sortie[dest] = int(params[cle])
+                    except Exception:
+                        pass
+                # Defaut prudent quand QGIS ne dit rien : mieux vaut une borne
+                # un peu basse qu'une boucle. 19 est la limite de la plupart des
+                # services de tuiles raster.
+                sortie.setdefault("min_zoom", 0)
+                sortie.setdefault("max_zoom", 19)
+                return sortie
             sortie = {{"type": params.get("tileMatrixSet") and "wmts" or "wms",
                       "classe": "externe", "url": params.get("url", "")}}
+            if params.get("tileMatrixSet"):
+                # Un WMTS pyramide comme un XYZ : meme risque de boucle.
+                for cle, dest in (("zmin", "min_zoom"), ("zmax", "max_zoom")):
+                    try:
+                        if params.get(cle) not in (None, ""):
+                            sortie[dest] = int(params[cle])
+                    except Exception:
+                        pass
+                sortie.setdefault("min_zoom", 0)
+                sortie.setdefault("max_zoom", 19)
             for cle in ("layers", "format", "crs", "styles", "tileMatrixSet"):
                 if params.get(cle):
                     sortie[cle] = params[cle]
