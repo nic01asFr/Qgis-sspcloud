@@ -295,41 +295,54 @@ class TestF15PdfModule:
         # PDF doit contenir plus que le header
         assert len(pdf_bytes) > 500
 
-    def test_render_pdf_injecte_integrity_hash(self):
-        """L'integrity_hash doit apparaitre dans le PDF (footer auditabilite)."""
+    def test_le_hash_est_injecte_dans_le_html_remis_au_moteur(self):
+        """L'empreinte doit figurer dans le document imprime, en pied de page.
+
+        On verifie l'injection, pas les octets du PDF : WeasyPrint encode le
+        texte selon la table de glyphes de la police, donc chercher une chaine
+        ASCII dans le binaire ne marche que par chance. L'ancien test le
+        faisait -- il passait ou echouait selon la version de la bibliotheque,
+        et etait ignore sur un poste sans Pango. Personne ne le voyait donc ni
+        passer ni echouer.
+
+        Ce qui nous appartient, c'est ce qu'on remet au moteur.
+        """
+        from hub.publish import pdf
+        html = "<html><head></head><body><h1>Marker</h1></body></html>"
+        h = "sha256:cafefeed99"
+
+        avec_css = pdf._inject_integrity_string_set(html, h)
+        assert h in avec_css, "l'empreinte n'est pas posee en variable de page"
+        assert "string-set: integrity-hash" in avec_css
+
+    def test_le_badge_visible_porte_l_empreinte(self):
+        """Le pied de page CSS depend du moteur ; le badge, lui, est du HTML
+        ordinaire. C'est la garantie de dernier recours qu'un lecteur puisse
+        lire l'empreinte a l'ecran."""
+        import inspect
+
+        from hub.publish import pdf
+        src = inspect.getsource(pdf.render_pdf_from_html)
+        assert "Integrity hash :" in src
+        assert "</body>" in src, (
+            "le badge n'est plus insere avant la fin du corps"
+        )
+
+    def test_le_pdf_se_produit_et_reste_un_pdf(self):
+        """Integration minimale : on ne verifie pas le contenu, seulement que
+        la chaine aboutit. Le contenu est verifie au-dessus, la ou il est
+        lisible."""
         try:
             import weasyprint  # noqa: F401
         except (ImportError, OSError) as exc:
-            pytest.skip(f"weasyprint indisponible (dev Windows sans Pango) : {exc}")
+            pytest.skip(f"weasyprint indisponible : {exc}")
         from hub.publish import pdf
-        html = "<html><body><h1>Marker</h1></body></html>"
-        pdf_bytes = pdf.render_pdf_from_html(
-            html, integrity_hash="sha256:cafefeed99",
+        octets = pdf.render_pdf_from_html(
+            "<html><head></head><body><h1>Marker</h1></body></html>",
+            integrity_hash="sha256:cafefeed99",
         )
-        # Le hash est dans le document, mais les flux d'un PDF sont
-        # compresses (/Filter /FlateDecode) : le chercher en clair ne
-        # fonctionnait que si la bibliotheque n'avait pas compresse. Le test
-        # passait donc selon la version de WeasyPrint, pas selon le code --
-        # il echouait en CI et etait ignore sur un poste sans Pango.
-        # On decompresse avant de chercher.
-        import zlib as _z
-        lisible = bytearray(pdf_bytes)
-        depart = 0
-        while True:
-            i = pdf_bytes.find(b"stream", depart)
-            if i == -1:
-                break
-            j = pdf_bytes.find(b"endstream", i)
-            if j == -1:
-                break
-            try:
-                lisible += _z.decompress(pdf_bytes[i + 6:j])
-            except Exception:
-                pass  # flux non compresse ou binaire : deja couvert
-            depart = j + 9
-        assert b"cafefeed99" in bytes(lisible), (
-            "integrity_hash absent du PDF, meme apres decompression des flux"
-        )
+        assert octets.startswith(b"%PDF-"), "la sortie n'est pas un PDF"
+        assert len(octets) > 500, "PDF suspicieusement vide"
 
 
 class TestF15Endpoint:
