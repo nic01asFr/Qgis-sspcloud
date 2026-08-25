@@ -281,9 +281,27 @@ class AuditChain(BaseModel):
     # ── Méthodes ──────────────────────────────────────────────────────────────
 
     def canonical_dict(self) -> dict[str, Any]:
-        """Sérialisation canonique pour integrity_hash. Exclut integrity_hash
-        lui-même (sinon référence circulaire)."""
-        return self.model_dump(mode="json", exclude={"integrity_hash"})
+        """Sérialisation canonique pour integrity_hash.
+
+        Exclut `integrity_hash` lui-même — référence circulaire — et
+        `created_at`, qui est renseigné à l'instanciation.
+
+        Sans cette seconde exclusion, deux chaînes au contenu identique
+        produisaient des empreintes différentes : l'empreinte attestait
+        l'instant du calcul, pas ce qu'on prétend sceller. Un contrôle
+        d'intégrité devenait impossible, puisque recalculer donnait toujours
+        autre chose. Le défaut ne se voyait pas sur une horloge grossière —
+        deux créations tombaient dans la même graduation — et sortait sur une
+        machine plus rapide.
+
+        Même principe que le `scene_hash`, qui écarte déjà ses parties
+        volatiles : une empreinte porte sur ce qui est atteste, et la date de
+        création n'en fait pas partie. Elle reste dans l'objet, simplement hors
+        du calcul.
+        """
+        return self.model_dump(
+            mode="json", exclude={"integrity_hash", "created_at"},
+        )
 
     def compute_integrity_hash(self) -> str:
         """SHA256 canonique de l'audit_chain (D-FORMAT-008 rename)."""

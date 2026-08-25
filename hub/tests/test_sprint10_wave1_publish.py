@@ -306,10 +306,29 @@ class TestF15PdfModule:
         pdf_bytes = pdf.render_pdf_from_html(
             html, integrity_hash="sha256:cafefeed99",
         )
-        # Le hash doit etre embarque en clair quelque part dans le PDF
-        # (le PDF binaire contient les strings des elements text)
-        assert b"cafefeed99" in pdf_bytes, (
-            "integrity_hash non trouve dans PDF"
+        # Le hash est dans le document, mais les flux d'un PDF sont
+        # compresses (/Filter /FlateDecode) : le chercher en clair ne
+        # fonctionnait que si la bibliotheque n'avait pas compresse. Le test
+        # passait donc selon la version de WeasyPrint, pas selon le code --
+        # il echouait en CI et etait ignore sur un poste sans Pango.
+        # On decompresse avant de chercher.
+        import zlib as _z
+        lisible = bytearray(pdf_bytes)
+        depart = 0
+        while True:
+            i = pdf_bytes.find(b"stream", depart)
+            if i == -1:
+                break
+            j = pdf_bytes.find(b"endstream", i)
+            if j == -1:
+                break
+            try:
+                lisible += _z.decompress(pdf_bytes[i + 6:j])
+            except Exception:
+                pass  # flux non compresse ou binaire : deja couvert
+            depart = j + 9
+        assert b"cafefeed99" in bytes(lisible), (
+            "integrity_hash absent du PDF, meme apres decompression des flux"
         )
 
 
