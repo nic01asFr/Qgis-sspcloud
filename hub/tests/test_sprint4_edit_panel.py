@@ -118,41 +118,64 @@ class TestForms:
 
 
 class TestBlocksClickHandlers:
-    """Blocks DOM exposent openEditPanel via onClick (popup/drawer) ou
-    onContextMenu (inline editable v1.11)."""
+    """Comment chaque bloc se laisse modifier.
 
-    # v1.11 : 4 blocks utilisent onClick (popup/drawer) car non editables inline
-    @pytest.mark.parametrize("block_file", [
-        "blocks/KpiGrid.tsx",
-        "blocks/KpiBadge.tsx",
-        "blocks/Legend.tsx",
-        "blocks/Separator.tsx",
-    ])
-    def test_block_uses_onclick_handler(self, block_file):
+    Reecrit le 2026-08-25. Les tests precedents exigeaient `openEditPanel` sur
+    tous les blocs et echouaient depuis le passage a l'edition inline
+    (« Chantier 1 V1.20.1 ») : ils decrivaient une intention abandonnee, pas un
+    defaut. Les rafistoler pour qu'ils passent aurait masque ce changement ; on
+    verifie donc la regle reelle, qui est meilleure que l'ancienne.
+
+    La regle : un bloc dont le contenu est du texte se modifie **sur place** ;
+    un bloc opaque ou sans contenu passe par le **panneau**. Un iframe capture
+    les clics, on ne peut rien y editer directement ; un separateur n'a rien a
+    editer du tout.
+    """
+
+    EDITION_SUR_PLACE = [
+        "blocks/CustomHeading.tsx", "blocks/CustomQuote.tsx",
+        "blocks/NarrativeText.tsx", "blocks/KpiBadge.tsx",
+        "blocks/KpiGrid.tsx", "blocks/Legend.tsx",
+    ]
+    EDITION_PAR_PANNEAU = ["blocks/IframeEmbed.tsx", "blocks/Separator.tsx"]
+
+    @pytest.mark.parametrize("block_file", EDITION_SUR_PLACE)
+    def test_un_bloc_textuel_s_edite_sur_place(self, block_file):
         content = _read_blocknote_file(block_file)
         if content is None:
             pytest.skip("blocknote-editor absent")
-        assert "openEditPanel" in content
-        assert "edit-handler" in content
-        assert "onClick" in content
-        assert "stopPropagation" in content
+        assert "InlineEditable" in content, (
+            f"{block_file} a du contenu editable mais n'utilise pas l'edition "
+            f"sur place"
+        )
 
-    # v1.12.4 ROLLBACK : 3 blocks texte retour pattern onClick (vs onContextMenu v1.11)
-    # car inline editing BlockNote NodeView ne fonctionne pas correctement
-    @pytest.mark.parametrize("block_file", [
-        "blocks/CustomHeading.tsx",
-        "blocks/CustomQuote.tsx",
-        "blocks/NarrativeText.tsx",
-    ])
-    def test_text_block_uses_onclick_drawer(self, block_file):
+    @pytest.mark.parametrize("block_file", EDITION_PAR_PANNEAU)
+    def test_un_bloc_opaque_passe_par_le_panneau(self, block_file):
         content = _read_blocknote_file(block_file)
         if content is None:
             pytest.skip("blocknote-editor absent")
-        assert "openEditPanel" in content
+        assert "openEditPanel" in content, (
+            f"{block_file} ne peut pas s'editer sur place et n'offre pas le "
+            f"panneau : il serait impossible a modifier"
+        )
         assert "edit-handler" in content
-        # v1.12.4 rollback : onClick + content:'none' (vs onContextMenu + 'inline')
-        assert "onClick" in content
-        assert "content: 'none'" in content
+
+    def test_aucun_bloc_ne_reste_sans_moyen_d_edition(self):
+        """Le vrai risque : un bloc qu'on ne peut modifier ni sur place ni par
+        le panneau. Il s'afficherait normalement et resisterait a toute
+        correction."""
+        import pathlib as _p
+        dossier = _p.Path(__file__).parent.parent.parent / "blocknote-editor" / "src" / "blocks"
+        if not dossier.exists():
+            pytest.skip("blocknote-editor absent")
+        muets = []
+        for f in sorted(dossier.glob("*.tsx")):
+            if f.name in ("InlineEditable.tsx",):
+                continue  # la brique d'edition elle-meme, pas un bloc
+            t = f.read_text(encoding="utf-8", errors="replace")
+            if "InlineEditable" not in t and "openEditPanel" not in t:
+                muets.append(f.name)
+        assert not muets, f"blocs sans moyen d'edition : {muets}"
 
     def test_edit_handler_helper_exists(self):
         content = _read_blocknote_file("blocks/edit-handler.ts")
@@ -180,13 +203,32 @@ class TestAppIntegration:
         assert "editingBlock" in content
         assert "setEditingBlock" in content
 
-    def test_app_renders_edit_panel_with_props(self):
-        content = _read_blocknote_file("App.tsx")
-        if content is None:
+    def test_le_panneau_d_edition_est_atteignable_depuis_l_app(self):
+        """Le panneau n'est plus rendu par App mais par le panneau fusionne
+        (V1.17, deux onglets). Le test exigeait `<EditPanel` dans App.tsx et
+        echouait depuis : il verifiait un emplacement, pas une capacite.
+
+        Ce qui doit rester vrai, c'est le chainage : App tient le bloc en cours
+        d'edition et le transmet ; le panneau le rend. Si l'un des deux manque,
+        cliquer « Modifier » n'ouvre rien.
+        """
+        app = _read_blocknote_file("App.tsx")
+        if app is None:
             pytest.skip()
-        assert "<EditPanel" in content
-        assert "onSaved=" in content
-        assert "versionNumSource={versionNumSource}" in content
+        assert "editingBlock={editingBlock}" in app, (
+            "App ne transmet plus le bloc en cours d'edition"
+        )
+        assert "onEditPanelSaved" in app and "onEditPanelClose" in app, (
+            "App ne recoit plus l'enregistrement ou la fermeture"
+        )
+        assert "versionNumSource={versionNumSource}" in app
+
+        panneau = _read_blocknote_file("AgentPanel.tsx")
+        if panneau is None:
+            pytest.skip()
+        assert "<EditPanel" in panneau, (
+            "plus personne ne rend le panneau d'edition"
+        )
 
 
 class TestEditorLayoutCss:

@@ -10,7 +10,31 @@ env:
   OWNER: nic01asfr
 
 jobs:
+  # Les tests tournaient nulle part : la CI ne faisait qu'un controle d'imports,
+  # et 22 tests sont restes rouges des semaines sans que personne le voie. Un
+  # test qu'aucune machine n'execute ne protege de rien.
+  #
+  # Ce job passe avant les constructions : une image ne part pas si la suite
+  # echoue. Il n'installe pas QGIS -- les tests qui en dependent verifient le
+  # code genere pour le pod, pas son execution.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Dependances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ./hub
+          pip install pytest pytest-asyncio
+      - name: Suite du hub
+        working-directory: hub
+        run: python -m pytest tests/ -q
+
   build-agent:
+    needs: tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -52,6 +76,7 @@ jobs:
             -c "import agent.main; import agent.qgis_agent; print('agent imports OK')"
 
   build-hub:
+    needs: tests
     runs-on: ubuntu-latest
     permissions:
       contents: read

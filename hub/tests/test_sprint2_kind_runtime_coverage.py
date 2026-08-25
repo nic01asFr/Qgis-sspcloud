@@ -73,9 +73,22 @@ class TestKindCoverage:
 class TestBlockNoteMapping:
     """Bijection 13x13 entre ComponentKind et BlockNote block type."""
 
+    # `timeline` est deliberement absent du mapping. Decision du 2026-08-24 :
+    # il sera absorbe par `layer.controls[]` quand Atlas deviendra le runtime
+    # carto -- un controle appartient a la scene, pas a un composant frere. Le
+    # mapper aujourd'hui reviendrait a construire ce qu'on va retirer.
+    # Son absence ne casse rien : le serialiseur rend un paragraphe visible
+    # « Composant timeline — kind non encore mappe », ce qui est le bon
+    # comportement. Voir docs/impact-bascule-atlas.md.
+    KINDS_SANS_BLOC_ASSUME = {"timeline"}
+
     @pytest.mark.parametrize("kind", COMPONENT_KINDS)
     def test_kind_has_blocknote_mapping(self, kind):
-        """Chaque ComponentKind doit avoir son block BlockNote (D-QGIS-010)."""
+        """Chaque ComponentKind doit avoir son block BlockNote (D-QGIS-010),
+        sauf ceux dont on a decide qu'ils disparaitraient."""
+        if kind in self.KINDS_SANS_BLOC_ASSUME:
+            pytest.skip(f"« {kind} » sera absorbe par layer.controls[] "
+                        f"(bascule Atlas) -- absence assumee")
         from pathlib import Path
         blocks_index = (
             Path(__file__).parent.parent.parent
@@ -172,3 +185,22 @@ class TestPlaceholderKinds:
         src = inspect.getsource(_pre_render_component_html)
         assert 'kind == "iframe_grist"' in src
         assert "_iframe_grist_partial.j2" in src
+
+
+def test_un_kind_non_mappe_se_signale_a_l_ecran():
+    """L'absence assumee n'est acceptable que parce qu'elle se voit.
+
+    Le serialiseur rend un paragraphe « Composant <kind> — kind non encore
+    mappe » plutot que de sauter le composant. Si ce repli disparaissait,
+    l'absence deviendrait un silence -- et un composant absent de la page
+    ressemblerait a un choix de l'auteur.
+    """
+    from pathlib import Path
+    f = (Path(__file__).parent.parent.parent
+         / "blocknote-editor" / "src" / "serializer.ts")
+    if not f.exists():
+        pytest.skip("blocknote-editor absent")
+    t = f.read_text(encoding="utf-8")
+    assert "kind non encore mapp" in t, (
+        "le repli visible a disparu : un kind inconnu serait saute en silence"
+    )

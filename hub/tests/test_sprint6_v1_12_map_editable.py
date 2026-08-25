@@ -31,11 +31,16 @@ class TestBugFix_CustomHeadingContentRef:
         content = _read("blocks/CustomHeading.tsx")
         if content is None:
             pytest.skip()
-        # v1.12.4 rollback : content:'none' + props.text (vs inline)
+        # Le titre garde son texte dans ses props, pas dans le contenu du
+        # bloc : c'est ce qui permet de le rendre sans que BlockNote s'en mele.
         assert "content: 'none'" in content
         assert "text: { default: '' }" in content
-        # Edit via drawer onClick (vs caret inline)
-        assert "openEditPanel" in content
+        # Il s'edite SUR PLACE depuis le « Chantier 1 V1.20.1 ». Le test
+        # exigeait `openEditPanel` -- le panneau lateral -- et echouait depuis
+        # ce changement : il figeait un mecanisme abandonne, pas un defaut.
+        assert "InlineEditable" in content, (
+            "le titre ne s'edite plus ni sur place ni par le panneau"
+        )
 
 
 class TestInteractiveMapForm:

@@ -173,9 +173,42 @@ class TestSprint5_Coherence:
         from agent.native_tools_v2 import update_component
         assert all([update_component_endpoint, _pre_render_component_html, update_component])
 
-    def test_all_13_kinds_still_in_helper(self):
-        """Le helper hub doit encore couvrir les 13 ComponentKind."""
-        from hub.models.component import ComponentKind
+    # Deux kinds ne sont pas rendus par le helper, et c'est assume :
+    #   scene_3d  Atlas fait deja la 3D (three.js, Models3D) ; notre gabarit
+    #             est reste a l'etat d'intention, marque « futur » dans le code.
+    #   timeline  sera absorbe par `layer.controls[]` : un controle appartient
+    #             a la scene, pas a un composant frere.
+    # Voir docs/impact-bascule-atlas.md. Les lister ici plutot que de figer un
+    # compte : un compte casse des qu'on ajoute un kind legitime et ne dit rien
+    # de ce qui manque.
+    KINDS_NON_RENDUS_ASSUMES = {"scene_3d", "timeline"}
+
+    def test_chaque_kind_est_rendu_par_le_helper(self):
+        """Un kind que le helper ignore produit un composant qu'on peut creer
+        mais pas afficher."""
+        import inspect
         from typing import get_args
-        kinds = get_args(ComponentKind)
-        assert len(kinds) == 13
+
+        from hub.main import _pre_render_component_html
+        from hub.models.component import ComponentKind
+
+        src = inspect.getsource(_pre_render_component_html)
+        oublies = [
+            k for k in get_args(ComponentKind)
+            if k not in self.KINDS_NON_RENDUS_ASSUMES
+            and f'"{k}"' not in src and f"'{k}'" not in src
+        ]
+        assert not oublies, (
+            f"kinds creables mais non rendus : {oublies}. Soit le helper les "
+            f"traite, soit leur absence est assumee et documentee ici."
+        )
+
+    def test_les_absences_assumees_existent_encore(self):
+        """Si un kind assume disparait du modele, la liste doit suivre --
+        sinon elle protegerait un nom qui n'existe plus."""
+        from typing import get_args
+
+        from hub.models.component import ComponentKind
+        connus = set(get_args(ComponentKind))
+        fantomes = self.KINDS_NON_RENDUS_ASSUMES - connus
+        assert not fantomes, f"kinds assumes qui n'existent plus : {fantomes}"

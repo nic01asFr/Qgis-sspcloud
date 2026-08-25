@@ -35,6 +35,10 @@ class _FakeReq:
         self.headers = headers or {}
         self.cookies = cookies or {}
         self.state = type("S", (), {})()
+        # Le middleware construit l'URL de connexion depuis `base_url`.
+        # Ce double l'ignorait : les tests echouaient sur un
+        # AttributeError, pas sur ce qu'ils verifiaient.
+        self.base_url = "https://exemple.test/"
 
 
 _SENT = object()
