@@ -9737,8 +9737,13 @@ async def serve_published(
 
     try:
         meta = s3_publication.head(owner, kind, safe_slug)
+    except s3_publication.StockageInaccessible as exc:
+        # 503, pas 404 : l'objet existe peut-etre, c'est nous qui ne pouvons
+        # pas le lire. Le message dit quoi faire -- le plus souvent, que les
+        # acces au stockage ont expire et qu'il faut relancer l'installation.
+        raise HTTPException(503, str(exc))
     except Exception as exc:
-        raise HTTPException(503, f"S3 inaccessible: {exc}")
+        raise HTTPException(503, f"Stockage injoignable : {exc}")
     if not meta:
         # V1.20.4 : 404 DSFR humaine au lieu de JSON brut. Le user qui clique
         # un lien peri me/expire voit une page utilisable (CTA retour).

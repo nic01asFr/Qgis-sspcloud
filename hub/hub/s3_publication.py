@@ -540,6 +540,27 @@ def read_range(
         return None
 
 
+class StockageInaccessible(RuntimeError):
+    """Le stockage n'a pas pu etre interroge — l'objet peut exister.
+
+    Distincte d'une absence : elle porte un message destine a l'utilisateur,
+    et l'appelant doit repondre autre chose qu'un « introuvable ».
+    """
+
+
+def _est_absence_reelle(exc: Exception) -> bool:
+    """Vrai si le stockage a repondu « cet objet n'existe pas ».
+
+    Tout le reste — identifiants expires, refus, panne reseau — est une
+    impossibilite de lire, pas une absence.
+    """
+    code = ""
+    resp = getattr(exc, "response", None)
+    if isinstance(resp, dict):
+        code = str((resp.get("Error") or {}).get("Code", ""))
+    return code in ("404", "NoSuchKey", "NoSuchBucket", "NotFound")
+
+
 def _metadata_insensible_casse(brut: dict) -> dict:
     """Les métadonnées S3, lisibles quelle que soit la casse des clés.
 
@@ -583,8 +604,13 @@ def head(owner: str, kind: str, slug: str) -> dict | None:
             # pour qui inspecte, et la minuscule, pour qui interroge.
             "metadata":     _metadata_insensible_casse(h.get("Metadata", {})),
         }
-    except Exception:
-        return None
+    except Exception as exc:
+        # « Introuvable » et « illisible » ne sont pas la meme chose. Rendre
+        # None pour les deux faisait repondre 404 a un lecteur dont l'objet
+        # existait parfaitement -- il en concluait qu'il avait mal publie.
+        if _est_absence_reelle(exc):
+            return None
+        raise StockageInaccessible(explain_s3_error(exc)) from exc
 
 
 def delete(owner: str, kind: str, slug: str) -> bool:
