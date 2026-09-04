@@ -120,13 +120,27 @@ Relancer la même commande met le service à jour sans toucher à tes données n
 curl -fsSL https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/install.sh | bash
 ```
 
-Vérifier l'état :
+Vérifier l'état des trois composants :
 
 ```bash
-kubectl get pods -n user-<toi> -l app.kubernetes.io/instance=qgis-hub
+kubectl get statefulset -n user-<toi> \
+    qgis-hub qgis-agent qgis-workspace-<toi> \
+    -o custom-columns=NOM:.metadata.name,PRETS:.status.readyReplicas,VOULUS:.spec.replicas
 ```
 
-Attendus : `qgis-hub-0`, `qgis-agent-0`, `qgis-workspace-<toi>-0`.
+Attendu : trois lignes, `PRETS` égal à `VOULUS` sur chacune.
+
+```
+NOM                        PRETS   VOULUS
+qgis-hub                   1       1
+qgis-agent                 1       1
+qgis-workspace-<toi>       1       1
+```
+
+Si un composant manque, la commande le **nomme** :
+`Error from server (NotFound): statefulsets.apps "qgis-workspace-<toi>" not
+found`. C'est voulu : une commande qui se contenterait de filtrer afficherait
+simplement moins de lignes, et une absence passerait pour un affichage normal.
 
 Retirer le service en conservant les données (les volumes sont préservés) :
 

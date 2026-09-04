@@ -54,9 +54,12 @@ Détails : [ARCHITECTURE.md](ARCHITECTURE.md) · Plan Sprint Day 5 :
 - `ghcr.io/nic01asfr/qgis-agent:latest` (Dockerfile.agent)
 - `ghcr.io/nic01asfr/qgisremotemcp:latest` (workspace, rebuild manuel)
 
-Build automatique par GitHub Actions sur push `main`
-([`build.yml`](.github/workflows/build.yml)). Publish chart Helm auto sur
-[`helm-repo/`](helm-repo/) → consommé par `install.sh`.
+GitHub Actions construit `qgis-hub` et `qgis-agent` a chaque push sur
+`main` ([`build.yml`](.github/workflows/build.yml)), apres la suite de
+tests. **`qgisremotemcp` n'est pas construite par la CI** — le job est
+commente (image QGIS Desktop complete, ~30 min) : elle se reconstruit a la
+main depuis `BigQgisMCP`, cf. [OPS.md](OPS.md) §7.1b. Publish chart Helm
+auto sur [`helm-repo/`](helm-repo/) → consomme par `install.sh`.
 
 ## Ce que le service permet
 
