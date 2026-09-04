@@ -249,6 +249,65 @@ echo "  -> $VALUES_FILE"
 
 # Etape 3 : install ou upgrade (idempotent)
 echo ""
+# Rattachement des ressources orphelines
+#
+# Une instance installee autrement -- a la main, ou par une version anterieure
+# du chart -- porte des ressources que Helm ne reconnait pas comme siennes. Il
+# refuse alors de les gerer, et l'upgrade echoue tout entier :
+#
+#   Error: ... "qgis-workspace-<user>" ... cannot be imported into the current
+#   release: invalid ownership metadata
+#
+# Constate le 2026-09-04 sur une instance ou le workspace tournait hors
+# release. Les rattacher est exactement ce que le script recommandait deja
+# pour un Secret ; on le fait ici pour tout ce que le chart rend, et avant
+# l'echec plutot qu'apres.
+_adopte=""
+_adopter() {
+    _kind="$1"; _nom="$2"
+    kubectl get "$_kind" "$_nom" -n "$NAMESPACE" >/dev/null 2>&1 || return 0
+    _proprio=$(kubectl get "$_kind" "$_nom" -n "$NAMESPACE" \
+        -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' \
+        2>/dev/null || echo "")
+    [ "$_proprio" = "$RELEASE" ] && return 0
+    if [ -n "$_proprio" ]; then
+        echo "  ATTENTION : $_kind/$_nom appartient a la release '$_proprio'."
+        echo "  Rien n'est touche. Desinstalle cette release, ou renomme le service."
+        return 0
+    fi
+    kubectl label "$_kind" "$_nom" -n "$NAMESPACE" \
+        app.kubernetes.io/managed-by=Helm --overwrite >/dev/null 2>&1 || return 0
+    kubectl annotate "$_kind" "$_nom" -n "$NAMESPACE" \
+        meta.helm.sh/release-name="$RELEASE" \
+        meta.helm.sh/release-namespace="$NAMESPACE" --overwrite >/dev/null 2>&1 \
+        || return 0
+    _adopte="$_adopte $_kind/$_nom"
+}
+
+echo ""
+echo "[2b/5] Rattachement des ressources deja presentes"
+for _r in \
+    "serviceaccount qgis-hub" \
+    "pvc qgis-hub" \
+    "secret qgis-hub-apikey" \
+    "secret qgis-llm-apikey" \
+    "service qgis-hub" \
+    "service qgis-agent" \
+    "service qgis-agent-svc" \
+    "statefulset qgis-hub" \
+    "statefulset qgis-agent" \
+    "ingress qgis-hub" \
+    "ingress qgis-agent" \
+    "statefulset qgis-workspace-$USERNAME" \
+    "service qgis-workspace-$USERNAME" ; do
+    _adopter $_r
+done
+if [ -n "$_adopte" ]; then
+    echo "  rattache :$_adopte"
+else
+    echo "  rien a rattacher"
+fi
+
 echo "[3/5] helm install/upgrade qgis-hub"
 # Le resultat de helm est capture AVANT tout pipe : `cmd | tail` renvoie le
 # code de sortie de `tail`, donc un echec d'installation passait inapercu et
@@ -276,15 +335,33 @@ if [ "$_helm_rc" -ne 0 ]; then
     echo "ERREUR : le helm $_action a echoue. Le service n'est PAS a jour."
     echo ""
     if grep -q "cannot be imported into the current release" "$_helm_log"; then
-        _orphan=$(grep -oE 'Secret "[^"]+"' "$_helm_log" | head -1 | tr -d '"' | awk '{print $2}')
-        echo "  Cause : le secret '$_orphan' existe mais n'appartient pas encore"
+        # Le message nomme l'espece et le nom : « Secret "x" », mais aussi
+        # « StatefulSet "y" » ou « Service "z" ». Ne chercher que Secret
+        # laissait sans remede tous les autres cas -- celui du workspace
+        # notamment, rencontre le 2026-09-04.
+        _kind=$(grep -oE '[A-Za-z]+ "[^"]+" in namespace' "$_helm_log" \
+                | head -1 | awk '{print $1}' | tr 'A-Z' 'a-z')
+        _orphan=$(grep -oE '[A-Za-z]+ "[^"]+" in namespace' "$_helm_log" \
+                  | head -1 | sed 's/.*"\(.*\)".*/\1/')
+        _kind="${_kind:-secret}"
+        echo "  Cause : $_kind '$_orphan' existe mais n'appartient pas encore"
         echo "  a la release Helm. Rattache-le puis relance ce script :"
         echo ""
-        echo "    kubectl label secret $_orphan -n $NAMESPACE \\"
+        echo "    kubectl label $_kind $_orphan -n $NAMESPACE \\"
         echo "        app.kubernetes.io/managed-by=Helm --overwrite"
-        echo "    kubectl annotate secret $_orphan -n $NAMESPACE \\"
+        echo "    kubectl annotate $_kind $_orphan -n $NAMESPACE \\"
         echo "        meta.helm.sh/release-name=$RELEASE \\"
         echo "        meta.helm.sh/release-namespace=$NAMESPACE --overwrite"
+    elif grep -qE "updates to statefulset spec for fields other than|field is immutable" "$_helm_log"; then
+        _sts=$(grep -oE 'statefulset[s]? "[^"]+"' "$_helm_log" | head -1 \
+               | sed 's/.*"\(.*\)".*/\1/')
+        echo "  Cause : le StatefulSet '$_sts' tourne avec un gabarit dont"
+        echo "  certains champs ne peuvent pas etre modifies en place."
+        echo ""
+        echo "  Supprime l'objet en gardant ses pods et ses volumes, puis"
+        echo "  relance ce script -- les donnees ne sont pas touchees :"
+        echo ""
+        echo "    kubectl delete statefulset $_sts -n $NAMESPACE --cascade=orphan"
     elif grep -qE "forbidden|Forbidden" "$_helm_log"; then
         echo "  Cause : droits Kubernetes insuffisants."
         echo "  Relance ton service Jupyter avec, dans ses parametres :"

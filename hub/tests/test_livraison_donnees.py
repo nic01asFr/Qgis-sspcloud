@@ -6,7 +6,11 @@ par une heuristique de taille. Et le même composant pouvait basculer de mode
 d'un rendu à l'autre, ce qui rendait le livrable non reproductible et obligeait
 tout consommateur à supporter les trois formes sans savoir laquelle arriverait.
 
-`auto` reste le défaut et reproduit exactement le comportement historique.
+`auto` reste le défaut. Il annonçait « reproduit exactement le comportement
+historique » — c'était faux, et deux tests le certifiaient parce que le
+stockage était en panne. Depuis le contrat component 0.3 (2026-09-04), il
+annonce ce que le code fait : la meilleure forme disponible, des tuiles dès
+qu'une couche est encodable.
 """
 
 from __future__ import annotations
@@ -117,16 +121,10 @@ async def test_auto_sert_des_tuiles_meme_pour_une_petite_couche(
 async def test_le_defaut_vaut_auto(stockage_qui_repond):
     """Sans mode déclaré, on applique `auto` — le défaut du contrat.
 
-    On compare le mode retenu, pas les octets produits : deux encodages du
-    même GeoJSON ne donnent pas le même fichier. Le format PMTiles compresse
-    chaque tuile en gzip, et gzip inscrit l'heure dans son en-tête. Deux
-    publications séparées par une seconde produisent donc deux empreintes,
-    donc deux adresses, pour une donnée identique.
-
-    C'est un défaut connu, pas une propriété : `content_hash` nomme du
-    contenu-plus-heure. Il est documenté dans
-    `test_reproductibilite_des_tuiles` ci-dessous — mieux vaut un test qui
-    énonce le défaut qu'un test qui échoue sans dire pourquoi.
+    On compare le mode retenu, pas les octets produits. L'encodage est
+    redevenu reproductible (cf. `test_reproductibilite_des_tuiles`), mais
+    comparer des formes plutôt que des fichiers dit mieux ce qu'on vérifie
+    ici : que le défaut vaut `auto`, pas que deux encodages coïncident.
     """
     entree = _couches(10_000)
     sans_mode, audit_sans = await main._externalize_large_features(
@@ -144,23 +142,25 @@ async def test_le_defaut_vaut_auto(stockage_qui_repond):
 
 @pytest.mark.asyncio
 async def test_reproductibilite_des_tuiles():
-    """Deux publications de la même couche devraient porter la même adresse.
+    """Deux publications de la même couche portent la même adresse.
 
-    Elles ne la portent pas. `content_hash = sha256(pmtiles_bytes)` et les
-    octets changent d'une seconde à l'autre : gzip horodate chaque tuile.
+    Elles ne la portaient pas jusqu'au 2026-09-04. `pmtiles.writer` compresse
+    ses métadonnées et son répertoire avec `gzip.compress()`, qui inscrit
+    l'heure courante dans l'en-tête gzip — deux octets, aux positions 131 et
+    185, les champs MTIME de `1f8b 08 00 ....` :
 
         meme seconde     ce591f5a ce591f5a  identiques
         seconde suivante ce591f5a 34bd278f  DIFFERENTS  (meme longueur)
 
-    Conséquences : republier un livrable inchangé crée un second objet S3 et
-    laisse le premier orphelin ; et l'adresse d'une donnée ne peut pas servir
-    à savoir si elle a changé. C'est exactement ce que `livraison` avait été
-    introduit pour garantir — « le même composant pouvait basculer d'un rendu
-    à l'autre, ce qui rendait le livrable non reproductible ».
+    Or le publish nomme le fichier par `sha256(pmtiles_bytes)`. L'empreinte
+    désignait donc du contenu-plus-heure : republier une couche inchangée
+    créait une adresse neuve et laissait un objet orphelin dans le stockage,
+    et l'URL d'une donnée ne disait pas si elle avait changé — précisément ce
+    que `livraison` avait été introduit pour garantir.
 
-    Ce test décrit l'état actuel. Le jour où l'encodeur fixe l'horodatage
-    gzip à zéro, il échouera : ce sera le signal que le défaut est réparé, et
-    qu'il faut inverser l'assertion.
+    L'encodage force désormais l'horodatage à zéro, convention des archives
+    reproductibles. Ce test franchit délibérément une frontière de seconde :
+    c'est le seul moment où le défaut se manifestait.
     """
     import hashlib
     import time
@@ -176,11 +176,27 @@ async def test_reproductibilite_des_tuiles():
         pass
     apres = geojson_to_pmtiles(gj, "batiments", 12, 16)[0]
 
-    assert len(avant) == len(apres), "seul l'horodatage devrait differer"
-    assert empreinte(avant) != empreinte(apres), (
-        "l'encodage est devenu reproductible — tres bien : inverser cette "
-        "assertion et retirer la mise en garde de test_le_defaut_vaut_auto"
+    assert empreinte(avant) == empreinte(apres), (
+        "deux encodages du meme GeoJSON donnent deux fichiers : l'adresse "
+        "publiee changerait sans que la donnee change"
     )
+
+
+def test_gzip_est_rendu_intact_apres_encodage():
+    """Le remplacement de `gzip.compress` ne doit pas survivre à l'encodage.
+
+    Forcer l'horodatage à zéro pour tout le programme serait un effet de bord
+    silencieux — le genre qui ne se remarque que dans un autre module, des
+    mois plus tard.
+    """
+    import gzip
+    import json as _json
+
+    avant = gzip.compress
+    from hub.pmtiles_encoder import geojson_to_pmtiles
+    geojson_to_pmtiles(_json.loads(_couches(10_000))[0]["geojson"],
+                       "batiments", 12, 16)
+    assert gzip.compress is avant, "gzip.compress n'a pas ete rendu au programme"
 
 
 class TestLecture:

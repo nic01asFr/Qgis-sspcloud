@@ -30,12 +30,51 @@ API :
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 from io import BytesIO
 from typing import Any, Iterable
 
 log = logging.getLogger(__name__)
+
+
+@contextlib.contextmanager
+def _gzip_sans_horodatage():
+    """Rend l'ecriture PMTiles reproductible le temps d'un encodage.
+
+    `pmtiles.writer` compresse ses metadonnees et son repertoire avec
+    `gzip.compress()`, qui inscrit l'heure courante dans l'en-tete gzip. Deux
+    encodages du meme GeoJSON produisaient donc deux fichiers differents :
+
+        meme seconde      ce591f5a ce591f5a  identiques
+        seconde suivante  ce591f5a 34bd278f  DIFFERENTS (meme longueur)
+        octets qui different : 2, aux positions 131 et 185 -- les champs
+        MTIME des deux en-tetes `1f8b 08 00 ....`
+
+    Le publish nomme ensuite le fichier par `sha256(pmtiles_bytes)`. Cette
+    empreinte designait donc du contenu-plus-heure : republier une couche
+    inchangee creait une adresse nouvelle et laissait un objet orphelin dans
+    le stockage, et l'URL d'une donnee ne permettait pas de savoir si elle
+    avait change. C'est precisement ce que le mode de livraison avait ete
+    introduit pour garantir.
+
+    On force l'horodatage a zero -- la convention des archives reproductibles
+    -- pendant l'appel, et on rend la fonction d'origine ensuite : le reste du
+    programme continue de gzipper normalement.
+    """
+    import gzip
+
+    origine = gzip.compress
+
+    def compresse(donnees, compresslevel=9, *, mtime=None):
+        return origine(donnees, compresslevel, mtime=0)
+
+    gzip.compress = compresse
+    try:
+        yield
+    finally:
+        gzip.compress = origine
 
 
 # ── Math helpers Web Mercator (WGS84 lng/lat <-> tile z/x/y) ─────────────────
@@ -236,7 +275,10 @@ def geojson_to_pmtiles(
             },
         ],
     }
-    writer.finalize(header, metadata_dict)
+    # Sans cela, deux encodages identiques donnent deux fichiers, donc
+    # deux adresses publiees pour une donnee inchangee.
+    with _gzip_sans_horodatage():
+        writer.finalize(header, metadata_dict)
 
     pmtiles_bytes = buf.getvalue()
     return pmtiles_bytes, {
