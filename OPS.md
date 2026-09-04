@@ -323,6 +323,32 @@ Elle rattache d'abord à la release les ressources qui existent sans
 propriétaire (instance installée à la main, ou par un chart antérieur), sinon
 `helm upgrade` refuse de les adopter et échoue en entier.
 
+**Le rattachement ne suffit pas toujours** — constaté le 2026-09-05 sur
+`user-nic01asfr`. Les étiquettes et annotations posées, l'upgrade échoue quand
+même : Helm applique côté serveur et réclame aussi la propriété des **champs**.
+Une ressource créée jadis par `kubectl` reste revendiquée par le gestionnaire
+`kubectl-client-side-apply` :
+
+```
+Service      .spec.ports[6080].name
+StatefulSet  .spec.volumeClaimTemplates
+             .spec.template.spec.containers[qgis].resources.limits.cpu
+```
+
+Remède, vérifié : supprimer les objets en gardant pods et volumes, puis
+relancer. Les données ne bougent pas — 168 Mo d'études intacts, même PVC avant
+et après. Mais **Helm recrée le pod au lieu de l'adopter** : le projet QGIS en
+mémoire est perdu, il reste dans le `.qgz`.
+
+```bash
+kubectl -n user-<u> delete statefulset qgis-workspace-<u> --cascade=orphan
+kubectl -n user-<u> delete service qgis-workspace-<u>
+```
+
+⚠ **`--dry-run=server` ne détecte pas ce cas.** Il valide la propriété de
+l'objet, pas celle des champs : la simulation était verte juste avant l'échec.
+Une simulation qui passe ne garantit donc pas qu'un `helm upgrade` passera.
+
 ### 7.1b Mise à jour de l'image workspace — **manuelle**
 
 > Corrige le 2026-09-04, quelques heures apres avoir ete ecrit faux. J'avais

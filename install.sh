@@ -352,6 +352,34 @@ if [ "$_helm_rc" -ne 0 ]; then
         echo "    kubectl annotate $_kind $_orphan -n $NAMESPACE \\"
         echo "        meta.helm.sh/release-name=$RELEASE \\"
         echo "        meta.helm.sh/release-namespace=$NAMESPACE --overwrite"
+    elif grep -qE "Apply failed with [0-9]+ conflict|conflict with \"kubectl" "$_helm_log"; then
+        # Rencontre en conditions reelles le 2026-09-05. Rattacher l'objet
+        # (etiquettes + annotations) le fait accepter par la release, mais
+        # Helm applique cote serveur et reclame aussi la propriete des
+        # CHAMPS. Une ressource creee jadis par `kubectl` reste revendiquee
+        # par le gestionnaire `kubectl-client-side-apply` :
+        #
+        #   Service      .spec.ports[6080].name
+        #   StatefulSet  .spec.volumeClaimTemplates
+        #                .spec.template.spec.containers[qgis].resources.limits.cpu
+        #
+        # A noter : `--dry-run=server` ne le detecte PAS. Il valide la
+        # propriete de l'objet, pas celle des champs. Une simulation verte ne
+        # garantit donc pas que l'upgrade passera.
+        echo "  Cause : conflit de propriete de champs. Ces ressources ont ete"
+        echo "  creees par kubectl, qui en revendique encore certains champs."
+        echo ""
+        echo "  Supprime les objets en gardant leurs pods et leurs volumes,"
+        echo "  puis relance ce script. Les donnees ne sont pas touchees --"
+        echo "  verifie en conditions reelles : 168 Mo d'etudes intacts, meme"
+        echo "  volume avant et apres."
+        echo ""
+        echo "    kubectl delete statefulset qgis-workspace-$USERNAME -n $NAMESPACE \\"
+        echo "        --cascade=orphan"
+        echo "    kubectl delete service qgis-workspace-$USERNAME -n $NAMESPACE"
+        echo ""
+        echo "  ATTENTION : le pod est recree, pas seulement adopte. Le projet"
+        echo "  QGIS en cours en memoire est perdu (il reste dans le .qgz)."
     elif grep -qE "updates to statefulset spec for fields other than|field is immutable" "$_helm_log"; then
         _sts=$(grep -oE 'statefulset[s]? "[^"]+"' "$_helm_log" | head -1 \
                | sed 's/.*"\(.*\)".*/\1/')

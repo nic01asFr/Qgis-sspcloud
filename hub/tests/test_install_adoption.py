@@ -133,6 +133,45 @@ class TestDiagnostic:
         assert motif.group(0).split()[0].lower() == espece.lower()
         assert re.sub(r'.*"(.*)".*', r"\1", motif.group(0)) == nom
 
+    def test_le_conflit_de_proprietaire_de_champs_est_couvert(self):
+        """Rattacher l'objet ne suffit pas.
+
+        Rencontre en conditions reelles le 2026-09-05 sur user-nic01asfr :
+        les etiquettes et annotations posees, `helm upgrade` echoue quand
+        meme. Helm applique cote serveur et reclame la propriete des CHAMPS ;
+        une ressource creee jadis par kubectl reste revendiquee par le
+        gestionnaire `kubectl-client-side-apply`.
+
+            Apply failed with 1 conflict: conflict with
+            "kubectl-client-side-apply" using v1:
+            .spec.ports[port=6080,protocol="TCP"].name
+
+        Le piege : `--dry-run=server` ne le detecte pas. Il valide la
+        propriete de l'OBJET, pas celle des champs -- la simulation etait
+        verte juste avant l'echec.
+        """
+        texte = _INSTALL.read_text(encoding="utf-8")
+        assert "Apply failed with" in texte, (
+            "le conflit de proprietaire de champs n'est pas diagnostique : "
+            "l'utilisateur tombe dans la branche generique, sans remede"
+        )
+        assert "kubectl-client-side-apply" in texte
+        assert "--dry-run=server" in texte, (
+            "la limite de la simulation doit etre dite : verte ne veut pas "
+            "dire que l'upgrade passera"
+        )
+
+    def test_le_remede_previent_de_la_perte_du_projet_en_cours(self):
+        """`--cascade=orphan` preserve pods et volumes -- verifie : 168 Mo
+        d'etudes intacts, meme PVC avant et apres. Mais Helm recree le pod au
+        lieu de l'adopter, donc le QGIS en memoire est perdu. Le taire ferait
+        decouvrir la perte apres coup."""
+        texte = _INSTALL.read_text(encoding="utf-8")
+        i = texte.find("Apply failed with")
+        bloc = texte[i:i + 1800]
+        assert "--cascade=orphan" in bloc
+        assert "recree" in bloc and "perdu" in bloc
+
     def test_le_cas_des_champs_immuables_est_couvert(self):
         """Un StatefulSet adopte dont le gabarit a bouge echoue autrement, et
         le remede n'est pas le meme : supprimer l'objet en gardant ses pods."""
