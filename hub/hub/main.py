@@ -9527,10 +9527,15 @@ async def list_published_owner(owner: str) -> HTMLResponse:
     """
     if not _S3_AVAILABLE:
         raise HTTPException(503, "Publication S3 indisponible")
+    indisponible = ""
     try:
         catalog = s3_publication.get_catalog(owner)
-    except Exception:
-        catalog = []
+    except s3_publication.StockageInaccessible as exc:
+        # On ne sait pas ce qu'il y a : le dire, plutot que d'afficher un
+        # vide que le lecteur prendrait pour un fait.
+        catalog, indisponible = [], str(exc)
+    except Exception as exc:
+        catalog, indisponible = [], f"Stockage injoignable : {exc}"
     items = catalog or []
     # Import local pour eviter fuite label si module non charge
     from hub.models.classification import (
@@ -9558,9 +9563,19 @@ async def list_published_owner(owner: str) -> HTMLResponse:
       </div>
     </a>"""
 
-    rows_html = "\n".join(_row(it) for it in items) if items else (
-        '<p class="empty">Aucune publication disponible pour l\'instant.</p>'
-    )
+    import html as _h
+    if indisponible:
+        rows_html = (
+            '<p class="indispo"><strong>Publications momentanement '
+            'illisibles.</strong><br/>Elles ne sont pas perdues : le '
+            'service ne parvient pas a interroger le stockage.<br/>'
+            '<span>' + _h.escape(indisponible) + '</span></p>'
+        )
+    elif items:
+        rows_html = "\n".join(_row(it) for it in items)
+    else:
+        rows_html = ('<p class="empty">Aucune publication disponible '
+                     "pour l'instant.</p>")
 
     body = f"""<!DOCTYPE html>
 <html lang="fr"><head>
@@ -9579,6 +9594,8 @@ async def list_published_owner(owner: str) -> HTMLResponse:
   .pub-row-meta {{ display:flex; gap:12px; font-size:12px; color:#666; flex-wrap:wrap }}
   .pub-badge {{ background:#ececfe; color:#000091; padding:2px 8px; border-radius:10px; font-weight:600 }}
   .empty {{ padding:32px; text-align:center; color:#888; background:#fff; border-radius:6px; border:1px dashed #ddd }}
+  .indispo {{ padding:24px 28px; color:#b34000; background:#fff4ed; border-radius:6px; border:1px solid #ffc7ab; line-height:1.6 }}
+  .indispo span {{ display:block; margin-top:10px; font-size:12px; color:#666 }}
   .footer-nav {{ margin-top:32px; text-align:center }}
   .footer-nav a {{ color:#000091; text-decoration:none; font-size:13px }}
 </style>
@@ -9586,13 +9603,16 @@ async def list_published_owner(owner: str) -> HTMLResponse:
 <div class="banner">CEREMA <span>· QGIS Service</span></div>
 <div class="wrap">
 <h1>Publications de {owner}</h1>
-<p class="subtitle">{len(items)} publication{'s' if len(items) > 1 else ''} disponible{'s' if len(items) > 1 else ''}</p>
+<p class="subtitle">{"etat du stockage inconnu" if indisponible else f"{len(items)} publication{'s' if len(items) > 1 else ''} disponible{'s' if len(items) > 1 else ''}"}</p>
 {rows_html}
 <div class="footer-nav">
   <a href="/workspace">Retour à mon espace de travail</a>
 </div>
 </div></body></html>"""
-    return HTMLResponse(content=body, status_code=200)
+    # 503 quand la lecture a echoue : un lecteur humain voit l'explication,
+    # un appelant automatique voit qu'il ne peut pas conclure au vide.
+    return HTMLResponse(content=body,
+                        status_code=503 if indisponible else 200)
 
 
 async def _serve_published_audience_gate(

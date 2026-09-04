@@ -59,23 +59,100 @@ async def test_vivant_ne_copie_jamais_la_donnee():
 
 
 @pytest.mark.asyncio
-async def test_auto_laisse_les_petites_couches_inline():
-    """Comportement historique : sous le seuil, rien ne sort."""
-    entree = _couches(10_000)
+async def test_auto_sert_des_tuiles_meme_pour_une_petite_couche():
+    """`auto` sert la meilleure forme disponible, pas la plus légère.
+
+    Contract component 0.3 (2026-09-04). Jusque-là le contrat annonçait « le
+    hub décide selon la taille — comportement historique », et deux tests le
+    certifiaient conforme. Ils étaient verts pour une mauvaise raison : les
+    accès au stockage étaient périmés, l'envoi échouait, le code repliait sur
+    l'inline. Le seuil de 500 Ko n'a jamais gardé le niveau PMTiles, il ne
+    garde que le niveau GeoJSON-URL en dessous.
+
+    Le comportement retenu est celui du code, pas celui du contrat : une
+    couche encodable part en tuiles quelle que soit sa taille. Un consommateur
+    qui a besoin d'un document autoportant déclare `inline` — il ne peut plus
+    le déduire du poids.
+    """
+    entree = _couches(10_000)  # ~10 Ko, très en dessous de l'ancien seuil
     sortie, audit = await main._externalize_large_features(
         entree, cid="abc123", owner="u", livraison="auto")
-    assert sortie == entree and audit == []
+    couches = json.loads(sortie)
+    assert couches[0].get("source_type") == "pmtiles", (
+        "auto aurait dû servir des tuiles ; s'il rend l'inline, vérifier que "
+        "le stockage répond — l'échec d'envoi se déguise en choix de mode"
+    )
+    assert audit and audit[0]["kind"] == "pmtiles"
 
 
 @pytest.mark.asyncio
-async def test_le_defaut_est_le_comportement_historique():
-    """Aucun composant existant ne change : sans mode déclaré, on fait comme
-    avant."""
+async def test_le_defaut_vaut_auto():
+    """Sans mode déclaré, on applique `auto` — le défaut du contrat.
+
+    On compare le mode retenu, pas les octets produits : deux encodages du
+    même GeoJSON ne donnent pas le même fichier. Le format PMTiles compresse
+    chaque tuile en gzip, et gzip inscrit l'heure dans son en-tête. Deux
+    publications séparées par une seconde produisent donc deux empreintes,
+    donc deux adresses, pour une donnée identique.
+
+    C'est un défaut connu, pas une propriété : `content_hash` nomme du
+    contenu-plus-heure. Il est documenté dans
+    `test_reproductibilite_des_tuiles` ci-dessous — mieux vaut un test qui
+    énonce le défaut qu'un test qui échoue sans dire pourquoi.
+    """
     entree = _couches(10_000)
-    sans_mode = await main._externalize_large_features(entree, cid="a", owner="u")
-    en_auto = await main._externalize_large_features(
+    sans_mode, audit_sans = await main._externalize_large_features(
+        entree, cid="a", owner="u")
+    en_auto, audit_auto = await main._externalize_large_features(
         entree, cid="a", owner="u", livraison="auto")
-    assert sans_mode == en_auto
+
+    forme = lambda js: [
+        (c.get("id"), c.get("source_type"), (c.get("source") or {}).get("type"))
+        for c in json.loads(js)
+    ]
+    assert forme(sans_mode) == forme(en_auto)
+    assert [a["kind"] for a in audit_sans] == [a["kind"] for a in audit_auto]
+
+
+@pytest.mark.asyncio
+async def test_reproductibilite_des_tuiles():
+    """Deux publications de la même couche devraient porter la même adresse.
+
+    Elles ne la portent pas. `content_hash = sha256(pmtiles_bytes)` et les
+    octets changent d'une seconde à l'autre : gzip horodate chaque tuile.
+
+        meme seconde     ce591f5a ce591f5a  identiques
+        seconde suivante ce591f5a 34bd278f  DIFFERENTS  (meme longueur)
+
+    Conséquences : republier un livrable inchangé crée un second objet S3 et
+    laisse le premier orphelin ; et l'adresse d'une donnée ne peut pas servir
+    à savoir si elle a changé. C'est exactement ce que `livraison` avait été
+    introduit pour garantir — « le même composant pouvait basculer d'un rendu
+    à l'autre, ce qui rendait le livrable non reproductible ».
+
+    Ce test décrit l'état actuel. Le jour où l'encodeur fixe l'horodatage
+    gzip à zéro, il échouera : ce sera le signal que le défaut est réparé, et
+    qu'il faut inverser l'assertion.
+    """
+    import hashlib
+    import time
+
+    from hub.pmtiles_encoder import geojson_to_pmtiles
+
+    gj = json.loads(_couches(10_000))[0]["geojson"]
+    empreinte = lambda o: hashlib.sha256(o).hexdigest()
+
+    avant = geojson_to_pmtiles(gj, "batiments", 12, 16)[0]
+    debut = time.time()
+    while time.time() - debut < 1.6:  # franchir une frontiere de seconde
+        pass
+    apres = geojson_to_pmtiles(gj, "batiments", 12, 16)[0]
+
+    assert len(avant) == len(apres), "seul l'horodatage devrait differer"
+    assert empreinte(avant) != empreinte(apres), (
+        "l'encodage est devenu reproductible — tres bien : inverser cette "
+        "assertion et retirer la mise en garde de test_le_defaut_vaut_auto"
+    )
 
 
 class TestLecture:

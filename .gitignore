@@ -22,3 +22,6 @@ dist/
 .env
 *.local.yaml
 kubeconfig*
+
+# Configuration MCP locale : chemins absolus du poste, jamais partageable
+.mcp.json

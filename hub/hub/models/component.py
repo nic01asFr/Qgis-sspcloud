@@ -78,8 +78,12 @@ class ComponentSource(BaseModel):
             "ligne. `url` : un fichier publié à côté — livrable léger, donnée "
             "remplaçable sans le régénérer. `tuiles` : idem en PMTiles, pour "
             "le volume. `vivant` : aucune copie, la source est lue à "
-            "l'affichage (WMS, XYZ, WFS, table Grist). `auto` : le hub décide "
-            "selon la taille — comportement historique, défaut."
+            "l'affichage (WMS, XYZ, WFS, table Grist). `auto` : le hub sert "
+            "la meilleure forme disponible — des tuiles dès que la couche "
+            "peut être encodée, quelle que soit sa taille, et l'inline en "
+            "dernier recours. Défaut. Un consommateur qui exige une forme "
+            "précise la déclare : `auto` ne garantit pas l'inline, même pour "
+            "une petite couche."
         ),
     )
 

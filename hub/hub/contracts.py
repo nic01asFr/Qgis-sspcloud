@@ -39,11 +39,22 @@ BASE_PUBLIQUE = "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas"
 # fichiers restent figés dans `schemas/` et ne sont plus régénérés.
 CONTRATS: dict[str, dict[str, Any]] = {
     "component": {
+        # 0.3 (2026-09-04) : `auto` change de sens. Il ne veut plus dire « le
+        # hub décide selon la taille » mais « la meilleure forme disponible » —
+        # des tuiles dès qu'une couche peut être encodée, l'inline en dernier
+        # recours. Le code faisait déjà cela ; c'est le contrat qui décrivait
+        # autre chose, et deux tests le certifiaient conforme parce que le
+        # stockage était en panne et que l'envoi repliait sur l'inline. Ce
+        # n'est pas rétrocompatible : un lecteur de 0.2 attend une petite
+        # couche en ligne. D'où une version, et non une correction en place.
+        #
         # 0.2 (2026-08-23) : ajout de `source.livraison`. Ajout rétrocompatible
         # — un composant sans ce champ vaut `auto`, le comportement historique.
-        # 0.1 reste servi : son adresse a été communiquée, elle doit répondre.
-        "version": "0.2",
-        "anciennes": ["0.1"],
+        # 0.1 et 0.2 restent servis : leurs adresses ont été communiquées,
+        # elles doivent répondre — et elles continuent de décrire fidèlement ce
+        # que ces versions-là voulaient dire.
+        "version": "0.3",
+        "anciennes": ["0.1", "0.2"],
         "module": "hub.models.component",
         "classe": "Component",
         "resume": "Une brique de livrable : carte, graphique, tableau, "

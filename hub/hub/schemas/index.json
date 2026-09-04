@@ -4,15 +4,19 @@
   "contracts": [
     {
       "name": "component",
-      "version": "0.2",
+      "version": "0.3",
       "description": "Une brique de livrable : carte, graphique, tableau, indicateur, texte, frise. Déclare d'où viennent ses données, comment elle se rend, et par quoi elle est paramétrée.",
-      "url": "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas/component-0.2.schema.json",
-      "empreinte": "sha256:a4dbf16898c3b04e",
-      "octets": 11525,
+      "url": "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas/component-0.3.schema.json",
+      "empreinte": "sha256:556dd05d6dff84af",
+      "octets": 11743,
       "previous": [
         {
           "version": "0.1",
           "url": "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas/component-0.1.schema.json"
+        },
+        {
+          "version": "0.2",
+          "url": "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas/component-0.2.schema.json"
         }
       ]
     },

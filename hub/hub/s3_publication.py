@@ -295,6 +295,16 @@ def is_s3_credentials_expired(exc: Exception) -> bool:
     resp = getattr(exc, "response", None)
     if isinstance(resp, dict):
         code = (resp.get("Error") or {}).get("Code", "") or ""
+    if isinstance(resp, dict):
+        # Une requete HEAD n'a pas de corps : botocore ne peut pas y lire le
+        # code d'erreur et se rabat sur le statut HTTP. Un 401/403 sur
+        # HeadObject ne peut venir que d'identifiants refuses -- le stockage
+        # s'arrete a l'authentification, il ne regarde jamais si l'objet
+        # existe. Sans ce cas, le message utile ci-dessous n'etait jamais
+        # atteint et l'utilisateur recevait le texte brut de la bibliotheque.
+        statut = (resp.get("ResponseMetadata") or {}).get("HTTPStatusCode")
+        if statut in (401, 403):
+            return True
     haystack = f"{code} {exc}"
     return any(c in haystack for c in _S3_EXPIRED_CODES)
 
@@ -673,9 +683,14 @@ def get_catalog(owner: str) -> list[dict]:
         obj = client.get_object(Bucket=bucket, Key=_catalog_key(owner))
         return json.loads(obj["Body"].read())
     except client.exceptions.NoSuchKey:
+        # Vraie absence : personne n'a encore publie. Le vide est la reponse.
         return []
-    except Exception:
-        return []
+    except Exception as exc:
+        if _est_absence_reelle(exc):
+            return []
+        # Illisible : rendre [] ferait annoncer « aucune publication » a
+        # quelqu'un dont les publications existent toujours.
+        raise StockageInaccessible(explain_s3_error(exc)) from exc
 
 
 def _save_catalog(owner: str, items: list[dict]) -> None:

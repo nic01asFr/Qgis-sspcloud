@@ -69,7 +69,19 @@ def format_datetime_fr(value) -> str:
 
     if value is None:
         return ""
-    if isinstance(value, str):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        # Le catalogue S3 date ses entrees avec un epoch, pas une chaine ISO.
+        # Sans ce cas, la page des publications tombait en 500 des que le
+        # catalogue redevenait lisible : le defaut restait invisible tant que
+        # les acces au stockage etaient perimes, puisque la liste vide ne
+        # faisait jamais formater la moindre date. Constate en production le
+        # 2026-09-03, une minute apres avoir renouvele les acces.
+        horodatage = value / 1000 if value > 1e11 else value  # ms ou s
+        try:
+            dt = _dt.fromtimestamp(horodatage)
+        except (OSError, OverflowError, ValueError):
+            return str(value)
+    elif isinstance(value, str):
         try:
             # Accepte '2026-07-08T08:27:56.597274' ou avec Z / offset
             v = value.replace("Z", "+00:00")
