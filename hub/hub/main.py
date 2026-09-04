@@ -1388,45 +1388,51 @@ async def _desk_context() -> dict:
 
             # Sprint UX-3 Commit 3 (2026-06-21) : projet actif + projets de
             # l'etude active (alimente le menu deroulant header desk).
-            if ctx.get("active_study_id"):
-                try:
-                    r = await c.get("/projects/active", headers=headers)
-                    if r.status_code == 200:
-                        ctx["active_project"] = r.json()
-                    r2 = await c.get(
-                        f"/studies/{ctx['active_study_id']}/projects",
-                        headers=headers,
-                    )
-                    if r2.status_code == 200:
-                        ctx["projects_in_active_study"] = r2.json()
-                except Exception as exc:
-                    log.debug("Fetch projects desk_context : %s", exc)
+            # Le catalogue se lit une fois, et ce qu'on affiche gouverne ce
+            # qu'on compte. Auparavant le badge portait `catalog_total` -- la
+            # totalite des publications -- au-dessus d'une liste filtree sur
+            # l'etude active : « 13 » suivi de « Aucune publication pour
+            # l'instant ». Deux populations sous un meme titre, et une absence
+            # affirmee qui n'existait pas.
+            try:
+                r = await c.get(f"/catalog/{_ONYXIA_USER}", headers=headers)
+                if r.status_code == 200:
+                    all_items = r.json().get("items", [])
+                    # Enrichir avec hub_url + size_kb (cf. /desk/catalog).
+                    # Sans ca, le template Jinja {{item.hub_url}} resout
+                    # vide et le href tombe sur la page courante (/desk).
+                    for it in all_items:
+                        kind = it.get("kind", "")
+                        slug = it.get("slug", "")
+                        if kind and slug and not it.get("hub_url"):
+                            it["hub_url"] = (
+                                f"{_HUB_URL}/published/{_ONYXIA_USER}/{kind}/{slug}"
+                            )
+                        sz = it.get("size")
+                        if sz and not it.get("size_kb"):
+                            it["size_kb"] = max(1, round(sz / 1024))
 
-            if ctx.get("active_study_id"):
-                try:
-                    r = await c.get(f"/catalog/{_ONYXIA_USER}", headers=headers)
-                    if r.status_code == 200:
-                        all_items = r.json().get("items", [])
-                        # Enrichir avec hub_url + size_kb (cf. /desk/catalog).
-                        # Sans ca, le template Jinja {{item.hub_url}} resout
-                        # vide et le href tombe sur la page courante (/desk).
-                        for it in all_items:
-                            kind = it.get("kind", "")
-                            slug = it.get("slug", "")
-                            if kind and slug and not it.get("hub_url"):
-                                it["hub_url"] = (
-                                    f"{_HUB_URL}/published/{_ONYXIA_USER}/{kind}/{slug}"
-                                )
-                            sz = it.get("size")
-                            if sz and not it.get("size_kb"):
-                                it["size_kb"] = max(1, round(sz / 1024))
-                        items = [i for i in all_items
-                                 if i.get("study_id") == ctx["active_study_id"]][:30]
-                        ctx.update(catalog_items=items,
-                                   catalog_count=len(items),
-                                   catalog_total=len(all_items))
-                except Exception:
-                    pass
+                    actif = ctx.get("active_study_id")
+                    if actif:
+                        retenus = [i for i in all_items
+                                   if i.get("study_id") == actif]
+                    else:
+                        # Sans etude active, filtrer sur rien ne retenait
+                        # rien : la page montrait une liste vide sous le
+                        # total. Tout montrer est la seule reponse honnete.
+                        retenus = list(all_items)
+
+                    montres = retenus[:30]
+                    ctx.update(
+                        catalog_items=montres,
+                        catalog_count=len(montres),
+                        catalog_total=len(all_items),
+                        # Ce qui existe mais n'apparait pas ici, et pourquoi.
+                        catalog_ailleurs=len(all_items) - len(retenus),
+                        catalog_tronques=len(retenus) - len(montres),
+                    )
+            except Exception:
+                pass
             else:
                 # Pas d'étude active : on remonte le catalogue global pour que
                 # le footer du desk affiche au moins le total et que le drawer

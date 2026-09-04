@@ -310,10 +310,18 @@
      ════════════════════════════════════════════════════════════════════ #}
   <div class="section-title fr-mt-5w">
     <h2>Mes livrables publiés</h2>
-    <span class="count">{{ catalog_total or catalog_count }}</span>
+    <span class="count">{{ catalog_count }}</span>
   </div>
   {% if catalog_items %}
   <p class="fr-text--sm fr-mb-3w">Cartes, rapports et recettes accessibles publiquement (sans authentification).</p>
+  {% if catalog_ailleurs or catalog_tronques %}
+  <p class="fr-text--sm fr-mb-3w">
+    {% if catalog_ailleurs %}{{ catalog_ailleurs }} autre{{ 's' if catalog_ailleurs > 1 }}
+    publication{{ 's' if catalog_ailleurs > 1 }} hors de cette etude.{% endif %}
+    {% if catalog_tronques %}{{ catalog_tronques }} de plus non affichee{{ 's' if catalog_tronques > 1 }} ici.{% endif %}
+    <a href="/published/{{ username }}/">Voir toutes mes publications</a>
+  </p>
+  {% endif %}
   {% set study_names = {} %}
   {% for s in studies %}{% set _ = study_names.update({s.id: s.name}) %}{% endfor %}
   <table class="fr-table">
@@ -385,8 +393,14 @@
   {% else %}
   <div class="empty-state">
     <span class="icon">📦</span>
+    {% if catalog_total %}
+    Aucune publication rattachée à cette étude.
+    Tu en as {{ catalog_total }} au total —
+    <a href="/published/{{ username }}/">voir toutes mes publications</a>.
+    {% else %}
     Aucune publication pour l'instant. Demande à l'agent dans le bureau
     de publier une storymap ou un PDF pour faire apparaître les livrables ici.
+    {% endif %}
   </div>
   {% endif %}
 
