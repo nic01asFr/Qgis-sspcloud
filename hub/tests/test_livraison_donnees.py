@@ -58,8 +58,36 @@ async def test_vivant_ne_copie_jamais_la_donnee():
     assert audit == []
 
 
+@pytest.fixture
+def stockage_qui_repond(monkeypatch):
+    """Un stockage qui accepte tout, sans réseau.
+
+    Sans cela, un test de mode de livraison teste en réalité si S3 répond.
+    C'est ce qui a fait vivre deux tests faux pendant des semaines : ils
+    affirmaient que `auto` laisse les petites couches en ligne, et ils étaient
+    verts parce que l'envoi échouait et que le code repliait sur l'inline. En
+    intégration continue, où aucun identifiant n'existe, le repli est
+    systématique — la décision n'y était jamais exercée.
+    """
+    from hub import s3_publication as _s3
+
+    def publier(owner, kind, slug, content, content_type=None,
+                audience="cerema_internal", **_):
+        return {
+            "url": f"https://stockage.test/{owner}/{kind}/{slug}",
+            "key": f"{kind}/{slug}",
+            "kind": kind, "slug": slug, "size": len(content),
+            "audience": audience,
+        }
+
+    monkeypatch.setattr(_s3, "publish", publier)
+    monkeypatch.setattr(_s3, "_S3_AVAILABLE", True, raising=False)
+    return publier
+
+
 @pytest.mark.asyncio
-async def test_auto_sert_des_tuiles_meme_pour_une_petite_couche():
+async def test_auto_sert_des_tuiles_meme_pour_une_petite_couche(
+        stockage_qui_repond):
     """`auto` sert la meilleure forme disponible, pas la plus légère.
 
     Contract component 0.3 (2026-09-04). Jusque-là le contrat annonçait « le
@@ -86,7 +114,7 @@ async def test_auto_sert_des_tuiles_meme_pour_une_petite_couche():
 
 
 @pytest.mark.asyncio
-async def test_le_defaut_vaut_auto():
+async def test_le_defaut_vaut_auto(stockage_qui_repond):
     """Sans mode déclaré, on applique `auto` — le défaut du contrat.
 
     On compare le mode retenu, pas les octets produits : deux encodages du
