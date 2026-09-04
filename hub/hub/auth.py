@@ -944,7 +944,17 @@ async def _build_jwks_cache() -> None:
 _OIDC_MIDDLEWARE_PUBLIC = (
     "/health",        # readinessProbe K8s
     "/healthz",       # alias
-    "/api/version",   # Phase 1 auto-update (poll public)
+    # Etat de version : commit du hub, version du chart, empreintes des images
+    # reellement en cours. Public a dessein — une empreinte d'image publique ne
+    # revele rien, et un etat de version derriere authentification n'est pas
+    # consultable par ce qui en aurait besoin.
+    #
+    # `/api/version` etait declare public depuis longtemps pour un « auto-update
+    # Phase 1 » jamais implemente : aucune route derriere, aucun appelant. Une
+    # porte ouverte sur une piece qui n'existait pas. On la garde comme alias
+    # plutot que de laisser un chemin public repondre 404.
+    "/version",
+    "/api/version",
     # OAuth 2.0 / decouverte MCP (connecteur distant claude.ai) — fix 2026-06-25.
     # claude.ai fait la decouverte et l'echange code->token COTE SERVEUR, sans
     # cookie navigateur. Sans whitelist, ces routes renvoient 401 "Auth requise"

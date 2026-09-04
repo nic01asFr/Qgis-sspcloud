@@ -22,13 +22,28 @@ Version 2026-09-04 · chart Helm 1.3.0.
 
 ## 1. Endpoints monitoring
 
+> Corrigé le 2026-09-04. Trois lignes sur quatre décrivaient des endpoints
+> qui n'existent pas — `/version` et `/healthz` renvoyaient 404, `/probe` un
+> 401 d'authentification sur une route absente — et le seul qui répond,
+> `/health`, n'y figurait pas. `/version` a été implémenté depuis ; les deux
+> autres sont retirés du tableau.
+
 | Endpoint | Auth | Info retournée |
 |---|---|---|
-| `/version` | public | commit SHA, version tag |
-| `/healthz` | public | status pod (200 = OK) |
-| `/probe` | public | K8s probe |
+| `/health` | public | état du pod (200 = OK), readinessProbe K8s |
+| `/version` | public | commit du hub, version du chart, **empreintes des images en cours** |
+| `/api/version` | public | alias de `/version` |
 | `/diagnostics/isolation` | Bearer HUB_API_KEY | switches physiques, locks, session_active_state stats, day3_priority |
 | `/diagnostics/mcp-sessions` | Cookie OIDC | sessions MCP par user + divergence DB |
+
+`/version` rend l'empreinte **tirée** (`imageID`), pas le tag demandé : un tag
+mobile peut désigner autre chose que ce que le nœud a en cache. Ce qu'il
+ignore, il le nomme — commit absent si l'image a été construite sans
+`GIT_SHA`, workspace `null` quand le pod est en veille.
+
+```bash
+curl -s https://user-<u>-qgis.user.lab.sspcloud.fr/version | jq
+```
 
 Depuis le terminal Jupyter de l'user :
 ```bash
@@ -310,10 +325,31 @@ propriétaire (instance installée à la main, ou par un chart antérieur), sino
 
 ### 7.1b Mise à jour de l'image workspace — **manuelle**
 
-La CI ne construit **pas** `qgisremotemcp` : le job `build-workspace` est
-commenté dans `build.yml` (image QGIS Desktop complète, ~30 min). L'image que
-`install.sh` tire est donc le dernier `latest` poussé à la main, sans que rien
-n'indique quand.
+> Corrige le 2026-09-04, quelques heures apres avoir ete ecrit faux. J'avais
+> conclu « construite a la main » en lisant le commentaire de `build.yml` cote
+> Qgis-sspcloud, sans aller verifier le depot d'en face.
+
+L'image **est** construite automatiquement — mais par un autre depot.
+`nic01asFr/BigQgisMCP` (miroir : `gitlab.cerema.fr/mcp/QgisRemoteMCP`) a son
+propre workflow, declenche sur push `main` touchant `Dockerfile`,
+`main_mcp.py`, `src/`, `recipes/`, `requirements.txt`… Il pousse `:latest`,
+`:main` et `:{sha}`.
+
+`Qgis-sspcloud` ne construit que `qgis-hub` et `qgis-agent` ; son job
+`build-workspace` est commente, et son commentaire est trompeur.
+
+Deux reserves verifiees :
+
+- **la publication precede le controle**. L'etape `Build and push`
+  (`push: true`) s'execute AVANT le « Controle du catalogue embarque » qui
+  valide `datasources.json` dans l'image construite. Une image incoherente
+  est donc deja disponible en `:latest` quand la CI rougit. Cote
+  `Qgis-sspcloud`, les constructions sont conditionnees aux tests
+  (`needs: tests`) — pas ici.
+- **le chart ignore le contournement**. Les deux CI poussent `:main`
+  precisement parce que « le cache local du tag `:latest` ne se met pas a
+  jour malgre `pullPolicy=Always` ». Le chart demande `:latest` pour les
+  trois briques.
 
 ```bash
 cd ../BigQgisMCP

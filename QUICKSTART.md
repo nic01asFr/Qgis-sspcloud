@@ -128,13 +128,16 @@ kubectl get statefulset -n user-<toi> \
     -o custom-columns=NOM:.metadata.name,PRETS:.status.readyReplicas,VOULUS:.spec.replicas
 ```
 
-Attendu : trois lignes, `PRETS` égal à `VOULUS` sur chacune.
+Attendu : trois lignes. Le hub et l'assistant à `1  1` ; **le QGIS Desktop
+peut être à `<none>  0`, et c'est normal** — il se met en veille après deux
+heures sans usage (`SESSION_IDLE_TTL`, 2 h par défaut) et le hub le réveille
+à la demande quand tu ouvres le bureau. Son volume est conservé.
 
 ```
 NOM                        PRETS   VOULUS
 qgis-hub                   1       1
 qgis-agent                 1       1
-qgis-workspace-<toi>       1       1
+qgis-workspace-<toi>       <none>  0      ← en veille, pas en panne
 ```
 
 Si un composant manque, la commande le **nomme** :

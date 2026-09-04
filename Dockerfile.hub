@@ -36,10 +36,17 @@ COPY hub/templates/ templates/
 # BlockNote editor bundle (Vague E2 D-QGIS-010) : copy depuis le stage builder
 COPY --from=blocknote-builder /build/dist /opt/qgis-hub/hub/static/blocknote-editor/
 
+# Le commit d'ou vient cette image. Passe par la CI (`build-args: GIT_SHA=...`)
+# et rendu par `/version`. Vide si l'image a ete construite a la main sans cet
+# argument : l'endpoint le dit alors explicitement plutot que de laisser croire
+# a un commit inconnu.
+ARG GIT_SHA=""
+
 ENV SERVICE_NAME=qgis-mcp \
     SERVER_MODULE=hub.main:app \
     SERVER_PORT=8888 \
-    HUB_INTERNAL_PORT=8888
+    HUB_INTERNAL_PORT=8888 \
+    HUB_GIT_SHA=${GIT_SHA}
 
 # Remplacer onyxia-init.sh pour respecter SERVER_MODULE (le chart passe toujours
 # "jupyter lab" en args mais on veut démarrer le hub uvicorn à la place).

@@ -55,6 +55,16 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            # La version du chart qui a pose ce deploiement, rendue par
+            # `/version`. C'est elle qui identifiera le produit entier quand
+            # les empreintes des trois images y seront figees ; en attendant,
+            # elle dit au moins avec quel chart on tourne.
+            - name: HUB_CHART_VERSION
+              value: {{ .Chart.Version | quote }}
+            - name: KUBERNETES_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             - name: HUB_INTERNAL_PORT
               value: "8888"
             - name: DATA_DIR

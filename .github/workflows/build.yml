@@ -97,6 +97,11 @@ jobs:
           context: .
           file: Dockerfile.hub
           push: true
+          # Sans cet argument, `/version` ne peut pas dire de quel commit
+          # l'image provient — et la verification « /version retourne le
+          # nouveau commit » de OPS.md §7.1 reste irrealisable.
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           # Sprint V0.2 (2026-07-10) : voir commentaire build-agent ci-dessus
           # sur le tag :main mobile qui contourne le cache node :latest.
           tags: |

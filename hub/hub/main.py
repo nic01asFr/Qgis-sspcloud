@@ -1756,6 +1756,19 @@ async def oauth_token(
 # masquerait `hub_home` (FastAPI prend la 1ère déclaration).
 
 
+@app.get("/version")
+@app.get("/api/version")
+async def version():
+    """Ce qui tourne : commit du hub, version du chart, empreintes des images.
+
+    `OPS.md` §7.1 demandait depuis toujours de « vérifier que /version
+    retourne le nouveau commit » — la route n'existait pas. Une vérification
+    qu'on ne peut pas faire ne rate jamais, donc personne ne l'avait vu.
+    """
+    from hub import version as _version
+    return _version.etat()
+
+
 @app.get("/health")
 async def health():
     return {
