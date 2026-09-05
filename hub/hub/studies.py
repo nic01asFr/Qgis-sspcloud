@@ -2536,7 +2536,22 @@ try:
                 # reordonne les couches ne peut pas le deviner autrement.
                 "order": i,
                 "geometry_type": ml_geom,
+                # `visible` est notre champ interne : les surcharges de
+                # composant et les filtres de rendu le lisent. Il n'existe pas
+                # au contrat 0.2.2 -- un consommateur tiers ne le voit donc
+                # pas, et jusqu'ici notre visibilite ne lui parvenait pas.
                 "visible": layer.isVisible() if hasattr(layer, "isVisible") else True,
+                # `visibility.defaultVisible` est ce que le contrat prevoit, et
+                # ce qu'Atlas lit. Sans lui, `isBasemapLayer` masque toute
+                # couche de plus de 2 500 entites : une couche d'analyse --
+                # 14 270 objets sur le parc bati de Marie -- s'ouvrait
+                # invisible, et le lecteur y voyait une carte vide plutot qu'un
+                # champ absent. On declare simplement ce que QGIS montre.
+                "visibility": {{
+                    "defaultVisible": (
+                        layer.isVisible() if hasattr(layer, "isVisible") else True
+                    ),
+                }},
                 "style": {{
                     "qml_source": None,
                     "declarative": {{
