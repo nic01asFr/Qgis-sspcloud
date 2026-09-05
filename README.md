@@ -27,6 +27,18 @@ ton interface Onyxia, et affiche ton adresse et ta clé d'accès. Colle-la sur
 La clé reste consultable dans **Onyxia > Mes services > QGIS Hub**, sans aucune
 commande.
 
+**Savoir ce qui tourne** — la même commande met à jour, et `GET /version` dit
+ce qui est déployé, publiquement, sans authentification :
+
+```bash
+curl -s https://user-<toi>-qgis.user.lab.sspcloud.fr/version
+```
+
+Il rend le commit du hub, la version du chart, et les empreintes réellement
+en cours des trois images — comparables à celles du registre. Le QGIS Desktop
+apparaît à `null` quand il dort : c'est normal, il se met en veille après deux
+heures sans usage.
+
 **Guides** :
 - [QUICKSTART.md](QUICKSTART.md) — installation pas à pas
 - [docs/day5-user-guide-visuel.md](docs/day5-user-guide-visuel.md) — guide illustré
@@ -52,7 +64,7 @@ Détails : [ARCHITECTURE.md](ARCHITECTURE.md) · Plan Sprint Day 5 :
 
 - `ghcr.io/nic01asfr/qgis-hub:latest` (Dockerfile.hub)
 - `ghcr.io/nic01asfr/qgis-agent:latest` (Dockerfile.agent)
-- `ghcr.io/nic01asfr/qgisremotemcp:latest` (workspace, rebuild manuel)
+- `ghcr.io/nic01asfr/qgisremotemcp:latest` (workspace, construite par [BigQgisMCP](https://github.com/nic01asFr/BigQgisMCP))
 
 GitHub Actions construit `qgis-hub` et `qgis-agent` a chaque push sur
 `main` ([`build.yml`](.github/workflows/build.yml)), apres la suite de

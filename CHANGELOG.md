@@ -3,6 +3,52 @@
 Versions du chart Helm `qgis-hub` (publié via GitHub Actions dans
 [`helm-repo/`](helm-repo/)) et jalons majeurs du service.
 
+## 1.4.0 · 2026-09-05
+
+**Le service dit ce qui tourne.** `GET /version` — public, sans
+authentification — rend le commit d'où vient l'image du hub, la version du
+chart qui a posé le déploiement, et les **empreintes réellement en cours**
+des trois images, relevées auprès de Kubernetes.
+
+Jusqu'ici rien ne le disait. `OPS.md` demandait pourtant, à l'étape 4 d'une
+mise à jour, de « vérifier que /version retourne le nouveau commit » : la
+route n'existait pas, et deux autres endpoints annoncés publics non plus.
+Une vérification qu'on ne peut pas faire ne rate jamais — personne ne s'en
+était aperçu.
+
+L'endpoint rend l'empreinte **tirée** (`imageID`), pas le tag demandé : un
+tag mobile peut désigner autre chose que ce que le nœud a en cache. Et ce
+qu'il ignore, il le nomme — commit absent si l'image a été construite sans
+`GIT_SHA`, workspace `null` avec la mention « en veille » quand le pod est à
+zéro réplique.
+
+**Installer sur une instance préexistante ne bloque plus.** `install.sh`
+rattache à la release les ressources qui existent sans propriétaire, et
+diagnostique les deux échecs rencontrés en conditions réelles : conflit de
+propriété d'objet, et conflit de propriété de **champs** — celui-là n'est
+pas détecté par `--dry-run=server`, qui valide l'objet et non ses champs.
+
+**Une image non vérifiée n'atteint plus les pods.** Côté `BigQgisMCP`, le
+catalogue est contrôlé avant la construction, l'image publiée sur le seul
+tag immuable, contrôlée à nouveau, et les tags mobiles posés seulement
+ensuite. Auparavant les trois tags partaient d'un coup et le contrôle venait
+après : le garde-fou constatait sans empêcher.
+
+**Contract `component` 0.3** — `auto` ne veut plus dire « le hub décide
+selon la taille » mais « la meilleure forme disponible ». Le code faisait
+déjà cela ; c'est le contrat qui décrivait autre chose, et deux tests le
+certifiaient conforme parce que le stockage était en panne. 0.1 et 0.2
+restent servis.
+
+**Tuiles reproductibles** — PMTiles compressait ses métadonnées avec
+l'horodatage courant, donc `sha256(pmtiles_bytes)` nommait du contenu-plus-
+heure : republier une couche inchangée créait une adresse neuve et un objet
+orphelin. Deux octets, corrigés.
+
+**Aussi** — la page des publications distingue « aucune » de « illisible » ;
+le compteur de livrables dénombre ce qu'il affiche ; les dates du catalogue,
+qui sont des epochs, ne font plus tomber la page en 500.
+
 ## 1.3.0 · 2026-08-22
 
 **Une commande, plus aucun jeton à retrouver.** Le parcours d'installation
