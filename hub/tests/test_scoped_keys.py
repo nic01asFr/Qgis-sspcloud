@@ -82,7 +82,10 @@ def test_tools_all_default_and_study_wide(tmp_path):
     v = asyncio.run(auth._validate_scoped_key(key))
     assert v["scope"]["tools"] == "all"
     assert v["scope"]["pid"] is None      # project_id NULL = etude entiere
-    assert v["scope"]["data"] == "project"
+    # Le defaut ne nomme plus de perimetre : aucun n'est applique, et
+    # « project » laissait croire a un cloisonnement inexistant. Voir le
+    # commentaire de `create_scoped_key` -- seul `tools` est lu.
+    assert v["scope"]["data"] == "unrestricted"
     assert v["scope"]["mode"] == "scoped"
 
 

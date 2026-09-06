@@ -566,7 +566,10 @@ async def create_scoped_key(
     project_id: str | None = None,
     persona: str | None = None,
     tools: list[str] | str = _SCOPED_TOOLS_ALL,
-    data_scope: str = "project",
+    # Defaut « unrestricted » et non « project » : aucun perimetre de donnees
+    # n'est applique aujourd'hui, et un defaut qui nomme une restriction
+    # inexistante se propage a tout appelant qui ne se pose pas la question.
+    data_scope: str = "unrestricted",
     mode: str = "scoped",
     actor: str = "owner",
     label: str | None = None,
@@ -641,8 +644,14 @@ async def _validate_scoped_key(key: str) -> dict | None:
             "sid":     study_id,
             "pid":     project_id,
             "persona": persona,
-            "tools":   tools,        # "all" | ["tool_a", ...]
-            "data":    data_scope,   # all | study | project
+            "tools":   tools,        # "all" | ["tool_a", ...] — SEUL champ applique
+            # `sid`, `pid` et `data` sont portes mais JAMAIS LUS : rien dans
+            # hub/ ne les consulte, seul `_scope_tools_whitelist` lit `tools`.
+            # Un agent publie agit donc sur l'etude ACTIVE du pod, quelle
+            # qu'elle soit. L'application viendra du provisionnement -- un
+            # atelier par agent, etude montee en subPath lecture seule --
+            # pas d'une garde dans le proxy.
+            "data":    data_scope,
             "mode":    mode,         # supervisor | scoped
             "actor":   actor,        # owner | delegate
         },

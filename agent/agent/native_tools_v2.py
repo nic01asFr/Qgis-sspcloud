@@ -1405,7 +1405,7 @@ NATIVE_TOOLS_V2 = {
             "profile": "str (storymap_creator_v15 défaut)",
             "audience": "str (cerema_internal défaut, JAMAIS public sans confirmation user)",
             "expires_at": "int unix timestamp optionnel (None = jamais)",
-            "data_scope": "str (project|study|all, project défaut)",
+            "data_scope": "str — accepté mais NON APPLIQUÉ (cf. mint)",
             "tools_whitelist": "list|'all'",
             "project_id": "str optionnel",
             "label": "str optionnel (auto-généré sinon)",
@@ -2065,6 +2065,12 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
                     "data_scope": {
                         "type": "string",
                         "enum": ["all", "study", "project"],
+                        "description": (
+                            "ACCEPTÉ MAIS NON APPLIQUÉ. La clé restreint les "
+                            "outils, pas les données : les outils QGIS opèrent "
+                            "sur l'étude active du pod. N'annoncez pas de "
+                            "cloisonnement sur la foi de ce paramètre."
+                        ),
                     },
                     "tools_whitelist": {
                         "description": "Liste de tools autorisés ou 'all' (hérite profile).",

@@ -4723,6 +4723,12 @@ async def get_storymap_pattern_endpoint(
 #  4. GET /studies/{sid}/scoped-keys → liste owned + publiés
 #  5. DELETE /studies/{sid}/scoped-keys/{kid} → soft revoke
 
+# Valeur stockée dans `scoped_keys.data_scope` tant qu'aucun périmètre de
+# données n'est appliqué. Explicite plutôt que 'project', qui laissait croire
+# à un cloisonnement inexistant. Les lignes antérieures gardent leur ancienne
+# valeur : elles n'étaient pas plus appliquées pour autant.
+_DATA_SCOPE_NON_APPLIQUE = "unrestricted"
+
 
 @app.post("/studies/{sid}/scoped-keys")
 async def mint_scoped_key_endpoint(
@@ -4734,6 +4740,11 @@ async def mint_scoped_key_endpoint(
 
     Payload : {profile, audience, expires_at, data_scope, tools_whitelist,
                project_id, label}
+
+    ATTENTION — `data_scope` est accepté mais N'EST PAS APPLIQUÉ. La clé
+    restreint les outils, pas les données : rien ne lit le sid ni le pid
+    qu'elle porte, et les outils QGIS opèrent sur l'étude active du pod. La
+    réponse le dit explicitement dans `data_scope_notice`.
 
     Retourne {key_id, masked_key, ...metadata}. La clé brute N'EST pas
     retournée 2 fois — l'user doit la copier ici ou utiliser la liste
@@ -4753,7 +4764,21 @@ async def mint_scoped_key_endpoint(
     profile = payload.get("profile", "storymap_creator_v15")
     audience = payload.get("audience", "cerema_internal")
     expires_at = payload.get("expires_at")
-    data_scope = payload.get("data_scope", "project")
+    # `data_scope` est accepte pour ne pas casser les appelants, mais il n'est
+    # PAS applique et la cle ne le portera donc pas.
+    #
+    # Rien ne lit `scope["sid"]`, `["pid"]` ni `["data"]` dans hub/ : seul
+    # `_scope_tools_whitelist` lit `tools`. Une cle emise avec
+    # `data_scope="project"` restreignait donc les outils, pas les donnees --
+    # et les outils QGIS n'acceptent pas de sid, ils operent sur l'etude ACTIVE
+    # du pod. L'agent agissait sur ce qui etait actif au moment de l'appel.
+    #
+    # Promettre un perimetre qu'on n'applique pas est pire que ne rien
+    # promettre. On stocke donc un marqueur explicite, et on le dit dans la
+    # reponse. L'application viendra du provisionnement -- un atelier par agent,
+    # l'etude montee en subPath lecture seule -- pas d'une garde ici.
+    payload.get("data_scope")  # lu et ignore, volontairement
+    data_scope = _DATA_SCOPE_NON_APPLIQUE
     tools = payload.get("tools_whitelist", "all")
     project_id = payload.get("project_id")
     label = payload.get("label", f"Agent partagé {sid[:6]}")
@@ -4787,6 +4812,11 @@ async def mint_scoped_key_endpoint(
         "audience": audience,
         "expires_at": expires_at,
         "data_scope": data_scope,
+        "data_scope_notice": (
+            "Le périmètre de données n'est pas appliqué : cette clé restreint "
+            "les outils, pas les données. Les outils QGIS opèrent sur l'étude "
+            "active du pod. Ne la diffusez pas en supposant un cloisonnement."
+        ),
         "label": label,
         "warning_copy_now": "Cette clé ne sera plus affichée en clair. Copiez-la maintenant.",
     }
