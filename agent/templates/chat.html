@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
 <meta name="theme-color" content="#000091">
-<title>QGIS Agent — CEREMA</title>
+<title>QGIS Agent — QGIS Service</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/utility/utility.min.css">
 <script src="https://unpkg.com/marked@9/marked.min.js"></script>
@@ -322,13 +322,15 @@ body.embed .msg .bubble pre{max-width:100%}
 
 <header role="banner" class="fr-header">
 <div class="fr-header__body"><div class="fr-container fr-container--fluid"><div class="fr-header__body-row">
+  {# Ni « République Française », ni nom d'opérateur : cette interface est
+     servie par l'instance de celui qui l'a installée, et rien ne permet d'y
+     affirmer une identité d'État ou un exploitant. Cf. workspace.html. #}
   <div class="fr-header__brand fr-enlarge-link"><div class="fr-header__brand-top">
-    <div class="fr-header__logo"><p class="fr-logo">République<br>Française</p></div>
     <div class="fr-header__operator">
-      <p style="font-weight:700;font-size:14px;color:#000091">CEREMA</p>
       {# Sprint UX-1 (2026-06-20) : harmonisation wording avec workspace.html
          operator (QGIS Service). Avant : 'QGIS Agent' incoherent vs workspace. #}
-      <p style="font-size:10px;color:#666">QGIS Service</p>
+      <p style="font-weight:700;font-size:14px;color:#000091">QGIS Service</p>
+      <p style="font-size:10px;color:#666">SSPCloud</p>
     </div>
   </div>
   {# Sprint UX-2 (2026-06-21) : retire service_title + tagline = doublon
@@ -633,21 +635,13 @@ body.embed .msg .bubble pre{max-width:100%}
    bandeau mentions. #}
 <footer class="fr-footer" role="contentinfo"><div class="fr-container fr-container--fluid">
   <div class="fr-footer__body">
-    <div class="fr-footer__brand fr-enlarge-link">
-      <p class="fr-logo">République<br>Française</p>
-    </div>
     <div class="fr-footer__content">
       <p class="fr-footer__content-desc">
-        QGIS Service · CEREMA. Plateforme d'analyse géospatiale assistée
-        par IA, hébergée sur SSPCloud (INSEE). Outils QGIS Desktop +
-        agent conversationnel + accès aux données IGN, Géorisques, OSM
-        et DVF.
+        QGIS Service — plateforme d'analyse géospatiale assistée par IA,
+        hébergée sur SSPCloud (INSEE). Outils QGIS Desktop + agent
+        conversationnel + accès aux données IGN, Géorisques, OSM et DVF.
       </p>
       <ul class="fr-footer__content-list">
-        <li class="fr-footer__content-item">
-          <a class="fr-footer__content-link" target="_blank" rel="noopener external"
-             href="https://www.cerema.fr">cerema.fr</a>
-        </li>
         <li class="fr-footer__content-item">
           <a class="fr-footer__content-link" target="_blank" rel="noopener external"
              href="https://lab.sspcloud.fr">SSPCloud</a>

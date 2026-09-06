@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
 <meta name="theme-color" content="#000091">
-<title>{{ active_study.name if active_study else 'Bureau de travail' }} — CEREMA</title>
+<title>{{ active_study.name if active_study else 'Bureau de travail' }} — QGIS Service</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/utility/utility.min.css">
 <!-- Chantier G4-b-3c : galerie de recettes web (section RECETTES du desk).
@@ -509,8 +509,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
            plus discret). Tooltip explicatif. -->
       <a href="/workspace" class="brand" style="text-decoration:none;color:inherit"
          title="Retour à mon espace de travail">
-        <span class="op">CEREMA</span>
-        <span class="sub">· QGIS</span>
+        <span class="op">QGIS</span>
+        <span class="sub">· Service</span>
       </a>
       <span style="color:var(--text-mention-grey);font-size:14px;margin:0 -2px"
             aria-hidden="true">›</span>
@@ -1145,14 +1145,14 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         {# Sprint Composants Phase 3b (2026-06-26) : quick-actions UI bridge. #}
         <div class="quick-actions-block" data-target="assemblies">
           <div class="quick-actions-title">✨ Demander à l'agent V1.5 :</div>
-          <button class="quick-action-btn" data-prompt="Assemble mes briques visuelles en storymap CEREMA prête à partager (style DSFR officiel). Confirme avec moi le titre et l'audience avant de créer.">
+          <button class="quick-action-btn" data-prompt="Assemble mes briques visuelles en storymap prête à partager (style DSFR officiel). Confirme avec moi le titre et l'audience avant de créer.">
             🎨 Assembler une storymap avec mes briques
           </button>
           <button class="quick-action-btn" data-prompt="Montre-moi un aperçu visuel de ma dernière storymap (sans la publier — juste pour vérifier le rendu).">
             👁 Aperçu de ma dernière storymap
           </button>
-          <button class="quick-action-btn" data-prompt="Publie ma dernière storymap pour qu'elle soit accessible (lien partageable, accès réservé collègues CEREMA par défaut). Confirme l'audience avant publication.">
-            🚀 Publier (lien partageable collègues CEREMA)
+          <button class="quick-action-btn" data-prompt="Publie ma dernière storymap pour qu'elle soit accessible (lien partageable, accès réservé aux collègues par défaut). Confirme l'audience avant publication.">
+            🚀 Publier (lien partageable entre collègues)
           </button>
         </div>
         <div id="assemblies-list" class="assemblies-list"
@@ -1197,7 +1197,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           sheet_a4: '📄', modal_embed: '🪟', atlas_immersive: '🏛',
         };
         const AUDIENCE_LABELS = {
-          public: '🌍 Public', cerema_internal: '🏛 CEREMA',
+          public: '🌍 Public', cerema_internal: '🏛 Interne',
           restricted: '🔒 Restreint', confidential: '🤐 Confidentiel',
         };
         list.innerHTML = data.map(a => `
@@ -1615,11 +1615,11 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             📋 Mes assistants partagés actuels
           </button>
           <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35;margin-top:5px"
-                  data-prompt="Je voudrais partager cette étude avec mes collègues CEREMA via un assistant qu'ils peuvent consulter directement. Propose-moi une configuration adaptée et préviens-moi des points d'attention (confidentialité, audience).">
+                  data-prompt="Je voudrais partager cette étude avec mes collègues via un assistant qu'ils peuvent consulter directement. Propose-moi une configuration adaptée et préviens-moi des points d'attention (confidentialité, audience).">
             🤖 Créer un assistant pour mes collègues
           </button>
           <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35;margin-top:5px"
-                  data-prompt="Vérifie qu'un assistant partagé visible par mes collègues CEREMA serait bien configuré pour cette étude. Signale-moi les éventuels points d'attention (confidentialité, accès, etc.).">
+                  data-prompt="Vérifie qu'un assistant partagé visible par mes collègues serait bien configuré pour cette étude. Signale-moi les éventuels points d'attention (confidentialité, accès, etc.).">
             🔍 Vérifier la configuration avant partage
           </button>
         </div>
@@ -1674,7 +1674,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         }
         const AUDIENCE_BADGE = {
           public: {color: '#fff', bg: '#b34000', label: '🌍 public'},
-          cerema_internal: {color: '#fff', bg: '#000091', label: '🏛 CEREMA'},
+          cerema_internal: {color: '#fff', bg: '#000091', label: '🏛 Interne'},
           restricted: {color: '#fff', bg: '#6e445a', label: '🔒 restreint'},
           confidential: {color: '#fff', bg: '#000', label: '🚫 confidentiel'},
         };
@@ -2664,7 +2664,7 @@ async function loadLivrables() {
              {label:'🔧 Métadonnées', onclick: `openAssemblyEditor('${a.aid}')`, title: 'Editer titre/audience/sections (mode expert JSON). Pour edition visuelle, utiliser BlockNote.'},
              {label:'📝 BlockNote', href:`/editor/${sid}/assembly/${a.aid}`, target:'_blank'},
              {label:'⎘ Cloner', onclick: `cloneAssembly('${a.aid}', '${(a.title || a.aid).replace(/'/g, "\\'")}')`},
-             {label:'🚀 Publier', prompt:`Publie cette storymap (« ${a.title || a.aid} ») avec accès réservé à mes collègues CEREMA. Confirme avec moi l'audience avant publication.`}],
+             {label:'🚀 Publier', prompt:`Publie cette storymap (« ${a.title || a.aid} ») avec accès réservé à mes collègues. Confirme avec moi l'audience avant publication.`}],
       });
     });
 

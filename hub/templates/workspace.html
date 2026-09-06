@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
 <meta name="theme-color" content="#000091">
-<title>Mon espace QGIS — CEREMA</title>
+<title>Mon espace — QGIS Service</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/utility/utility.min.css">
 <style>
@@ -114,11 +114,15 @@
 <body>
 <header role="banner" class="fr-header">
 <div class="fr-header__body"><div class="fr-container"><div class="fr-header__body-row">
+  {# Ni bloc « République Française », ni nom d'opérateur : ce service
+     s'installe en trois minutes par n'importe qui sur SSPCloud, et son en-tête
+     ne peut pas affirmer une identité d'État ni un exploitant que l'instance
+     n'a pas. L'attribution vit dans le dépôt — README, LICENSE — où elle est
+     vraie et où la Licence Ouverte 2.0 l'exige. #}
   <div class="fr-header__brand fr-enlarge-link"><div class="fr-header__brand-top">
-    <div class="fr-header__logo"><p class="fr-logo">République<br>Française</p></div>
     <div class="fr-header__operator">
-      <p style="font-weight:700;font-size:15px;color:#000091">CEREMA</p>
-      <p style="font-size:11px;color:#666">QGIS Service</p>
+      <p style="font-weight:700;font-size:15px;color:#000091">QGIS Service</p>
+      <p style="font-size:11px;color:#666">SSPCloud</p>
     </div>
   </div>
   <div class="fr-header__service"><a href="/workspace"><p class="fr-header__service-title">Mon espace de travail</p></a>
@@ -581,19 +585,13 @@
    Memes liens, meme structure -> service unifie. #}
 <footer class="fr-footer" role="contentinfo"><div class="fr-container">
 <div class="fr-footer__body">
-  <div class="fr-footer__brand fr-enlarge-link"><p class="fr-logo">République<br>Française</p></div>
   <div class="fr-footer__content">
     <p class="fr-footer__content-desc">
-      QGIS Service · CEREMA. Plateforme d'analyse géospatiale assistée
-      par IA, hébergée sur SSPCloud (INSEE). Outils QGIS Desktop +
-      agent conversationnel + accès aux données IGN, Géorisques, OSM
-      et DVF.
+      QGIS Service — plateforme d'analyse géospatiale assistée par IA,
+      hébergée sur SSPCloud (INSEE). Outils QGIS Desktop + agent
+      conversationnel + accès aux données IGN, Géorisques, OSM et DVF.
     </p>
     <ul class="fr-footer__content-list">
-      <li class="fr-footer__content-item">
-        <a class="fr-footer__content-link" target="_blank" rel="noopener external"
-           href="https://www.cerema.fr">cerema.fr</a>
-      </li>
       <li class="fr-footer__content-item">
         <a class="fr-footer__content-link" target="_blank" rel="noopener external"
            href="https://lab.sspcloud.fr">SSPCloud</a>

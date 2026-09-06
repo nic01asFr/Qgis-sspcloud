@@ -83,7 +83,7 @@ PATTERNS: dict[str, dict[str, Any]] = {
         },
         "example": {
             "title": "Risque inondation 4e arrondissement",
-            "subtitle": "Diagnostic CEREMA 2026",
+            "subtitle": "Diagnostic 2026",
             "kpis": [
                 {"value": "47", "label": "% du territoire", "unit": "%"},
                 {"value": "5 670", "label": "batiments exposes"},
@@ -256,7 +256,7 @@ PATTERNS: dict[str, dict[str, Any]] = {
             "methodology": "str markdown : etapes de calcul methodologie (caveat inclus)",
             "expert_quote": "str : citation expert pour valider la methodo",
             "expert_name": "str : nom expert",
-            "expert_role": "str : role expert (ex: 'Chef de projet risque, CEREMA')",
+            "expert_role": "str : role expert (ex: 'Chef de projet risque')",
             "source": "str : source datee",
         },
         "components_template": [

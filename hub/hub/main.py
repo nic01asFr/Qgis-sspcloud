@@ -2579,7 +2579,7 @@ async def hub_onboarding(request: Request):
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>Connexion QGIS Service — CEREMA</title>
+<title>Connexion — QGIS Service</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
 <style>
 body{{font-family:Marianne,arial,sans-serif;max-width:720px;margin:60px auto;padding:0 20px}}
@@ -2759,7 +2759,7 @@ async def hub_login_form(request: Request, error: str = "", key: str = ""):
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>Connexion — QGIS Service — CEREMA</title>
+<title>Connexion — QGIS Service</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#000091">
 {_FAVICON_TAG}
@@ -2784,14 +2784,14 @@ code{{font-size:11px;background:#efeffb;padding:2px 6px;border-radius:2px}}
 </style>
 </head>
 <body>
-<!-- Bloc-marque : /login etait la seule page du service sans identite
-     institutionnelle, alors que /workspace et /desk affichent Marianne et
-     CEREMA. C'est pourtant la porte d'entree du service. -->
+<!-- Bloc-marque neutre : ni Marianne, ni exploitant. Ce service
+     s'installe par n'importe qui sur SSPCloud ; sa porte d'entree ne peut
+     affirmer ni une identite d'Etat ni une organisation que l'instance n'a
+     pas. L'attribution vit dans le depot, ou la licence l'exige. -->
 <header role="banner" class="brand-row">
-  <p class="fr-logo">République<br>Française</p>
   <div class="brand-op">
-    <span class="op">CEREMA</span>
-    <span class="sub">QGIS Service</span>
+    <span class="op">QGIS Service</span>
+    <span class="sub">SSPCloud</span>
   </div>
 </header>
 
@@ -9674,7 +9674,7 @@ def _render_publication_404_html(owner: str, kind: str, slug: str) -> HTMLRespon
     body = f"""<!DOCTYPE html>
 <html lang="fr"><head>
 <meta charset="utf-8"/>
-<title>Publication introuvable — CEREMA · QGIS Service</title>
+<title>Publication introuvable — QGIS Service</title>
 <style>
   body {{ margin:0; font-family: Marianne, system-ui, sans-serif; background:#f6f6f6; color:#161616 }}
   .wrap {{ max-width:640px; margin:64px auto; padding:32px; background:#fff; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,.06) }}
@@ -9770,7 +9770,7 @@ async def list_published_owner(owner: str) -> HTMLResponse:
     body = f"""<!DOCTYPE html>
 <html lang="fr"><head>
 <meta charset="utf-8"/>
-<title>Publications de {owner} — CEREMA · QGIS Service</title>
+<title>Publications de {owner} — QGIS Service</title>
 <style>
   body {{ margin:0; font-family: Marianne, system-ui, sans-serif; background:#f6f6f6; color:#161616 }}
   .banner {{ background:#000091; color:#fff; padding:10px 16px; font-size:13px; font-weight:600 }}

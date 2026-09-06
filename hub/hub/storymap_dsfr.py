@@ -1,5 +1,5 @@
 """
-hub.storymap_dsfr — Builder DSFR pour storymaps cartographiques CEREMA.
+hub.storymap_dsfr — Builder de storymaps cartographiques, style DSFR.
 
 Pattern extrait de trois exemples de référence :
   - stationnement_4eme.html        (hero custom + KPI cards + Leaflet)
@@ -7,7 +7,7 @@ Pattern extrait de trois exemples de référence :
   - storymap_blancarde_chartreux   (DSFR scrollytelling + #methodo + SVG)
 
 Principes invariants :
-  1. Header DSFR (République Française + operator CEREMA)
+  1. Header (operateur optionnel, vide par defaut)
   2. fr-notice (statut de l'étude)
   3. Chapitres alternant fond gris/blanc (background-alt-grey)
   4. .chapter-title bleu france avec border-bottom 3px
@@ -22,8 +22,8 @@ Usage :
     sb = StorymapBuilder(
         title="Inondations — Le Lavandou",
         subtitle="Risque T100 sur les bâtiments exposés",
-        operator="CEREMA",
-        operator_sub="DTerMed · DTVB/AU",
+        operator="",  # renseigner si l'instance a un exploitant a citer
+        operator_sub="",
         notice="Étude exploratoire — données expérimentales (mai 2026)",
     )
     sb.add_kpis([
@@ -248,7 +248,9 @@ def _method_step(step: dict[str, Any]) -> str:
 class StorymapBuilder:
     title: str
     subtitle: str = ""
-    operator: str = "CEREMA"
+    # Vide par defaut : un livrable ne porte le nom d'un exploitant que
+    # si celui qui publie le renseigne. Cf. _render_header.
+    operator: str = ""
     operator_sub: str = ""
     service_title: str | None = None
     notice: str = ""
@@ -452,11 +454,12 @@ class StorymapBuilder:
             f'href="https://unpkg.com/leaflet@{_LEAFLET_VERSION}/dist/leaflet.css">'
             if self._needs_leaflet else ""
         )
+        titre_suffixe = f" · {self.operator}" if self.operator else ""
         return f"""<head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
 <meta name="theme-color" content="#000091">
-<title>{self.title} · {self.operator}</title>
+<title>{self.title}{titre_suffixe}</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@{_DSFR_VERSION}/dist/dsfr.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@{_DSFR_VERSION}/dist/utility/utility.min.css">
 {leaflet}
@@ -466,14 +469,26 @@ class StorymapBuilder:
 
     def _render_header(self) -> str:
         svc_title = self.service_title or self.title
+        # Pas de bloc « République Française », et pas d'opérateur par défaut.
+        # Un livrable produit ici part chez ses destinataires avec une URL
+        # stable : il ne peut pas porter l'identité de l'État ni le nom d'un
+        # exploitant que l'instance n'a pas. Celui qui publie renseigne
+        # `operator` s'il y a lieu — et alors seulement le bloc apparaît.
+        bloc_operateur = ""
+        if self.operator:
+            sous_titre = (
+                f'\n      <p style="font-size:11px;color:#666">{self.operator_sub}</p>'
+                if self.operator_sub else ""
+            )
+            bloc_operateur = (
+                '\n    <div class="fr-header__operator">'
+                f'\n      <p style="font-weight:700;font-size:15px;color:#000091">{self.operator}</p>'
+                f'{sous_titre}'
+                '\n    </div>'
+            )
         return f"""<header role="banner" class="fr-header">
 <div class="fr-header__body"><div class="fr-container"><div class="fr-header__body-row">
-  <div class="fr-header__brand fr-enlarge-link"><div class="fr-header__brand-top">
-    <div class="fr-header__logo"><p class="fr-logo">République<br>Française</p></div>
-    <div class="fr-header__operator">
-      <p style="font-weight:700;font-size:15px;color:#000091">{self.operator}</p>
-      <p style="font-size:11px;color:#666">{self.operator_sub}</p>
-    </div>
+  <div class="fr-header__brand fr-enlarge-link"><div class="fr-header__brand-top">{bloc_operateur}
   </div>
   <div class="fr-header__service"><a href="#"><p class="fr-header__service-title">{svc_title}</p></a>
     <p class="fr-header__service-tagline">{self.subtitle}</p>
@@ -596,15 +611,18 @@ class StorymapBuilder:
 
     def _render_footer(self) -> str:
         license = (self._traceability or {}).get("license", "Licence ouverte 2.0")
+        # Même règle qu'en en-tête : ni identité d'État, ni lien vers un
+        # organisme qui n'a pas produit ce document. Le titre suffit quand
+        # aucun opérateur n'est renseigné.
+        signature = " ".join(
+            p for p in (self.operator, self.operator_sub) if p
+        )
+        signature = f"{signature} — {self.title}" if signature else self.title
         return f"""<footer class="fr-footer" role="contentinfo"><div class="fr-container">
 <div class="fr-footer__body">
-  <div class="fr-footer__brand fr-enlarge-link">
-    <p class="fr-logo">République<br>Française</p>
-  </div>
   <div class="fr-footer__content">
-    <p class="fr-footer__content-desc">{self.operator} {self.operator_sub} — {self.title}</p>
+    <p class="fr-footer__content-desc">{signature}</p>
     <ul class="fr-footer__content-list">
-      <li class="fr-footer__content-item"><a class="fr-footer__content-link" href="https://cerema.fr">cerema.fr</a></li>
       <li class="fr-footer__content-item"><a class="fr-footer__content-link" href="https://geoservices.ign.fr">geoservices.ign.fr</a></li>
     </ul>
   </div>
@@ -641,7 +659,7 @@ def quick_storymap(
     map_center: list[float],
     sources: list[str],
     kpis: list[dict] | None = None,
-    operator_sub: str = "DTerMed",
+    operator_sub: str = "",
 ) -> str:
     """Storymap minimale en une seule fonction — pour usage rapide de l'agent."""
     sb = StorymapBuilder(
