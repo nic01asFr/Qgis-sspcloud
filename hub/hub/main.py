@@ -3638,6 +3638,107 @@ async def get_active_study_endpoint(
     return await studies.get_study(active_id, user["username"])
 
 
+def _diff_registre_disque(en_base: list, sur_disque: list) -> dict:
+    """Compare ce que la base sait et ce que le volume porte.
+
+    Fonction pure, donc testable sans pod ni base. Elle regarde dans les deux
+    sens, parce que les deux divergences existent et n'ont pas le meme remede :
+
+    - `orphelines` : un dossier avec des donnees, aucune ligne en base. Elles
+      sont invisibles depuis l'interface, donc inatteignables. Adoptables.
+    - `fantomes` : une ligne en base, aucun dossier. L'etude s'affiche et
+      s'ouvre sur du vide. Vu apres une suppression de dossier que le hub a
+      aussitot recreee depuis sa base.
+    """
+    ids_base = {s["id"] for s in en_base}
+    ids_disque = {s["sid"] for s in sur_disque}
+    return {
+        "orphelines": [s for s in sur_disque if s["sid"] not in ids_base],
+        "fantomes": [
+            {"id": s["id"], "name": s.get("name"), "status": s.get("status")}
+            for s in en_base if s["id"] not in ids_disque
+        ],
+        "accordees": sorted(ids_base & ids_disque),
+    }
+
+
+async def _etudes_sur_disque(username: str) -> list:
+    """Inventaire du PVC. Le hub ne le monte pas : on passe par le pod."""
+    stdout = await _execute_python_in_workspace(
+        username, studies.inventaire_disque_pod_code(),
+    )
+    for ligne in (stdout or "").splitlines():
+        if ligne.startswith("STUDIES_ON_DISK_OK"):
+            return json.loads(ligne[len("STUDIES_ON_DISK_OK"):].strip())
+    raise RuntimeError("inventaire du disque : marqueur absent de la sortie")
+
+
+@app.get("/studies/reconciliation")
+async def reconciliation_endpoint(
+    user: dict = Depends(auth.get_current_user),
+):
+    """Ce que la base sait, ce que le disque porte, et l'ecart entre les deux.
+
+    Constate sans rien modifier. Le POST du meme chemin adopte les orphelines.
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    en_base = await studies.list_studies(
+        user["username"], include_archived=True, include_test=True,
+    )
+    try:
+        sur_disque = await _etudes_sur_disque(user["username"])
+    except Exception as exc:
+        log.warning("Inventaire du disque impossible : %s -> reconciliation "
+                    "indisponible", exc)
+        raise HTTPException(503, "Inventaire du disque impossible : %s" % exc)
+    d = _diff_registre_disque(en_base, sur_disque)
+    d["en_base"] = len(en_base)
+    d["sur_disque"] = len(sur_disque)
+    return d
+
+
+@app.post("/studies/reconciliation")
+async def adopter_orphelines_endpoint(
+    user: dict = Depends(auth.get_current_user),
+):
+    """Enregistre les etudes presentes sur le disque et absentes de la base.
+
+    Ne touche pas aux fantomes : une ligne sans dossier peut vouloir dire que
+    le volume n'est pas monte, et supprimer sur cette foi ferait perdre une
+    etude bien vivante. On les signale, on ne les efface pas.
+    """
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    en_base = await studies.list_studies(
+        user["username"], include_archived=True, include_test=True,
+    )
+    try:
+        sur_disque = await _etudes_sur_disque(user["username"])
+    except Exception as exc:
+        log.warning("Inventaire du disque impossible : %s -> aucune adoption", exc)
+        raise HTTPException(503, "Inventaire du disque impossible : %s" % exc)
+
+    d = _diff_registre_disque(en_base, sur_disque)
+    adoptees, ignorees = [], []
+    for e in d["orphelines"]:
+        if not e.get("meta_lisible"):
+            # Un dossier sans meta.json lisible n'est pas forcement une etude.
+            # On prefere le signaler qu'inscrire n'importe quoi au registre.
+            ignorees.append({"sid": e["sid"], "raison": "meta.json illisible"})
+            continue
+        if await studies.adopter_etude(
+            e["sid"], user["username"], e.get("name"), e.get("profile") or "standard",
+        ):
+            adoptees.append({"sid": e["sid"], "name": e.get("name")})
+    return {
+        "adoptees": adoptees,
+        "ignorees": ignorees,
+        "fantomes": d["fantomes"],
+    }
+
+
+
 @app.get("/studies/{sid}")
 async def get_study_endpoint(
     sid: str,

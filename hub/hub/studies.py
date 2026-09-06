@@ -2800,3 +2800,95 @@ if active_p.exists() and active_p.read_text().strip() == sid:
     active_p.unlink()
     print("ACTIVE_CLEARED")
 """
+
+
+def inventaire_disque_pod_code() -> str:
+    """Code Python pour enumerer les etudes reellement presentes sur le PVC.
+
+    Le hub ne monte pas le volume : il ne connait des etudes que ce que sa
+    base en dit. Les deux peuvent diverger, et divergeaient -- six dossiers
+    sur le disque pour deux lignes en base, donc quatre etudes avec de vraies
+    donnees inatteignables depuis l'interface.
+
+    Chaque etude porte son `meta.json` : l'adoption d'un dossier orphelin est
+    donc bien definie, elle ne suppose aucun nom invente. Un dossier sans
+    `meta.json` lisible est signale plutot qu'ignore -- c'est le cas qui
+    demande un oeil humain.
+    """
+    return """
+from pathlib import Path
+import json
+racine = Path("/data/studies")
+out = []
+if racine.is_dir():
+    for d in sorted(racine.iterdir()):
+        # `active` est un lien symbolique vers l'etude courante, pas une etude.
+        if not d.is_dir() or d.is_symlink():
+            continue
+        entree = {"sid": d.name, "name": None, "profile": None, "meta_lisible": False}
+        meta = d / "meta.json"
+        if meta.is_file():
+            try:
+                m = json.loads(meta.read_text(encoding="utf-8"))
+                entree["name"] = m.get("name")
+                entree["profile"] = m.get("profile")
+                entree["meta_lisible"] = True
+            except Exception as exc:
+                entree["erreur"] = str(exc)[:120]
+        try:
+            entree["projets"] = len(list((d / "projects").iterdir())) \
+                if (d / "projects").is_dir() else 0
+        except Exception:
+            entree["projets"] = 0
+        out.append(entree)
+print("STUDIES_ON_DISK_OK " + json.dumps(out, ensure_ascii=False))
+"""
+
+
+async def adopter_etude(
+    sid: str,
+    owner: str,
+    name: str | None = None,
+    profile: str = "standard",
+) -> bool:
+    """Enregistre une etude qui existe sur le disque mais pas en base.
+
+    `create_study` engendre un identifiant ; ici il est impose par le dossier
+    deja present. C'est toute la difference : on n'invente rien, on constate.
+
+    Idempotente : si la ligne existe deja, rend False sans rien ecrire. Le nom
+    vient du `meta.json` du dossier ; a defaut, on le nomme d'apres son
+    identifiant plutot que de laisser un champ vide, pour qu'il soit
+    reperable dans la liste.
+
+    Rend True si une ligne a ete creee.
+    """
+    now = int(time.time())
+    ligne = {
+        "id":              sid,
+        "owner":           owner,
+        "name":            _safe_name(name or f"Etude {sid[:6]} (adoptee)"),
+        "profile":         profile or "standard",
+        "project_path":    f"/data/studies/{sid}/project.qgz",
+        "conversation_id": None,
+        "created_at":      now,
+        "last_active":     now,
+        "status":          "active",
+        "origin":          "user",
+    }
+    async with aiosqlite.connect(_DB_PATH) as db:
+        cur = await db.execute("SELECT 1 FROM studies WHERE id = ?", (sid,))
+        if await cur.fetchone():
+            return False
+        await db.execute("""
+            INSERT INTO studies
+            (id, owner, name, profile, project_path, conversation_id,
+             created_at, last_active, status, origin)
+            VALUES (:id, :owner, :name, :profile, :project_path,
+                    :conversation_id, :created_at, :last_active, :status,
+                    :origin)
+        """, ligne)
+        await db.commit()
+    log.info("Etude %s adoptee depuis le disque pour %s (%s)",
+             sid, owner, ligne["name"])
+    return True
