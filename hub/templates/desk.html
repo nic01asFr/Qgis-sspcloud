@@ -1235,7 +1235,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     async function publishAssembly(aid) {
       const list = document.getElementById('assemblies-list');
       const sid = list.dataset.activeStudyId;
-      if (!confirm('Publier cet assemblage sur S3 ?\\nL\\'audience par défaut sera "cerema_internal".\\naudit_chain sera signé SHA256.')) return;
+      if (!confirm('Publier cet assemblage sur S3 ?\nL\'audience par défaut sera "cerema_internal".\naudit_chain sera signé SHA256.')) return;
       try {
         const resp = await fetch(`/studies/${sid}/assemblies/${aid}/publish`, {
           method: 'POST', credentials: 'include',
@@ -1246,7 +1246,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         if (!resp.ok || !data.published) {
           throw new Error(data.detail || `HTTP ${resp.status}`);
         }
-        alert(`✓ Publié : ${data.published_url}\\nsigned_hash: ${data.audit_chain.signed_hash.slice(0,30)}…`);
+        alert(`✓ Publié : ${data.published_url}\nsigned_hash: ${data.audit_chain.signed_hash.slice(0,30)}…`);
         loadAssemblies();
       } catch (e) {
         alert(`Erreur publish : ${e.message}`);

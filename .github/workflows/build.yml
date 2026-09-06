@@ -24,6 +24,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      # Node sert a compiler les scripts inline des gabarits
+      # (tests/test_templates_js.py). Sans lui le test s'ignore, et la classe
+      # de defaut qu'il ferme repasserait sans bruit.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       - name: Dependances
         run: |
           python -m pip install --upgrade pip
