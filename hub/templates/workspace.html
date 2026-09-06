@@ -159,8 +159,8 @@
   {% if active_study %}
   <div class="hero">
     <div class="hero-cta">
-      <a href="/desk" class="fr-btn fr-btn--lg">
-        🪟 Continuer mon travail sur « {{ active_study.name }} »
+      <a href="/desk" class="fr-btn fr-btn--lg fr-icon-window-line fr-btn--icon-left">
+        Continuer mon travail sur « {{ active_study.name }} »
       </a>
       <span class="hero-status hero-status-{% if session_ready %}ok{% else %}sleep{% endif %}"
             title="{% if session_ready %}Bureau QGIS prêt{% else %}Bureau QGIS en veille (se réveille au premier message){% endif %}">
@@ -172,10 +172,10 @@
   {% elif not studies %}
   <div class="hero">
     <div class="hero-cta">
-      <button type="button" class="fr-btn fr-btn--lg"
+      <button type="button" class="fr-btn fr-btn--lg fr-icon-add-circle-line fr-btn--icon-left"
               onclick="document.getElementById('new-study-name').focus();
                        document.getElementById('new-study-name').scrollIntoView({behavior:'smooth',block:'center'})">
-        ✨ Démarrer ma première étude
+        Démarrer ma première étude
       </button>
     </div>
   </div>
@@ -207,7 +207,7 @@
     <div class="study-card{% if s.id == active_study_id %} is-active{% endif %}{% if s.origin == 'demo' %} is-demo{% endif %}">
       <div class="study-card-header">
         <h3 class="study-name" title="{{ s.name }}">
-          {% if s.id == active_study_id %}🪟{% else %}📁{% endif %} {{ s.name }}
+          {% if s.id == active_study_id %}<span class="fr-icon-window-line fr-icon--sm" aria-hidden="true"></span>{% else %}<span class="fr-icon-folder-2-line fr-icon--sm" aria-hidden="true"></span>{% endif %} {{ s.name }}
         </h3>
         {% if s.id == active_study_id %}<span class="active-badge">ACTIVE</span>{% endif %}
         {% if s.origin == 'demo' %}
@@ -217,22 +217,22 @@
       </div>
       <div class="study-meta">
         {% if s.project_count and s.project_count > 0 %}
-        <span>📁 {{ s.project_count }} {% if s.project_count == 1 %}projet{% else %}projets{% endif %}</span>
+        <span><span class="fr-icon-folder-2-line fr-icon--sm" aria-hidden="true"></span> {{ s.project_count }} {% if s.project_count == 1 %}projet{% else %}projets{% endif %}</span>
         {% endif %}
         {% if s.default_project %}
         <span class="sep">·</span>
-        <span>⭐ {{ s.default_project.label }}</span>
+        <span><span class="fr-icon-star-line fr-icon--sm" aria-hidden="true"></span> {{ s.default_project.label }}</span>
         {% endif %}
         {# Repere temporel : seul moyen de distinguer deux etudes homonymes. #}
         {% if s.last_active_label %}
         <span class="sep">·</span>
-        <span title="Dernière ouverture de cette étude">🕘 {{ s.last_active_label }}</span>
+        <span title="Dernière ouverture de cette étude"><span class="fr-icon-time-line fr-icon--sm" aria-hidden="true"></span> {{ s.last_active_label }}</span>
         {% endif %}
       </div>
       <div class="study-actions">
         {% if s.id == active_study_id %}
-        <a href="/desk" class="fr-btn fr-btn--sm" style="font-weight:700;flex:1;text-align:center">
-          🪟 Ouvrir le bureau
+        <a href="/desk" class="fr-btn fr-btn--sm fr-icon-window-line fr-btn--icon-left" style="font-weight:700;flex:1;text-align:center">
+          Ouvrir le bureau
         </a>
         {% else %}
         <form method="POST" action="/workspace/study/{{ s.id }}/activate?return_to=desk"
@@ -255,7 +255,7 @@
   </div>
   {% else %}
   <div class="empty-state" style="margin-bottom:18px">
-    <span class="icon">📂</span>
+    <span class="icon fr-icon-folder-2-line" aria-hidden="true"></span>
     Aucune étude pour l'instant. Démarrez votre première étude ci-dessous.
   </div>
   {% endif %}
@@ -264,7 +264,7 @@
      L'user fini de regarder ses etudes -> il peut en creer une. #}
   <div class="new-study">
     <h3 class="new-study-title">
-      <span style="font-size:1.15rem">✨</span>
+      <span class="fr-icon-add-circle-line" aria-hidden="true"></span>
       <span>Démarrer une nouvelle étude</span>
     </h3>
     <p class="new-study-desc">
@@ -354,10 +354,10 @@
         <td>{{ item.date }}</td>
         <td><a href="{{ item.hub_url }}" target="_blank" class="fr-link">Ouvrir →</a></td>
         <td>
-          <button type="button" class="fr-btn fr-btn--tertiary-no-outline fr-btn--sm"
+          <button type="button" class="fr-btn fr-btn--tertiary-no-outline fr-btn--sm fr-icon-delete-line fr-btn--icon-left"
                   onclick="unpublishArtifact('{{ item.kind }}', '{{ item.slug }}', this)"
                   title="Dépublier ce livrable (suppression S3 + catalogue). Action irréversible.">
-            🗑 Dépublier
+            Dépublier
           </button>
         </td>
       </tr>
@@ -385,18 +385,18 @@
         const txt = await r.text();
         alert(`Échec de la dépublication (HTTP ${r.status}) : ${txt.slice(0, 200)}`);
         btn.disabled = false;
-        btn.textContent = '🗑 Dépublier';
+        btn.textContent = 'Dépublier';
       }
     } catch (e) {
       alert(`Erreur réseau : ${e.message || e}`);
       btn.disabled = false;
-      btn.textContent = '🗑 Dépublier';
+      btn.textContent = 'Dépublier';
     }
   }
   </script>
   {% else %}
   <div class="empty-state">
-    <span class="icon">📦</span>
+    <span class="icon fr-icon-archive-line" aria-hidden="true"></span>
     {% if catalog_total %}
     Aucune publication rattachée à cette étude.
     Tu en as {{ catalog_total }} au total —
@@ -429,7 +429,7 @@
   <div class="memo-grid">
     {% if preferences %}
     <div class="memo-card">
-      <h3>📌 Préférences explicites</h3>
+      <h3><span class="fr-icon-bookmark-line fr-icon--sm" aria-hidden="true"></span> Préférences explicites</h3>
       <ul>
         {% for k, v in preferences.items() %}
         <li><strong>{{ k }}</strong> : {{ v }}</li>
@@ -439,7 +439,7 @@
     {% endif %}
     {% if insights %}
     <div class="memo-card">
-      <h3>💡 Insights agentiques</h3>
+      <h3><span class="fr-icon-lightbulb-line fr-icon--sm" aria-hidden="true"></span> Insights agentiques</h3>
       <ul>
         {% for ins in insights[:10] %}
         <li><strong>{{ ins.key }}</strong> : {{ ins.value }}</li>
@@ -483,7 +483,7 @@
   <details class="fr-callout fr-callout--brown-caramel fr-mb-4w"
            style="padding:12px 16px;font-size:13px">
     <summary style="cursor:pointer;font-weight:600;color:#845d29">
-      🔑 Ma clé d'accès personnelle
+      <span class="fr-icon-lock-line fr-icon--sm" aria-hidden="true"></span> Ma clé d'accès personnelle
     </summary>
     <div class="fr-mt-2w">
       <p style="margin:0 0 8px 0">
@@ -504,9 +504,9 @@
          Remplace par : au 1er acces autre navigateur, l'user va sur /login
          et colle sa cle API dans le form (POST body, zero URL). #}
       <div style="display:flex;gap:8px">
-        <button type="button" class="fr-btn fr-btn--sm fr-btn--secondary"
-                onclick="navigator.clipboard.writeText(document.getElementById('hub-api-key-value').textContent).then(()=>this.textContent='✓ Clé copiée')">
-          📋 Copier la clé
+        <button type="button" class="fr-btn fr-btn--sm fr-btn--secondary fr-icon-clipboard-line fr-btn--icon-left"
+                onclick="navigator.clipboard.writeText(document.getElementById('hub-api-key-value').textContent).then(()=>this.textContent='Clé copiée')">
+          Copier la clé
         </button>
       </div>
       <p style="margin:12px 0 0 0;color:#666;font-size:11px">
@@ -536,7 +536,7 @@
            style="padding:12px 16px;font-size:13px"
            {% if llm_key_missing %}open{% endif %}>
     <summary style="cursor:pointer;font-weight:600;color:#845d29">
-      🤖 Assistant IA — clé de connexion
+      <span class="fr-icon-chat-3-line fr-icon--sm" aria-hidden="true"></span> Assistant IA — clé de connexion
     </summary>
     <div class="fr-mt-2w">
       <p style="margin:0 0 8px 0">
