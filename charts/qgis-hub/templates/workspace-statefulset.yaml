@@ -6,7 +6,7 @@ noVNC). Absorbe le manifest historique `sessions.py:_statefulset_manifest`
 Pattern identique :
 - image `ghcr.io/nic01asfr/qgisremotemcp:latest`
 - 3 ports : MCP 8100 + API 8080 + VNC 6080
-- WORKSPACE_OWNER env obligatoire (utilise par les tools BigQgisMCP pour scope)
+- WORKSPACE_OWNER env obligatoire (utilise par les tools QgisRemoteMCP pour scope)
 - USER_RECIPES_DIR pointe sur symlink maintenu par activate_pod_code
 - HUB_API_KEY via secretKeyRef (pour publish_artifact vers hub)
 - PVC 10Gi rook-ceph-block (data cache, .qgz projets)

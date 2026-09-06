@@ -341,7 +341,7 @@ spec:
           value: "1"
         # V1.5 Sprint 1 : recipes user de l'etude active.
         # `/data/studies/active` est un symlink maintenu par activate_pod_code
-        # (cf. studies.py:activate_pod_code) -> {{active_sid}}. BigQgisMCP
+        # (cf. studies.py:activate_pod_code) -> {{active_sid}}. QgisRemoteMCP
         # qgis_bridge.py lit cette env (commit 3529d1c) et merge user recipes
         # avec system recipes /app/recipes dans list_recipes.
         - name: USER_RECIPES_DIR

@@ -248,9 +248,9 @@ kubectl -n user-<u> exec qgis-hub-0 -- python -c \
 ```
 
 ### 5.3 Study_zone bbox perdu entre 2 calls MCP
-Bug côté BigQgisMCP (workspace). Workaround : passer `bbox` explicite à
+Bug côté QgisRemoteMCP (workspace). Workaround : passer `bbox` explicite à
 chaque `smart_load` au lieu de compter sur `set_study_zone` persistant.
-Fix backlog côté BigQgisMCP.
+Fix backlog côté QgisRemoteMCP.
 
 ### 5.4 Ingress 60s timeout tue run_recipe
 Fix historique Bug ingress : le hub patch son propre ingress au startup
@@ -356,7 +356,7 @@ Une simulation qui passe ne garantit donc pas qu'un `helm upgrade` passera.
 > Qgis-sspcloud, sans aller verifier le depot d'en face.
 
 L'image **est** construite automatiquement — mais par un autre depot.
-`nic01asFr/BigQgisMCP` (miroir : `gitlab.cerema.fr/mcp/QgisRemoteMCP`) a son
+`nic01asFr/QgisRemoteMCP` (miroir : `gitlab.cerema.fr/mcp/QgisRemoteMCP`) a son
 propre workflow, declenche sur push `main` touchant `Dockerfile`,
 `main_mcp.py`, `src/`, `recipes/`, `requirements.txt`… Il pousse `:latest`,
 `:main` et `:{sha}`.
@@ -378,7 +378,7 @@ Deux reserves verifiees :
   trois briques.
 
 ```bash
-cd ../BigQgisMCP
+cd ../QgisRemoteMCP
 docker build -t ghcr.io/nic01asfr/qgisremotemcp:latest .
 docker push ghcr.io/nic01asfr/qgisremotemcp:latest
 ```

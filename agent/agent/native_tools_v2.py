@@ -496,7 +496,7 @@ async def _fetch_recipe_yaml(slug: str, source: str = "auto") -> tuple[str, str,
     Pattern :
     - source="auto" : essaie user d'abord (/desk/recipes/{slug}), fallback system
     - source="user" : recipes user-scoped (PVC user)
-    - source="system" : recipes système BigQgisMCP (/app/recipes via run_recipe)
+    - source="system" : recipes système QgisRemoteMCP (/app/recipes via run_recipe)
     """
     import hashlib
 
@@ -510,7 +510,7 @@ async def _fetch_recipe_yaml(slug: str, source: str = "auto") -> tuple[str, str,
             raise RuntimeError(f"User recipe '{slug}' introuvable")
 
     if source in ("auto", "system"):
-        # Try system recipe via BigQgisMCP MCP tool list_recipes
+        # Try system recipe via QgisRemoteMCP MCP tool list_recipes
         # Pattern : appel /mcp tools/call avec name="get_recipe", arguments={"id": slug}
         if not _HUB_URL or not _HUB_API_KEY:
             raise RuntimeError("HUB_URL/HUB_API_KEY non configurés pour MCP call")
@@ -1374,7 +1374,7 @@ NATIVE_TOOLS_V2 = {
     "analyze_recipe": {
         "fn": analyze_recipe,
         "description": (
-            "Analyse une recipe (user ou système BigQgisMCP) et retourne "
+            "Analyse une recipe (user ou système QgisRemoteMCP) et retourne "
             "RecipeAnalysis : params + impact métier + quality_checks. "
             "Cache HIT instant si déjà analysée, sinon trigger LLM (~10s). "
             "DISCIPLINE PLAN-PUIS-EXECUTE : appelle ce tool AVANT run_recipe "

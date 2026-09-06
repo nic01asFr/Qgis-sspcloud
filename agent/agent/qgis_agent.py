@@ -1681,7 +1681,7 @@ class QGISAgent:
     }
 
     # Villes majeures dont le nom seul est ambigu vis-a-vis des arrondissements.
-    # Cf. memory _MAJOR_CITY_INSEE de BigQgisMCP : `?nom=Marseille` renvoie
+    # Cf. memory _MAJOR_CITY_INSEE de QgisRemoteMCP : `?nom=Marseille` renvoie
     # Marseillette (Aude) ; sans numero on suppose la commune principale.
     _AMBIGUOUS_MAJOR_CITIES = {"marseille", "paris", "lyon"}
 

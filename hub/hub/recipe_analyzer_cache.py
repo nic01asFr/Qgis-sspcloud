@@ -27,7 +27,7 @@ def user_recipe_analysis_path(sid: str, slug: str) -> str:
 
 
 def system_recipe_analysis_path(slug: str, content_hash: str) -> str:
-    """Path PVC pour analyse d'une recipe système (BigQgisMCP /app/recipes).
+    """Path PVC pour analyse d'une recipe système (QgisRemoteMCP /app/recipes).
 
     Pas de sid → cache global au workspace, indexé par content_hash[:12]
     pour conserver les analyses historiques quand la recipe change.

@@ -122,7 +122,7 @@ jobs:
             -c "import hub.main; print('hub imports OK')"
 
   # build-workspace : image QGIS Desktop (ubuntu + QGIS complet ~30min).
-  # Buildée manuellement depuis BigQgisMCP, disponible sur ghcr.io/nic01asfr/qgisremotemcp:latest.
+  # Buildée manuellement depuis QgisRemoteMCP, disponible sur ghcr.io/nic01asfr/qgisremotemcp:latest.
   # Décommenter ce job uniquement pour rebuilder (ex: màj plugins QGIS).
   #
   # build-workspace:

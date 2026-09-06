@@ -1,7 +1,7 @@
 """Tests du vrai McpQgisExecutor JSON-RPC (chantier G4-b-3a).
 
 Couvre le mode ``live=True`` avec mock strict de ``httpx.AsyncClient``.
-Aucun test unitaire ne dépend d'un serveur BigQgisMCP réel.
+Aucun test unitaire ne dépend d'un serveur QgisRemoteMCP réel.
 
 Tests :
   1. `_mcp_call` OK → parse `body["result"]`.
@@ -501,10 +501,10 @@ def test_explicit_args_override_env(monkeypatch):
 @pytest.mark.mcp_live
 @pytest.mark.skipif(
     not os.environ.get("MCP_LIVE_URL"),
-    reason="Test live : nécessite MCP_LIVE_URL vers un BigQgisMCP réel",
+    reason="Test live : nécessite MCP_LIVE_URL vers un QgisRemoteMCP réel",
 )
 def test_mcp_live_integration_ping():
-    """Test d'intégration contre un BigQgisMCP réel — skip si MCP_LIVE_URL
+    """Test d'intégration contre un QgisRemoteMCP réel — skip si MCP_LIVE_URL
     n'est pas défini. Utile pour valider un déploiement.
     """
     exec_ = McpQgisExecutor(

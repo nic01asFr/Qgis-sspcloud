@@ -20,7 +20,7 @@ propre helper local en défense-in-depth (regex identique, idempotent
 = second passage sur URL deja publique est un no-op ~1ms).
 
 Regex ciblé : DEUX endpoints workspace pod-interne exposés par
-BigQgisMCP api_server.py sur localhost:8080 :
+QgisRemoteMCP api_server.py sur localhost:8080 :
     - /api/files/{path}  (download GET)  -> reécrit vers {hub}/files/{path}
     - /api/upload         (upload POST)  -> reécrit vers {hub}/api/upload
 

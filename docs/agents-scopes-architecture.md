@@ -76,7 +76,7 @@ L'enforcement livré restreint **quels tools** un agent scopé peut appeler. Res
 à enforcer **quelles données** (binding étude/projet). Décision actée
 (`#decisions`, coordination Passerelle-Archi × Composants-Architect) :
 
-- **Tools BigQgisMCP** (ceux qui passent par `/mcp`) **n'acceptent PAS sid/pid en
+- **Tools QgisRemoteMCP** (ceux qui passent par `/mcp`) **n'acceptent PAS sid/pid en
   args** — ils opèrent sur l'**étude active du pod** (`activate_study` /
   `activate_project`). → binding = **bind session** (le hub force
   `activate_study(scope.sid)` + `activate_project(scope.pid)` avant `tools/call`,

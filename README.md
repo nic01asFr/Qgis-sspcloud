@@ -41,6 +41,7 @@ heures sans usage.
 
 **Guides** :
 - [QUICKSTART.md](QUICKSTART.md) — installation pas à pas
+- [CONTRIBUTING.md](CONTRIBUTING.md) — proposer une correction
 - [docs/day5-user-guide-visuel.md](docs/day5-user-guide-visuel.md) — guide illustré
 - [docs/day5-migration-guide.md](docs/day5-migration-guide.md) — migration depuis l'ancien portail
 
@@ -64,18 +65,18 @@ Détails : [ARCHITECTURE.md](ARCHITECTURE.md) · Plan Sprint Day 5 :
 
 - `ghcr.io/nic01asfr/qgis-hub:latest` (Dockerfile.hub)
 - `ghcr.io/nic01asfr/qgis-agent:latest` (Dockerfile.agent)
-- `ghcr.io/nic01asfr/qgisremotemcp:latest` (workspace, construite par [BigQgisMCP](https://github.com/nic01asFr/BigQgisMCP))
+- `ghcr.io/nic01asfr/qgisremotemcp:latest` (workspace, construite par [QgisRemoteMCP](https://github.com/nic01asFr/QgisRemoteMCP))
 
 GitHub Actions construit `qgis-hub` et `qgis-agent` a chaque push sur
 `main` ([`build.yml`](.github/workflows/build.yml)), apres la suite de
 tests. **`qgisremotemcp` n'est pas construite par la CI** — le job est
 commente (image QGIS Desktop complete, ~30 min) : elle se reconstruit a la
-main depuis `BigQgisMCP`, cf. [OPS.md](OPS.md) §7.1b. Publish chart Helm
+main depuis `QgisRemoteMCP`, cf. [OPS.md](OPS.md) §7.1b. Publish chart Helm
 auto sur [`helm-repo/`](helm-repo/) → consomme par `install.sh`.
 
 ## Ce que le service permet
 
-- **Analyse géospatiale** : QGIS Desktop complet + BigQgisMCP tools + accès
+- **Analyse géospatiale** : QGIS Desktop complet + QgisRemoteMCP tools + accès
   IGN, Géorisques, OSM, DVF, INSEE
 - **Assistant IA** : chat conversationnel LLM SSPCloud (`qwen3-6-35b-moe`),
   tool-calling QGIS, mémoire 3 couches (session, étude, user)

@@ -1,7 +1,7 @@
 # Atlas comme runtime carto — cadrage d'interopérabilité
 
 > Décision du 2026-08-23. Engage cinq dépôts : `qgis-sspcloud`,
-> `Widgets-Grist` (Atlas, qgis2grist, grist_forms), `BigQgisMCP`,
+> `Widgets-Grist` (Atlas, qgis2grist, grist_forms), `QgisRemoteMCP`,
 > `cerema-offre-de-service`, `Passerelle` (geoai-kit).
 
 ## La cible en une phrase
@@ -18,7 +18,7 @@ scène, et qui la rend — quel que soit l'endroit où elle tourne.
 
 ```
         QGIS  ─┐
-    BigQgisMCP ─┼──► Scene Manifest ──► Atlas ──┬──► widget Grist
+    QgisRemoteMCP ─┼──► Scene Manifest ──► Atlas ──┬──► widget Grist
      qgis2grist ─┤     (le format)   (le runtime)├──► bloc BlockNote
       assistant ─┘                               └──► page S3 publiée
 ```
@@ -125,7 +125,7 @@ stable, soit retirer une référence qui ment.
 - Le hub émet `version` (une ligne) et déclare l'origine de ses couches sous une
   forme qu'un runtime peut résoudre.
 - La validation stricte est activée au build — le « Sprint C-2 ».
-- `BigQgisMCP.export_grist` produit la même chose.
+- `QgisRemoteMCP.export_grist` produit la même chose.
 
 Les **41 sites de lecture** internes (`geojson_path` ×22, `geometry_type` ×19)
 passent par un lecteur unique qui accepte les deux graphies, pour que les

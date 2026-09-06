@@ -130,7 +130,7 @@ L'étude est l'unité atomique qui traverse ce cycle.
 
 ### WORKSPACE — QGIS Desktop + MCP server
 
-**Repo path** : SÉPARÉ — `BigQgisMCP/` (au même niveau dans Github Repositories)
+**Repo path** : SÉPARÉ — `QgisRemoteMCP/` (au même niveau dans Github Repositories)
 **Image** : `ghcr.io/nic01asfr/qgisremotemcp:latest` (build MANUEL, voir §4)
 **Déploiement** : auto-bootstrap par hub `sessions.create_session` + scale 0↔1 selon usage
 
@@ -144,7 +144,7 @@ L'étude est l'unité atomique qui traverse ce cycle.
 
 **Tools MCP exposés** (~45 tools) : `set_study_zone`, `smart_load`, `execute_python`, `run_processing`, `run_recipe`, `export_pdf`, `export_web_map`, `export_flood_map`, `publish_artifact`, etc.
 
-**Fichiers clés** (dans BigQgisMCP) :
+**Fichiers clés** (dans QgisRemoteMCP) :
 - `main_mcp.py` : entrypoint MCP server
 - `src/qgis_bridge.py` : actions PyQGIS (UNIX socket vers QGIS)
 - `src/qgis_helpers.py` : helpers haut niveau (`set_study_zone`, `smart_load`, `geocode`)
@@ -237,7 +237,7 @@ Métadonnées S3 : `study_id`, `published_at`, `content_type`.
 ```bash
 # 1. Cloner les 2 repos
 git clone https://github.com/nic01asfr/qgis-sspcloud
-git clone https://github.com/nic01asfr/BigQgisMCP
+git clone https://github.com/nic01asfr/QgisRemoteMCP
 
 # 2. Pour modifier hub ou agent : VS Code, env Python 3.13
 cd qgis-sspcloud
@@ -245,7 +245,7 @@ python -m venv .venv
 .venv/bin/pip install -e hub/  # ou agent/
 
 # 3. Pour modifier workspace (QGIS) : besoin de QGIS local + plugins
-# Voir BigQgisMCP/README.md
+# Voir QgisRemoteMCP/README.md
 ```
 
 ### Workflow modification HUB ou AGENT
@@ -270,11 +270,11 @@ git push origin main
 # 5. Déploiement (cf. §5)
 ```
 
-### Workflow modification WORKSPACE (BigQgisMCP)
+### Workflow modification WORKSPACE (QgisRemoteMCP)
 
 ```bash
 # Build manuel (long, ~30 min — QGIS Desktop image complète)
-cd BigQgisMCP
+cd QgisRemoteMCP
 docker build -t ghcr.io/nic01asfr/qgisremotemcp:latest .
 docker push ghcr.io/nic01asfr/qgisremotemcp:latest
 
@@ -379,8 +379,8 @@ pytest hub/tests/ -q
 pytest agent/tests/ -q
 # Tests clés : test_checkpoints, test_memory, test_enrichers
 
-# Workspace (BigQgisMCP)
-cd ../BigQgisMCP
+# Workspace (QgisRemoteMCP)
+cd ../QgisRemoteMCP
 pytest tests/ -q
 ```
 

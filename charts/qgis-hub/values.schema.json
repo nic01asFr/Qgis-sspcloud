@@ -96,7 +96,7 @@
     "workspace": {
       "type": "object",
       "title": "Workspace QGIS Desktop",
-      "description": "QGIS Desktop + BigQgisMCP tools (subdomain interne, non exposé publiquement — accès via proxy hub).",
+      "description": "QGIS Desktop + QgisRemoteMCP tools (subdomain interne, non exposé publiquement — accès via proxy hub).",
       "properties": {
         "enabled": { "type": "boolean", "default": true },
         "image": {

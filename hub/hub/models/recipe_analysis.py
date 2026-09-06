@@ -129,7 +129,7 @@ class RecipeAnalysis(BaseModel):
     # ── Identité ────────────────────────────────────────────────────────
     slug: str = Field(..., min_length=1, max_length=128)
     source: Literal["user", "system"] = Field(
-        ..., description="user = recipe PVC user-scoped, system = BigQgisMCP /app/recipes."
+        ..., description="user = recipe PVC user-scoped, system = QgisRemoteMCP /app/recipes."
     )
     content_hash: str = Field(
         ..., min_length=64, max_length=64,

@@ -1628,7 +1628,7 @@ Path("/data/.active_study").write_text(sid, encoding="utf-8")
 print(f"ACTIVE_STUDY={{sid}}")
 
 # V1.5 Sprint 1 : symlink /data/studies/active/recipes -> {{sid}}/recipes
-# pour que BigQgisMCP qgis_bridge.py voie les recipes user de l'etude active
+# pour que QgisRemoteMCP qgis_bridge.py voie les recipes user de l'etude active
 # via USER_RECIPES_DIR=/data/studies/active/recipes (env injected via STS
 # extra_env). Le symlink est re-cree a chaque activation -> follow study switch.
 try:

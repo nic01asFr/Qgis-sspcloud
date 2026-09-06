@@ -351,9 +351,9 @@ Survit aux restart pod. Effort ~3h.
 Script cron qui refresh env vars AWS_* du pod avant expiration 7 jours SSPCloud.
 Documenté dans OPS.md §7. Effort ~2h.
 
-### 4-C — Fix study_zone BigQgisMCP
+### 4-C — Fix study_zone QgisRemoteMCP
 
-Bug côté workspace (repo externe BigQgisMCP) : `set_study_zone` bbox perdue entre
+Bug côté workspace (repo externe QgisRemoteMCP) : `set_study_zone` bbox perdue entre
 2 calls MCP. Workaround actuel : passer bbox à chaque `smart_load`. Effort ~3h.
 
 ### 4-D — Rate limiting POST /login

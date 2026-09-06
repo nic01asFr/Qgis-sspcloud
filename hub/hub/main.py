@@ -1069,7 +1069,7 @@ async def auth_whoami(request: Request):
 # reverse proxy via hub permet :
 #   - Same-origin (cookie OIDC du hub partage via Domain=.user.lab.sspcloud.fr)
 #   - Le middleware hub protege l'acces (owner check)
-#   - Pas de modification cote BigQgisMCP (workspace reste accessible en interne
+#   - Pas de modification cote QgisRemoteMCP (workspace reste accessible en interne
 #     via service cluster, mais pas expose publiquement avec auth)
 #
 # Architecture :
@@ -1996,7 +1996,7 @@ async def execute_recipe_web_endpoint(
         SSPCloud). Le mode ``polished`` exige ``OPENAI_API_KEY`` +
         ``OPENAI_BASE_URL`` côté serveur — 400 sinon.
       - ``executor`` : ``stub`` (défaut, POC G4) ou ``mcp`` (placeholder
-        G4-b-1 en attendant le vrai câblage JSON-RPC BigQgisMCP). Toute
+        G4-b-1 en attendant le vrai câblage JSON-RPC QgisRemoteMCP). Toute
         autre valeur → 400. Le mode ``mcp`` nécessite un serveur MCP
         accessible + configuration à câbler en G4-b-2 ; à ce stade il
         renvoie un layer plausible pointant vers ``/data/scene_store/``
@@ -4402,7 +4402,7 @@ async def scene_manifest_history_endpoint(
 
 
 # ── Sprint Composants-1 Phase B (2026-06-24) : export Grist (.grist) ──────────
-# Wrapper hub qui appelle le tool MCP 'export_grist' de BigQgisMCP avec :
+# Wrapper hub qui appelle le tool MCP 'export_grist' de QgisRemoteMCP avec :
 # - output_path force dans projects/{pid}/exports/ (au lieu du /data/ legacy)
 # - scene_manifest_json embarque automatiquement si une version existe
 # Indexe le resultat dans exports_index pour audit trail.
@@ -4444,7 +4444,7 @@ async def export_grist_endpoint(
 ):
     """Genere un fichier .grist (SQLite Grist) depuis le projet QGIS actif.
 
-    Wraps BigQgisMCP `export_grist` MCP tool avec :
+    Wraps QgisRemoteMCP `export_grist` MCP tool avec :
     - output_path force dans {sid}/projects/{pid}/exports/{doc_name}.grist
     - scene_manifest_json embarque si une version Scene Manifest existe
       (cherche scene_manifest_index latest pour ce pid puis lit le fichier)
@@ -4453,7 +4453,7 @@ async def export_grist_endpoint(
                         detect_relationships?, timezone?, embed_scene_manifest?}
 
     Indexe le resultat en DB (exports_index) pour audit trail.
-    Retourne le payload BigQgisMCP enrichi d'un download_url interne.
+    Retourne le payload QgisRemoteMCP enrichi d'un download_url interne.
     """
     if not _STUDIES_AVAILABLE:
         raise HTTPException(503, "Module studies indisponible")
@@ -4497,7 +4497,7 @@ async def export_grist_endpoint(
         except Exception as exc:
             log.warning("Lecture scene_manifest pour export Grist : %s", exc)
 
-    # 3. Construire les params pour le tool MCP BigQgisMCP
+    # 3. Construire les params pour le tool MCP QgisRemoteMCP
     mcp_params = {
         "document_name": doc_name,
         "output_path": output_path,
@@ -4547,7 +4547,7 @@ async def export_grist_endpoint(
         log.warning("exports_index insert : %s", exc)
 
     # 6. Construire le download_url interne (proxy via /files/{path:path})
-    # Le tool BigQgisMCP retourne un download_url localhost interne au pod.
+    # Le tool QgisRemoteMCP retourne un download_url localhost interne au pod.
     # On le remplace par le proxy hub pour que le browser puisse y acceder.
     relative = output_path.lstrip("/").removeprefix("data/")
     download_url = f"/files/{relative}"

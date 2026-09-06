@@ -17,10 +17,10 @@ depuis le terminal Jupyter Onyxia de l'user (namespace `user-<username>`) :
 |---|---|---|---|
 | `qgis-hub-0` | API REST FastAPI, orchestrateur central, proxy /agent same-origin | `ghcr.io/nic01asfr/qgis-hub:latest` | `user-<u>-qgis.user.lab.sspcloud.fr` |
 | `qgis-agent-0` | LLM tool-runner, chat SSE, tool-calls, mémoire | `ghcr.io/nic01asfr/qgis-agent:latest` | `user-<u>-qgis-agent.user.lab.sspcloud.fr` |
-| `qgis-workspace-<u>-0` | QGIS Desktop noVNC + BigQgisMCP tools | `ghcr.io/nic01asfr/qgisremotemcp:latest` | ingress interne |
+| `qgis-workspace-<u>-0` | QGIS Desktop noVNC + QgisRemoteMCP tools | `ghcr.io/nic01asfr/qgisremotemcp:latest` | ingress interne |
 
 **Coordination** : le hub est le point d'entrée unique. Il proxy les
-requêtes vers le workspace (BigQgisMCP) et l'agent (via /agent proxy
+requêtes vers le workspace (QgisRemoteMCP) et l'agent (via /agent proxy
 same-origin Phase 1.7-B). Le workspace tourne sur un PVC `ReadWriteOnce`
 → une seule instance QGIS par user.
 
@@ -47,7 +47,7 @@ Confusion fréquente qui est source de bugs — **retiens** :
   session UI (auth via portail)
 
 ### Workspace (`qgisremotemcp`)
-- **QGIS Desktop** dans un container avec noVNC + BigQgisMCP FastMCP
+- **QGIS Desktop** dans un container avec noVNC + QgisRemoteMCP FastMCP
   server
 - Un **process QGIS unique** avec `QgsProject.instance()` singleton →
   1 seul projet .qgz ouvert en RAM à la fois
@@ -205,7 +205,7 @@ session-scoped ne sont PAS impactees (elles ont leur propre state).
 
 ## 5. Mapping tools (hub natifs vs workspace)
 
-| Concept | Hub-tools (namespace `study_*`) | Workspace-tools (BigQgisMCP) |
+| Concept | Hub-tools (namespace `study_*`) | Workspace-tools (QgisRemoteMCP) |
 |---|---|---|
 | Créer étude | `study_create(name)` | — |
 | Lister études | `study_list()` | — |

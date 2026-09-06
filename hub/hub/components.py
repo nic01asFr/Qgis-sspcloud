@@ -7,7 +7,7 @@ Sprint Composants Phase 2 (2026-06-25). Pattern recipes_index V1.5
 Storage :
 - DB index : `components_index` table dans `studies.db` (créée Phase 0)
 - Manifest JSON : `/data/studies/{sid}/components/{cid}/manifest.json` sur PVC
-                  workspace user (via execute_python tool BigQgisMCP)
+                  workspace user (via execute_python tool QgisRemoteMCP)
 
 Audit trail :
 - INSERT-only (jamais UPDATE) : chaque édition crée une nouvelle row

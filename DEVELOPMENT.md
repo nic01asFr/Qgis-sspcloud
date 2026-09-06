@@ -41,7 +41,7 @@ qgis-sspcloud/
 ├── .github/workflows/    # CI/CD (build image + publish chart)
 ├── Dockerfile.hub        # Image hub
 ├── Dockerfile.agent      # Image agent
-├── Dockerfile.workspace  # Reference seule — l'image est construite par BigQgisMCP
+├── Dockerfile.workspace  # Reference seule — l'image est construite par QgisRemoteMCP
 └── install.sh            # One-liner install user
 ```
 
@@ -136,8 +136,8 @@ docker build -t ghcr.io/nic01asfr/qgis-agent:local -f Dockerfile.agent .
 > commenté ici et son commentaire induisaient en erreur — je m'y suis
 > laissé prendre avant de vérifier.
 
-Image `qgisremotemcp` (QGIS Desktop + BigQgisMCP + noVNC + Xvfb) construite
-par [BigQgisMCP](https://github.com/nic01asFr/BigQgisMCP) — miroir
+Image `qgisremotemcp` (QGIS Desktop + QgisRemoteMCP + noVNC + Xvfb) construite
+par [QgisRemoteMCP](https://github.com/nic01asFr/QgisRemoteMCP) — miroir
 `gitlab.cerema.fr/mcp/QgisRemoteMCP`, **même base de code**, la CI est côté
 GitHub. Déclenchée sur push `main` touchant `Dockerfile`, `main_mcp.py`,
 `src/`, `recipes/`, `requirements.txt`… Elle pousse `:latest`, `:main` et
@@ -157,7 +157,7 @@ rougissait.
 **Ce que l'image embarque** — et qui ne peut donc pas être corrigé depuis
 ce dépôt : le catalogue de sources (`datasources.json`), les recettes, les
 skills MCP, les gabarits de mise en page et tout `src/`. Rien n'est monté
-en volume en production : une correction dans BigQgisMCP n'atteint le
+en volume en production : une correction dans QgisRemoteMCP n'atteint le
 service qu'après rebuild + push de l'image. **Le signal de divergence existe
 désormais** : `GET /version` rend l'empreinte réellement en cours pour les
 trois images, comparable à celle du registre (voir OPS.md §1). Les projets `.qgz` existants conservent par

@@ -6,7 +6,7 @@ Chantier A (route via hub proxy). Cette couche découple le moteur
 réelle des steps ``run_qgis`` :
 
   - ``StubQgisExecutor`` : POC G4, path ``stub://`` (retrocompat).
-  - ``McpQgisExecutor`` : appelle le workspace BigQgisMCP via
+  - ``McpQgisExecutor`` : appelle le workspace QgisRemoteMCP via
     JSON-RPC streamable HTTP quand ``live=True``. Route par défaut :
     hub proxy ``{HUB_URL}/mcp`` (audit trail + auth centralisée, aligné
     STRUCTURE §2). En mode ``live=False`` (défaut), garde le comportement
@@ -41,7 +41,7 @@ from hub.recipes_web.models import RecipeStepRunQgis
 log = logging.getLogger("hub.recipes_web.qgis_executor")
 
 
-# Codes de retry HTTP considérés comme transitoires (BigQgisMCP redéploie,
+# Codes de retry HTTP considérés comme transitoires (QgisRemoteMCP redéploie,
 # pod cold-start, upstream saturé). 429 n'est pas dedans : on préfère laisser
 # remonter un rate-limit explicite sans le masquer.
 _RETRYABLE_HTTP_STATUSES: frozenset[int] = frozenset({500, 502, 503, 504})

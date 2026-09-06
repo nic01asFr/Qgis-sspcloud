@@ -12,7 +12,7 @@ Points d'attention :
     de `datetime.now()` ou `time.time()`, sinon l'idempotence saute.
   - `run_qgis` est délégué à un `QgisExecutor` (voir `qgis_executor.py`).
     Le comportement POC (stub) est préservé par défaut ; injection d'un
-    `McpQgisExecutor` possible pour brancher BigQgisMCP.
+    `McpQgisExecutor` possible pour brancher QgisRemoteMCP.
   - Toute erreur d'import ou de step est fatale (levée immédiate).
 
 API :
@@ -242,7 +242,7 @@ async def execute_recipe_pure(
     `executor` : implémentation `QgisExecutor` chargée d'exécuter les
     steps `run_qgis`. Par défaut `StubQgisExecutor()` (backward-compat
     avec le POC G4). Injecter `McpQgisExecutor(...)` pour brancher
-    BigQgisMCP.
+    QgisRemoteMCP.
 
     Retourne un `RecipeWebOutput` contenant :
       - `scene_manifest` prêt à publier ;

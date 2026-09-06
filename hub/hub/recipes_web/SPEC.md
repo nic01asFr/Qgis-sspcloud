@@ -1,7 +1,7 @@
 # Spec — Format `recipe_web` (chantier G4-POC)
 
 Statut : POC — v0.1 (2026-07-13). Ne remplace pas le format recipe JSON
-existant de BigQgisMCP (voir `USER_RECIPES_DIR`), il l'étend pour produire
+existant de QgisRemoteMCP (voir `USER_RECIPES_DIR`), il l'étend pour produire
 directement un `scene_manifest` V0.3.x publiable côté web.
 
 ## 1. Objectif
@@ -95,7 +95,7 @@ injecté dans le moteur :
   ne s'agit pas d'une vraie source. Utilisé pour tests d'idempotence et
   pour valider la chaîne de rendu web sans QGIS live.
 - **`McpQgisExecutor`** (chantier G4-b-1, placeholder) : contrat prêt à
-  appeler BigQgisMCP via JSON-RPC HTTP. À l'état actuel, retourne un
+  appeler QgisRemoteMCP via JSON-RPC HTTP. À l'état actuel, retourne un
   layer plausible pointant vers `/data/scene_store/{layer_id}.geojson`.
   Le vrai câblage JSON-RPC (set_study_zone / smart_load / run_processing
   / export_layer) sera l'objet du chantier G4-b-2.

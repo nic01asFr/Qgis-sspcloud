@@ -121,7 +121,7 @@ agent:
       cpu: 2000m
       memory: 2Gi
 
-# Workspace QGIS Desktop (noVNC + BigQgisMCP)
+# Workspace QGIS Desktop (noVNC + QgisRemoteMCP)
 workspace:
   enabled: true
   image:
