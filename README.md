@@ -174,3 +174,18 @@ shell, patches `/app/src` **non**. Toujours documenter pip+env dans
 ```bash
 cd hub && python tests/test_storymap_audit.py && python tests/test_audit_trail.py
 ```
+
+## Licence
+
+Ce dépôt est publié sous **Licence Ouverte 2.0** (Etalab) — identifiant SPDX
+`etalab-2.0`. Le texte intégral est dans [LICENSE.md](LICENSE.md), repris
+verbatim du dépôt de référence [etalab/licence-ouverte](https://github.com/etalab/licence-ouverte).
+
+Elle autorise la réutilisation libre, y compris commerciale, à la seule
+condition de mentionner la paternité : l'origine de l'information et la date de
+sa dernière mise à jour.
+
+> Le dépôt est resté public sans fichier de licence jusqu'au 6 septembre 2026,
+> alors que l'interface du hub en affichait une. Du code public sans licence
+> est, par défaut, tous droits réservés : la page annonçait donc l'inverse de
+> ce que le dépôt accordait. C'est corrigé.
