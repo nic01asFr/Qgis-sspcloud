@@ -1376,14 +1376,43 @@ async def _desk_context() -> dict:
                     r = await c.get(path, headers=headers)
                     if r.status_code == 200:
                         cb(r.json())
-                except Exception:
-                    pass
+                    else:
+                        log.warning("Contexte du bureau : %s rend %s -> la "
+                                    "section restera vide", path, r.status_code)
+                except Exception as exc:
+                    log.warning("Contexte du bureau : %s injoignable (%s) -> "
+                                "la section restera vide", path, exc)
             # Repere temporel sur chaque etude : sans lui, deux etudes de meme
             # nom sont indiscernables dans la liste (constate en revue UI).
             for _s in ctx.get("studies") or []:
                 if isinstance(_s, dict):
                     _s["last_active_label"] = _libelle_anciennete(
                         _s.get("last_active") or _s.get("created_at")
+                    )
+
+            # Le projet actif et les projets de l'étude étaient déclarés en
+            # tête de ce contexte et jamais remplis. Le fil d'Ariane annonçait
+            # donc « aucun projet actif » EN TOUTES CIRCONSTANCES, et le menu
+            # déroulant des projets restait vide — quel que soit l'état réel,
+            # y compris avec un `db_active_pid` renseigné et le projet ouvert
+            # dans QGIS. Un libellé qui contredit l'état fait douter du reste.
+            #
+            # `get_active_project_id` sait déjà rattraper le cas où une étude
+            # est active sans projet actif ; on ne le redérive pas ici.
+            if _STUDIES_AVAILABLE and ctx.get("active_study_id"):
+                try:
+                    pid = await studies.get_active_project_id(_ONYXIA_USER)
+                    if pid:
+                        ctx["active_project"] = await studies.get_project(
+                            pid, _ONYXIA_USER
+                        )
+                    ctx["projects_in_active_study"] = await studies.list_projects(
+                        ctx["active_study_id"]
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "Projet actif du bureau illisible : %s -> le fil "
+                        "d'Ariane affichera « aucun projet actif »", exc,
                     )
 
             # Sprint UX-3 Commit 3 (2026-06-21) : projet actif + projets de
@@ -3635,7 +3664,15 @@ async def get_active_study_endpoint(
     active_id = await studies.get_active_study_id(user["username"])
     if not active_id:
         return None
-    return await studies.get_study(active_id, user["username"])
+    etude = await studies.get_study(active_id, user["username"])
+    # Garde pour les lignes archivées avant que `archive_study` n'efface le
+    # pointeur : une étude archivée n'est plus un lieu de travail, la rendre
+    # ici ferait proposer « Continuer mon travail sur X » pour une étude que
+    # la liste juste en dessous n'affiche pas.
+    if etude and etude.get("status") == "archived":
+        log.info("Etude active %s archivee : ignoree comme active", active_id)
+        return None
+    return etude
 
 
 def _diff_registre_disque(en_base: list, sur_disque: list) -> dict:

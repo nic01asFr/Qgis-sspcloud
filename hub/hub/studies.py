@@ -721,11 +721,21 @@ async def update_study(sid: str, **fields) -> dict | None:
 
 
 async def archive_study(sid: str) -> None:
-    """Archive (soft delete) — préserve les fichiers, marque status='archived'."""
+    """Archive (soft delete) — préserve les fichiers, marque status='archived'.
+
+    Efface aussi le pointeur d'étude active s'il désignait celle-ci. `purge_study`
+    le faisait, pas l'archivage : le bouton « Continuer mon travail sur X » de la
+    page workspace continuait donc de proposer une étude archivée, absente de la
+    liste affichée juste en dessous. Un bouton qui propose ce que la page nie.
+
+    Une étude archivée n'est plus un lieu de travail : la laisser active était
+    l'incohérence, pas le symptôme.
+    """
     async with aiosqlite.connect(_DB_PATH) as db:
         await db.execute(
             "UPDATE studies SET status = 'archived' WHERE id = ?", (sid,)
         )
+        await db.execute("DELETE FROM active_study WHERE study_id = ?", (sid,))
         await db.commit()
 
 
