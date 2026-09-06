@@ -7948,7 +7948,8 @@ async def _check_publish_ready(sid: str, aid: str, username: str) -> list[dict]:
         stdout = await _execute_python_in_workspace(
             username, asm_mod.read_assembly_manifest_pod_code(sid, aid),
         )
-    except Exception:
+    except Exception as exc:
+        log.warning("Manifeste d'assemblage %s/%s illisible : %s -> liste vide", sid, aid, exc)
         return []
     if "ASSEMBLY_READ_OK" not in stdout:
         return []
@@ -7956,7 +7957,8 @@ async def _check_publish_ready(sid: str, aid: str, username: str) -> list[dict]:
     manifest = _json_pr.loads(_b64_pr.b64decode(b64).decode())
     try:
         asm = Assembly.model_validate(manifest)
-    except Exception:
+    except Exception as exc:
+        log.warning("Manifeste d'assemblage invalide : %s -> liste vide", exc)
         return []
 
     issues: list[dict] = []
@@ -9357,7 +9359,8 @@ def _parse_recipe_list_marker(stdout: str) -> list[dict]:
             payload = line[len("RECIPE_LIST_OK"):].strip()
             try:
                 return _json.loads(payload)
-            except Exception:
+            except Exception as exc:
+                log.warning("Liste de recettes illisible : %s -> liste vide", exc)
                 return []
     return []
 
@@ -12927,7 +12930,8 @@ async def desk_study_files():
             return {"files": []}
         import json as _json
         return {"files": _json.loads(stdout[start + len("<<<FILES>>>"):end])}
-    except Exception:
+    except Exception as exc:
+        log.warning("Fichiers de l'etude illisibles : %s -> liste vide", exc)
         return {"files": []}
 
 
@@ -12948,7 +12952,8 @@ async def desk_workspace_status():
             "status": s.get("status", "—"),
             "novnc_url": s.get("novnc_url", ""),
         }
-    except Exception:
+    except Exception as exc:
+        log.warning("Etat du workspace indisponible : %s -> status=error", exc)
         return {"status": "error", "novnc_url": ""}
 
 
@@ -12963,7 +12968,8 @@ async def desk_agent_health():
     try:
         r = await _agent_call("GET", "/health")
         return {"ready": r.status_code < 300}
-    except Exception:
+    except Exception as exc:
+        log.debug("Sante de l'agent injoignable : %s -> ready=False", exc)
         return {"ready": False}
 
 
@@ -13175,7 +13181,8 @@ async def desk_layers():
         all_sessions = await sessions.list_sessions(_ONYXIA_USER)
         if not all_sessions or all_sessions[0].get("status") != sessions.SESSION_READY:
             return {"layers": [], "state": "workspace_sleeping"}
-    except Exception:
+    except Exception as exc:
+        log.warning("Etat des sessions illisible : %s -> state=unknown", exc)
         return {"layers": [], "state": "unknown"}
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
@@ -13189,5 +13196,6 @@ async def desk_layers():
         text = content[0].get("text", "") if content else ""
         info = json.loads(text) if text else {}
         return {"layers": info.get("layers", []), "state": "ok"}
-    except Exception:
+    except Exception as exc:
+        log.warning("Lecture des couches par le MCP echouee : %s -> state=error", exc)
         return {"layers": [], "state": "error"}
