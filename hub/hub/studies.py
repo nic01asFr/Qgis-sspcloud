@@ -1854,6 +1854,19 @@ try:
                        env={{"DISPLAY": ":99"}}, timeout=3)
 except Exception:
     pass
+
+# ── Marque d'appartenance ────────────────────────────────────────────────
+# Le nom de fichier ne survit pas : la brique MCP fait
+# `project.write("/data/.autosave.qgz")` avant chaque operation risquee, et
+# `QgsProject.write(chemin)` reaffecte le nom. Une variable de projet, elle,
+# est ecrite dans le .qgz et relue au chargement. C'est ce que la sauvegarde
+# lira pour refuser d'ecrire un projet dans l'etude d'un autre.
+try:
+    from qgis.core import QgsProject as _QP, QgsExpressionContextUtils as _ECU
+    _ECU.setProjectVariable(_QP.instance(), "hub_sid", sid)
+    print(f"STUDY_STAMP sid={{sid}}")
+except Exception as _exc_stamp:
+    print(f"STUDY_STAMP_ERR {{_exc_stamp}}")
 """
 
 
@@ -1909,10 +1922,42 @@ try:
     n_layers = len(proj.mapLayers())
     dirty = proj.isDirty() if hasattr(proj, "isDirty") else True
 
+    # ── Garde d'appartenance ────────────────────────────────────────────
+    # Cette fonction ecrit le projet CHARGE dans l'etude qu'on lui nomme, sans
+    # rien verifier : il a suffi qu'une page desk gardant un sid fige envoie
+    # son beacon apres que QGIS eut bascule ailleurs pour qu'un projet en
+    # ecrase un autre. Silencieusement -- `STUDY_SAVE_OK` etait imprime.
+    #
+    # `fname` ne peut pas servir de preuve : la brique MCP fait
+    # `project.write("/data/.autosave.qgz")` avant chaque operation risquee, et
+    # `QgsProject.write(chemin)` reaffecte le nom de fichier. Apres un seul
+    # `execute_python`, le projet ne sait plus d'ou il vient.
+    #
+    # On lit donc la variable de projet posee a l'activation, qui survit aux
+    # ecritures. Conservateur : on refuse seulement quand on SAIT que le projet
+    # appartient ailleurs. Un projet non marque -- anterieur, ou cree hors du
+    # flux -- passe comme avant, pour ne rien casser.
+    _refuse = False
+    try:
+        from qgis.core import QgsExpressionContextUtils as _ECU
+        _proprio = _ECU.projectScope(proj).variable("hub_sid") or ""
+    except Exception:
+        _proprio = ""
+    if _proprio and str(_proprio) != sid:
+        _refuse = True
+        print(
+            f"STUDY_SAVE_REFUSED sid={{sid}} owner={{_proprio}} "
+            f"n_layers={{n_layers}} fname={{fname}}"
+        )
+
     # ── Adoption des sources /data/cache/ → /data/studies/{{sid}}/data/ ──
     adopted = []
     failed = []
-    if n_layers > 0:
+    # `_refuse` coupe aussi l'adoption : elle deplace des fichiers depuis
+    # /data/cache vers le dossier data/ de l'etude visee ET reecrit les sources
+    # des couches chargees. Sur un projet qui ne lui appartient pas, elle
+    # deplacerait les donnees d'un travail dans le dossier d'un autre.
+    if n_layers > 0 and not _refuse:
         data_dir.mkdir(parents=True, exist_ok=True)
         # Snapshot des layers pour itérer sans muter la collection en boucle.
         layers_snapshot = list(proj.mapLayers().values())
@@ -1948,7 +1993,9 @@ try:
 
     # ── Write LEGACY (portable, chemins relatifs, adopte sources cache) ──
     ok_legacy = False
-    if n_layers > 0 or not target.exists():
+    if _refuse:
+        pass
+    elif n_layers > 0 or not target.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
         proj.setFileName(str(target))
         # Chemins relatifs au .qgz pour rendre le bundle portable.
@@ -2341,6 +2388,17 @@ else:
         print(f"PROJECT_CREATED_AND_SAVED path={{qgz}} wrote={{wrote}}")
     except Exception as exc:
         print(f"PROJECT_NEW_ERR {{exc}}")
+
+# ── Marque d'appartenance ────────────────────────────────────────────────
+# Cf. activate_pod_code : le nom de fichier ne survit pas a l'autosave de la
+# brique MCP. La variable de projet, si.
+try:
+    from qgis.core import QgsProject as _QP, QgsExpressionContextUtils as _ECU
+    _ECU.setProjectVariable(_QP.instance(), "hub_sid", sid)
+    _ECU.setProjectVariable(_QP.instance(), "hub_pid", pid)
+    print(f"STUDY_STAMP sid={{sid}} pid={{pid}}")
+except Exception as _exc_stamp:
+    print(f"STUDY_STAMP_ERR {{_exc_stamp}}")
 """
 
 
