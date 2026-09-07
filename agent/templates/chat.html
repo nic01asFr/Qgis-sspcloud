@@ -364,7 +364,7 @@ body.embed .msg .bubble pre{max-width:100%}
       <div class="sidebar-label">Projets</div>
       {% for p in projects[:6] %}
       <div class="sidebar-item" title="{{ p.zone or '' }}">
-        <span class="ic">📁</span><span>{{ p.name[:25] }}</span>
+        <span class="ic fr-icon-folder-2-line" aria-hidden="true"></span><span>{{ p.name[:25] }}</span>
       </div>
       {% endfor %}
     </div>
@@ -376,7 +376,7 @@ body.embed .msg .bubble pre{max-width:100%}
       {% for s in sessions[:8] %}
       <div class="sidebar-item" onclick="loadSession('{{ s.id }}')"
            title="{{ s.summary or '' }}">
-        <span class="ic">💬</span>
+        <span class="ic fr-icon-chat-3-line" aria-hidden="true"></span>
         <span>{{ s.summary[:30] if s.summary else 'Session ' + s.id[:8] }}</span>
       </div>
       {% endfor %}
@@ -405,7 +405,7 @@ body.embed .msg .bubble pre{max-width:100%}
       <button type="button" class="tool-btn" id="btn-new-conv"
               onclick="startNewConversation()" aria-label="Nouvelle conversation"
               title="Démarre une nouvelle conversation (la session actuelle est conservée dans l'historique des sessions). Utile si la conversation a accumulé trop d'erreurs ou si tu changes de sujet.">
-        ➕ <span class="tool-btn-label">Nouvelle</span>
+        <span class="fr-icon-add-line fr-icon--sm" aria-hidden="true"></span> <span class="tool-btn-label">Nouvelle</span>
       </button>
       {# Sprint UX-3 fix (2026-06-22) : bouton 'Historique' ajoute pour
          exposer les sessions recentes en mode embed (desk). Avant : sidebar
@@ -415,17 +415,17 @@ body.embed .msg .bubble pre{max-width:100%}
       <button type="button" class="tool-btn" id="btn-history"
               onclick="toggleHistoryPopover(event)" aria-label="Historique des conversations"
               title="Voir l'historique des conversations récentes">
-        📜 <span class="tool-btn-label">Historique</span>
+        <span class="fr-icon-time-line fr-icon--sm" aria-hidden="true"></span> <span class="tool-btn-label">Historique</span>
       </button>
       <button type="button" class="tool-btn" id="btn-memory"
               onclick="toggleMemoryDrawer()" aria-label="Memoire de l'agent"
               title="Voir et éditer la mémoire de l'agent">
-        🧠 <span class="tool-btn-label">Mémoire</span>
+        <span class="fr-icon-book-2-line fr-icon--sm" aria-hidden="true"></span> <span class="tool-btn-label">Mémoire</span>
       </button>
       <a href="{{ hub_url ~ '/desk' if hub_url else '/desk' }}" target="_blank"
          rel="noopener" class="tool-btn-link"
          title="Ouvrir le Bureau QGIS dans un nouvel onglet (canvas + outils)">
-        🖥 <span class="tool-btn-label">Bureau</span> ↗
+        <span class="fr-icon-window-line fr-icon--sm" aria-hidden="true"></span> <span class="tool-btn-label">Bureau</span> ↗
       </a>
 
       {# Popover historique : liste des sessions recentes, click -> loadSession.
@@ -433,8 +433,8 @@ body.embed .msg .bubble pre{max-width:100%}
          Cache par defaut, toggle via JS. Fermeture click outside. #}
       <div id="history-popover" class="history-popover" aria-hidden="true">
         <div class="history-popover-header">
-          <span style="font-weight:700">📜 Conversations récentes</span>
-          <button type="button" class="close" onclick="toggleHistoryPopover(null,false)" aria-label="Fermer">✕</button>
+          <span style="font-weight:700"><span class="fr-icon-time-line fr-icon--sm" aria-hidden="true"></span> Conversations récentes</span>
+          <button type="button" class="close" onclick="toggleHistoryPopover(null,false)" aria-label="Fermer"><span class="fr-icon-close-line fr-icon--sm" aria-hidden="true"></span></button>
         </div>
         <div class="history-popover-body">
           {% if sessions %}
@@ -442,7 +442,7 @@ body.embed .msg .bubble pre{max-width:100%}
           <button type="button" class="history-item"
                   onclick="loadSession('{{ s.id }}');toggleHistoryPopover(null,false)"
                   title="{{ s.summary or 'Session ' + s.id[:8] }}">
-            <span class="ic">💬</span>
+            <span class="ic fr-icon-chat-3-line" aria-hidden="true"></span>
             <span class="lbl">{{ s.summary[:50] if s.summary else 'Session ' + s.id[:8] }}</span>
           </button>
           {% endfor %}
@@ -537,21 +537,21 @@ body.embed .msg .bubble pre{max-width:100%}
     <!-- Mémoire drawer : liste des insights + lien vers édition complète -->
     <aside id="memory-drawer" class="memory-drawer" aria-hidden="true">
       <header>
-        <span>🧠 Mémoire agentique</span>
-        <button class="close" onclick="toggleMemoryDrawer(false)" aria-label="Fermer">✕</button>
+        <span><span class="fr-icon-book-2-line fr-icon--sm" aria-hidden="true"></span> Mémoire agentique</span>
+        <button class="close" onclick="toggleMemoryDrawer(false)" aria-label="Fermer"><span class="fr-icon-close-line fr-icon--sm" aria-hidden="true"></span></button>
       </header>
       <div class="body" id="memory-body">
         <div class="memory-empty">Chargement…</div>
       </div>
       <footer>
         Édition complète des sections (identité, zones, préférences…) :
-        ouvre l'onglet <strong>🧠 Mémoire</strong> dans le bureau intégré.
+        ouvre l'onglet <strong>Mémoire</strong> dans le bureau intégré.
       </footer>
     </aside>
 
     <div id="messages" class="chat-messages">
       <div class="msg">
-        <div class="avatar">🗺</div>
+        <div class="avatar"><span class="fr-icon-road-map-line fr-icon--md" aria-hidden="true"></span></div>
         <div class="bubble welcome">
           <h3>QGIS Agent prêt</h3>
           <p>Décris ton analyse géospatiale. J'ai accès aux outils QGIS, aux données IGN,
@@ -588,7 +588,7 @@ body.embed .msg .bubble pre{max-width:100%}
           <strong>Réglages</strong> → <strong>Compte</strong> →
           section <strong>Clés API</strong> → copie ta clé.</li>
         <li>Va sur <a href="/workspace" target="_top" rel="noopener">/workspace</a>
-          → déroule le bloc <strong>🤖 Assistant IA — clé de connexion</strong> →
+          → déroule le bloc <strong>Assistant IA — clé de connexion</strong> →
           colle la clé → <strong>Enregistrer</strong>.
           <em>(active immédiatement, sans interruption — et conservée : tu
           n'auras pas à la ressaisir)</em></li>
@@ -1076,7 +1076,7 @@ function newSession() {
   document.getElementById('session-id').value = newId;
   document.getElementById('messages').innerHTML = `
     <div class="msg">
-      <div class="avatar">🗺</div>
+      <div class="avatar"><span class="fr-icon-road-map-line fr-icon--md" aria-hidden="true"></span></div>
       <div class="bubble">Nouvelle analyse. Décris ce que tu veux faire.</div>
     </div>`;
 }
@@ -1092,7 +1092,7 @@ function loadSession(sid) {
         const role = m.role === 'user' ? 'user' : 'assistant';
         const html = role === 'user'
           ? `<div class="msg user"><div class="bubble">${escapeHtml(m.content)}</div></div>`
-          : `<div class="msg"><div class="avatar">🗺</div><div class="bubble">${marked.parse(m.content || '')}</div></div>`;
+          : `<div class="msg"><div class="avatar"><span class="fr-icon-road-map-line fr-icon--md" aria-hidden="true"></span></div><div class="bubble">${marked.parse(m.content || '')}</div></div>`;
         c.insertAdjacentHTML('beforeend', html);
       });
       // Replie tous les blocs résultat-tool dans les messages history
@@ -1316,7 +1316,7 @@ function appendMessage(role, content) {
     // SSE. Le placeholder est écrasé par responseDiv.innerHTML = ... dès
     // que le streaming commence.
     div.className = 'msg';
-    div.innerHTML = '<div class="avatar">🗺</div>'
+    div.innerHTML = '<div class="avatar"><span class="fr-icon-road-map-line fr-icon--md" aria-hidden="true"></span></div>'
       + '<div class="bubble" id="current-response">'
       + '<div class="bubble-thinking">'
       + '<span class="bubble-spinner"></span>'
@@ -1463,7 +1463,7 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
       // Coupure user via stop-btn — message déjà affiché par le serveur si
       // SSE a délivré son dernier chunk. Sinon on l'écrit ici.
       if (responseDiv && !responseDiv.textContent.includes('Arrêté')) {
-        responseDiv.innerHTML += '<p style="color:#b34000">⛔ Arrêté par l\'utilisateur.</p>';
+        responseDiv.innerHTML += '<p style="color:#b34000">Arrêté par l\'utilisateur.</p>';
       }
     } else if (responseDiv) {
       responseDiv.innerHTML = `<span style="color:#ce0500">Erreur réseau : ${err.message}</span>`;
