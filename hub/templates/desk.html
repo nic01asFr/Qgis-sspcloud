@@ -518,7 +518,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <div class="study-menu">
           <button class="study-trigger" id="study-trigger" onclick="toggleStudyMenu(event)"
                   title="{% if active_study %}Étude : {{ active_study.name }}{% if active_project %} — Projet : {{ active_project.label }}{% endif %} — clique pour changer de projet{% else %}Choisir une étude{% endif %}">
-            <span>📂</span>
+            <span class="fr-icon-folder-2-line" aria-hidden="true"></span>
             {% if active_study %}
               {# Sprint isolation etudes-projets Fix #6 (2026-07-30) : badge
                  explicite 'Étude : X / Projet : Y' pour rendre l'isolation
@@ -599,7 +599,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                         style="width:100%;text-align:left;background:transparent;border:none;font-family:inherit"
                         title="{{ p.label }}{% if p.is_default %} (projet principal){% endif %}">
                   <span class="ic">
-                    {% if active_project and active_project.pid == p.pid %}✓{% elif p.is_default %}⭐{% else %}📄{% endif %}
+                    {% if active_project and active_project.pid == p.pid %}<span class="fr-icon-check-line fr-icon--sm" aria-hidden="true"></span>{% elif p.is_default %}<span class="fr-icon-star-line fr-icon--sm" aria-hidden="true"></span>{% else %}<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>{% endif %}
                   </span>
                   <span>{{ p.label }}</span>
                 </button>
@@ -631,8 +631,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 
     <!-- Colonne droite (alignée avec chat panel) : onglets Chat/Mémoire -->
     <div class="hdr-right">
-      <button class="right-tab active" data-tab="chat">💬 Chat</button>
-      <button class="right-tab" data-tab="memory">🧠 Mémoire</button>
+      <button class="right-tab active" data-tab="chat"><span class="fr-icon-chat-3-line fr-icon--sm" aria-hidden="true"></span> Chat</button>
+      <button class="right-tab" data-tab="memory"><span class="fr-icon-book-2-line fr-icon--sm" aria-hidden="true"></span> Mémoire</button>
     </div>
 
     <!-- Toggle chat au bord droit : position absolute en dehors du grid -->
@@ -681,15 +681,15 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     <div class="rtabs">
       <button class="rtab active" data-rtab="sources"
               title="Sources : ce avec quoi je travaille (couches + fichiers + recettes)">
-        📁 Sources
+        <span class="fr-icon-database-line fr-icon--sm" aria-hidden="true"></span> Sources
       </button>
       <button class="rtab" data-rtab="livrables"
               title="Livrables : ce que je produis (assemblages + publications + composants)">
-        📚 Livrables
+        <span class="fr-icon-article-line fr-icon--sm" aria-hidden="true"></span> Livrables
       </button>
       <button class="rtab" data-rtab="partages"
               title="Partages : assistants IA configurables que je partage en live">
-        🤖 Partages
+        <span class="fr-icon-team-line fr-icon--sm" aria-hidden="true"></span> Partages
       </button>
     </div>
 
@@ -718,19 +718,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       .src-action:hover{background:#e3eaf5}
       </style>
       <div class="src-section">
-        <div class="src-section-header">🗺 Couches QGIS du projet</div>
+        <div class="src-section-header">Couches QGIS du projet</div>
         <div class="src-section-content" id="src-layers-content">
           <div class="publi-empty">Chargement…</div>
         </div>
       </div>
       <div class="src-section">
-        <div class="src-section-header">📁 Fichiers de l'étude</div>
+        <div class="src-section-header">Fichiers de l'étude</div>
         <div class="src-section-content" id="src-files-content">
           <div class="publi-empty">Chargement…</div>
         </div>
       </div>
       <div class="src-section">
-        <div class="src-section-header">📋 Recettes</div>
+        <div class="src-section-header">Recettes</div>
         <div class="src-section-content" id="src-recipes-content">
           {# Chantier G4-b-3c : galerie SSR des recipes web disponibles.
              Le contexte `recipes` est alimente par _desk_context() a partir
@@ -869,10 +869,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <div class="publi-empty">Chargement…</div>
       </div>
       <div class="liv-create-row">
-        <div class="liv-create-title">✨ Demander à l'assistant V1.5 :</div>
+        <div class="liv-create-title">Demander à l'assistant V1.5 :</div>
         <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35;width:100%"
                 data-prompt="J'aimerais créer un nouveau livrable pour cette étude. Quels types sont possibles (storymap interactive, rapport, jeu de données partageable, etc.) ? Propose-moi le plus adapté à ce que j'ai déjà.">
-          🎨 Créer un nouveau livrable
+          Créer un nouveau livrable
         </button>
       </div>
       {% else %}
@@ -934,7 +934,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         {% if active_study %}
         <div class="components-header">
           <p class="components-desc">
-            🎨 Composants UI rattachés à l'étude « {{ active_study.name }} ».
+            Composants UI rattachés à l'étude « {{ active_study.name }} ».
             Création via l'agent IA (chat). Catalogue MVP :
             <em>interactive_map · legend · kpi_badge · narrative_text</em>.
           </p>
@@ -948,15 +948,15 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
            le chat agent. Permet à l'user de déclencher le workflow V1.5 sans
            se souvenir de la formulation exacte. #}
         <div class="quick-actions-block" data-target="components">
-          <div class="quick-actions-title">✨ Demander à l'agent V1.5 :</div>
+          <div class="quick-actions-title">Demander à l'agent V1.5 :</div>
           <button class="quick-action-btn" data-prompt="Quels types de briques visuelles je peux créer pour ma future storymap (cartes, textes, indicateurs, etc.) ? Propose-moi 3 idées pertinentes pour mon étude actuelle.">
-            💡 Quelles briques je peux créer ?
+            Quelles briques je peux créer ?
           </button>
           <button class="quick-action-btn" data-prompt="Crée-moi un texte d'introduction (court, accessible) pour ma future storymap : titre + 3 paragraphes contextualisant mon étude.">
-            📝 Créer un texte d'introduction
+            Créer un texte d'introduction
           </button>
           <button class="quick-action-btn" data-prompt="Crée-moi un indicateur visuel (chiffre-clé en avant) qui met en valeur une donnée importante de ma zone d'étude (population exposée, surface, etc.).">
-            🔢 Créer un indicateur visuel
+            Créer un indicateur visuel
           </button>
         </div>
         <div id="components-list" class="components-list"
@@ -997,13 +997,13 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           return;
         }
         const KIND_ICONS = {
-          interactive_map: '🗺', scene_3d: '🏛', chart: '📊',
-          kpi_badge: '🔢', legend: '📋', narrative_text: '📝',
-          data_table: '📋', media_embed: '🎞', iframe_grist: '📈',
+          interactive_map: '<span class="fr-icon-road-map-line fr-icon--sm" aria-hidden="true"></span>', scene_3d: '<span class="fr-icon-building-line fr-icon--sm" aria-hidden="true"></span>', chart: '<span class="fr-icon-line-chart-line fr-icon--sm" aria-hidden="true"></span>',
+          kpi_badge: '<span class="fr-icon-hashtag fr-icon--sm" aria-hidden="true"></span>', legend: '<span class="fr-icon-list-unordered fr-icon--sm" aria-hidden="true"></span>', narrative_text: '<span class="fr-icon-edit-box-line fr-icon--sm" aria-hidden="true"></span>',
+          data_table: '<span class="fr-icon-table-line fr-icon--sm" aria-hidden="true"></span>', media_embed: '<span class="fr-icon-image-line fr-icon--sm" aria-hidden="true"></span>', iframe_grist: '<span class="fr-icon-layout-grid-line fr-icon--sm" aria-hidden="true"></span>',
         };
         list.innerHTML = data.map(c => `
           <div class="component-item">
-            <div class="component-icon">${KIND_ICONS[c.kind] || '🎨'}</div>
+            <div class="component-icon">${KIND_ICONS[c.kind] || '<span class="fr-icon-shapes-line fr-icon--sm" aria-hidden="true"></span>'}</div>
             <div class="component-body">
               <div class="component-title">${escapeHtml(c.title || c.cid)}</div>
               <div class="component-meta">
@@ -1016,7 +1016,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                target="_blank" class="fr-btn fr-btn--sm fr-btn--tertiary"
                style="font-size:10.5px;padding:4px 8px"
                title="Aperçu HTML du composant">
-              👁 Voir
+              Voir
             </a>
           </div>
         `).join('');
@@ -1105,7 +1105,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           await navigator.clipboard.writeText(prompt);
           btn.classList.add('copied');
           setTimeout(() => btn.classList.remove('copied'), 1800);
-          showToast('✅ Prompt copié — colle-le dans le chat (Ctrl+V)');
+          showToast('Prompt copié — colle-le dans le chat (Ctrl+V)');
         } catch (err) {
           /* Fallback ancien navigateur — select + execCommand */
           const ta = document.createElement('textarea');
@@ -1114,7 +1114,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           ta.select();
           try { document.execCommand('copy'); } catch (e2) {}
           document.body.removeChild(ta);
-          showToast('✅ Prompt copié');
+          showToast('Prompt copié');
         }
       });
     })();
@@ -1133,7 +1133,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         {% if active_study %}
         <div class="assemblies-header">
           <p class="assemblies-desc">
-            📄 Assemblages publishables (storymap DSFR, dashboard…). Création via
+            Assemblages publishables (storymap DSFR, dashboard…). Création via
             l'agent IA. <strong>audit_chain transverse</strong> calculé automatiquement
             au <em>publish</em> (signed_hash SHA256 + components_refs + scene_hashes).
           </p>
@@ -1144,15 +1144,15 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         </div>
         {# Sprint Composants Phase 3b (2026-06-26) : quick-actions UI bridge. #}
         <div class="quick-actions-block" data-target="assemblies">
-          <div class="quick-actions-title">✨ Demander à l'agent V1.5 :</div>
+          <div class="quick-actions-title">Demander à l'agent V1.5 :</div>
           <button class="quick-action-btn" data-prompt="Assemble mes briques visuelles en storymap prête à partager (style DSFR officiel). Confirme avec moi le titre et l'audience avant de créer.">
-            🎨 Assembler une storymap avec mes briques
+            Assembler une storymap avec mes briques
           </button>
           <button class="quick-action-btn" data-prompt="Montre-moi un aperçu visuel de ma dernière storymap (sans la publier — juste pour vérifier le rendu).">
-            👁 Aperçu de ma dernière storymap
+            Aperçu de ma dernière storymap
           </button>
           <button class="quick-action-btn" data-prompt="Publie ma dernière storymap pour qu'elle soit accessible (lien partageable, accès réservé aux collègues par défaut). Confirme l'audience avant publication.">
-            🚀 Publier (lien partageable entre collègues)
+            Publier (lien partageable entre collègues)
           </button>
         </div>
         <div id="assemblies-list" class="assemblies-list"
@@ -1193,37 +1193,37 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           return;
         }
         const KIND_ICONS = {
-          storymap_narrative_dsfr: '📖', dashboard: '📊',
-          sheet_a4: '📄', modal_embed: '🪟', atlas_immersive: '🏛',
+          storymap_narrative_dsfr: '<span class="fr-icon-article-line fr-icon--sm" aria-hidden="true"></span>', dashboard: '<span class="fr-icon-dashboard-line fr-icon--sm" aria-hidden="true"></span>',
+          sheet_a4: '<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>', modal_embed: '<span class="fr-icon-window-line fr-icon--sm" aria-hidden="true"></span>', atlas_immersive: '<span class="fr-icon-building-line fr-icon--sm" aria-hidden="true"></span>',
         };
         const AUDIENCE_LABELS = {
-          public: '🌍 Public', cerema_internal: '🏛 Interne',
-          restricted: '🔒 Restreint', confidential: '🤐 Confidentiel',
+          public: '<span class="fr-icon-earth-line fr-icon--sm" aria-hidden="true"></span> Public', cerema_internal: '<span class="fr-icon-building-line fr-icon--sm" aria-hidden="true"></span> Interne',
+          restricted: '<span class="fr-icon-lock-line fr-icon--sm" aria-hidden="true"></span> Restreint', confidential: '<span class="fr-icon-eye-off-line fr-icon--sm" aria-hidden="true"></span> Confidentiel',
         };
         list.innerHTML = data.map(a => `
           <div class="assembly-item">
-            <div class="assembly-icon">${KIND_ICONS[a.kind] || '📄'}</div>
+            <div class="assembly-icon">${KIND_ICONS[a.kind] || '<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>'}</div>
             <div class="assembly-body">
               <div class="assembly-title">${escapeHtml(a.title || a.aid)}</div>
               <div class="assembly-meta">
                 <span class="assembly-kind">${escapeHtml(a.kind)}</span>
                 <span class="assembly-audience">${AUDIENCE_LABELS[a.classification] || a.classification}</span>
                 <span class="assembly-version">v${a.version_num}</span>
-                ${a.published_url ? '<span class="assembly-published">✓ publié</span>' : '<span class="assembly-draft">brouillon</span>'}
+                ${a.published_url ? '<span class="assembly-published"><span class="fr-icon-checkbox-circle-line fr-icon--sm" aria-hidden="true"></span> publié</span>' : '<span class="assembly-draft">brouillon</span>'}
               </div>
             </div>
             <div class="assembly-actions">
               <a href="/studies/${sid}/assemblies/${a.aid}/render" target="_blank"
                  class="fr-btn fr-btn--sm fr-btn--tertiary"
                  style="font-size:10.5px;padding:4px 8px"
-                 title="Preview HTML">👁</a>
+                 title="Preview HTML"><span class="fr-icon-eye-line fr-icon--sm" aria-hidden="true"></span></a>
               ${a.published_url ?
                 `<a href="${escapeHtml(a.published_url)}" target="_blank"
                     class="fr-btn fr-btn--sm" style="font-size:10.5px;padding:4px 8px"
-                    title="URL publiée S3">🌐</a>` :
+                    title="URL publiée S3"><span class="fr-icon-external-link-line fr-icon--sm" aria-hidden="true"></span></a>` :
                 `<button onclick="publishAssembly('${a.aid}')"
                     class="fr-btn fr-btn--sm" style="font-size:10.5px;padding:4px 8px"
-                    title="Publier sur S3 avec audit_chain">💾</button>`}
+                    title="Publier sur S3 avec audit_chain"><span class="fr-icon-upload-line fr-icon--sm" aria-hidden="true"></span></button>`}
             </div>
           </div>
         `).join('');
@@ -1308,7 +1308,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         {# ═══ NIVEAU ÉTUDE ═══════════════════════════════════════════ #}
         <div class="exports-zone">
           <div class="exports-zone-header">
-            <span class="exports-zone-icon">🏷</span>
+            <span class="exports-zone-icon fr-icon-bookmark-line" aria-hidden="true"></span>
             <div class="exports-zone-titles">
               <h3 class="exports-zone-label">Niveau étude</h3>
               <p class="exports-zone-context">« {{ active_study.name }} »</p>
@@ -1316,7 +1316,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           </div>
 
           <div class="export-section">
-            <h4 class="export-section-title">📦 Bundle complet</h4>
+            <h4 class="export-section-title">Bundle complet</h4>
             <p class="export-section-desc">
               Télécharge l'étude entière au format ZIP : tous les projets
               QGIS, données SIG locales, livrables publiés, recettes.
@@ -1330,7 +1330,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           </div>
 
           <div class="export-section export-soon">
-            <h4 class="export-section-title">📖 Storymap narrative DSFR <span class="soon-badge">Bientôt</span></h4>
+            <h4 class="export-section-title">Storymap narrative DSFR <span class="soon-badge">Bientôt</span></h4>
             <p class="export-section-desc">
               Page HTML narrative (scroll vertical scrollytelling DSFR)
               qui orchestre les composants des projets de l'étude.
@@ -1348,7 +1348,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         {% if active_project %}
         <div class="exports-zone exports-zone--project">
           <div class="exports-zone-header">
-            <span class="exports-zone-icon">🏷</span>
+            <span class="exports-zone-icon fr-icon-bookmark-line" aria-hidden="true"></span>
             <div class="exports-zone-titles">
               <h3 class="exports-zone-label">Niveau projet</h3>
               <p class="exports-zone-context">
@@ -1365,7 +1365,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 
           {# Sprint Composants-1 Phase C (2026-06-24) : export Grist livré. #}
           <div class="export-section">
-            <h4 class="export-section-title">💾 Document Grist (.grist)</h4>
+            <h4 class="export-section-title">Document Grist (.grist)</h4>
             <p class="export-section-desc">
               Génère un document Grist complet (SQLite portable) avec
               tables des couches QGIS, widgets Map/Chart/Form, et — si une
@@ -1379,13 +1379,13 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                     data-active-study-id="{{ active_study_id }}"
                     data-active-project-pid="{{ active_project.pid }}"
                     title="Lance la génération du .grist sur le workspace (10-30s)">
-              💾 Générer le doc Grist →
+              Générer le doc Grist →
             </button>
             <div id="export-grist-status" class="export-status" hidden></div>
           </div>
 
           <div class="export-section export-soon">
-            <h4 class="export-section-title">🎨 Scene Manifest (.json) <span class="soon-badge">Bientôt</span></h4>
+            <h4 class="export-section-title">Scene Manifest (.json) <span class="soon-badge">Bientôt</span></h4>
             <p class="export-section-desc">
               Exporte le contrat de style declarative V0.2 du projet seul
               (couches + symbology + provenance). Format JSON pivot
@@ -1399,7 +1399,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           </div>
 
           <div class="export-section export-soon">
-            <h4 class="export-section-title">📦 GPKG étendu V0.2 <span class="soon-badge">Bientôt</span></h4>
+            <h4 class="export-section-title">GPKG étendu V0.2 <span class="soon-badge">Bientôt</span></h4>
             <p class="export-section-desc">
               GeoPackage binaire portable avec couches + style + provenance
               embarqués (tables _meta_scene + scene_relations + scene_provenance).
@@ -1415,7 +1415,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         {% else %}
         <div class="exports-zone exports-zone--project exports-zone--empty">
           <div class="exports-zone-header">
-            <span class="exports-zone-icon">🏷</span>
+            <span class="exports-zone-icon fr-icon-bookmark-line" aria-hidden="true"></span>
             <div class="exports-zone-titles">
               <h3 class="exports-zone-label">Niveau projet</h3>
               <p class="exports-zone-context exports-zone-context--hint">
@@ -1537,12 +1537,12 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
              onclick="setActiveRender('{{ item.kind }}', '{{ item.slug }}', '{{ item.slug }}')"
              title="{{ item.url }}">
             <span class="ic">
-              {% if item.kind == 'storymap' %}📖
-              {% elif item.kind == 'flux' %}🌐
-              {% elif item.kind == 'recipe' %}📋
-              {% elif item.kind == 'pdf' %}📄
-              {% elif item.kind == 'dataset' %}📊
-              {% else %}📦{% endif %}
+              {% if item.kind == 'storymap' %}<span class="fr-icon-article-line fr-icon--sm" aria-hidden="true"></span>
+              {% elif item.kind == 'flux' %}<span class="fr-icon-external-link-line fr-icon--sm" aria-hidden="true"></span>
+              {% elif item.kind == 'recipe' %}<span class="fr-icon-list-unordered fr-icon--sm" aria-hidden="true"></span>
+              {% elif item.kind == 'pdf' %}<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>
+              {% elif item.kind == 'dataset' %}<span class="fr-icon-line-chart-line fr-icon--sm" aria-hidden="true"></span>
+              {% else %}<span class="fr-icon-archive-line fr-icon--sm" aria-hidden="true"></span>{% endif %}
             </span>
             <div class="info">
               <div class="name">{{ item.slug }}</div>
@@ -1599,7 +1599,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         {% if active_study %}
         <div class="agents-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
           <p class="agents-desc" style="font-size:11.5px;color:var(--text-mention-grey);margin:0;line-height:1.45;flex:1">
-            🤖 Agents partagés (assistants IA configurables) que tu publies pour diffusion.
+            Agents partagés (assistants IA configurables) que tu publies pour diffusion.
             Chaque agent = profile + audience + scope étude + clé scopée révocable.
             <strong>Configuration via l'assistant</strong> (chat) — pose ton plan, valide, mint + publie.
           </p>
@@ -1608,19 +1608,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         </div>
         <div class="quick-actions-block" data-target="agents" style="background:#eef3f9;border:1px dashed #91b0d6;border-radius:6px;padding:8px 10px">
           <div style="font-size:10.5px;color:#000091;font-weight:600;margin-bottom:5px">
-            ✨ Demander à l'assistant V1.5 :
+            Demander à l'assistant V1.5 :
           </div>
           <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35"
                   data-prompt="Montre-moi mes assistants partagés actuels pour cette étude, et fais le point sur où on en est.">
-            📋 Mes assistants partagés actuels
+            Mes assistants partagés actuels
           </button>
           <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35;margin-top:5px"
                   data-prompt="Je voudrais partager cette étude avec mes collègues via un assistant qu'ils peuvent consulter directement. Propose-moi une configuration adaptée et préviens-moi des points d'attention (confidentialité, audience).">
-            🤖 Créer un assistant pour mes collègues
+            Créer un assistant pour mes collègues
           </button>
           <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35;margin-top:5px"
                   data-prompt="Vérifie qu'un assistant partagé visible par mes collègues serait bien configuré pour cette étude. Signale-moi les éventuels points d'attention (confidentialité, accès, etc.).">
-            🔍 Vérifier la configuration avant partage
+            Vérifier la configuration avant partage
           </button>
         </div>
         <div id="agents-list" class="agents-list" data-active-study-id="{{ active_study_id }}" style="display:flex;flex-direction:column;gap:6px">
@@ -1673,18 +1673,18 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           return;
         }
         const AUDIENCE_BADGE = {
-          public: {color: '#fff', bg: '#b34000', label: '🌍 public'},
-          cerema_internal: {color: '#fff', bg: '#000091', label: '🏛 Interne'},
-          restricted: {color: '#fff', bg: '#6e445a', label: '🔒 restreint'},
-          confidential: {color: '#fff', bg: '#000', label: '🚫 confidentiel'},
+          public: {color: '#fff', bg: '#b34000', label: '<span class="fr-icon-earth-line fr-icon--sm" aria-hidden="true"></span> public'},
+          cerema_internal: {color: '#fff', bg: '#000091', label: '<span class="fr-icon-building-line fr-icon--sm" aria-hidden="true"></span> Interne'},
+          restricted: {color: '#fff', bg: '#6e445a', label: '<span class="fr-icon-lock-line fr-icon--sm" aria-hidden="true"></span> restreint'},
+          confidential: {color: '#fff', bg: '#000', label: '<span class="fr-icon-eye-off-line fr-icon--sm" aria-hidden="true"></span> confidentiel'},
         };
         list.innerHTML = agents.map(a => {
           const aud = AUDIENCE_BADGE[a.audience] || {color: '#161616', bg: '#ccc', label: a.audience};
           const pub = a.published_url
-            ? `<a href="${a.published_url}" target="_blank" class="fr-btn fr-btn--sm fr-btn--tertiary" style="font-size:10.5px;padding:4px 8px" title="URL widget de l'agent partagé">👁 URL</a>`
+            ? `<a href="${a.published_url}" target="_blank" class="fr-btn fr-btn--sm fr-btn--tertiary" style="font-size:10.5px;padding:4px 8px" title="URL widget de l'agent partagé"><span class="fr-icon-eye-line fr-icon--sm" aria-hidden="true"></span> URL</a>`
             : '<span style="font-size:10px;color:#999;font-style:italic">draft (non publié)</span>';
           return `<div class="agent-item" style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--background-alt-grey);border-radius:6px;border-left:3px solid ${aud.bg}">
-            <div style="font-size:20px">🤖</div>
+            <div style="font-size:20px"><span class="fr-icon-team-line fr-icon--md" aria-hidden="true"></span></div>
             <div style="flex:1;min-width:0">
               <div style="font-size:12.5px;font-weight:600;color:var(--text-title-blue-france);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(a.label || a.id_masked)}</div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:10px;color:var(--text-mention-grey);margin-top:3px">
@@ -1719,7 +1719,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <span id="recipe-editor-meta" style="font-size:11px; color:#666;"></span>
         <button onclick="closeRecipeEditor()"
                 style="border:0; background:#eee; padding:4px 10px; border-radius:4px;
-                       cursor:pointer;">✕ Fermer</button>
+                       cursor:pointer;"><span class="fr-icon-close-line fr-icon--sm" aria-hidden="true"></span> Fermer</button>
       </div>
       <div style="padding:12px 16px; display:flex; gap:8px; flex-wrap:wrap;">
         <input id="recipe-editor-slug" type="text" placeholder="slug (ex: ma_recette)"
@@ -1744,7 +1744,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         </button>
         <button id="recipe-editor-save" onclick="saveRecipeFromEditor()"
                 class="fr-btn fr-btn--sm">
-          💾 Sauvegarder
+          <span class="fr-icon-save-line fr-icon--sm" aria-hidden="true"></span> Sauvegarder
         </button>
       </div>
     </div>
@@ -2423,7 +2423,7 @@ async function openAssemblyEditor(aid) {
       <div id="assembly-editor-content">
         <div id="assembly-editor-header">
           <h2 id="assembly-editor-title">Éditer assemblage</h2>
-          <button onclick="closeAssemblyEditor()" id="assembly-editor-close">✕</button>
+          <button onclick="closeAssemblyEditor()" id="assembly-editor-close"><span class="fr-icon-close-line fr-icon--sm" aria-hidden="true"></span></button>
         </div>
         <div id="assembly-editor-body">
           <p id="assembly-editor-status">Chargement…</p>
@@ -2431,7 +2431,7 @@ async function openAssemblyEditor(aid) {
         </div>
         <div id="assembly-editor-footer">
           <button onclick="closeAssemblyEditor()" class="ae-btn-secondary">Annuler</button>
-          <button onclick="saveAssemblyEditor()" class="ae-btn-primary">💾 Enregistrer (nouvelle version)</button>
+          <button onclick="saveAssemblyEditor()" class="ae-btn-primary"><span class="fr-icon-save-line fr-icon--sm" aria-hidden="true"></span> Enregistrer (nouvelle version)</button>
         </div>
       </div>
     `;
@@ -2479,7 +2479,7 @@ function renderEditorSections() {
       `<li class="ae-comp">
         ${c.ref ? `<code>${escapeHtml(c.ref)}</code>` : `<em>${escapeHtml(c.kind || 'inline')}</em>`}
         <button onclick="removeComponentFromSection(${idx}, '${c.ref || ''}')"
-                class="ae-btn-mini" title="Supprimer">✕</button>
+                class="ae-btn-mini" title="Supprimer"><span class="fr-icon-close-line fr-icon--sm" aria-hidden="true"></span></button>
         <button onclick="duplicateComponentInSection(${idx}, '${c.ref || ''}')"
                 class="ae-btn-mini" title="Dupliquer">⎘</button>
       </li>`
@@ -2491,7 +2491,7 @@ function renderEditorSections() {
         <span class="ae-section-count">${compsCount} composant(s)</span>
         <button onclick="moveSection(${idx}, -1)" class="ae-btn-mini" ${idx === 0 ? 'disabled' : ''} title="Monter">↑</button>
         <button onclick="moveSection(${idx}, 1)" class="ae-btn-mini" ${idx === sections.length - 1 ? 'disabled' : ''} title="Descendre">↓</button>
-        <button onclick="deleteSection(${idx})" class="ae-btn-mini ae-btn-danger" title="Supprimer">🗑</button>
+        <button onclick="deleteSection(${idx})" class="ae-btn-mini ae-btn-danger" title="Supprimer"><span class="fr-icon-delete-line fr-icon--sm" aria-hidden="true"></span></button>
       </div>
       <ul class="ae-comp-list">${compsList}</ul>
     </div>`;
@@ -2553,7 +2553,7 @@ async function saveAssemblyEditor() {
       const data = await r.json().catch(() => ({}));
       const detail = data.detail || data;
       const choice = confirm(
-        `⚠ Conflit : l'assembly a été modifié par un autre processus.\n\n` +
+        `Conflit : l'assembly a été modifié par un autre processus.\n\n` +
         `Version actuelle serveur : ${detail.current_version_num}\n` +
         `Version chargée à l'ouverture : ${detail.source_version_num}\n\n` +
         `OK = recharger (perdre vos modifs)\n` +
@@ -2574,7 +2574,7 @@ async function saveAssemblyEditor() {
         });
         if (!r2.ok) throw new Error('http_' + r2.status);
         const data2 = await r2.json();
-        alert(`✅ Écrasement forcé — version ${data2.version_num}`);
+        alert(`Écrasement forcé — version ${data2.version_num}`);
         closeAssemblyEditor();
         if (typeof loadLivrables === 'function') loadLivrables();
       }
@@ -2582,7 +2582,7 @@ async function saveAssemblyEditor() {
     }
     if (!r.ok) throw new Error('http_' + r.status);
     const data = await r.json();
-    alert(`✅ Enregistré — nouvelle version ${data.version_num}`);
+    alert(`Enregistré — nouvelle version ${data.version_num}`);
     closeAssemblyEditor();
     if (typeof loadLivrables === 'function') loadLivrables();
   } catch (e) {
@@ -2599,7 +2599,7 @@ async function cloneAssembly(aid, title) {
     });
     if (!r.ok) throw new Error('http_' + r.status);
     const data = await r.json();
-    alert(`✅ Cloné : ${data.title}\nNouvel aid : ${data.id}`);
+    alert(`Cloné : ${data.title}\nNouvel aid : ${data.id}`);
     if (typeof loadLivrables === 'function') loadLivrables();
   } catch (e) {
     alert(`Erreur clonage : ${e.message}`);
@@ -2648,7 +2648,7 @@ async function loadLivrables() {
       } catch{}
       cards.push({
         type: 'assembly',
-        icon: '📄',
+        icon: '<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>',
         title: a.title || a.aid,
         kind: a.kind,
         state: isPub ? 'published' : 'draft',
@@ -2657,14 +2657,14 @@ async function loadLivrables() {
         children: comps,
         ref: a.aid,
         actions: isPub
-          ? [{label:'👁 Voir',  href: _rewriteS3UrlToHub(a.published_url, a.aid), target:'_blank'},
-             {label:'🔧 Métadonnées', onclick: `openAssemblyEditor('${a.aid}')`, title: 'Editer titre/audience/sections (mode expert JSON). Pour edition visuelle, utiliser BlockNote.'},
-             {label:'📝 BlockNote', href:`/editor/${sid}/assembly/${a.aid}`, target:'_blank'}]
-          : [{label:'👁 Preview', href:`/studies/${sid}/assemblies/${a.aid}/render`, target:'_blank'},
-             {label:'🔧 Métadonnées', onclick: `openAssemblyEditor('${a.aid}')`, title: 'Editer titre/audience/sections (mode expert JSON). Pour edition visuelle, utiliser BlockNote.'},
-             {label:'📝 BlockNote', href:`/editor/${sid}/assembly/${a.aid}`, target:'_blank'},
+          ? [{label:'Voir',  href: _rewriteS3UrlToHub(a.published_url, a.aid), target:'_blank'},
+             {label:'Métadonnées', onclick: `openAssemblyEditor('${a.aid}')`, title: 'Editer titre/audience/sections (mode expert JSON). Pour edition visuelle, utiliser BlockNote.'},
+             {label:'BlockNote', href:`/editor/${sid}/assembly/${a.aid}`, target:'_blank'}]
+          : [{label:'<span class="fr-icon-eye-line fr-icon--sm" aria-hidden="true"></span> Preview', href:`/studies/${sid}/assemblies/${a.aid}/render`, target:'_blank'},
+             {label:'Métadonnées', onclick: `openAssemblyEditor('${a.aid}')`, title: 'Editer titre/audience/sections (mode expert JSON). Pour edition visuelle, utiliser BlockNote.'},
+             {label:'BlockNote', href:`/editor/${sid}/assembly/${a.aid}`, target:'_blank'},
              {label:'⎘ Cloner', onclick: `cloneAssembly('${a.aid}', '${(a.title || a.aid).replace(/'/g, "\\'")}')`},
-             {label:'🚀 Publier', prompt:`Publie cette storymap (« ${a.title || a.aid} ») avec accès réservé à mes collègues. Confirme avec moi l'audience avant publication.`}],
+             {label:'Publier', prompt:`Publie cette storymap (« ${a.title || a.aid} ») avec accès réservé à mes collègues. Confirme avec moi l'audience avant publication.`}],
       });
     });
 
@@ -2673,12 +2673,12 @@ async function loadLivrables() {
       if (it.kind === 'assembly') return;
       cards.push({
         type: 'catalog',
-        icon: it.kind === 'storymap' ? '📖'
-            : it.kind === 'flux'     ? '🌐'
-            : it.kind === 'recipe'   ? '📋'
-            : it.kind === 'pdf'      ? '📄'
-            : it.kind === 'dataset'  ? '📊'
-            : '📦',
+        icon: it.kind === 'storymap' ? '<span class="fr-icon-article-line fr-icon--sm" aria-hidden="true"></span>'
+            : it.kind === 'flux'     ? '<span class="fr-icon-external-link-line fr-icon--sm" aria-hidden="true"></span>'
+            : it.kind === 'recipe'   ? '<span class="fr-icon-list-unordered fr-icon--sm" aria-hidden="true"></span>'
+            : it.kind === 'pdf'      ? '<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>'
+            : it.kind === 'dataset'  ? '<span class="fr-icon-line-chart-line fr-icon--sm" aria-hidden="true"></span>'
+            : '<span class="fr-icon-archive-line fr-icon--sm" aria-hidden="true"></span>',
         title: it.slug,
         kind: it.kind,
         state: 'published',
@@ -2686,7 +2686,7 @@ async function loadLivrables() {
         size_kb: it.size_kb,
         children: [],
         ref: it.slug,
-        actions: [{label:'👁 Voir', href: _rewriteS3UrlToHub(it.hub_url || it.url, it.slug), target:'_blank'}],
+        actions: [{label:'Voir', href: _rewriteS3UrlToHub(it.hub_url || it.url, it.slug), target:'_blank'}],
       });
     });
 
@@ -2712,7 +2712,7 @@ async function loadLivrables() {
     };
 
     target.innerHTML = cards.map((c, idx) => {
-      const stateLabel = c.state === 'published' ? '✅ publié' : '🟡 draft';
+      const stateLabel = c.state === 'published' ? '<span class="fr-icon-checkbox-circle-line fr-icon--sm" aria-hidden="true"></span> publié' : '<span class="fr-icon-draft-line fr-icon--sm" aria-hidden="true"></span> draft';
       const meta = [
         KIND_LABEL[c.kind] || c.kind,
         c.size_kb ? `${c.size_kb} ko` : '',
@@ -2724,7 +2724,7 @@ async function loadLivrables() {
         </div>
         <div class="liv-card-children" id="liv-children-${idx}">
           ${c.children.map(comp => `
-            <div class="liv-child">${comp.kind ? '🎨 ' + escapeHtml(comp.kind) + ' — ' : ''}${escapeHtml(comp.title || comp.cid || '?')}</div>
+            <div class="liv-child">${comp.kind ? '<span class="fr-icon-shapes-line fr-icon--sm" aria-hidden="true"></span> ' + escapeHtml(comp.kind) + ' — ' : ''}${escapeHtml(comp.title || comp.cid || '?')}</div>
           `).join('')}
         </div>
       ` : '';
@@ -2835,7 +2835,7 @@ async function loadResourceLayers() {
       const typ = (l.type || l.geom_type || '').toString();
       const n = (l.feature_count != null) ? ` · ${l.feature_count}` : '';
       return `<div class="publi-item">
-        <span class="ic">📍</span>
+        <span class="ic fr-icon-map-pin-2-line" aria-hidden="true"></span>
         <div class="info">
           <div class="name">${name.replace(/</g, '&lt;')}</div>
           <div class="meta">${typ}${n}</div>
@@ -2868,8 +2868,8 @@ async function loadResourceFiles() {
       const name = (f.name || '?').toString();
       const kind = (f.kind || 'file').toString();
       const size = f.size_kb != null ? ` · ${f.size_kb} ko` : '';
-      const ic = kind === 'dir' ? '📁' : (kind === 'data' ? '💾'
-              : kind === 'export' ? '📤' : kind === 'note' ? '📝' : '📄');
+      const ic = kind === 'dir' ? '<span class="fr-icon-folder-2-line fr-icon--sm" aria-hidden="true"></span>' : (kind === 'data' ? '<span class="fr-icon-database-line fr-icon--sm" aria-hidden="true"></span>'
+              : kind === 'export' ? '<span class="fr-icon-download-line fr-icon--sm" aria-hidden="true"></span>' : kind === 'note' ? '<span class="fr-icon-edit-box-line fr-icon--sm" aria-hidden="true"></span>' : '<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>');
       return `<div class="publi-item" title="${(f.path||'').replace(/"/g, '&quot;')}">
         <span class="ic">${ic}</span>
         <div class="info">
@@ -2936,18 +2936,18 @@ async function loadResourceRecipes() {
       const v = r.version_num ? `v${r.version_num}` : '—';
       const sz = r.size != null ? ` · ${Math.round(r.size/1024*10)/10} ko` : '';
       const sha = r.sha ? r.sha.substring(0, 8) : '';
-      const pub = r.published_at ? '🌐 ' : '';
+      const pub = r.published_at ? '<span class="fr-icon-external-link-line fr-icon--sm" aria-hidden="true"></span> ' : '';
       return `<div class="publi-item" data-slug="${slug.replace(/"/g, '&quot;')}">
-        <span class="ic">📋</span>
+        <span class="ic fr-icon-list-unordered" aria-hidden="true"></span>
         <div class="info" style="flex:1;">
           <div class="name">${pub}${name.replace(/</g, '&lt;')}</div>
           <div class="meta">${fmt.toUpperCase()} · ${v} · ${sha}${sz}</div>
         </div>
         <div style="display:flex; gap:2px;">
           <button onclick="openRecipeEditor('${slug.replace(/'/g, '\\\'')}', false)"
-                  title="Voir / Éditer" style="border:0; background:transparent; cursor:pointer; padding:2px 4px;">✏</button>
+                  title="Voir / Éditer" style="border:0; background:transparent; cursor:pointer; padding:2px 4px;"><span class="fr-icon-edit-line fr-icon--sm" aria-hidden="true"></span></button>
           <button onclick="deleteRecipe('${slug.replace(/'/g, '\\\'')}')"
-                  title="Supprimer (archive)" style="border:0; background:transparent; cursor:pointer; padding:2px 4px;">🗑</button>
+                  title="Supprimer (archive)" style="border:0; background:transparent; cursor:pointer; padding:2px 4px;"><span class="fr-icon-delete-line fr-icon--sm" aria-hidden="true"></span></button>
         </div>
       </div>`;
     }).join('');
@@ -3287,10 +3287,10 @@ async function refreshCatalogPanel() {
           c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
         const labels = d.study_labels || {};
         const activeSid = d.active_study_id;
-        const ICONS = {storymap:'📖', pdf:'📄', dataset:'📊', flux:'🌐', recipe:'📋'};
+        const ICONS = {storymap:'<span class="fr-icon-article-line fr-icon--sm" aria-hidden="true"></span>', pdf:'<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>', dataset:'<span class="fr-icon-line-chart-line fr-icon--sm" aria-hidden="true"></span>', flux:'<span class="fr-icon-external-link-line fr-icon--sm" aria-hidden="true"></span>', recipe:'<span class="fr-icon-list-unordered fr-icon--sm" aria-hidden="true"></span>'};
         list.innerHTML = d.items.map(it => {
           const kind = it.kind || 'fichier';
-          const ic = ICONS[kind] || '📦';
+          const ic = ICONS[kind] || '<span class="fr-icon-archive-line fr-icon--sm" aria-hidden="true"></span>';
           const slug = escapeHtml(it.slug);
           const hubUrl = it.hub_url || it.url || '#';
           // size_kb fourni par le serveur (cf. /desk/catalog enrichi).
