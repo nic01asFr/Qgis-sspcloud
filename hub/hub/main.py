@@ -1678,7 +1678,7 @@ async def oauth_authorize(
       class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono
              focus:outline-none focus:ring-2 focus:ring-blue-500"/>
     <p class="text-xs text-gray-400">
-      Votre clé API est disponible sur le portail CEREMA ou via
+      Votre clé API est disponible sur le portail ou via
       <code>POST /auth/apikey</code> avec votre token SSPCloud.
     </p>
     <button type="submit"
@@ -2613,7 +2613,7 @@ et colle-le ci-dessous.</p>
 </div>
 
 <p style="color:#888;font-size:12px;margin-top:40px">
-QGIS Service · CEREMA — Sprint Day 5 (portail absorbé côté hub).
+QGIS Service — Sprint Day 5 (portail absorbé côté hub).
 </p>
 </body>
 </html>""")
@@ -2827,7 +2827,7 @@ depuis <a href="/onboarding">la page de secours</a>.
 </div>
 
 <p style="color:#666;font-size:12px;margin-top:40px">
-QGIS Service — CEREMA — plateforme d'analyse géospatiale sur SSPCloud.
+QGIS Service — plateforme d'analyse géospatiale sur SSPCloud.
 </p>
 </main>
 </body>
@@ -7093,7 +7093,7 @@ async def _build_interactive_map_ctx(
             source_text = get_label(ds_ref)
     # Fallback si scene_manifest mais pas de source datee : signal IGN/CEREMA
     if not source_text and scene_hash:
-        source_text = "Scene Manifest QGIS — CEREMA"
+        source_text = "Scene Manifest QGIS"
 
     caveat = params.get("caveat") or None
 
@@ -9689,7 +9689,7 @@ def _render_publication_404_html(owner: str, kind: str, slug: str) -> HTMLRespon
   .banner span {{ opacity:.7; font-weight:400 }}
 </style>
 </head><body>
-<div class="banner">CEREMA <span>· QGIS Service</span></div>
+<div class="banner">QGIS <span>· Service</span></div>
 <div class="wrap">
 <h1>Publication introuvable</h1>
 <p class="lead">La publication que vous cherchez n'existe pas ou n'est plus disponible.
@@ -9790,7 +9790,7 @@ async def list_published_owner(owner: str) -> HTMLResponse:
   .footer-nav a {{ color:#000091; text-decoration:none; font-size:13px }}
 </style>
 </head><body>
-<div class="banner">CEREMA <span>· QGIS Service</span></div>
+<div class="banner">QGIS <span>· Service</span></div>
 <div class="wrap">
 <h1>Publications de {owner}</h1>
 <p class="subtitle">{"etat du stockage inconnu" if indisponible else f"{len(items)} publication{'s' if len(items) > 1 else ''} disponible{'s' if len(items) > 1 else ''}"}</p>
@@ -10048,16 +10048,16 @@ async def serve_published(
                 except Exception:
                     pass
             banner = (
-                '<div id="cerema-publi-banner" style="position:fixed;top:0;left:0;right:0;'
+                '<div id="publi-banner" style="position:fixed;top:0;left:0;right:0;'
                 'height:32px;background:#000091;color:#fff;display:flex;align-items:center;'
                 'padding:0 14px;font:13px system-ui,sans-serif;z-index:99999;gap:14px;'
                 'box-shadow:0 1px 4px rgba(0,0,0,.15)">'
-                '<span style="font-weight:700">CEREMA</span>'
-                '<span style="opacity:.7">· QGIS</span>'
+                '<span style="font-weight:700">QGIS</span>'
+                '<span style="opacity:.7">· Service</span>'
                 f'<span style="opacity:.85">— Publié par <strong>{owner}</strong></span>'
                 + (f'<span style="opacity:.7">· {date_str}</span>' if date_str else '')
                 + '<span style="margin-left:auto;opacity:.6;font-size:11px">'
-                'Livrable public — généré par l\'agent QGIS CEREMA'
+                'Livrable public — généré par l\'agent QGIS'
                 '</span></div>'
                 '<style>body{padding-top:32px !important}</style>'
             )
