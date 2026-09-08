@@ -1950,6 +1950,33 @@ try:
             f"n_layers={{n_layers}} fname={{fname}}"
         )
 
+    # ── Garde de validite ───────────────────────────────────────────────
+    # Vecu le 8 septembre 2026 : le projet Saint-Martin s'est retrouve charge
+    # avec ses dix-neuf couches pointant sur /data/data/ -- un `../../data/`
+    # resolu depuis la mauvaise profondeur, puis fige en absolu par la
+    # sauvegarde suivante. QGIS ouvre alors sa boite "Traiter les couches
+    # inutilisables" et le panneau des couches se remplit d'italiques.
+    #
+    # Le degat ne vient pas du chargement degrade, qui est reversible, mais de
+    # la sauvegarde qui le persiste par-dessus le fichier sain. On refuse donc
+    # d'ecraser un projet existant par un projet dont AUCUNE couche ne resout.
+    #
+    # Critere volontairement etroit : une couche lente, ou une source reseau
+    # momentanement absente, ne doit pas bloquer les sauvegardes ordinaires.
+    # Seule la perte pure -- tout casse d'un cote, du sain de l'autre -- est
+    # refusee.
+    _valides = -1
+    try:
+        _valides = sum(1 for _c in proj.mapLayers().values() if _c.isValid())
+    except Exception:
+        _valides = -1
+    if n_layers > 0 and _valides == 0 and target.exists():
+        _refuse = True
+        print(
+            f"STUDY_SAVE_REFUSED_INVALIDE sid={{sid}} n_layers={{n_layers}} "
+            f"valides=0 fname={{fname}}"
+        )
+
     # ── Adoption des sources /data/cache/ → /data/studies/{{sid}}/data/ ──
     adopted = []
     failed = []
@@ -2000,10 +2027,25 @@ try:
         proj.setFileName(str(target))
         # Chemins relatifs au .qgz pour rendre le bundle portable.
         # (data/ est sibling de project.qgz dans {{sid}}/)
+        #
+        # `writeEntry("Paths", "Absolute", ...)` ne sert a RIEN ici : elle pose
+        # bien <Absolute> dans le XML, mais QGIS ne la consulte pas au moment
+        # d'ecrire les sources -- verifie en bac a sable le 8 septembre 2026,
+        # le write sortait 19 chemins absolus sur 19 malgre la demande. La
+        # portabilite du bundle annoncee depuis Phase 12 n'a donc jamais
+        # existe. L'API qui agit est `setFilePathStorage`.
+        #
+        # QGIS ne relativise que ce qui se trouve sous l'arborescence du
+        # projet : une source hors de {{sid}}/ reste absolue, ce qui est le
+        # comportement voulu.
         try:
-            proj.writeEntry("Paths", "Absolute", False)
+            from qgis.core import Qgis as _Qgis
+            proj.setFilePathStorage(_Qgis.FilePathType.Relative)
         except Exception:
-            pass
+            try:
+                proj.writeEntry("Paths", "Absolute", False)
+            except Exception:
+                pass
         ok_legacy = proj.write(str(target))
         print(
             f"STUDY_SAVE_OK sid={{sid}} ok={{ok_legacy}} n_layers={{n_layers}} "
@@ -2032,18 +2074,26 @@ try:
             # qui n'existe pas. En absolu, on garde les references intactes
             # vers /data/studies/{{sid}}/data/ ecrites au write legacy.
             try:
-                proj.writeEntry("Paths", "Absolute", True)
+                from qgis.core import Qgis as _Qgis
+                proj.setFilePathStorage(_Qgis.FilePathType.Absolute)
             except Exception:
-                pass
+                try:
+                    proj.writeEntry("Paths", "Absolute", True)
+                except Exception:
+                    pass
             ok_pid = proj.write(str(pid_target))
             print(f"STUDY_SAVE_PID_OK sid={{sid}} pid={{pid}} ok={{ok_pid}}")
             # Restore fileName et Paths mode pour ne pas perturber saves ulterieurs
             # (autres call-sites attendent le mode legacy historique par defaut).
             proj.setFileName(str(target))
             try:
-                proj.writeEntry("Paths", "Absolute", False)
+                from qgis.core import Qgis as _Qgis
+                proj.setFilePathStorage(_Qgis.FilePathType.Relative)
             except Exception:
-                pass
+                try:
+                    proj.writeEntry("Paths", "Absolute", False)
+                except Exception:
+                    pass
         except Exception as _pid_exc:
             print(f"STUDY_SAVE_PID_ERR sid={{sid}} pid={{pid}} : {{_pid_exc}}")
 except Exception as exc:
