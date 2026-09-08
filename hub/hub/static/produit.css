@@ -1,0 +1,829 @@
+/* Feuille du produit — QGIS Service
+ *
+ * Remplace la charte d'Etat qui etait chargee depuis un CDN sur toutes les
+ * surfaces. Cette charte est destinee aux sites de l'Etat ; la conserver sur
+ * un service qu'on a par ailleurs debrande n'etait defendable ni sur le fond
+ * ni sur la forme.
+ *
+ * Tout est ici : jetons, composants, icones. Aucune dependance externe,
+ * aucune police a telecharger — la pile systeme rend net sur les trois OS et
+ * ne pose aucune question de licence.
+ *
+ * Prefixe `qs-` (QGIS Service) pour les composants, `ic-` pour les icones.
+ *
+ * La partie icones est generee entre les marqueurs ICONES-DEBUT / ICONES-FIN
+ * par hub/tools/genere_icones.py, qui porte aussi les traces SVG. Ne pas
+ * editer les regles `.ic-*` a la main : la prochaine generation les ecrase.
+ */
+
+/* ── Socle ──────────────────────────────────────────────────────────────
+ * La charte precedente apportait son propre socle avec elle. En la retirant
+ * on a retire cela aussi, sans le remplacer : `.qs-conteneur` mesurait alors
+ * 518 px dans une fenetre de 501 -- sa largeur de 100 % PLUS ses marges
+ * interieures -- et toutes les pages defilaient lateralement sur telephone.
+ *
+ * Une seule ligne, mais c'est elle qui rend le responsive possible : sans
+ * elle, chaque composant a marges interieures deborde de son parent.
+ */
+*, *::before, *::after { box-sizing: border-box; }
+
+img, video, canvas, svg { max-width: 100%; height: auto; }
+
+/* ── Jetons ─────────────────────────────────────────────────────────── */
+
+:root {
+  /* Palette QGIS : vert, orange, et un bleu-nuit profond.
+   *
+   * Le fond nuit fait le gros du travail d'identite. C'est lui qui permet au
+   * vert de rester une couleur d'ACTION au lieu d'envahir l'interface -- une
+   * vraie contrainte ici, ou le vert est aussi la teinte la plus frequente
+   * dans les donnees affichees (vegetation, espaces naturels).
+   *
+   * Les valeurs de marque ne sont pas assez contrastees pour du texte :
+   * #589632 donne 3,6:1 sur blanc et #EE7913 seulement 2,9:1, quand il en
+   * faut 4,5. Chaque couleur existe donc en deux temps -- la teinte de marque
+   * pour les aplats et les fonds sombres, une version assombrie pour tout ce
+   * qui doit se lire sur du blanc. Contrastes mesures, pas estimes.
+   */
+
+  /* Neutres refroidis vers le bleu de la marque. */
+  --qs-encre:      #13212C;
+  --qs-encre-2:    #3B4C58;
+  --qs-discret:    #697987;
+  --qs-fond:       #F4F6F7;
+  --qs-surface:    #FFFFFF;
+  --qs-surface-2:  #E9EDEF;
+  --qs-trait:      #D1D9DE;
+  --qs-trait-2:    #E4E9EC;
+
+  /* Le bleu-nuit : bandeaux, en-tetes, surfaces sombres. */
+  --qs-nuit:       #0E2433;
+  --qs-nuit-2:     #16324A;
+  --qs-nuit-encre: #FFFFFF;      /* 15,9:1 sur nuit */
+  --qs-nuit-discret: #9FB3C0;    /*  7,3:1 sur nuit */
+
+  /* Vert QGIS. La teinte de marque pour les aplats, l'assombrie pour le
+     texte et les libelles de bouton. */
+  --qs-marque:       #589632;    /* vert QGIS exact */
+  --qs-accent:       #41701F;    /* 5,9:1 sur blanc */
+  --qs-accent-fonce: #33591A;    /* 8,1:1 -- survol */
+  --qs-accent-clair: #6FAE45;    /* 5,9:1 sur nuit */
+  --qs-accent-pale:  #EDF4E6;
+  --qs-accent-encre: #FFFFFF;
+
+  /* Orange QGIS. Sert d'accent secondaire et de couleur d'attention : deux
+     roles qui ne se croisent pas dans l'interface. */
+  --qs-orange:       #EE7913;    /* orange QGIS exact, 5,6:1 sur nuit */
+  --qs-alerte:       #B0560B;    /* 5,0:1 sur blanc */
+  --qs-alerte-pale:  #FDF0E4;
+
+  /* Semantiques. Le succes reprend le vert de l'accent : deux verts voisins
+     se liraient comme une nuance involontaire plutot qu'une distinction. */
+  --qs-succes:      #41701F;
+  --qs-succes-pale: #EDF4E6;
+  --qs-danger:      #A32E28;
+  --qs-danger-pale: #F8E5E4;
+
+  --qs-police: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+               Arial, sans-serif;
+  --qs-police-mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas,
+                    "Liberation Mono", monospace;
+
+  --qs-rayon:    4px;
+  --qs-rayon-sm: 3px;
+  --qs-ombre:    0 1px 2px rgba(20, 32, 43, .06),
+                 0 6px 20px -14px rgba(20, 32, 43, .30);
+
+  /* Unite d'espacement : 1w = 8px, reprise de l'ancienne echelle pour que
+     les gabarits gardent leurs valeurs. */
+  --qs-w: 8px;
+}
+
+/* ── Icones ─────────────────────────────────────────────────────────────
+ * Posees en masque : la forme vient du data-URI, la couleur de `currentColor`.
+ * Une icone suit donc la couleur du texte qui l'entoure, y compris au survol
+ * et dans un bouton de couleur inversee.
+ */
+
+/* L'icone est TOUJOURS posee dans un `::before`, jamais sur l'element.
+ *
+ * Une classe d'icone se rencontre sous deux formes, et la charte precedente
+ * les traitait toutes les deux :
+ *   <span class="ic-fichier"></span>              -- l'element est l'icone
+ *   <button class="qs-btn ic-ajout">Creer</button> -- elle precede le libelle
+ *
+ * Poser le masque sur l'element lui-meme marche pour la premiere et casse la
+ * seconde : le bouton entier devient une icone geante et son texte disparait.
+ * Passer par `::before` sert les deux, le span vide n'ayant que son
+ * pseudo-element a afficher.
+ */
+/* Ancre a gauche : `[class*="ic-"]` seul est un match de sous-chaine et
+   attrapait `mic-btn`, dont le bouton devenait un carre plein. */
+[class^="ic-"]::before,
+[class*=" ic-"]::before {
+  content: "";
+  display: inline-block;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: 0 0 auto;
+  vertical-align: -.22em;
+  background-color: currentColor;
+  -webkit-mask: var(--ic) center / contain no-repeat;
+          mask: var(--ic) center / contain no-repeat;
+}
+.ic--sm::before { width: 1rem;   height: 1rem;   vertical-align: -.16em; }
+.ic--md::before { width: 1.5rem; height: 1.5rem; vertical-align: -.28em; }
+.ic--lg::before { width: 2rem;   height: 2rem;   vertical-align: -.35em; }
+
+/* Un span dedie ne doit pas ajouter d'espace autour de son pseudo-element. */
+span[class^="ic-"], span[class*=" ic-"],
+i[class^="ic-"], i[class*=" ic-"] { display: inline-flex; line-height: 0; }
+
+/* ICONES-DEBUT - genere par tools/genere_icones.py, ne pas editer */
+:root{
+  --ic-ajout: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E");
+  --ic-ajout-cercle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M12 8.5v7M8.5 12h7'/%3E%3C/svg%3E");
+  --ic-alerte: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5L21.5 20H2.5z'/%3E%3Cpath d='M12 9.5v5M12 17.5v.01'/%3E%3C/svg%3E");
+  --ic-ampoule: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 17.5h6'/%3E%3Cpath d='M10 20.5h4'/%3E%3Cpath d='M12 2.5a6.5 6.5 0 00-3.7 11.8c.5.4.7.9.7 1.5v.2h6v-.2c0-.6.2-1.1.7-1.5A6.5 6.5 0 0012 2.5z'/%3E%3C/svg%3E");
+  --ic-archive: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='7.5' width='17' height='12' rx='1.5'/%3E%3Crect x='2.5' y='4' width='19' height='3.5' rx='1'/%3E%3Cpath d='M10 11.5h4'/%3E%3C/svg%3E");
+  --ic-article: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='3.5' width='15' height='17' rx='1.5'/%3E%3Cpath d='M8 8h8M8 12h8M8 16h5'/%3E%3C/svg%3E");
+  --ic-base-donnees: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cellipse cx='12' cy='6' rx='7.5' ry='3'/%3E%3Cpath d='M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6'/%3E%3Cpath d='M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3'/%3E%3C/svg%3E");
+  --ic-batiment: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 20.5V5.5l8-2.5v17.5'/%3E%3Cpath d='M12.5 20.5V9.5l7 2v9'/%3E%3Cpath d='M2.5 20.5h19'/%3E%3Cpath d='M7.5 8.5v.01M7.5 12.5v.01M7.5 16.5v.01M16 14v.01M16 17.5v.01'/%3E%3C/svg%3E");
+  --ic-brouillon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13.5 3.5H6.5A1.5 1.5 0 005 5v14a1.5 1.5 0 001.5 1.5h11A1.5 1.5 0 0019 19V9z'/%3E%3Cpath d='M13.5 3.5V9H19'/%3E%3C/svg%3E");
+  --ic-cadenas: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='10' width='15' height='10.5' rx='1.5'/%3E%3Cpath d='M8 10V7a4 4 0 018 0v3'/%3E%3C/svg%3E");
+  --ic-carte: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 4.5L3.5 6.5v13L9 17.5m0-13l6 2m-6-2v13m6-11l5.5-2v13L15 19.5m0-13v13m-6-2l6 2'/%3E%3C/svg%3E");
+  --ic-chevron-bas: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9.5l6 6 6-6'/%3E%3C/svg%3E");
+  --ic-coche: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 12.5l5 5 10-11'/%3E%3C/svg%3E");
+  --ic-coche-cercle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M8 12.2l2.8 2.8L16 9.5'/%3E%3C/svg%3E");
+  --ic-copier: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='8.5' y='8.5' width='12' height='12' rx='1.5'/%3E%3Cpath d='M15.5 8.5V5A1.5 1.5 0 0014 3.5H5A1.5 1.5 0 003.5 5v9A1.5 1.5 0 005 15.5h3.5'/%3E%3C/svg%3E");
+  --ic-courbe: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 3.5v17h17'/%3E%3Cpath d='M7 15.5l3.5-4.5 3 2.5 5-6.5'/%3E%3C/svg%3E");
+  --ic-deconnexion: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9.5 20.5H5.5A1.5 1.5 0 014 19V5a1.5 1.5 0 011.5-1.5h4'/%3E%3Cpath d='M15 16.5l4.5-4.5L15 7.5'/%3E%3Cpath d='M19.5 12h-11'/%3E%3C/svg%3E");
+  --ic-diese: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 3.5L7 20.5M17 3.5l-2 17M3.5 8.5h17M2.5 15.5h17'/%3E%3C/svg%3E");
+  --ic-discussion: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20.5 12c0 4.1-3.8 7.4-8.5 7.4-1 0-2-.15-2.9-.42L4 20.5l1.6-3.6A7 7 0 013.5 12C3.5 7.9 7.3 4.6 12 4.6s8.5 3.3 8.5 7.4z'/%3E%3C/svg%3E");
+  --ic-dossier: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 6.5A1.5 1.5 0 015 5h4l2 2.5h8A1.5 1.5 0 0120.5 9v9a1.5 1.5 0 01-1.5 1.5H5A1.5 1.5 0 013.5 18z'/%3E%3C/svg%3E");
+  --ic-editer: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 19.5h4l11-11-4-4-11 11z'/%3E%3Cpath d='M13.5 5.5l4 4'/%3E%3C/svg%3E");
+  --ic-editer-bloc: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19.5 12.5V19a1.5 1.5 0 01-1.5 1.5H6A1.5 1.5 0 014.5 19V7A1.5 1.5 0 016 5.5h6.5'/%3E%3Cpath d='M15.5 4.5l4 4-6 6h-4v-4z'/%3E%3C/svg%3E");
+  --ic-enregistrer: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 5.5A1 1 0 015.5 4.5h11l4 4v11a1 1 0 01-1 1h-14a1 1 0 01-1-1z'/%3E%3Cpath d='M7.5 4.5v6h8v-6'/%3E%3Crect x='7.5' y='13.5' width='9' height='6'/%3E%3C/svg%3E");
+  --ic-epingle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21.5s7-6.3 7-11.5a7 7 0 10-14 0c0 5.2 7 11.5 7 11.5z'/%3E%3Ccircle cx='12' cy='10' r='2.8'/%3E%3C/svg%3E");
+  --ic-equipe: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='9' cy='8' r='3.5'/%3E%3Cpath d='M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6'/%3E%3Cpath d='M16 5.2a3.5 3.5 0 010 5.6'/%3E%3Cpath d='M18 14.6c2.1.7 3.5 2.5 3.5 5.4'/%3E%3C/svg%3E");
+  --ic-etoile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5l2.7 5.6 6 .9-4.4 4.2 1.1 6-5.4-2.9-5.4 2.9 1.1-6-4.4-4.2 6-.9z'/%3E%3C/svg%3E");
+  --ic-fenetre: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='4.5' width='17' height='15' rx='1.5'/%3E%3Cpath d='M3.5 9h17'/%3E%3Cpath d='M6.5 6.7v.01M9 6.7v.01'/%3E%3C/svg%3E");
+  --ic-fermer: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E");
+  --ic-fichier: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13.5 3.5H6.5A1.5 1.5 0 005 5v14a1.5 1.5 0 001.5 1.5h11A1.5 1.5 0 0019 19V9z'/%3E%3Cpath d='M13.5 3.5V9H19'/%3E%3Cpath d='M8.5 13h7M8.5 16.5h5'/%3E%3C/svg%3E");
+  --ic-formes: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='7.5' cy='7.5' r='4'/%3E%3Crect x='13' y='13' width='7.5' height='7.5' rx='1'/%3E%3Cpath d='M13 4h7.5v7.5'/%3E%3C/svg%3E");
+  --ic-globe: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M3.5 12h17'/%3E%3Cpath d='M12 3.5c2.2 2.4 3.4 5.4 3.4 8.5S14.2 18.1 12 20.5c-2.2-2.4-3.4-5.4-3.4-8.5S9.8 5.9 12 3.5z'/%3E%3C/svg%3E");
+  --ic-grille: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='3.5' width='7' height='7' rx='1'/%3E%3Crect x='13.5' y='3.5' width='7' height='7' rx='1'/%3E%3Crect x='3.5' y='13.5' width='7' height='7' rx='1'/%3E%3Crect x='13.5' y='13.5' width='7' height='7' rx='1'/%3E%3C/svg%3E");
+  --ic-horloge: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M12 7v5.3l3.4 2'/%3E%3C/svg%3E");
+  --ic-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='4.5' width='17' height='15' rx='1.5'/%3E%3Ccircle cx='8.5' cy='9.5' r='1.8'/%3E%3Cpath d='M3.5 16.5l4.5-4 3.5 3 4-4.5 5 5.5'/%3E%3C/svg%3E");
+  --ic-lien-externe: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18.5 13.5V19a1.5 1.5 0 01-1.5 1.5H5.5A1.5 1.5 0 014 19V7.5A1.5 1.5 0 015.5 6H11'/%3E%3Cpath d='M14.5 3.5h6v6M20.5 3.5l-9 9'/%3E%3C/svg%3E");
+  --ic-liste: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 6.5h11M9 12h11M9 17.5h11'/%3E%3Cpath d='M4.5 6.5v.01M4.5 12v.01M4.5 17.5v.01'/%3E%3C/svg%3E");
+  --ic-livre: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5.5 4a1.5 1.5 0 00-1.5 1.5v13A2.5 2.5 0 016.5 16h13V4z'/%3E%3Cpath d='M6.5 16h13v4h-13A2.5 2.5 0 014 17.5'/%3E%3Cpath d='M8.5 8h7'/%3E%3C/svg%3E");
+  --ic-memoire: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4.5a4 4 0 00-4 4v.4a3.2 3.2 0 00-1.5 2.7 3.2 3.2 0 001.7 2.8A3 3 0 0011 19.5V4.9a3.9 3.9 0 011-.4z'/%3E%3Cpath d='M12 4.5a4 4 0 014 4v.4a3.2 3.2 0 011.5 2.7 3.2 3.2 0 01-1.7 2.8A3 3 0 0113 19.5V4.9a3.9 3.9 0 00-1-.4z'/%3E%3C/svg%3E");
+  --ic-oeil: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
+  --ic-oeil-barre: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9.5 6c.8-.3 1.6-.5 2.5-.5 6 0 9.5 6.5 9.5 6.5s-1 1.9-2.9 3.6'/%3E%3Cpath d='M6.2 8C4 9.8 2.5 12 2.5 12S6 18.5 12 18.5c1.5 0 2.9-.4 4-1'/%3E%3Cpath d='M9.9 9.9a3 3 0 004.2 4.2'/%3E%3Cpath d='M3.5 3.5l17 17'/%3E%3C/svg%3E");
+  --ic-presse-papier: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 4.5H7a1.5 1.5 0 00-1.5 1.5v13A1.5 1.5 0 007 20.5h10a1.5 1.5 0 001.5-1.5V6A1.5 1.5 0 0017 4.5h-2'/%3E%3Crect x='9' y='2.5' width='6' height='4' rx='1'/%3E%3C/svg%3E");
+  --ic-reglages: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='M19.4 14.5a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-1.8-.3 1.6 1.6 0 00-1 1.5v.2a2 2 0 11-4 0v-.1a1.6 1.6 0 00-1-1.5 1.6 1.6 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.6 1.6 0 00.3-1.8 1.6 1.6 0 00-1.5-1h-.2a2 2 0 110-4h.1a1.6 1.6 0 001.5-1 1.6 1.6 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.6 1.6 0 001.8.3h.1a1.6 1.6 0 001-1.5v-.2a2 2 0 114 0v.1a1.6 1.6 0 001 1.5 1.6 1.6 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.6 1.6 0 00-.3 1.8v.1a1.6 1.6 0 001.5 1h.2a2 2 0 110 4h-.1a1.6 1.6 0 00-1.5 1z'/%3E%3C/svg%3E");
+  --ic-signet: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6.5 3.5h11v17l-5.5-4-5.5 4z'/%3E%3C/svg%3E");
+  --ic-supprimer: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 6.5h15M9.5 6.5V4h5v2.5'/%3E%3Cpath d='M6.5 6.5l1 13a1.5 1.5 0 001.5 1.4h6a1.5 1.5 0 001.5-1.4l1-13'/%3E%3Cpath d='M10.5 10v7M13.5 10v7'/%3E%3C/svg%3E");
+  --ic-tableau: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='4.5' width='17' height='15' rx='1.5'/%3E%3Cpath d='M3.5 9.5h17M3.5 14.5h17M9.5 4.5v15M15 4.5v15'/%3E%3C/svg%3E");
+  --ic-tableau-bord: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='3.5' width='7' height='7' rx='1'/%3E%3Crect x='13.5' y='3.5' width='7' height='7' rx='1'/%3E%3Crect x='3.5' y='13.5' width='7' height='7' rx='1'/%3E%3Crect x='13.5' y='13.5' width='7' height='7' rx='1'/%3E%3C/svg%3E");
+  --ic-telecharger: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5v11M7.5 10.5l4.5 4.5 4.5-4.5'/%3E%3Cpath d='M4.5 18.5v2h15v-2'/%3E%3C/svg%3E");
+  --ic-televerser: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 15.5v-11M7.5 8.5L12 4l4.5 4.5'/%3E%3Cpath d='M4.5 18.5v2h15v-2'/%3E%3C/svg%3E");
+  --ic-chevron: var(--ic-chevron-bas);
+}
+.ic-ajout{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E")}
+.ic-ajout-cercle{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M12 8.5v7M8.5 12h7'/%3E%3C/svg%3E")}
+.ic-alerte{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5L21.5 20H2.5z'/%3E%3Cpath d='M12 9.5v5M12 17.5v.01'/%3E%3C/svg%3E")}
+.ic-ampoule{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 17.5h6'/%3E%3Cpath d='M10 20.5h4'/%3E%3Cpath d='M12 2.5a6.5 6.5 0 00-3.7 11.8c.5.4.7.9.7 1.5v.2h6v-.2c0-.6.2-1.1.7-1.5A6.5 6.5 0 0012 2.5z'/%3E%3C/svg%3E")}
+.ic-archive{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='7.5' width='17' height='12' rx='1.5'/%3E%3Crect x='2.5' y='4' width='19' height='3.5' rx='1'/%3E%3Cpath d='M10 11.5h4'/%3E%3C/svg%3E")}
+.ic-article{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='3.5' width='15' height='17' rx='1.5'/%3E%3Cpath d='M8 8h8M8 12h8M8 16h5'/%3E%3C/svg%3E")}
+.ic-base-donnees{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cellipse cx='12' cy='6' rx='7.5' ry='3'/%3E%3Cpath d='M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6'/%3E%3Cpath d='M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3'/%3E%3C/svg%3E")}
+.ic-batiment{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 20.5V5.5l8-2.5v17.5'/%3E%3Cpath d='M12.5 20.5V9.5l7 2v9'/%3E%3Cpath d='M2.5 20.5h19'/%3E%3Cpath d='M7.5 8.5v.01M7.5 12.5v.01M7.5 16.5v.01M16 14v.01M16 17.5v.01'/%3E%3C/svg%3E")}
+.ic-brouillon{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13.5 3.5H6.5A1.5 1.5 0 005 5v14a1.5 1.5 0 001.5 1.5h11A1.5 1.5 0 0019 19V9z'/%3E%3Cpath d='M13.5 3.5V9H19'/%3E%3C/svg%3E")}
+.ic-cadenas{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='10' width='15' height='10.5' rx='1.5'/%3E%3Cpath d='M8 10V7a4 4 0 018 0v3'/%3E%3C/svg%3E")}
+.ic-carte{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 4.5L3.5 6.5v13L9 17.5m0-13l6 2m-6-2v13m6-11l5.5-2v13L15 19.5m0-13v13m-6-2l6 2'/%3E%3C/svg%3E")}
+.ic-chevron-bas{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9.5l6 6 6-6'/%3E%3C/svg%3E")}
+.ic-coche{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 12.5l5 5 10-11'/%3E%3C/svg%3E")}
+.ic-coche-cercle{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M8 12.2l2.8 2.8L16 9.5'/%3E%3C/svg%3E")}
+.ic-copier{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='8.5' y='8.5' width='12' height='12' rx='1.5'/%3E%3Cpath d='M15.5 8.5V5A1.5 1.5 0 0014 3.5H5A1.5 1.5 0 003.5 5v9A1.5 1.5 0 005 15.5h3.5'/%3E%3C/svg%3E")}
+.ic-courbe{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 3.5v17h17'/%3E%3Cpath d='M7 15.5l3.5-4.5 3 2.5 5-6.5'/%3E%3C/svg%3E")}
+.ic-deconnexion{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9.5 20.5H5.5A1.5 1.5 0 014 19V5a1.5 1.5 0 011.5-1.5h4'/%3E%3Cpath d='M15 16.5l4.5-4.5L15 7.5'/%3E%3Cpath d='M19.5 12h-11'/%3E%3C/svg%3E")}
+.ic-diese{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 3.5L7 20.5M17 3.5l-2 17M3.5 8.5h17M2.5 15.5h17'/%3E%3C/svg%3E")}
+.ic-discussion{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20.5 12c0 4.1-3.8 7.4-8.5 7.4-1 0-2-.15-2.9-.42L4 20.5l1.6-3.6A7 7 0 013.5 12C3.5 7.9 7.3 4.6 12 4.6s8.5 3.3 8.5 7.4z'/%3E%3C/svg%3E")}
+.ic-dossier{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 6.5A1.5 1.5 0 015 5h4l2 2.5h8A1.5 1.5 0 0120.5 9v9a1.5 1.5 0 01-1.5 1.5H5A1.5 1.5 0 013.5 18z'/%3E%3C/svg%3E")}
+.ic-editer{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 19.5h4l11-11-4-4-11 11z'/%3E%3Cpath d='M13.5 5.5l4 4'/%3E%3C/svg%3E")}
+.ic-editer-bloc{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19.5 12.5V19a1.5 1.5 0 01-1.5 1.5H6A1.5 1.5 0 014.5 19V7A1.5 1.5 0 016 5.5h6.5'/%3E%3Cpath d='M15.5 4.5l4 4-6 6h-4v-4z'/%3E%3C/svg%3E")}
+.ic-enregistrer{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 5.5A1 1 0 015.5 4.5h11l4 4v11a1 1 0 01-1 1h-14a1 1 0 01-1-1z'/%3E%3Cpath d='M7.5 4.5v6h8v-6'/%3E%3Crect x='7.5' y='13.5' width='9' height='6'/%3E%3C/svg%3E")}
+.ic-epingle{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21.5s7-6.3 7-11.5a7 7 0 10-14 0c0 5.2 7 11.5 7 11.5z'/%3E%3Ccircle cx='12' cy='10' r='2.8'/%3E%3C/svg%3E")}
+.ic-equipe{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='9' cy='8' r='3.5'/%3E%3Cpath d='M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6'/%3E%3Cpath d='M16 5.2a3.5 3.5 0 010 5.6'/%3E%3Cpath d='M18 14.6c2.1.7 3.5 2.5 3.5 5.4'/%3E%3C/svg%3E")}
+.ic-etoile{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5l2.7 5.6 6 .9-4.4 4.2 1.1 6-5.4-2.9-5.4 2.9 1.1-6-4.4-4.2 6-.9z'/%3E%3C/svg%3E")}
+.ic-fenetre{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='4.5' width='17' height='15' rx='1.5'/%3E%3Cpath d='M3.5 9h17'/%3E%3Cpath d='M6.5 6.7v.01M9 6.7v.01'/%3E%3C/svg%3E")}
+.ic-fermer{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E")}
+.ic-fichier{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13.5 3.5H6.5A1.5 1.5 0 005 5v14a1.5 1.5 0 001.5 1.5h11A1.5 1.5 0 0019 19V9z'/%3E%3Cpath d='M13.5 3.5V9H19'/%3E%3Cpath d='M8.5 13h7M8.5 16.5h5'/%3E%3C/svg%3E")}
+.ic-formes{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='7.5' cy='7.5' r='4'/%3E%3Crect x='13' y='13' width='7.5' height='7.5' rx='1'/%3E%3Cpath d='M13 4h7.5v7.5'/%3E%3C/svg%3E")}
+.ic-globe{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M3.5 12h17'/%3E%3Cpath d='M12 3.5c2.2 2.4 3.4 5.4 3.4 8.5S14.2 18.1 12 20.5c-2.2-2.4-3.4-5.4-3.4-8.5S9.8 5.9 12 3.5z'/%3E%3C/svg%3E")}
+.ic-grille{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='3.5' width='7' height='7' rx='1'/%3E%3Crect x='13.5' y='3.5' width='7' height='7' rx='1'/%3E%3Crect x='3.5' y='13.5' width='7' height='7' rx='1'/%3E%3Crect x='13.5' y='13.5' width='7' height='7' rx='1'/%3E%3C/svg%3E")}
+.ic-horloge{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M12 7v5.3l3.4 2'/%3E%3C/svg%3E")}
+.ic-image{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='4.5' width='17' height='15' rx='1.5'/%3E%3Ccircle cx='8.5' cy='9.5' r='1.8'/%3E%3Cpath d='M3.5 16.5l4.5-4 3.5 3 4-4.5 5 5.5'/%3E%3C/svg%3E")}
+.ic-lien-externe{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18.5 13.5V19a1.5 1.5 0 01-1.5 1.5H5.5A1.5 1.5 0 014 19V7.5A1.5 1.5 0 015.5 6H11'/%3E%3Cpath d='M14.5 3.5h6v6M20.5 3.5l-9 9'/%3E%3C/svg%3E")}
+.ic-liste{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 6.5h11M9 12h11M9 17.5h11'/%3E%3Cpath d='M4.5 6.5v.01M4.5 12v.01M4.5 17.5v.01'/%3E%3C/svg%3E")}
+.ic-livre{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5.5 4a1.5 1.5 0 00-1.5 1.5v13A2.5 2.5 0 016.5 16h13V4z'/%3E%3Cpath d='M6.5 16h13v4h-13A2.5 2.5 0 014 17.5'/%3E%3Cpath d='M8.5 8h7'/%3E%3C/svg%3E")}
+.ic-memoire{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4.5a4 4 0 00-4 4v.4a3.2 3.2 0 00-1.5 2.7 3.2 3.2 0 001.7 2.8A3 3 0 0011 19.5V4.9a3.9 3.9 0 011-.4z'/%3E%3Cpath d='M12 4.5a4 4 0 014 4v.4a3.2 3.2 0 011.5 2.7 3.2 3.2 0 01-1.7 2.8A3 3 0 0113 19.5V4.9a3.9 3.9 0 00-1-.4z'/%3E%3C/svg%3E")}
+.ic-oeil{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E")}
+.ic-oeil-barre{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9.5 6c.8-.3 1.6-.5 2.5-.5 6 0 9.5 6.5 9.5 6.5s-1 1.9-2.9 3.6'/%3E%3Cpath d='M6.2 8C4 9.8 2.5 12 2.5 12S6 18.5 12 18.5c1.5 0 2.9-.4 4-1'/%3E%3Cpath d='M9.9 9.9a3 3 0 004.2 4.2'/%3E%3Cpath d='M3.5 3.5l17 17'/%3E%3C/svg%3E")}
+.ic-presse-papier{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 4.5H7a1.5 1.5 0 00-1.5 1.5v13A1.5 1.5 0 007 20.5h10a1.5 1.5 0 001.5-1.5V6A1.5 1.5 0 0017 4.5h-2'/%3E%3Crect x='9' y='2.5' width='6' height='4' rx='1'/%3E%3C/svg%3E")}
+.ic-reglages{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='M19.4 14.5a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-1.8-.3 1.6 1.6 0 00-1 1.5v.2a2 2 0 11-4 0v-.1a1.6 1.6 0 00-1-1.5 1.6 1.6 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.6 1.6 0 00.3-1.8 1.6 1.6 0 00-1.5-1h-.2a2 2 0 110-4h.1a1.6 1.6 0 001.5-1 1.6 1.6 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.6 1.6 0 001.8.3h.1a1.6 1.6 0 001-1.5v-.2a2 2 0 114 0v.1a1.6 1.6 0 001 1.5 1.6 1.6 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.6 1.6 0 00-.3 1.8v.1a1.6 1.6 0 001.5 1h.2a2 2 0 110 4h-.1a1.6 1.6 0 00-1.5 1z'/%3E%3C/svg%3E")}
+.ic-signet{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6.5 3.5h11v17l-5.5-4-5.5 4z'/%3E%3C/svg%3E")}
+.ic-supprimer{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 6.5h15M9.5 6.5V4h5v2.5'/%3E%3Cpath d='M6.5 6.5l1 13a1.5 1.5 0 001.5 1.4h6a1.5 1.5 0 001.5-1.4l1-13'/%3E%3Cpath d='M10.5 10v7M13.5 10v7'/%3E%3C/svg%3E")}
+.ic-tableau{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='4.5' width='17' height='15' rx='1.5'/%3E%3Cpath d='M3.5 9.5h17M3.5 14.5h17M9.5 4.5v15M15 4.5v15'/%3E%3C/svg%3E")}
+.ic-tableau-bord{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='3.5' width='7' height='7' rx='1'/%3E%3Crect x='13.5' y='3.5' width='7' height='7' rx='1'/%3E%3Crect x='3.5' y='13.5' width='7' height='7' rx='1'/%3E%3Crect x='13.5' y='13.5' width='7' height='7' rx='1'/%3E%3C/svg%3E")}
+.ic-telecharger{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5v11M7.5 10.5l4.5 4.5 4.5-4.5'/%3E%3Cpath d='M4.5 18.5v2h15v-2'/%3E%3C/svg%3E")}
+.ic-televerser{--ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 15.5v-11M7.5 8.5L12 4l4.5 4.5'/%3E%3Cpath d='M4.5 18.5v2h15v-2'/%3E%3C/svg%3E")}
+/* ICONES-FIN */
+
+/* ── Base ───────────────────────────────────────────────────────────── */
+
+/* Les gabarits n'ont pas de classe sur <body> : la charte precedente posait
+   ses bases sur l'element lui-meme, et exiger une classe aurait laisse toutes
+   les pages en Times. On fait donc pareil, et `.qs-corps` reste disponible
+   pour un conteneur qui voudrait les memes bases sans etre le body. */
+body,
+.qs-corps {
+  margin: 0;
+  background: var(--qs-fond);
+  color: var(--qs-encre);
+  font-family: var(--qs-police);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Bases de texte. Sans elles, un gabarit qui n'utilise aucune classe rend en
+   serif avec les marges par defaut du navigateur. */
+h1, h2, h3, h4, h5, h6 {
+  margin: 0 0 .5em;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -.012em;
+  text-wrap: balance;
+}
+h1 { font-size: 1.75rem; }
+h2 { font-size: 1.375rem; }
+h3 { font-size: 1.125rem; }
+h4, h5, h6 { font-size: 1rem; }
+p { margin: 0 0 .75em; }
+p:last-child { margin-bottom: 0; }
+ul, ol { margin: 0 0 .75em; padding-left: 1.4em; }
+a { color: var(--qs-accent); text-underline-offset: 2px; }
+a:hover { color: var(--qs-accent-fonce); }
+code, kbd, samp, pre { font-family: var(--qs-police-mono); font-size: .9em; }
+hr { border: 0; border-top: 1px solid var(--qs-trait); margin: 1.5em 0; }
+
+.qs-conteneur {
+  width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+  padding-inline: calc(var(--qs-w) * 2);
+}
+.qs-conteneur--large { max-width: none; }
+
+.qs-texte--sm   { font-size: .875rem; line-height: 1.5; }
+.qs-texte--lead { font-size: 1.125rem; line-height: 1.6; color: var(--qs-encre-2); }
+.qs-discret     { color: var(--qs-discret); }
+
+.qs-lien { color: var(--qs-accent); text-decoration: underline; text-underline-offset: 2px; }
+.qs-lien:hover { color: var(--qs-accent-fonce); }
+
+/* Etend la zone cliquable d'une carte au lien qu'elle contient.
+ *
+ * `inset: 0` se cale sur le premier ancetre positionne : sans `position:
+ * relative` sur le bloc lui-meme, la zone cliquable s'etendrait au conteneur
+ * le plus proche, voire a la page entiere, et avalerait les clics des
+ * elements voisins. La regle porte donc le positionnement avec elle.
+ */
+.qs-lien-etendu { position: relative; }
+.qs-lien-etendu a::after { content: ""; position: absolute; inset: 0; }
+
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--qs-accent);
+  outline-offset: 2px;
+  border-radius: var(--qs-rayon-sm);
+}
+
+/* ── Boutons ────────────────────────────────────────────────────────── */
+
+.qs-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--qs-w) * .75);
+  padding: 8px 16px;
+  border: 1px solid var(--qs-accent);
+  border-radius: var(--qs-rayon);
+  background: var(--qs-accent);
+  color: var(--qs-accent-encre);
+  font: inherit;
+  font-size: .9375rem;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color .12s ease, border-color .12s ease, color .12s ease;
+}
+.qs-btn:hover    { background: var(--qs-accent-fonce); border-color: var(--qs-accent-fonce); }
+.qs-btn:disabled,
+.qs-btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+
+.qs-btn--sm { padding: 5px 11px; font-size: .8125rem; gap: 5px; }
+.qs-btn--lg { padding: 11px 22px; font-size: 1rem; }
+
+.qs-btn--secondaire {
+  background: transparent;
+  color: var(--qs-accent);
+}
+.qs-btn--secondaire:hover { background: var(--qs-accent-pale); border-color: var(--qs-accent-fonce); }
+
+.qs-btn--tertiaire {
+  background: transparent;
+  border-color: var(--qs-trait);
+  color: var(--qs-encre-2);
+}
+.qs-btn--tertiaire:hover {
+  background: var(--qs-surface-2);
+  border-color: var(--qs-trait);
+  color: var(--qs-encre);
+}
+
+.qs-btn--nu {
+  background: transparent;
+  border-color: transparent;
+  color: var(--qs-encre-2);
+}
+.qs-btn--nu:hover { background: var(--qs-surface-2); border-color: transparent; color: var(--qs-encre); }
+
+/* L'icone precede le libelle : le gap de .qs-btn suffit, la classe reste
+   pour que les gabarits n'aient pas a changer de structure. */
+.qs-btn--icone-gauche { flex-direction: row; }
+
+/* ── Pastilles ──────────────────────────────────────────────────────── */
+
+.qs-pastille {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--qs-surface-2);
+  color: var(--qs-encre-2);
+  font-size: .8125rem;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.qs-pastille--sm      { padding: 1px 7px; font-size: .75rem; }
+.qs-pastille--info    { background: var(--qs-accent-pale); color: var(--qs-accent-fonce); }
+.qs-pastille--succes  { background: var(--qs-succes-pale); color: var(--qs-succes); }
+.qs-pastille--alerte  { background: var(--qs-alerte-pale); color: var(--qs-alerte); }
+.qs-pastille--danger  { background: var(--qs-danger-pale); color: var(--qs-danger); }
+.qs-pastille--nouveau { background: var(--qs-accent); color: var(--qs-accent-encre); }
+
+/* ── Encarts ────────────────────────────────────────────────────────── */
+
+.qs-encart {
+  padding: calc(var(--qs-w) * 2) calc(var(--qs-w) * 2.5);
+  border: 1px solid var(--qs-trait);
+  border-left: 3px solid var(--qs-accent);
+  border-radius: 0 var(--qs-rayon) var(--qs-rayon) 0;
+  background: var(--qs-surface);
+}
+.qs-encart__texte { margin: 0; color: var(--qs-encre-2); }
+.qs-encart--attention { border-left-color: var(--qs-alerte); background: var(--qs-alerte-pale); }
+
+.qs-alerte {
+  padding: calc(var(--qs-w) * 1.5) calc(var(--qs-w) * 2);
+  border: 1px solid var(--qs-trait);
+  border-left: 3px solid var(--qs-accent);
+  border-radius: 0 var(--qs-rayon) var(--qs-rayon) 0;
+  background: var(--qs-surface);
+}
+.qs-alerte--attention { border-left-color: var(--qs-alerte); background: var(--qs-alerte-pale); }
+.qs-alerte__titre { margin: 0 0 4px; font-size: 1rem; font-weight: 600; }
+
+.qs-avis {
+  padding: calc(var(--qs-w) * 1.5) 0;
+  border-bottom: 1px solid var(--qs-trait);
+  background: var(--qs-accent-pale);
+  color: var(--qs-accent-fonce);
+}
+.qs-avis__corps  { display: flex; align-items: center; gap: var(--qs-w); }
+.qs-avis__titre  { font-weight: 500; }
+.qs-avis--info   { background: var(--qs-accent-pale); }
+
+/* ── Accordeon ──────────────────────────────────────────────────────── */
+
+.qs-accordeon { border-bottom: 1px solid var(--qs-trait); }
+.qs-accordeon__titre { margin: 0; }
+.qs-accordeon__btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--qs-w);
+  width: 100%;
+  padding: calc(var(--qs-w) * 1.5) 0;
+  border: 0;
+  background: none;
+  color: var(--qs-encre);
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.qs-accordeon__btn::after {
+  content: "";
+  width: 1rem; height: 1rem;
+  flex: 0 0 auto;
+  background-color: currentColor;
+  -webkit-mask: var(--ic-chevron) center / contain no-repeat;
+          mask: var(--ic-chevron) center / contain no-repeat;
+  transition: transform .15s ease;
+}
+.qs-accordeon__btn[aria-expanded="true"]::after { transform: rotate(180deg); }
+.qs-repli[hidden] { display: none !important; }
+
+/* ── Tableaux ───────────────────────────────────────────────────────── */
+
+.qs-tableau { overflow-x: auto; }
+.qs-tableau table { border-collapse: collapse; width: 100%; }
+.qs-tableau th {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--qs-trait);
+  background: var(--qs-surface-2);
+  font-size: .8125rem;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+.qs-tableau td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--qs-trait-2);
+  font-size: .9375rem;
+  vertical-align: top;
+}
+.qs-tableau tr:last-child td { border-bottom: 0; }
+
+/* ── Champs ─────────────────────────────────────────────────────────── */
+
+.qs-champ {
+  width: 100%;
+  padding: 8px 11px;
+  border: 1px solid var(--qs-trait);
+  border-radius: var(--qs-rayon);
+  background: var(--qs-surface);
+  color: var(--qs-encre);
+  font: inherit;
+  font-size: .9375rem;
+}
+.qs-champ:focus { border-color: var(--qs-accent); }
+.qs-champ::placeholder { color: var(--qs-discret); }
+
+/* ── En-tete ────────────────────────────────────────────────────────── */
+
+.qs-entete {
+  border-bottom: 1px solid var(--qs-trait);
+  background: var(--qs-surface);
+}
+.qs-entete__corps { padding-block: calc(var(--qs-w) * 1.5); }
+.qs-entete__ligne {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--qs-w) * 2);
+  flex-wrap: wrap;
+}
+.qs-entete__marque { display: flex; align-items: center; gap: var(--qs-w); }
+.qs-entete__marque-haut { display: flex; align-items: center; gap: var(--qs-w); }
+/* Le nom du service est une adresse, pas un lien de corps de texte : le
+   souligner le fait ressembler a une note de bas de page. */
+.qs-entete__service, .qs-entete__service a { text-decoration: none; color: inherit; }
+.qs-entete__service a:hover .qs-entete__service-titre { color: var(--qs-accent); }
+.qs-entete__service p { margin: 0; }
+.qs-entete__marque p { margin: 0; }
+/* Titre et identite sur une seule ligne : empiles, ils formaient un bloc de
+   deux etages pour deux informations courtes, et poussaient l'en-tete a la
+   hauteur d'une vraie section. */
+.qs-entete__service {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: calc(var(--qs-w) * 1.25);
+  min-width: 0;
+}
+.qs-entete__service-titre {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+.qs-entete__service-accroche {
+  font-size: .8125rem;
+  color: var(--qs-discret);
+}
+
+/* Marque du produit : un carre aux couleurs de QGIS, pas un bloc
+   institutionnel. C'est le seul endroit ou la teinte de marque est employee
+   telle quelle -- un aplat, jamais du texte. */
+.qs-marque {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px; height: 30px;
+  flex: 0 0 auto;
+  border-radius: var(--qs-rayon);
+  background: var(--qs-marque);
+  color: #fff;
+  font-size: .8125rem;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+
+/* ── Surfaces sombres ───────────────────────────────────────────────────
+ * Le bandeau nuit porte l'identite. Sur ce fond, les couleurs de marque
+ * s'emploient telles quelles : elles y sont contrastees, ce qu'elles ne sont
+ * pas sur du blanc.
+ */
+
+.qs-nuit {
+  background: var(--qs-nuit);
+  color: var(--qs-nuit-encre);
+}
+.qs-nuit a { color: var(--qs-accent-clair); }
+.qs-nuit a:hover { color: #fff; }
+.qs-nuit .qs-discret,
+.qs-nuit .qs-texte--sm { color: var(--qs-nuit-discret); }
+
+/* Sur fond sombre, l'action reprend le vert de marque : il y est lisible. */
+.qs-nuit .qs-btn {
+  background: var(--qs-marque);
+  border-color: var(--qs-marque);
+  color: #fff;
+}
+.qs-nuit .qs-btn:hover {
+  background: var(--qs-accent-clair);
+  border-color: var(--qs-accent-clair);
+}
+.qs-nuit .qs-btn--tertiaire {
+  background: transparent;
+  border-color: rgba(255, 255, 255, .28);
+  color: var(--qs-nuit-encre);
+}
+.qs-nuit .qs-btn--tertiaire:hover {
+  background: rgba(255, 255, 255, .09);
+  border-color: rgba(255, 255, 255, .45);
+}
+
+/* ── Pied de page ───────────────────────────────────────────────────── */
+
+/* Un pied de page est une mention, pas une section.
+ *
+ * Celui-ci occupait un cinquieme de la page : quatre lignes de description au
+ * corps du texte, puis deux rangees de liens, le tout genereusement espace.
+ * Reduit d'un cran partout -- corps plus petit, interlignes resserres, la
+ * description sur une seule ligne quand la largeur le permet. */
+.qs-pied {
+  margin-top: calc(var(--qs-w) * 4);
+  border-top: 1px solid var(--qs-trait);
+  background: var(--qs-surface);
+  font-size: .8125rem;
+  line-height: 1.45;
+  color: var(--qs-discret);
+}
+.qs-pied__corps { padding-block: calc(var(--qs-w) * 1.75); }
+.qs-pied__contenu {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: calc(var(--qs-w) * .75) calc(var(--qs-w) * 3);
+}
+.qs-pied__desc {
+  flex: 1 1 34ch;
+  max-width: 78ch;
+  margin: 0;
+  color: var(--qs-discret);
+}
+.qs-pied__liste { display: flex; flex-wrap: wrap; gap: calc(var(--qs-w) * 2);
+                  margin: 0; padding: 0; list-style: none; }
+.qs-pied__item  { margin: 0; }
+.qs-pied__lien  { color: var(--qs-encre-2); text-decoration: none; }
+.qs-pied__lien:hover { color: var(--qs-accent); text-decoration: underline; }
+.qs-pied__bas {
+  padding-block: calc(var(--qs-w) * 1.25);
+  border-top: 1px solid var(--qs-trait-2);
+}
+.qs-pied__bas-liste { display: flex; flex-wrap: wrap; gap: calc(var(--qs-w) * 2);
+                      margin: 0; padding: 0; list-style: none; }
+.qs-pied__bas-item  { margin: 0; }
+.qs-pied__bas-lien  { color: var(--qs-discret); text-decoration: none; font-size: .78125rem; }
+.qs-pied__bas-lien:hover { color: var(--qs-accent); text-decoration: underline; }
+
+/* ── Compte : bouton et menu ─────────────────────────────────────────────
+ * L'identite etait un simple mot en bas a droite de la barre d'etat, et les
+ * reglages vivaient sur une autre page. Ici, un bouton unique en haut a
+ * droite : la place ou on va la chercher.
+ */
+
+.qs-compte { position: relative; display: inline-flex; }
+
+.qs-compte__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--qs-w) * .75);
+  padding: 4px 8px 4px 4px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--qs-encre-2);
+  font: inherit;
+  font-size: .8125rem;
+  cursor: pointer;
+  max-width: 200px;
+}
+.qs-compte__btn:hover { background: var(--qs-surface-2); border-color: var(--qs-trait); }
+.qs-compte__btn[aria-expanded="true"] { background: var(--qs-surface-2); border-color: var(--qs-trait); }
+.qs-compte__nom {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 500;
+}
+.qs-compte__btn::after {
+  content: "";
+  width: .75rem; height: .75rem;
+  flex: 0 0 auto;
+  background-color: currentColor;
+  -webkit-mask: var(--ic-chevron) center / contain no-repeat;
+          mask: var(--ic-chevron) center / contain no-repeat;
+  transition: transform .15s ease;
+}
+.qs-compte__btn[aria-expanded="true"]::after { transform: rotate(180deg); }
+
+/* Initiales plutot qu'une photo : rien a telecharger, rien a stocker. */
+.qs-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px; height: 26px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--qs-marque);
+  color: #fff;
+  font-size: .6875rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+.qs-avatar--lg { width: 40px; height: 40px; font-size: .9375rem; }
+
+/* ── Menu deroulant ─────────────────────────────────────────────────── */
+
+.qs-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 200;
+  min-width: 240px;
+  padding: 5px;
+  border: 1px solid var(--qs-trait);
+  border-radius: var(--qs-rayon);
+  background: var(--qs-surface);
+  box-shadow: 0 6px 24px -8px rgba(19, 33, 44, .28);
+}
+.qs-menu[hidden] { display: none !important; }
+.qs-menu__entete {
+  display: flex;
+  align-items: center;
+  gap: var(--qs-w);
+  padding: 9px 10px 11px;
+  border-bottom: 1px solid var(--qs-trait-2);
+  margin-bottom: 5px;
+}
+.qs-menu__identite { min-width: 0; }
+.qs-menu__nom {
+  display: block; font-size: .875rem; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.qs-menu__detail { display: block; font-size: .75rem; color: var(--qs-discret); }
+.qs-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--qs-rayon-sm);
+  background: none;
+  color: var(--qs-encre-2);
+  font: inherit;
+  font-size: .8125rem;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.qs-menu__item:hover { background: var(--qs-surface-2); color: var(--qs-encre); }
+.qs-menu__item--danger { color: var(--qs-danger); }
+.qs-menu__item--danger:hover { background: var(--qs-danger-pale); color: var(--qs-danger); }
+.qs-menu__item .qs-menu__suffixe { margin-left: auto; color: var(--qs-discret); font-size: .75rem; }
+.qs-menu__sep { height: 1px; margin: 5px 0; background: var(--qs-trait-2); border: 0; }
+
+/* ── Modale ─────────────────────────────────────────────────────────────
+ * Un reglage se consulte sans quitter son travail : le bureau reste en place
+ * derriere, la carte n'est pas rechargee.
+ */
+
+.qs-modale { position: fixed; inset: 0; z-index: 900; display: flex;
+             align-items: center; justify-content: center; padding: 20px; }
+.qs-modale[hidden] { display: none !important; }
+.qs-modale__fond { position: absolute; inset: 0; background: rgba(14, 36, 51, .5); }
+.qs-modale__boite {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 100%);
+  max-height: min(80vh, 640px);
+  border-radius: 6px;
+  background: var(--qs-surface);
+  box-shadow: 0 18px 50px -12px rgba(14, 36, 51, .45);
+}
+.qs-modale__entete {
+  display: flex; align-items: center; gap: var(--qs-w);
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--qs-trait);
+}
+.qs-modale__titre { flex: 1; margin: 0; font-size: 1rem; font-weight: 600; }
+.qs-modale__fermer {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px;
+  border: 0; border-radius: var(--qs-rayon-sm);
+  background: none; color: var(--qs-discret); cursor: pointer;
+}
+.qs-modale__fermer:hover { background: var(--qs-surface-2); color: var(--qs-encre); }
+.qs-modale__corps { flex: 1; overflow-y: auto; padding: 18px; }
+.qs-modale__corps > * + * { margin-top: 16px; }
+.qs-modale__pied {
+  display: flex; gap: var(--qs-w); justify-content: flex-end;
+  padding: 12px 18px;
+  border-top: 1px solid var(--qs-trait);
+}
+
+/* Champ en lecture seule accompagne d'un bouton -- une cle qu'on copie. */
+.qs-champ-copie { display: flex; gap: 6px; align-items: stretch; }
+.qs-champ-copie .qs-champ {
+  font-family: var(--qs-police-mono);
+  font-size: .8125rem;
+  min-width: 0;
+}
+
+.qs-libelle {
+  display: block;
+  margin-bottom: 5px;
+  font-size: .8125rem;
+  font-weight: 600;
+  color: var(--qs-encre-2);
+}
+.qs-aide { margin-top: 5px; font-size: .75rem; color: var(--qs-discret); }
+
+/* Sur telephone, la modale devient une feuille ancree en bas : le pouce y
+   atteint les actions, et le clavier ne la recouvre pas entierement. */
+@media (max-width: 560px) {
+  .qs-modale { padding: 0; align-items: flex-end; }
+  .qs-modale__boite {
+    width: 100%;
+    max-height: 88vh;
+    border-radius: 12px 12px 0 0;
+  }
+  .qs-menu {
+    position: fixed;
+    top: auto; right: 8px; bottom: 8px; left: 8px;
+    min-width: 0;
+  }
+  .qs-compte__nom { display: none; }
+  .qs-compte__btn { max-width: none; padding: 3px; }
+}
+
+/* ── Espacements ─────────────────────────────────────────────────────── */
+
+.qs-mb-1w { margin-bottom: calc(var(--qs-w) * 1); }
+.qs-mb-3w { margin-bottom: calc(var(--qs-w) * 3); }
+.qs-mb-4w { margin-bottom: calc(var(--qs-w) * 4); }
+.qs-mt-2w { margin-top: calc(var(--qs-w) * 2); }
+.qs-mt-5w { margin-top: calc(var(--qs-w) * 5); }
+.qs-py-4w { padding-block: calc(var(--qs-w) * 4); }
+.qs-py-6w { padding-block: calc(var(--qs-w) * 6); }
+
+/* ── Impression ─────────────────────────────────────────────────────── */
+
+@media print {
+  .qs-entete, .qs-pied, .qs-btn { display: none !important; }
+  .qs-corps { background: #fff; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
