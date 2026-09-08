@@ -1,50 +1,49 @@
 <!DOCTYPE html>
-<html lang="fr" data-fr-scheme="light">
+<html lang="fr">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
-<meta name="theme-color" content="#000091">
+<meta name="theme-color" content="#0E2433">
 <title>QGIS Agent — QGIS Service</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/utility/utility.min.css">
+<link rel="stylesheet" href="/static/produit.css">
 <script src="https://unpkg.com/marked@9/marked.min.js"></script>
 <style>
 html,body{height:100%;margin:0}
 body{display:flex;flex-direction:column;background:#f6f6f6}
 .chat-app{flex:1;display:grid;grid-template-columns:240px 1fr;min-height:0}
-.chat-sidebar{background:#fff;border-right:1px solid var(--border-default-grey);
+.chat-sidebar{background:#fff;border-right:1px solid var(--qs-trait);
   display:flex;flex-direction:column;overflow:hidden}
-.sidebar-section{padding:10px 14px;border-bottom:1px solid var(--border-default-grey)}
-.sidebar-label{font-size:10px;color:var(--text-mention-grey);text-transform:uppercase;
+.sidebar-section{padding:10px 14px;border-bottom:1px solid var(--qs-trait)}
+.sidebar-label{font-size:10px;color:var(--qs-discret);text-transform:uppercase;
   letter-spacing:.5px;font-weight:700;margin-bottom:6px}
 .sidebar-item{padding:5px 8px;border-radius:3px;font-size:12px;cursor:pointer;
-  display:flex;gap:6px;align-items:center;color:var(--text-default-grey)}
-.sidebar-item:hover{background:var(--background-alt-grey)}
+  display:flex;gap:6px;align-items:center;color:var(--qs-encre-2)}
+.sidebar-item:hover{background:var(--qs-surface-2)}
 .sidebar-item .ic{flex-shrink:0;font-size:13px;opacity:.7}
 .suggestion-btn{display:block;width:100%;text-align:left;padding:6px 8px;border-radius:3px;
-  background:transparent;border:1px solid transparent;font-size:11.5px;color:var(--text-default-grey);
+  background:transparent;border:1px solid transparent;font-size:11.5px;color:var(--qs-encre-2);
   cursor:pointer;font-family:inherit;line-height:1.3;margin-bottom:2px}
-.suggestion-btn:hover{background:var(--background-alt-blue-france);color:var(--text-action-high-blue-france);
-  border-color:var(--border-action-low-blue-france)}
+.suggestion-btn:hover{background:var(--qs-accent-pale);color:var(--qs-accent);
+  border-color:var(--qs-trait)}
 .chat-main{display:flex;flex-direction:column;min-height:0;background:#f6f6f6;position:relative}
-.chat-toolbar{padding:8px 14px;background:#fff;border-bottom:1px solid var(--border-default-grey);
+.chat-toolbar{padding:8px 14px;background:#fff;border-bottom:1px solid var(--qs-trait);
   display:flex;gap:10px;align-items:center;flex-shrink:0}
 .chat-toolbar select{font-size:12px;padding:3px 6px;border-radius:3px;
-  border:1px solid var(--border-default-grey);background:#fff;font-family:inherit}
+  border:1px solid var(--qs-trait);background:#fff;font-family:inherit}
 .chat-toolbar .spacer{flex:1}
-.chat-toolbar a{font-size:12px;color:var(--text-action-high-blue-france);text-decoration:none}
+.chat-toolbar a{font-size:12px;color:var(--qs-accent);text-decoration:none}
 .chat-toolbar a:hover{text-decoration:underline}
-.chat-toolbar button.tool-btn{background:transparent;border:1px solid var(--border-default-grey);
+.chat-toolbar button.tool-btn{background:transparent;border:1px solid var(--qs-trait);
   border-radius:3px;padding:3px 8px;font-size:12px;cursor:pointer;font-family:inherit;
-  color:var(--text-default-grey)}
-.chat-toolbar button.tool-btn:hover{background:var(--background-alt-blue-france);
-  border-color:var(--border-action-low-blue-france);color:var(--text-action-high-blue-france)}
+  color:var(--qs-encre-2)}
+.chat-toolbar button.tool-btn:hover{background:var(--qs-accent-pale);
+  border-color:var(--qs-trait);color:var(--qs-accent)}
 /* Chip de contexte (routeur contextuel) : affiche le mode courant.
    Cliquable pour révéler le combobox d'override manuel (rare). */
-.context-chip{background:var(--background-alt-blue-france);
-  border:1px solid var(--border-action-low-blue-france);
+.context-chip{background:var(--qs-accent-pale);
+  border:1px solid var(--qs-trait);
   border-radius:14px;padding:3px 10px 3px 8px;font-size:12px;
-  font-family:inherit;cursor:pointer;color:var(--text-action-high-blue-france);
+  font-family:inherit;cursor:pointer;color:var(--qs-accent);
   display:flex;align-items:center;gap:6px}
 .context-chip:hover{background:#dde0fe}
 .context-chip .ctx-icon{font-size:13px}
@@ -52,93 +51,95 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
 
 /* Mémoire drawer : pan latéral droit par-dessus la zone messages, sans casser le layout */
 .memory-drawer{position:absolute;top:0;right:0;bottom:0;width:340px;background:#fff;
-  border-left:1px solid var(--border-default-grey);box-shadow:-4px 0 12px rgba(0,0,0,.06);
+  border-left:1px solid var(--qs-trait);box-shadow:-4px 0 12px rgba(0,0,0,.06);
   transform:translateX(100%);transition:transform .2s ease;z-index:20;
   display:flex;flex-direction:column}
 .memory-drawer.open{transform:translateX(0)}
-.memory-drawer header{padding:10px 14px;border-bottom:1px solid var(--border-default-grey);
+.memory-drawer header{padding:10px 14px;border-bottom:1px solid var(--qs-trait);
   display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500}
 .memory-drawer header .close{margin-left:auto;background:transparent;border:0;
-  font-size:18px;cursor:pointer;color:var(--text-mention-grey);line-height:1}
+  font-size:18px;cursor:pointer;color:var(--qs-discret);line-height:1}
 .memory-drawer .body{flex:1;overflow-y:auto;padding:10px 14px}
-.memory-drawer footer{padding:10px 14px;border-top:1px solid var(--border-default-grey);
-  font-size:11.5px;color:var(--text-mention-grey)}
+.memory-drawer footer{padding:10px 14px;border-top:1px solid var(--qs-trait);
+  font-size:11.5px;color:var(--qs-discret)}
 .memory-drawer footer a{font-size:11.5px}
-.insight-card{background:var(--background-alt-grey);border:1px solid var(--border-default-grey);
+.insight-card{background:var(--qs-surface-2);border:1px solid var(--qs-trait);
   border-radius:4px;padding:8px 10px;margin-bottom:6px;font-size:12px;position:relative}
-.insight-card .key{font-weight:600;color:var(--text-action-high-blue-france);font-family:Menlo,Monaco,Consolas,monospace;
+.insight-card .key{font-weight:600;color:var(--qs-accent);font-family:Menlo,Monaco,Consolas,monospace;
   font-size:11px}
-.insight-card .val{margin-top:3px;color:var(--text-default-grey)}
-.insight-card .meta{margin-top:4px;font-size:10px;color:var(--text-mention-grey);
+.insight-card .val{margin-top:3px;color:var(--qs-encre-2)}
+.insight-card .meta{margin-top:4px;font-size:10px;color:var(--qs-discret);
   display:flex;gap:8px;align-items:center}
 .insight-card button.del{position:absolute;top:6px;right:8px;background:transparent;border:0;
-  font-size:14px;cursor:pointer;opacity:.4;color:var(--text-default-grey);line-height:1}
+  font-size:14px;cursor:pointer;opacity:.4;color:var(--qs-encre-2);line-height:1}
 .insight-card button.del:hover{opacity:1;color:#c00}
-.memory-empty{font-size:12px;color:var(--text-mention-grey);text-align:center;padding:20px 10px}
+.memory-empty{font-size:12px;color:var(--qs-discret);text-align:center;padding:20px 10px}
 .chat-messages{flex:1;overflow-y:auto;padding:18px 22px;display:flex;flex-direction:column;gap:14px}
 .msg{display:flex;gap:10px;max-width:100%}
 .msg.user{justify-content:flex-end}
-.msg .avatar{width:28px;height:28px;border-radius:50%;background:var(--background-alt-blue-france);
+.msg .avatar{width:28px;height:28px;border-radius:50%;background:var(--qs-accent-pale);
   display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
 .msg .bubble{padding:10px 14px;border-radius:6px;font-size:13.5px;line-height:1.5;
-  max-width:680px;background:#fff;border:1px solid var(--border-default-grey);
-  color:var(--text-default-grey)}
-.msg.user .bubble{background:var(--background-action-high-blue-france);color:#fff;border-color:transparent;
+  max-width:680px;background:#fff;border:1px solid var(--qs-trait);
+  color:var(--qs-encre-2)}
+.msg.user .bubble{background:var(--qs-accent);color:#fff;border-color:transparent;
   max-width:560px}
 .msg .bubble :last-child{margin-bottom:0}
 /* Placeholder "Analyse en cours…" affiché dans la bulle assistant entre
    l'envoi du message user et le 1er chunk SSE — évite le rectangle blanc
    vide qui donnait l'impression que rien ne se passait. */
 .msg .bubble .bubble-thinking{display:flex;align-items:center;gap:10px;
-  color:var(--text-action-high-blue-france);font-size:13px}
+  color:var(--qs-accent);font-size:13px}
 .msg .bubble .bubble-spinner{display:inline-block;width:14px;height:14px;
-  border:2px solid var(--background-alt-blue-france);
-  border-top-color:var(--text-action-high-blue-france);
+  border:2px solid var(--qs-accent-pale);
+  border-top-color:var(--qs-accent);
   border-radius:50%;animation:bubble-spin 0.9s linear infinite}
 @keyframes bubble-spin{to{transform:rotate(360deg)}}
 .msg .bubble p{margin:0 0 6px}
 .msg .bubble ul,.msg .bubble ol{margin:6px 0;padding-left:20px}
-.msg .bubble code{background:var(--background-alt-grey);padding:1px 4px;border-radius:2px;
+.msg .bubble code{background:var(--qs-surface-2);padding:1px 4px;border-radius:2px;
   font-size:.9em;font-family:Menlo,Monaco,Consolas,monospace}
 /* Résultats tool (code blocks après blockquote) : compacts, max-height,
    scroll auto. L'user CEREMA n'a pas besoin de lire le JSON brut en grand. */
-.msg .bubble pre{background:var(--background-alt-grey);padding:6px 10px;border-radius:3px;
+.msg .bubble pre{background:var(--qs-surface-2);padding:6px 10px;border-radius:3px;
   overflow:auto;max-height:200px;font-size:11px;line-height:1.45;
-  margin:2px 0 10px;border-left:2px solid var(--border-default-grey);
+  margin:2px 0 10px;border-left:2px solid var(--qs-trait);
   font-size:11.5px;line-height:1.4}
 /* Tool calls = badges feedback visibles. Format utilisé par l'agent :
    "> **`tool_name`** — `arg=val`". On garde un feedback visuel CLAIR
    (l'user doit voir l'agent travailler) tout en restant ordonné. Accent
-   bleu DSFR sur la border + icône ⚙️ ajoutée via CSS pour identifier
+   bleu DSFR sur la border + icone de reglages ajoutee via CSS pour identifier
    immédiatement les actions. */
 .msg .bubble blockquote{
   position:relative;
-  border-left:3px solid var(--border-action-low-blue-france);
-  background:var(--background-alt-blue-france);
+  border-left:3px solid var(--qs-trait);
+  background:var(--qs-accent-pale);
   padding:5px 10px 5px 30px;margin:10px 0 2px;
   font-size:12px;line-height:1.5;
-  color:var(--text-default-grey);
+  color:var(--qs-encre-2);
   border-radius:3px;
   font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
 .msg .bubble blockquote::before{
-  content:"⚙️";position:absolute;left:8px;top:50%;transform:translateY(-50%);
-  font-size:13px;
+  content:"";position:absolute;left:8px;top:50%;transform:translateY(-50%);
+  width:13px;height:13px;background-color:currentColor;
+  -webkit-mask:var(--ic-reglages) center/contain no-repeat;
+  mask:var(--ic-reglages) center/contain no-repeat;
 }
-.msg .bubble blockquote strong{color:var(--text-action-high-blue-france);font-weight:700}
-.msg .bubble blockquote code{background:transparent;color:var(--text-mention-grey);padding:0;font-size:0.95em}
+.msg .bubble blockquote strong{color:var(--qs-accent);font-weight:700}
+.msg .bubble blockquote code{background:transparent;color:var(--qs-discret);padding:0;font-size:0.95em}
 .msg .bubble blockquote p{margin:0}
 /* Bouton "↶ Revenir avant" attaché au blockquote des tools mutating
    (smart_load, processing, etc.) — visible discret en bas-droite. */
 .msg .bubble blockquote .rollback-btn{
   display:inline-block;margin-top:6px;background:#fff;
-  color:var(--text-action-high-blue-france);
-  border:1px solid var(--border-action-low-blue-france);
+  color:var(--qs-accent);
+  border:1px solid var(--qs-trait);
   border-radius:3px;padding:2px 8px;font-size:10.5px;
   font-family:inherit;cursor:pointer;line-height:1.4}
 .msg .bubble blockquote .rollback-btn:hover{
-  background:var(--background-alt-blue-france);
-  border-color:var(--border-action-high-blue-france)}
+  background:var(--qs-accent-pale);
+  border-color:var(--qs-accent)}
 .msg .bubble blockquote .rollback-btn:disabled{opacity:.6;cursor:wait}
 
 /* Dernier tool en cours d'exécution : pulse pour signaler "j'attends le retour" */
@@ -155,7 +156,7 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
 .msg .bubble blockquote:has(+ details){animation:none}
 
 /* Tool result blocks (pre) collapsibles par défaut.
-   Le blockquote au-dessus (⚙️ tool_name + args) reste visible, le payload
+   Le blockquote au-dessus (icone + tool_name + args) reste visible, le payload
    JSON brut est replié dans un <details> que l'user peut ouvrir au besoin.
    Permet de lire la conversation et le DERNIER message sans scroller
    à travers 200 lignes de JSON. */
@@ -163,10 +164,10 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
   margin:2px 0 10px;
 }
 .msg .bubble details.tool-result > summary{
-  font-size:10.5px;color:var(--text-mention-grey);
+  font-size:10.5px;color:var(--qs-discret);
   cursor:pointer;padding:3px 8px;border-radius:3px;
-  background:var(--background-alt-grey);
-  border-left:2px solid var(--border-default-grey);
+  background:var(--qs-surface-2);
+  border-left:2px solid var(--qs-trait);
   list-style:none;user-select:none;
   display:inline-block;font-family:ui-monospace,Menlo,monospace;
 }
@@ -179,8 +180,8 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
   content:"▾ ";
 }
 .msg .bubble details.tool-result > summary:hover{
-  background:var(--background-alt-blue-france);
-  color:var(--text-action-high-blue-france);
+  background:var(--qs-accent-pale);
+  color:var(--qs-accent);
 }
 .msg .bubble details.tool-result > pre{
   margin:4px 0 0;
@@ -197,7 +198,7 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
    l'image directement visible en standalone (zoom click pour fullscreen
    ailleurs si besoin). On garde le inline simple. */
 .msg .bubble img{max-width:100%;height:auto;border-radius:4px;margin:8px 0;
-  border:1px solid var(--border-default-grey);display:block;cursor:zoom-in}
+  border:1px solid var(--qs-trait);display:block;cursor:zoom-in}
 /* Mode EMBED (iframe dans /desk) : le canvas noVNC est cote-a-cote
    donc les screenshots sont COMPLETEMENT redondants. User precise
    2026-06-21 'pas du tout besoin de voir la capture dans le chat desk'.
@@ -205,26 +206,26 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
    La conversation reste fluide texte uniquement. */
 body.embed .msg .bubble img{display:none}
 body.embed .msg .bubble details.embed-screenshot{display:none !important}
-.chat-input{padding:10px 16px 0;background:#fff;border-top:1px solid var(--border-default-grey);
+.chat-input{padding:10px 16px 0;background:#fff;border-top:1px solid var(--qs-trait);
   flex-shrink:0}
-.status-bar{font-size:11.5px;color:var(--text-action-high-blue-france);margin-bottom:6px;
+.status-bar{font-size:11.5px;color:var(--qs-accent);margin-bottom:6px;
   display:none;align-items:center;gap:6px}
 .status-bar.visible{display:flex}
-.spinner{width:10px;height:10px;border:2px solid var(--border-action-low-blue-france);
+.spinner{width:10px;height:10px;border:2px solid var(--qs-trait);
   border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .chat-form{display:flex;gap:8px;align-items:flex-end}
 .input-wrap{flex:1;position:relative;display:flex}
-.chat-form textarea{flex:1;border:1px solid var(--border-default-grey);border-radius:4px;
+.chat-form textarea{flex:1;border:1px solid var(--qs-trait);border-radius:4px;
   padding:8px 40px 8px 12px;font-size:13.5px;resize:none;font-family:inherit;line-height:1.4;
   min-height:44px;max-height:160px}
-.chat-form textarea:focus{outline:none;border-color:var(--border-action-high-blue-france);
-  box-shadow:0 0 0 1px var(--border-action-high-blue-france)}
-.chat-form .send-btn{background:var(--background-action-high-blue-france);color:#fff;border:none;
+.chat-form textarea:focus{outline:none;border-color:var(--qs-accent);
+  box-shadow:0 0 0 1px var(--qs-accent)}
+.chat-form .send-btn{background:var(--qs-accent);color:#fff;border:none;
   padding:0 6px;border-radius:4px;cursor:pointer;font-size:13.5px;font-weight:500;
   height:44px}
 .chat-form .send-btn:disabled{opacity:.5;cursor:wait}
-.chat-form .send-btn:hover:not(:disabled){background:var(--background-action-high-blue-france-hover)}
+.chat-form .send-btn:hover:not(:disabled){background:var(--qs-accent-fonce)}
 .chat-form .stop-btn{background:#fff;color:#b34000;border:1px solid #b34000;
   padding:8px 14px;font-size:13px;border-radius:4px;cursor:pointer;
   font-family:inherit;font-weight:500}
@@ -237,10 +238,10 @@ body.embed .msg .bubble details.embed-screenshot{display:none !important}
    top:8px = padding-top du textarea pour s'aligner pile sur la baseline. */
 .mic-btn{position:absolute;right:6px;top:8px;width:28px;height:28px;
   border:none;background:transparent;border-radius:50%;cursor:pointer;padding:0;
-  display:none;align-items:center;justify-content:center;color:var(--text-mention-grey);
+  display:none;align-items:center;justify-content:center;color:var(--qs-discret);
   transition:background .12s ease,color .12s ease}
 .mic-btn.available{display:flex}
-.mic-btn:hover{background:var(--background-alt-grey);color:var(--text-action-high-blue-france)}
+.mic-btn:hover{background:var(--qs-surface-2);color:var(--qs-accent)}
 .mic-btn svg{width:16px;height:16px;display:block}
 .mic-btn.recording{background:#e1000f;color:#fff;animation:micPulse 1.4s ease-in-out infinite}
 .mic-btn.recording:hover{background:#b3000c;color:#fff}
@@ -249,19 +250,19 @@ body.embed .msg .bubble details.embed-screenshot{display:none !important}
   0%,100%{box-shadow:0 0 0 0 rgba(225,0,15,.55)}
   50%{box-shadow:0 0 0 6px rgba(225,0,15,0)}
 }
-.hint{font-size:10.5px;color:var(--text-mention-grey);margin:2px 0 0;text-align:center}
-.welcome{background:#fff;border:1px solid var(--border-default-grey);border-radius:6px;
-  padding:14px 18px;color:var(--text-default-grey);font-size:13.5px}
-.welcome h3{font-size:14px;color:var(--text-title-blue-france);margin:0 0 6px;font-weight:700}
-.welcome ul{margin:6px 0 0;padding-left:18px;font-size:12.5px;color:var(--text-mention-grey)}
+.hint{font-size:10.5px;color:var(--qs-discret);margin:2px 0 0;text-align:center}
+.welcome{background:#fff;border:1px solid var(--qs-trait);border-radius:6px;
+  padding:14px 18px;color:var(--qs-encre-2);font-size:13.5px}
+.welcome h3{font-size:14px;color:var(--qs-accent);margin:0 0 6px;font-weight:700}
+.welcome ul{margin:6px 0 0;padding-left:18px;font-size:12.5px;color:var(--qs-discret)}
 .welcome li{padding:2px 0}
 .welcome-examples{list-style:none;padding-left:0}
-.welcome-example{background:none;border:1px dashed var(--border-default-grey);border-radius:4px;
+.welcome-example{background:none;border:1px dashed var(--qs-trait);border-radius:4px;
   padding:4px 8px;width:100%;text-align:left;cursor:pointer;font-family:inherit;
-  font-size:12.5px;color:var(--text-mention-grey);margin:2px 0;transition:all .15s}
-.welcome-example:hover{background:var(--background-alt-blue-france);
-  border-color:var(--text-action-high-blue-france);
-  color:var(--text-action-high-blue-france)}
+  font-size:12.5px;color:var(--qs-discret);margin:2px 0;transition:all .15s}
+.welcome-example:hover{background:var(--qs-accent-pale);
+  border-color:var(--qs-accent);
+  color:var(--qs-accent)}
 
 /* Bandeau "clé LLM manquante" — affiché tant que l'agent n'a pas reçu
    sa LLM_API_KEY via /admin/agent-config (Vault). Disparaît dès que le
@@ -273,29 +274,29 @@ body.embed .msg .bubble details.embed-screenshot{display:none !important}
 .llm-banner h4{font-size:13px;margin:0 0 6px;color:#b34000;font-weight:700}
 .llm-banner ol{margin:6px 0 8px;padding-left:20px}
 .llm-banner ol li{margin:2px 0}
-.llm-banner a{color:var(--text-action-high-blue-france);text-decoration:underline;
+.llm-banner a{color:var(--qs-accent);text-decoration:underline;
   font-weight:500}
-.llm-banner a:hover{color:var(--text-action-high-blue-france-hover)}
+.llm-banner a:hover{color:var(--qs-accent-fonce)}
 .llm-banner code{background:#fff;border:1px solid #fcc63a;border-radius:3px;
   padding:1px 4px;font-size:11.5px;color:#3a3a3a}
 .llm-banner .verify-row{display:flex;align-items:center;gap:10px;margin-top:8px;
   flex-wrap:wrap}
-.llm-banner .verify-btn{background:var(--background-action-high-blue-france);
+.llm-banner .verify-btn{background:var(--qs-accent);
   color:#fff;border:none;border-radius:4px;padding:6px 14px;font-size:12px;
   font-weight:500;cursor:pointer}
-.llm-banner .verify-btn:hover{background:var(--background-action-high-blue-france-hover)}
+.llm-banner .verify-btn:hover{background:var(--qs-accent-fonce)}
 .llm-banner .verify-btn:disabled{opacity:.55;cursor:wait}
-.llm-banner .verify-status{font-size:11.5px;color:var(--text-mention-grey)}
-.llm-banner .verify-status.ok{color:#18753c}
+.llm-banner .verify-status{font-size:11.5px;color:var(--qs-discret)}
+.llm-banner .verify-status.ok{color:var(--qs-succes)}
 .llm-banner .verify-status.err{color:#b34000}
 
 /* Mode embed (?embed=1) : enlève header/sidebar pour iframe */
-body.embed .fr-header,
-body.embed .fr-footer,
+body.embed .qs-entete,
+body.embed .qs-pied,
 body.embed .chat-sidebar,
 body.embed .chat-toolbar a[href*="/"],
 /* En mode embed dans desk, le bouton Mémoire ET le drawer interne sont
-   redondants avec l'onglet 🧠 Mémoire de la navbar portail (déjà visible
+   redondants avec l'onglet Memoire de la navbar portail (déjà visible
    au-dessus). On les masque pour éviter la duplication d'affordance et
    le scroll horizontal causé par le drawer ouvert. */
 body.embed #btn-memory,
@@ -320,16 +321,16 @@ body.embed .msg .bubble pre{max-width:100%}
 </head>
 <body>
 
-<header role="banner" class="fr-header">
-<div class="fr-header__body"><div class="fr-container fr-container--fluid"><div class="fr-header__body-row">
+<header role="banner" class="qs-entete">
+<div class="qs-entete__corps"><div class="qs-conteneur qs-conteneur--large"><div class="qs-entete__ligne">
   {# Ni « République Française », ni nom d'opérateur : cette interface est
      servie par l'instance de celui qui l'a installée, et rien ne permet d'y
      affirmer une identité d'État ou un exploitant. Cf. workspace.html. #}
-  <div class="fr-header__brand fr-enlarge-link"><div class="fr-header__brand-top">
-    <div class="fr-header__operator">
+  <div class="qs-entete__marque qs-lien-etendu"><div class="qs-entete__marque-haut">
+    <div class="qs-entete__marque-haut">
       {# Sprint UX-1 (2026-06-20) : harmonisation wording avec workspace.html
          operator (QGIS Service). Avant : 'QGIS Agent' incoherent vs workspace. #}
-      <p style="font-weight:700;font-size:14px;color:#000091">QGIS Service</p>
+      <p style="font-weight:700;font-size:14px;color:var(--qs-accent)">QGIS Service</p>
       <p style="font-size:10px;color:#666">SSPCloud</p>
     </div>
   </div>
@@ -349,7 +350,7 @@ body.embed .msg .bubble pre{max-width:100%}
   <!-- Sidebar -->
   <aside class="chat-sidebar">
     <div class="sidebar-section">
-      <button onclick="newSession()" class="fr-btn fr-btn--sm" style="width:100%">
+      <button onclick="newSession()" class="qs-btn qs-btn--sm" style="width:100%">
         + Nouvelle analyse
       </button>
     </div>
@@ -364,7 +365,7 @@ body.embed .msg .bubble pre{max-width:100%}
       <div class="sidebar-label">Projets</div>
       {% for p in projects[:6] %}
       <div class="sidebar-item" title="{{ p.zone or '' }}">
-        <span class="ic fr-icon-folder-2-line" aria-hidden="true"></span><span>{{ p.name[:25] }}</span>
+        <span class="ic ic-dossier" aria-hidden="true"></span><span>{{ p.name[:25] }}</span>
       </div>
       {% endfor %}
     </div>
@@ -376,7 +377,7 @@ body.embed .msg .bubble pre{max-width:100%}
       {% for s in sessions[:8] %}
       <div class="sidebar-item" onclick="loadSession('{{ s.id }}')"
            title="{{ s.summary or '' }}">
-        <span class="ic fr-icon-chat-3-line" aria-hidden="true"></span>
+        <span class="ic ic-discussion" aria-hidden="true"></span>
         <span>{{ s.summary[:30] if s.summary else 'Session ' + s.id[:8] }}</span>
       </div>
       {% endfor %}
@@ -405,7 +406,7 @@ body.embed .msg .bubble pre{max-width:100%}
       <button type="button" class="tool-btn" id="btn-new-conv"
               onclick="startNewConversation()" aria-label="Nouvelle conversation"
               title="Démarre une nouvelle conversation (la session actuelle est conservée dans l'historique des sessions). Utile si la conversation a accumulé trop d'erreurs ou si tu changes de sujet.">
-        <span class="fr-icon-add-line fr-icon--sm" aria-hidden="true"></span> <span class="tool-btn-label">Nouvelle</span>
+        <span class="ic-ajout ic--sm" aria-hidden="true"></span> <span class="tool-btn-label">Nouvelle</span>
       </button>
       {# Sprint UX-3 fix (2026-06-22) : bouton 'Historique' ajoute pour
          exposer les sessions recentes en mode embed (desk). Avant : sidebar
@@ -415,17 +416,17 @@ body.embed .msg .bubble pre{max-width:100%}
       <button type="button" class="tool-btn" id="btn-history"
               onclick="toggleHistoryPopover(event)" aria-label="Historique des conversations"
               title="Voir l'historique des conversations récentes">
-        <span class="fr-icon-time-line fr-icon--sm" aria-hidden="true"></span> <span class="tool-btn-label">Historique</span>
+        <span class="ic-horloge ic--sm" aria-hidden="true"></span> <span class="tool-btn-label">Historique</span>
       </button>
       <button type="button" class="tool-btn" id="btn-memory"
               onclick="toggleMemoryDrawer()" aria-label="Memoire de l'agent"
               title="Voir et éditer la mémoire de l'agent">
-        <span class="fr-icon-book-2-line fr-icon--sm" aria-hidden="true"></span> <span class="tool-btn-label">Mémoire</span>
+        <span class="ic-livre ic--sm" aria-hidden="true"></span> <span class="tool-btn-label">Mémoire</span>
       </button>
       <a href="{{ hub_url ~ '/desk' if hub_url else '/desk' }}" target="_blank"
          rel="noopener" class="tool-btn-link"
          title="Ouvrir le Bureau QGIS dans un nouvel onglet (canvas + outils)">
-        <span class="fr-icon-window-line fr-icon--sm" aria-hidden="true"></span> <span class="tool-btn-label">Bureau</span> ↗
+        <span class="ic-fenetre ic--sm" aria-hidden="true"></span> <span class="tool-btn-label">Bureau</span> ↗
       </a>
 
       {# Popover historique : liste des sessions recentes, click -> loadSession.
@@ -433,8 +434,8 @@ body.embed .msg .bubble pre{max-width:100%}
          Cache par defaut, toggle via JS. Fermeture click outside. #}
       <div id="history-popover" class="history-popover" aria-hidden="true">
         <div class="history-popover-header">
-          <span style="font-weight:700"><span class="fr-icon-time-line fr-icon--sm" aria-hidden="true"></span> Conversations récentes</span>
-          <button type="button" class="close" onclick="toggleHistoryPopover(null,false)" aria-label="Fermer"><span class="fr-icon-close-line fr-icon--sm" aria-hidden="true"></span></button>
+          <span style="font-weight:700"><span class="ic-horloge ic--sm" aria-hidden="true"></span> Conversations récentes</span>
+          <button type="button" class="close" onclick="toggleHistoryPopover(null,false)" aria-label="Fermer"><span class="ic-fermer ic--sm" aria-hidden="true"></span></button>
         </div>
         <div class="history-popover-body">
           {% if sessions %}
@@ -442,7 +443,7 @@ body.embed .msg .bubble pre{max-width:100%}
           <button type="button" class="history-item"
                   onclick="loadSession('{{ s.id }}');toggleHistoryPopover(null,false)"
                   title="{{ s.summary or 'Session ' + s.id[:8] }}">
-            <span class="ic fr-icon-chat-3-line" aria-hidden="true"></span>
+            <span class="ic ic-discussion" aria-hidden="true"></span>
             <span class="lbl">{{ s.summary[:50] if s.summary else 'Session ' + s.id[:8] }}</span>
           </button>
           {% endfor %}
@@ -470,28 +471,28 @@ body.embed .msg .bubble pre{max-width:100%}
     .history-popover{
       position:absolute;top:calc(100% + 4px);right:8px;
       width:320px;max-height:60vh;
-      background:#fff;border:1px solid var(--border-default-grey);
+      background:#fff;border:1px solid var(--qs-trait);
       border-radius:6px;box-shadow:0 6px 24px rgba(0,0,0,.15);
       z-index:200;display:none;overflow:hidden;
       flex-direction:column}
     .history-popover.open{display:flex}
     .history-popover-header{display:flex;align-items:center;justify-content:space-between;
-      padding:10px 14px;border-bottom:1px solid var(--border-default-grey);
-      font-size:13px;background:var(--background-alt-grey);flex-shrink:0}
+      padding:10px 14px;border-bottom:1px solid var(--qs-trait);
+      font-size:13px;background:var(--qs-surface-2);flex-shrink:0}
     .history-popover-header .close{background:transparent;border:none;
-      cursor:pointer;color:var(--text-mention-grey);font-size:16px;
+      cursor:pointer;color:var(--qs-discret);font-size:16px;
       padding:0 4px;line-height:1}
-    .history-popover-header .close:hover{color:var(--text-default-grey)}
+    .history-popover-header .close:hover{color:var(--qs-encre-2)}
     .history-popover-body{overflow-y:auto;padding:6px 0;flex:1}
     .history-item{display:flex;align-items:center;gap:8px;width:100%;
       padding:8px 14px;border:none;background:transparent;
       text-align:left;cursor:pointer;font-family:inherit;font-size:12.5px;
-      color:var(--text-default-grey);transition:background .12s}
-    .history-item:hover{background:var(--background-alt-grey)}
+      color:var(--qs-encre-2);transition:background .12s}
+    .history-item:hover{background:var(--qs-surface-2)}
     .history-item .ic{font-size:13px;opacity:.7;flex-shrink:0}
     .history-item .lbl{flex:1;min-width:0;
       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .history-empty{font-size:12px;color:var(--text-mention-grey);
+    .history-empty{font-size:12px;color:var(--qs-discret);
       padding:14px 16px;margin:0;line-height:1.5}
     </style>
     <script>
@@ -537,8 +538,8 @@ body.embed .msg .bubble pre{max-width:100%}
     <!-- Mémoire drawer : liste des insights + lien vers édition complète -->
     <aside id="memory-drawer" class="memory-drawer" aria-hidden="true">
       <header>
-        <span><span class="fr-icon-book-2-line fr-icon--sm" aria-hidden="true"></span> Mémoire agentique</span>
-        <button class="close" onclick="toggleMemoryDrawer(false)" aria-label="Fermer"><span class="fr-icon-close-line fr-icon--sm" aria-hidden="true"></span></button>
+        <span><span class="ic-livre ic--sm" aria-hidden="true"></span> Mémoire agentique</span>
+        <button class="close" onclick="toggleMemoryDrawer(false)" aria-label="Fermer"><span class="ic-fermer ic--sm" aria-hidden="true"></span></button>
       </header>
       <div class="body" id="memory-body">
         <div class="memory-empty">Chargement…</div>
@@ -551,7 +552,7 @@ body.embed .msg .bubble pre{max-width:100%}
 
     <div id="messages" class="chat-messages">
       <div class="msg">
-        <div class="avatar"><span class="fr-icon-road-map-line fr-icon--md" aria-hidden="true"></span></div>
+        <div class="avatar"><span class="ic-carte ic--md" aria-hidden="true"></span></div>
         <div class="bubble welcome">
           <h3>QGIS Agent prêt</h3>
           <p>Décris ton analyse géospatiale. J'ai accès aux outils QGIS, aux données IGN,
@@ -633,44 +634,43 @@ body.embed .msg .bubble pre{max-width:100%}
    liens utiles + bottom-list mentions legales. Avant : 1 ligne minimaliste
    sans valeur ajoutee. Maintenant : Service / Aide / Source/Donnees +
    bandeau mentions. #}
-<footer class="fr-footer" role="contentinfo"><div class="fr-container fr-container--fluid">
-  <div class="fr-footer__body">
-    <div class="fr-footer__content">
-      <p class="fr-footer__content-desc">
+<footer class="qs-pied" role="contentinfo"><div class="qs-conteneur qs-conteneur--large">
+  <div class="qs-pied__corps">
+    <div class="qs-pied__contenu">
+      <p class="qs-pied__desc">
         QGIS Service — plateforme d'analyse géospatiale assistée par IA,
         hébergée sur SSPCloud (INSEE). Outils QGIS Desktop + agent
         conversationnel + accès aux données IGN, Géorisques, OSM et DVF.
       </p>
-      <ul class="fr-footer__content-list">
-        <li class="fr-footer__content-item">
-          <a class="fr-footer__content-link" target="_blank" rel="noopener external"
+      <ul class="qs-pied__liste">
+        <li class="qs-pied__item">
+          <a class="qs-pied__lien" target="_blank" rel="noopener external"
              href="https://lab.sspcloud.fr">SSPCloud</a>
         </li>
-        <li class="fr-footer__content-item">
-          <a class="fr-footer__content-link" target="_blank" rel="noopener external"
+        <li class="qs-pied__item">
+          <a class="qs-pied__lien" target="_blank" rel="noopener external"
              href="https://github.com/nic01asFr/Qgis-sspcloud">GitHub source</a>
         </li>
       </ul>
     </div>
   </div>
-  <div class="fr-footer__bottom"><ul class="fr-footer__bottom-list">
-    <li class="fr-footer__bottom-item">
-      <a class="fr-footer__bottom-link" href="{{ hub_url ~ '/workspace' if hub_url else '/workspace' }}">Mon espace</a>
+  <div class="qs-pied__bas"><ul class="qs-pied__bas-liste">
+    <li class="qs-pied__bas-item">
+      <a class="qs-pied__bas-lien" href="{{ hub_url ~ '/workspace' if hub_url else '/workspace' }}">Mon espace</a>
     </li>
-    <li class="fr-footer__bottom-item">
-      <a class="fr-footer__bottom-link" href="{{ hub_url ~ '/desk' if hub_url else '/desk' }}">Bureau de travail</a>
+    <li class="qs-pied__bas-item">
+      <a class="qs-pied__bas-lien" href="{{ hub_url ~ '/desk' if hub_url else '/desk' }}">Bureau de travail</a>
     </li>
-    <li class="fr-footer__bottom-item">
-      <span class="fr-footer__bottom-link">Licence ouverte 2.0</span>
+    <li class="qs-pied__bas-item">
+      <span class="qs-pied__bas-lien">Licence ouverte 2.0</span>
     </li>
-    <li class="fr-footer__bottom-item">
-      <a class="fr-footer__bottom-link" target="_blank" rel="noopener external"
+    <li class="qs-pied__bas-item">
+      <a class="qs-pied__bas-lien" target="_blank" rel="noopener external"
          href="https://github.com/nic01asFr/Qgis-sspcloud/issues">Signaler un problème</a>
     </li>
   </ul></div>
 </div></footer>
 
-<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.module.min.js"></script>
 <script>
 // Mode embed (iframe) — activé par ?embed=1
 if (new URLSearchParams(location.search).get('embed') === '1') {
@@ -928,14 +928,14 @@ function changeProfile(profileId) {
 
 // Mapping profil → libellé court + emoji pour le chip
 const _PROFILE_META = {
-  standard:         {label: 'Standard',     icon: '💬'},
-  geoai_analyst:    {label: 'IA Vision',    icon: '🧠'},
-  risk_analyst:     {label: 'Risques',      icon: '⚠️'},
-  db_analyst:       {label: 'Données',      icon: '📊'},
-  storymap_creator: {label: 'Storymap',     icon: '📖'},
-  map_composer:     {label: 'Cartographe',  icon: '🗺'},
-  recipe_creator:   {label: 'Recettes',     icon: '📋'},
-  guided_tour:      {label: 'Guide',        icon: '🧭'},
+  standard:         {label: 'Standard',     icone: 'ic-discussion'},
+  geoai_analyst:    {label: 'IA Vision',    icone: 'ic-memoire'},
+  risk_analyst:     {label: 'Risques',      icone: 'ic-alerte'},
+  db_analyst:       {label: 'Données',      icone: 'ic-courbe'},
+  storymap_creator: {label: 'Storymap',     icone: 'ic-livre'},
+  map_composer:     {label: 'Cartographe',  icone: 'ic-carte'},
+  recipe_creator:   {label: 'Recettes',     icone: 'ic-presse-papier'},
+  guided_tour:      {label: 'Guide',        icone: 'ic-ampoule'},
 };
 
 function updateContextChip() {
@@ -944,9 +944,14 @@ function updateContextChip() {
   const icon = document.getElementById('ctx-icon');
   if (!chip || !sel) return;
   const profile = sel.value;
-  const meta = _PROFILE_META[profile] || {label: profile, icon: '📂'};
+  const meta = _PROFILE_META[profile] || {label: profile, icone: 'ic-dossier'};
   chip.textContent = meta.label;
-  if (icon) icon.textContent = meta.icon;
+  // L'icone est une classe : on remplace celle qui etait posee, sans toucher
+  // aux classes de taille.
+  if (icon) {
+    icon.className = icon.className.replace(/ic-[a-z-]+/g, '').trim()
+      + ' ' + meta.icone;
+  }
 }
 
 function toggleProfileMenu() {
@@ -1076,7 +1081,7 @@ function newSession() {
   document.getElementById('session-id').value = newId;
   document.getElementById('messages').innerHTML = `
     <div class="msg">
-      <div class="avatar"><span class="fr-icon-road-map-line fr-icon--md" aria-hidden="true"></span></div>
+      <div class="avatar"><span class="ic-carte ic--md" aria-hidden="true"></span></div>
       <div class="bubble">Nouvelle analyse. Décris ce que tu veux faire.</div>
     </div>`;
 }
@@ -1092,7 +1097,7 @@ function loadSession(sid) {
         const role = m.role === 'user' ? 'user' : 'assistant';
         const html = role === 'user'
           ? `<div class="msg user"><div class="bubble">${escapeHtml(m.content)}</div></div>`
-          : `<div class="msg"><div class="avatar"><span class="fr-icon-road-map-line fr-icon--md" aria-hidden="true"></span></div><div class="bubble">${marked.parse(m.content || '')}</div></div>`;
+          : `<div class="msg"><div class="avatar"><span class="ic-carte ic--md" aria-hidden="true"></span></div><div class="bubble">${marked.parse(m.content || '')}</div></div>`;
         c.insertAdjacentHTML('beforeend', html);
       });
       // Replie tous les blocs résultat-tool dans les messages history
@@ -1316,7 +1321,7 @@ function appendMessage(role, content) {
     // SSE. Le placeholder est écrasé par responseDiv.innerHTML = ... dès
     // que le streaming commence.
     div.className = 'msg';
-    div.innerHTML = '<div class="avatar"><span class="fr-icon-road-map-line fr-icon--md" aria-hidden="true"></span></div>'
+    div.innerHTML = '<div class="avatar"><span class="ic-carte ic--md" aria-hidden="true"></span></div>'
       + '<div class="bubble" id="current-response">'
       + '<div class="bubble-thinking">'
       + '<span class="bubble-spinner"></span>'

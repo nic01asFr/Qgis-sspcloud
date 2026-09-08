@@ -6,7 +6,7 @@ Couvre les 5 items Vague A :
 - A2 chart + data_table (templates partials)
 - A3 publish_component endpoint
 - A4 narrative_text source.data_url notes.md (whitelist regex)
-- A5 fr-callout audience non-public dans storymap_dsfr.html.j2
+- A5 qs-encart audience non-public dans storymap_dsfr.html.j2
 
 Vague B :
 - B3 legend auto-fill datasources catalog
@@ -45,7 +45,8 @@ class TestVagueAMarkdownBasique:
     def test_markdown_h2(self):
         from hub.main import _markdown_to_html_basique
         html = _markdown_to_html_basique("## Titre 2\n\nParagraphe libre.")
-        assert "<h2 style='color:#000091'>Titre 2</h2>" in html
+        # L'accent du produit a remplace le bleu de la charte d'Etat.
+        assert "<h2 style='color:#41701F'>Titre 2</h2>" in html
         assert "<p>Paragraphe libre.</p>" in html
 
     def test_markdown_h1_h3(self):

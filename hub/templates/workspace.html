@@ -1,12 +1,11 @@
 <!DOCTYPE html>
-<html lang="fr" data-fr-scheme="light">
+<html lang="fr">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
-<meta name="theme-color" content="#000091">
+<meta name="theme-color" content="#0E2433">
 <title>Mon espace — QGIS Service</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/utility/utility.min.css">
+<link rel="stylesheet" href="/static/produit.css">
 <style>
 /* Sprint UX-3 refonte 'ideale' (2026-06-21 v3) :
    Principes :
@@ -20,113 +19,113 @@
 /* Section title compact : juste le nom + compteur badge */
 .section-title{display:flex;align-items:baseline;gap:10px;
   margin:0 0 6px;padding-bottom:8px;
-  border-bottom:2px solid var(--border-action-high-blue-france)}
+  border-bottom:2px solid var(--qs-accent)}
 .section-title h2{font-size:1.15rem;font-weight:700;
-  color:var(--text-title-blue-france);margin:0;line-height:1}
-.section-title .count{font-size:.78rem;color:var(--text-mention-grey);
-  font-weight:500;padding:2px 8px;background:var(--background-alt-grey);
+  color:var(--qs-accent);margin:0;line-height:1}
+.section-title .count{font-size:.78rem;color:var(--qs-discret);
+  font-weight:500;padding:2px 8px;background:var(--qs-surface-2);
   border-radius:10px}
-.section-desc{font-size:.85rem;color:var(--text-mention-grey);
+.section-desc{font-size:.85rem;color:var(--qs-discret);
   margin:0 0 18px;line-height:1.5;max-width:760px}
 
 /* Hero : titre + sous-titre + action principale + statut bureau */
 .hero{margin:6px 0 36px}
 .hero-cta{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:10px}
-.hero-cta .fr-btn--lg{font-weight:700;padding:16px 32px;font-size:1.05rem;
+.hero-cta .qs-btn--lg{font-weight:700;padding:16px 32px;font-size:1.05rem;
   border-radius:6px;box-shadow:0 2px 8px rgba(0,0,145,.18)}
-.hero-cta .fr-btn--lg:hover{box-shadow:0 4px 14px rgba(0,0,145,.28)}
+.hero-cta .qs-btn--lg:hover{box-shadow:0 4px 14px rgba(0,0,145,.28)}
 .hero-status{display:inline-flex;align-items:center;gap:6px;font-size:.8rem;
-  color:var(--text-mention-grey)}
+  color:var(--qs-discret)}
 .hero-status .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
-.hero-status-ok .dot{background:#18753c;box-shadow:0 0 0 3px rgba(24,117,60,.18)}
+.hero-status-ok .dot{background:var(--qs-succes);box-shadow:0 0 0 3px rgba(24,117,60,.18)}
 .hero-status-sleep .dot{background:#919191}
 
 /* Card etude : layout simple et clair */
 .study-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));
   gap:14px;margin:12px 0 28px}
 .study-card{background:#fff;border-radius:8px;padding:16px 18px;
-  border:1px solid var(--border-default-grey);
-  border-left:4px solid var(--border-action-high-blue-france);
+  border:1px solid var(--qs-trait);
+  border-left:4px solid var(--qs-accent);
   box-shadow:0 1px 3px rgba(0,0,0,.05);transition:all .15s;
   display:flex;flex-direction:column;gap:6px}
 .study-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.08)}
-.study-card.is-active{border-left-color:#d64d00;
+.study-card.is-active{border-left-color:var(--qs-alerte);
   background:linear-gradient(180deg,#fff8f3 0%,#fff 100%)}
 .study-card-header{display:flex;align-items:center;justify-content:space-between;
   gap:8px;margin-bottom:4px}
-.study-name{font-size:1.05rem;font-weight:700;color:var(--text-title-blue-france);
+.study-name{font-size:1.05rem;font-weight:700;color:var(--qs-accent);
   margin:0;line-height:1.25;flex:1;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.study-meta{font-size:.78rem;color:var(--text-mention-grey);
+.study-meta{font-size:.78rem;color:var(--qs-discret);
   display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;line-height:1.5;
   margin-bottom:6px}
 .study-meta .sep{opacity:.4}
 .study-actions{display:flex;gap:8px;margin-top:6px;padding-top:10px;
-  border-top:1px solid var(--background-alt-grey)}
+  border-top:1px solid var(--qs-surface-2)}
 .study-actions form{margin:0}
-.study-actions .fr-btn{font-size:.78rem;padding:.35rem .7rem}
+.study-actions .qs-btn{font-size:.78rem;padding:.35rem .7rem}
 .active-badge{display:inline-flex;align-items:center;gap:5px;
-  background:#d64d00;color:#fff;padding:2px 8px;border-radius:10px;
+  background:var(--qs-alerte);color:#fff;padding:2px 8px;border-radius:10px;
   font-size:.65rem;font-weight:700;letter-spacing:.4px;flex-shrink:0}
 .active-badge::before{content:"";width:5px;height:5px;border-radius:50%;
   background:#fff;display:inline-block}
 
 /* Section creer une etude : compact, integre apres la liste */
-.new-study{background:linear-gradient(135deg,#f5f5fe 0%,#fff 100%);
-  border:1px solid var(--border-default-grey);border-radius:8px;
+.new-study{background:linear-gradient(135deg,#EDF4E6 0%,#fff 100%);
+  border:1px solid var(--qs-trait);border-radius:8px;
   padding:18px 20px;margin:0 0 32px}
-.new-study-title{font-size:.98rem;font-weight:700;color:var(--text-title-blue-france);
+.new-study-title{font-size:.98rem;font-weight:700;color:var(--qs-accent);
   margin:0 0 4px;display:flex;align-items:center;gap:6px}
-.new-study-desc{font-size:.82rem;color:var(--text-mention-grey);margin:0 0 12px}
+.new-study-desc{font-size:.82rem;color:var(--qs-discret);margin:0 0 12px}
 .new-study-form{display:flex;gap:8px;flex-wrap:wrap}
 .new-study-form input{flex:1;min-width:240px}
 .tpl-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
 .tpl-chip{font-size:.75rem;padding:4px 10px;
-  background:#fff;border:1px solid var(--border-default-grey);
+  background:#fff;border:1px solid var(--qs-trait);
   border-radius:14px;cursor:pointer;transition:all .12s;
-  color:var(--text-default-grey);font-family:inherit}
-.tpl-chip:hover{background:var(--background-action-high-blue-france);
+  color:var(--qs-encre-2);font-family:inherit}
+.tpl-chip:hover{background:var(--qs-accent);
   color:#fff;border-color:transparent}
 
 /* Empty states discrets */
-.empty-state{padding:24px 20px;color:var(--text-mention-grey);
-  background:var(--background-alt-grey);border-radius:8px;
-  border:1px dashed var(--border-default-grey);font-size:.88rem}
+.empty-state{padding:24px 20px;color:var(--qs-discret);
+  background:var(--qs-surface-2);border-radius:8px;
+  border:1px dashed var(--qs-trait);font-size:.88rem}
 .empty-state .icon{font-size:1.6rem;margin-right:8px;opacity:.65}
 
 /* Livrables list compact */
-.fr-table{font-size:.85rem}
-.fr-card__title{font-size:1rem}
+.qs-tableau{font-size:.85rem}
+.qs-carte__titre{font-size:1rem}
 
 /* Memoire compacte en bas */
 .memo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
   gap:12px;margin-top:10px}
-.memo-card{background:var(--background-alt-grey);border-radius:8px;
+.memo-card{background:var(--qs-surface-2);border-radius:8px;
   padding:14px 16px;font-size:.85rem}
 .memo-card h3{font-size:.95rem;margin:0 0 8px;font-weight:700;
-  color:var(--text-title-blue-france)}
+  color:var(--qs-accent)}
 .memo-card ul{margin:0;padding-left:18px;line-height:1.6}
-.memo-empty{font-size:.85rem;color:var(--text-mention-grey);
-  background:var(--background-alt-grey);padding:14px 18px;border-radius:8px;
-  border:1px dashed var(--border-default-grey)}
+.memo-empty{font-size:.85rem;color:var(--qs-discret);
+  background:var(--qs-surface-2);padding:14px 18px;border-radius:8px;
+  border:1px dashed var(--qs-trait)}
 </style>
 </head>
 <body>
-<header role="banner" class="fr-header">
-<div class="fr-header__body"><div class="fr-container"><div class="fr-header__body-row">
+<header role="banner" class="qs-entete">
+<div class="qs-entete__corps"><div class="qs-conteneur"><div class="qs-entete__ligne">
   {# Ni bloc « République Française », ni nom d'opérateur : ce service
      s'installe en trois minutes par n'importe qui sur SSPCloud, et son en-tête
      ne peut pas affirmer une identité d'État ni un exploitant que l'instance
      n'a pas. L'attribution vit dans le dépôt — README, LICENSE — où elle est
      vraie et où la Licence Ouverte 2.0 l'exige. #}
-  <div class="fr-header__brand fr-enlarge-link"><div class="fr-header__brand-top">
-    <div class="fr-header__operator">
-      <p style="font-weight:700;font-size:15px;color:#000091">QGIS Service</p>
+  <div class="qs-entete__marque qs-lien-etendu"><div class="qs-entete__marque-haut">
+    <div class="qs-entete__marque-haut">
+      <p style="font-weight:700;font-size:15px;color:var(--qs-accent)">QGIS Service</p>
       <p style="font-size:11px;color:#666">SSPCloud</p>
     </div>
   </div>
-  <div class="fr-header__service"><a href="/workspace"><p class="fr-header__service-title">Mon espace de travail</p></a>
-    <p class="fr-header__service-tagline">{{ username }}@sspcloud</p>
+  <div class="qs-entete__service"><a href="/workspace"><p class="qs-entete__service-titre">Mon espace de travail</p></a>
+    <p class="qs-entete__service-accroche">{{ username }}@sspcloud</p>
   </div></div>
 </div></div></div>
 </header>
@@ -136,12 +135,12 @@
    etudes) et le footer (Bureau de travail, Agent IA seul). #}
 
 <main role="main">
-<section class="fr-py-4w">
-<div class="fr-container">
+<section class="qs-py-4w">
+<div class="qs-conteneur">
 
   {% if llm_key_missing %}
-  <div class="fr-alert fr-alert--warning fr-mb-3w">
-    <h3 class="fr-alert__title">Assistant IA en attente de configuration</h3>
+  <div class="qs-alerte qs-alerte--attention qs-mb-3w">
+    <h3 class="qs-alerte__titre">Assistant IA en attente de configuration</h3>
     <p>Ta clé LLM n'est pas renseignée : l'assistant ne peut pas répondre.
        Ouvre le bloc ci-dessous pour la saisir (moins d'une minute).</p>
   </div>
@@ -159,7 +158,7 @@
   {% if active_study %}
   <div class="hero">
     <div class="hero-cta">
-      <a href="/desk" class="fr-btn fr-btn--lg fr-icon-window-line fr-btn--icon-left">
+      <a href="/desk" class="qs-btn qs-btn--lg ic-fenetre qs-btn--icone-gauche">
         Continuer mon travail sur « {{ active_study.name }} »
       </a>
       <span class="hero-status hero-status-{% if session_ready %}ok{% else %}sleep{% endif %}"
@@ -172,7 +171,7 @@
   {% elif not studies %}
   <div class="hero">
     <div class="hero-cta">
-      <button type="button" class="fr-btn fr-btn--lg fr-icon-add-circle-line fr-btn--icon-left"
+      <button type="button" class="qs-btn qs-btn--lg ic-ajout-cercle qs-btn--icone-gauche"
               onclick="document.getElementById('new-study-name').focus();
                        document.getElementById('new-study-name').scrollIntoView({behavior:'smooth',block:'center'})">
         Démarrer ma première étude
@@ -207,7 +206,7 @@
     <div class="study-card{% if s.id == active_study_id %} is-active{% endif %}{% if s.origin == 'demo' %} is-demo{% endif %}">
       <div class="study-card-header">
         <h3 class="study-name" title="{{ s.name }}">
-          {% if s.id == active_study_id %}<span class="fr-icon-window-line fr-icon--sm" aria-hidden="true"></span>{% else %}<span class="fr-icon-folder-2-line fr-icon--sm" aria-hidden="true"></span>{% endif %} {{ s.name }}
+          {% if s.id == active_study_id %}<span class="ic-fenetre ic--sm" aria-hidden="true"></span>{% else %}<span class="ic-dossier ic--sm" aria-hidden="true"></span>{% endif %} {{ s.name }}
         </h3>
         {% if s.id == active_study_id %}<span class="active-badge">ACTIVE</span>{% endif %}
         {% if s.origin == 'demo' %}
@@ -217,34 +216,34 @@
       </div>
       <div class="study-meta">
         {% if s.project_count and s.project_count > 0 %}
-        <span><span class="fr-icon-folder-2-line fr-icon--sm" aria-hidden="true"></span> {{ s.project_count }} {% if s.project_count == 1 %}projet{% else %}projets{% endif %}</span>
+        <span><span class="ic-dossier ic--sm" aria-hidden="true"></span> {{ s.project_count }} {% if s.project_count == 1 %}projet{% else %}projets{% endif %}</span>
         {% endif %}
         {% if s.default_project %}
         <span class="sep">·</span>
-        <span><span class="fr-icon-star-line fr-icon--sm" aria-hidden="true"></span> {{ s.default_project.label }}</span>
+        <span><span class="ic-etoile ic--sm" aria-hidden="true"></span> {{ s.default_project.label }}</span>
         {% endif %}
         {# Repere temporel : seul moyen de distinguer deux etudes homonymes. #}
         {% if s.last_active_label %}
         <span class="sep">·</span>
-        <span title="Dernière ouverture de cette étude"><span class="fr-icon-time-line fr-icon--sm" aria-hidden="true"></span> {{ s.last_active_label }}</span>
+        <span title="Dernière ouverture de cette étude"><span class="ic-horloge ic--sm" aria-hidden="true"></span> {{ s.last_active_label }}</span>
         {% endif %}
       </div>
       <div class="study-actions">
         {% if s.id == active_study_id %}
-        <a href="/desk" class="fr-btn fr-btn--sm fr-icon-window-line fr-btn--icon-left" style="font-weight:700;flex:1;text-align:center">
+        <a href="/desk" class="qs-btn qs-btn--sm ic-fenetre qs-btn--icone-gauche" style="font-weight:700;flex:1;text-align:center">
           Ouvrir le bureau
         </a>
         {% else %}
         <form method="POST" action="/workspace/study/{{ s.id }}/activate?return_to=desk"
               style="flex:1">
-          <button type="submit" class="fr-btn fr-btn--sm" style="font-weight:700;width:100%">
+          <button type="submit" class="qs-btn qs-btn--sm" style="font-weight:700;width:100%">
             Ouvrir l'étude →
           </button>
         </form>
         {% endif %}
         <form method="POST" action="/workspace/study/{{ s.id }}/archive"
               onsubmit="return confirm('Archiver cette étude ? Vous pourrez toujours en créer une nouvelle.');">
-          <button type="submit" class="fr-btn fr-btn--tertiary fr-btn--sm"
+          <button type="submit" class="qs-btn qs-btn--tertiaire qs-btn--sm"
                   title="Archiver cette étude (réversible, le dossier reste sur le PVC)">
             Archiver
           </button>
@@ -255,7 +254,7 @@
   </div>
   {% else %}
   <div class="empty-state" style="margin-bottom:18px">
-    <span class="icon fr-icon-folder-2-line" aria-hidden="true"></span>
+    <span class="icon ic-dossier" aria-hidden="true"></span>
     Aucune étude pour l'instant. Démarrez votre première étude ci-dessous.
   </div>
   {% endif %}
@@ -264,7 +263,7 @@
      L'user fini de regarder ses etudes -> il peut en creer une. #}
   <div class="new-study">
     <h3 class="new-study-title">
-      <span class="fr-icon-add-circle-line" aria-hidden="true"></span>
+      <span class="ic-ajout-cercle" aria-hidden="true"></span>
       <span>Démarrer une nouvelle étude</span>
     </h3>
     <p class="new-study-desc">
@@ -273,8 +272,8 @@
     <form method="POST" action="/workspace/study/new" class="new-study-form">
       <input id="new-study-name" name="name" type="text" required
              placeholder="ex : Risque inondation Le Lavandou"
-             class="fr-input">
-      <button type="submit" class="fr-btn">+ Créer l'étude</button>
+             class="qs-champ">
+      <button type="submit" class="qs-btn">+ Créer l'étude</button>
     </form>
     {# V1.20.4 : les chips 'Idees' pre-remplissent juste le nom d'etude
        (vierge). Un futur sprint pourra proposer des templates 'demo' pre-
@@ -282,7 +281,7 @@
        exemple de risque inondation') pour eviter le carry-over des titres
        techniques 'Demo Vague E2' dans les etudes reelles. #}
     <div class="tpl-chips">
-      <span style="font-size:.75rem;color:var(--text-mention-grey);align-self:center;margin-right:2px">
+      <span style="font-size:.75rem;color:var(--qs-discret);align-self:center;margin-right:2px">
         Idées de sujet :
       </span>
       <button type="button" class="tpl-chip"
@@ -312,14 +311,14 @@
      SECTION LIVRABLES — sortie du travail effectue.
      Titre + compteur, table si rempli, empty state simple si vide.
      ════════════════════════════════════════════════════════════════════ #}
-  <div class="section-title fr-mt-5w">
+  <div class="section-title qs-mt-5w">
     <h2>Mes livrables publiés</h2>
     <span class="count">{{ catalog_count }}</span>
   </div>
   {% if catalog_items %}
-  <p class="fr-text--sm fr-mb-3w">Cartes, rapports et recettes accessibles publiquement (sans authentification).</p>
+  <p class="qs-texte--sm qs-mb-3w">Cartes, rapports et recettes accessibles publiquement (sans authentification).</p>
   {% if catalog_ailleurs or catalog_tronques %}
-  <p class="fr-text--sm fr-mb-3w">
+  <p class="qs-texte--sm qs-mb-3w">
     {% if catalog_ailleurs %}{{ catalog_ailleurs }} autre{{ 's' if catalog_ailleurs > 1 }}
     publication{{ 's' if catalog_ailleurs > 1 }} hors de cette etude.{% endif %}
     {% if catalog_tronques %}{{ catalog_tronques }} de plus non affichee{{ 's' if catalog_tronques > 1 }} ici.{% endif %}
@@ -328,33 +327,33 @@
   {% endif %}
   {% set study_names = {} %}
   {% for s in studies %}{% set _ = study_names.update({s.id: s.name}) %}{% endfor %}
-  <table class="fr-table">
+  <table class="qs-tableau">
     <thead>
       <tr><th>Type</th><th>Slug</th><th>Étude</th><th>Taille</th><th>Date</th><th>Lien</th><th>Actions</th></tr>
     </thead>
     <tbody>
       {% for item in catalog_items %}
       <tr data-slug="{{ item.slug }}" data-kind="{{ item.kind }}">
-        <td><span class="fr-badge fr-badge--sm fr-badge--info fr-badge--no-icon">{{ item.kind }}</span></td>
+        <td><span class="qs-pastille qs-pastille--sm qs-pastille--info">{{ item.kind }}</span></td>
         <td>{{ item.slug }}</td>
         <td>
           {% if item.study_id and item.study_id in study_names %}
-            <span class="fr-badge fr-badge--sm fr-badge--no-icon"
-                  style="background:#ffe7d6;color:#d64d00"
+            <span class="qs-pastille qs-pastille--sm"
+                  style="background:var(--qs-alerte-pale);color:var(--qs-alerte)"
                   title="Étude : {{ study_names[item.study_id] }}">
               {{ study_names[item.study_id] }}
             </span>
           {% elif item.study_id %}
-            <span class="fr-text--sm" style="opacity:.55">{{ item.study_id }}</span>
+            <span class="qs-texte--sm" style="opacity:.55">{{ item.study_id }}</span>
           {% else %}
-            <span class="fr-text--sm" style="opacity:.55">—</span>
+            <span class="qs-texte--sm" style="opacity:.55">—</span>
           {% endif %}
         </td>
         <td>{{ item.size_kb }} ko</td>
         <td>{{ item.date }}</td>
-        <td><a href="{{ item.hub_url }}" target="_blank" class="fr-link">Ouvrir →</a></td>
+        <td><a href="{{ item.hub_url }}" target="_blank" class="qs-lien">Ouvrir →</a></td>
         <td>
-          <button type="button" class="fr-btn fr-btn--tertiary-no-outline fr-btn--sm fr-icon-delete-line fr-btn--icon-left"
+          <button type="button" class="qs-btn qs-btn--nu qs-btn--sm ic-supprimer qs-btn--icone-gauche"
                   onclick="unpublishArtifact('{{ item.kind }}', '{{ item.slug }}', this)"
                   title="Dépublier ce livrable (suppression S3 + catalogue). Action irréversible.">
             Dépublier
@@ -396,7 +395,7 @@
   </script>
   {% else %}
   <div class="empty-state">
-    <span class="icon fr-icon-archive-line" aria-hidden="true"></span>
+    <span class="icon ic-archive" aria-hidden="true"></span>
     {% if catalog_total %}
     Aucune publication rattachée à cette étude.
     Tu en as {{ catalog_total }} au total —
@@ -413,7 +412,7 @@
      Toujours visible (transparence). Compteur de prefs + insights dans
      le badge. Cards compactes en grid 2 cols, ou empty state simple.
      ════════════════════════════════════════════════════════════════════ #}
-  <div class="section-title fr-mt-5w">
+  <div class="section-title qs-mt-5w">
     <h2>Ce que l'agent sait de toi</h2>
     <span class="count">
       {% set memo_count = (preferences|length if preferences else 0) + (insights|length if insights else 0) %}
@@ -429,7 +428,7 @@
   <div class="memo-grid">
     {% if preferences %}
     <div class="memo-card">
-      <h3><span class="fr-icon-bookmark-line fr-icon--sm" aria-hidden="true"></span> Préférences explicites</h3>
+      <h3><span class="ic-signet ic--sm" aria-hidden="true"></span> Préférences explicites</h3>
       <ul>
         {% for k, v in preferences.items() %}
         <li><strong>{{ k }}</strong> : {{ v }}</li>
@@ -439,7 +438,7 @@
     {% endif %}
     {% if insights %}
     <div class="memo-card">
-      <h3><span class="fr-icon-lightbulb-line fr-icon--sm" aria-hidden="true"></span> Insights agentiques</h3>
+      <h3><span class="ic-ampoule ic--sm" aria-hidden="true"></span> Insights agentiques</h3>
       <ul>
         {% for ins in insights[:10] %}
         <li><strong>{{ ins.key }}</strong> : {{ ins.value }}</li>
@@ -464,7 +463,7 @@
      et conservee : ce bloc ne sert plus qu'en cas de changement.
      L'alerte, elle, reste en tete : elle signale une action requise.
      ════════════════════════════════════════════════════════════════════ #}
-  <div class="section-title fr-mt-5w">
+  <div class="section-title qs-mt-5w">
     <h2>Paramètres</h2>
   </div>
   <p class="section-desc">
@@ -480,12 +479,12 @@
      ou cookie hub_api_key -> la cle n'est visible que pour l'user auth.
      ════════════════════════════════════════════════════════════════════ #}
   {% if hub_api_key %}
-  <details class="fr-callout fr-callout--brown-caramel fr-mb-4w"
+  <details class="qs-encart qs-encart--attention qs-mb-4w"
            style="padding:12px 16px;font-size:13px">
     <summary style="cursor:pointer;font-weight:600;color:#845d29">
-      <span class="fr-icon-lock-line fr-icon--sm" aria-hidden="true"></span> Ma clé d'accès personnelle
+      <span class="ic-cadenas ic--sm" aria-hidden="true"></span> Ma clé d'accès personnelle
     </summary>
-    <div class="fr-mt-2w">
+    <div class="qs-mt-2w">
       <p style="margin:0 0 8px 0">
         <b>Une fois retenue, tu n'as plus besoin du portail OIDC.</b>
         Garde-la de côté : elle te reconnecte depuis n'importe quel
@@ -504,7 +503,7 @@
          Remplace par : au 1er acces autre navigateur, l'user va sur /login
          et colle sa cle API dans le form (POST body, zero URL). #}
       <div style="display:flex;gap:8px">
-        <button type="button" class="fr-btn fr-btn--sm fr-btn--secondary fr-icon-clipboard-line fr-btn--icon-left"
+        <button type="button" class="qs-btn qs-btn--sm qs-btn--secondaire ic-presse-papier qs-btn--icone-gauche"
                 onclick="navigator.clipboard.writeText(document.getElementById('hub-api-key-value').textContent).then(()=>this.textContent='Clé copiée')">
           Copier la clé
         </button>
@@ -532,13 +531,13 @@
   {# Correctif 2026-08-22 : alerte tant que la cle LLM manque. Sans elle,
      l'assistant ne repond pas, et le bloc ci-dessous etant replie par
      defaut, rien ne le signalait sur cette page. #}
-  <details class="fr-callout fr-callout--brown-caramel fr-mb-4w"
+  <details class="qs-encart qs-encart--attention qs-mb-4w"
            style="padding:12px 16px;font-size:13px"
            {% if llm_key_missing %}open{% endif %}>
     <summary style="cursor:pointer;font-weight:600;color:#845d29">
-      <span class="fr-icon-chat-3-line fr-icon--sm" aria-hidden="true"></span> Assistant IA — clé de connexion
+      <span class="ic-discussion ic--sm" aria-hidden="true"></span> Assistant IA — clé de connexion
     </summary>
-    <div class="fr-mt-2w">
+    <div class="qs-mt-2w">
       <p style="margin:0 0 8px 0">
         L'assistant a besoin d'une clé pour répondre. Récupère-la sur
         <a href="https://llm.lab.sspcloud.fr" target="_blank">llm.lab.sspcloud.fr</a>
@@ -562,7 +561,7 @@
                  style="width:100%;padding:8px 10px;border:1px solid #ddd;
                         border-radius:4px;font-family:monospace;font-size:12px" />
         </div>
-        <button type="submit" class="fr-btn fr-btn--sm">
+        <button type="submit" class="qs-btn qs-btn--sm">
           Enregistrer
         </button>
       </form>
@@ -583,44 +582,43 @@
 
 {# Sprint UX-2 (2026-06-21) : footer DSFR harmonise avec chat.html agent.
    Memes liens, meme structure -> service unifie. #}
-<footer class="fr-footer" role="contentinfo"><div class="fr-container">
-<div class="fr-footer__body">
-  <div class="fr-footer__content">
-    <p class="fr-footer__content-desc">
+<footer class="qs-pied" role="contentinfo"><div class="qs-conteneur">
+<div class="qs-pied__corps">
+  <div class="qs-pied__contenu">
+    <p class="qs-pied__desc">
       QGIS Service — plateforme d'analyse géospatiale assistée par IA,
       hébergée sur SSPCloud (INSEE). Outils QGIS Desktop + agent
       conversationnel + accès aux données IGN, Géorisques, OSM et DVF.
     </p>
-    <ul class="fr-footer__content-list">
-      <li class="fr-footer__content-item">
-        <a class="fr-footer__content-link" target="_blank" rel="noopener external"
+    <ul class="qs-pied__liste">
+      <li class="qs-pied__item">
+        <a class="qs-pied__lien" target="_blank" rel="noopener external"
            href="https://lab.sspcloud.fr">SSPCloud</a>
       </li>
-      <li class="fr-footer__content-item">
-        <a class="fr-footer__content-link" target="_blank" rel="noopener external"
+      <li class="qs-pied__item">
+        <a class="qs-pied__lien" target="_blank" rel="noopener external"
            href="https://github.com/nic01asFr/Qgis-sspcloud">GitHub source</a>
       </li>
     </ul>
   </div>
 </div>
-<div class="fr-footer__bottom"><ul class="fr-footer__bottom-list">
-  <li class="fr-footer__bottom-item">
-    <a class="fr-footer__bottom-link" href="/desk">Bureau de travail</a>
+<div class="qs-pied__bas"><ul class="qs-pied__bas-liste">
+  <li class="qs-pied__bas-item">
+    <a class="qs-pied__bas-lien" href="/desk">Bureau de travail</a>
   </li>
-  <li class="fr-footer__bottom-item">
-    <a class="fr-footer__bottom-link" href="{{ agent_url }}" target="_blank" rel="noopener">Agent IA seul ↗</a>
+  <li class="qs-pied__bas-item">
+    <a class="qs-pied__bas-lien" href="{{ agent_url }}" target="_blank" rel="noopener">Agent IA seul ↗</a>
   </li>
-  <li class="fr-footer__bottom-item">
-    <a class="fr-footer__bottom-link" target="_blank" rel="noopener external"
+  <li class="qs-pied__bas-item">
+    <a class="qs-pied__bas-lien" target="_blank" rel="noopener external"
        href="https://github.com/nic01asFr/Qgis-sspcloud/blob/main/LICENSE.md">Licence ouverte 2.0</a>
   </li>
-  <li class="fr-footer__bottom-item">
-    <a class="fr-footer__bottom-link" target="_blank" rel="noopener external"
+  <li class="qs-pied__bas-item">
+    <a class="qs-pied__bas-lien" target="_blank" rel="noopener external"
        href="https://github.com/nic01asFr/Qgis-sspcloud/issues">Signaler un problème</a>
   </li>
 </ul></div>
 </div></footer>
 
-<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.module.min.js"></script>
 </body>
 </html>

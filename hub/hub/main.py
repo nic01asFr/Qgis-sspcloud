@@ -1265,9 +1265,9 @@ _AGENT_URL = (
 # SVG en data URI : aucune requete reseau, donc plus de 401 possible.
 _FAVICON_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
-    '<rect width="32" height="32" rx="6" fill="#000091"/>'
+    '<rect width="32" height="32" rx="6" fill="#589632"/>'
     '<path d="M6 22 L13 11 L18 18 L22 14 L26 22 Z" fill="#fff"/>'
-    '<circle cx="23" cy="9" r="2.5" fill="#e1000f"/>'
+    '<circle cx="23" cy="9" r="2.5" fill="#EE7913"/>'
     '</svg>'
 )
 _FAVICON_TAG = (
@@ -1367,7 +1367,8 @@ async def _desk_context() -> dict:
                 ("/studies/active", lambda d: ctx.update(
                     active_study_id=d.get("id"), active_study=d) if d else None),
                 ("/sessions", lambda d: ctx.update(
-                    session_status={"ready":"✓","sleeping":"💤","starting":"…","error":"⚠"}.get(
+                    session_status={"ready": "actif", "sleeping": "en veille",
+                     "starting": "demarrage", "error": "erreur"}.get(
                         d[0].get("status","—"), d[0].get("status","—")),
                     session_ready=(d[0].get("status") == "ready"),
                     novnc_url=d[0].get("novnc_url","#")) if d else None),
@@ -1675,8 +1676,7 @@ async def oauth_authorize(
   <form action="/authorize/confirm?{params}" method="POST" class="space-y-3">
     <input name="api_key" type="password" required
       placeholder="qgis_votrenom_..."
-      class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono
-             focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+      class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"/>
     <p class="text-xs text-gray-400">
       Votre clé API est disponible sur le portail ou via
       <code>POST /auth/apikey</code> avec votre token SSPCloud.
@@ -2580,15 +2580,14 @@ async def hub_onboarding(request: Request):
 <head>
 <meta charset="UTF-8">
 <title>Connexion — QGIS Service</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
 <style>
-body{{font-family:Marianne,arial,sans-serif;max-width:720px;margin:60px auto;padding:0 20px}}
-h1{{color:#000091;font-size:24px}}
-.step{{background:#f5f5fe;border-left:4px solid #000091;padding:16px 20px;margin:20px 0;border-radius:2px}}
+body{{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;max-width:720px;margin:60px auto;padding:0 20px}}
+h1{{color:#41701F;font-size:24px}}
+.step{{background:#EDF4E6;border-left:4px solid #41701F;padding:16px 20px;margin:20px 0;border-radius:2px}}
 textarea{{width:100%;min-height:120px;font-family:monospace;font-size:11px;padding:8px;border:1px solid #ddd;border-radius:2px}}
-button{{background:#000091;color:#fff;padding:10px 24px;border:none;border-radius:2px;font-size:14px;cursor:pointer;font-family:inherit}}
+button{{background:#41701F;color:#fff;padding:10px 24px;border:none;border-radius:2px;font-size:14px;cursor:pointer;font-family:inherit}}
 button:hover{{background:#1212ff}}
-a{{color:#000091}}
+a{{color:#41701F}}
 .hint{{color:#666;font-size:12px;margin-top:4px}}
 </style>
 </head>
@@ -2761,23 +2760,22 @@ async def hub_login_form(request: Request, error: str = "", key: str = ""):
 <meta charset="UTF-8">
 <title>Connexion — QGIS Service</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#000091">
+<meta name="theme-color" content="#0E2433">
 {_FAVICON_TAG}
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
 <style>
-body{{font-family:Marianne,arial,sans-serif;max-width:640px;margin:40px auto 60px;padding:0 20px}}
-h1{{color:#000091;font-size:24px}}
+body{{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;max-width:640px;margin:40px auto 60px;padding:0 20px}}
+h1{{color:#41701F;font-size:24px}}
 .brand-row{{display:flex;align-items:center;gap:20px;
   padding-bottom:16px;margin-bottom:28px;border-bottom:1px solid #ddd}}
-.brand-row .fr-logo{{margin:0}}
+.brand-row .{{margin:0}}
 .brand-op{{display:flex;flex-direction:column;gap:2px}}
-.brand-op .op{{font-weight:700;font-size:15px;color:#000091;letter-spacing:.4px}}
+.brand-op .op{{font-weight:700;font-size:15px;color:#41701F;letter-spacing:.4px}}
 .brand-op .sub{{font-size:11.5px;color:#666}}
-.step{{background:#f5f5fe;border-left:4px solid #000091;padding:16px 20px;margin:20px 0;border-radius:2px}}
+.step{{background:#EDF4E6;border-left:4px solid #41701F;padding:16px 20px;margin:20px 0;border-radius:2px}}
 input[type=password]{{width:100%;padding:10px;border:1px solid #ddd;border-radius:2px;font-family:monospace;font-size:12px;box-sizing:border-box}}
-button{{background:#000091;color:#fff;padding:10px 24px;border:none;border-radius:2px;font-size:14px;cursor:pointer;font-family:inherit;margin-top:8px}}
+button{{background:#41701F;color:#fff;padding:10px 24px;border:none;border-radius:2px;font-size:14px;cursor:pointer;font-family:inherit;margin-top:8px}}
 button:hover{{background:#1212ff}}
-a{{color:#000091}}
+a{{color:#41701F}}
 .hint{{color:#666;font-size:12px;margin-top:4px}}
 .alt{{margin-top:30px;padding-top:20px;border-top:1px solid #ddd;color:#666;font-size:13px}}
 code{{font-size:11px;background:#efeffb;padding:2px 6px;border-radius:2px}}
@@ -2981,8 +2979,7 @@ async def hub_home(request: Request):
     </div>
     <button
       onclick="startSession(this)"
-      class="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium text-sm
-             hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-wait">
+      class="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium text-sm hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-wait">
       ▶ Démarrer ma session QGIS
     </button>
     <p id="session-status" class="text-xs text-gray-500 hidden"></p>
@@ -6101,7 +6098,7 @@ async def render_component_endpoint(
         "<link rel='stylesheet' href='https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css'>"
         "<script src='https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js'></script>"
         "<script src='https://unpkg.com/chart.js@4.4.0/dist/chart.umd.js'></script>"
-        "<style>body{margin:0;font-family:Marianne,system-ui,sans-serif;background:#f6f6f6;padding:20px}</style>"
+        "<style>body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#f6f6f6;padding:20px}</style>"
         "</head><body>"
         f"{body_html}"
         "</body></html>"
@@ -6746,13 +6743,13 @@ def _markdown_to_html_basique(md: str) -> str:
             _flush_list()
             _flush_para()
             rendered.append(
-                f"<h2 style='color:#000091'>{_inline(_h.escape(s[3:]))}</h2>"
+                f"<h2 style='color:#41701F'>{_inline(_h.escape(s[3:]))}</h2>"
             )
         elif s.startswith("# "):
             _flush_list()
             _flush_para()
             rendered.append(
-                f"<h1 style='color:#000091'>{_inline(_h.escape(s[2:]))}</h1>"
+                f"<h1 style='color:#41701F'>{_inline(_h.escape(s[2:]))}</h1>"
             )
         elif s.startswith("- "):
             _flush_para()
@@ -7028,7 +7025,7 @@ async def _build_interactive_map_ctx(
     # Une carte CEREMA exploitable en COPIL a TOUJOURS : Titre + Legende +
     # Source datee + Caveat (optionnel mais recommande). Sans ces 4, la
     # carte est jolie mais inutilisable metier.
-    palette = ['#000091', '#e1000f', '#1f8d4d', '#ff6f00', '#9c27b0', '#0288d1']
+    palette = ['#41701F', '#e1000f', '#41701F', '#ff6f00', '#9c27b0', '#0288d1']
 
     # Legende auto-derivee depuis les layers du scene_manifest
     # Vague E2 Commit 5 + 10 : si layer.classification existe, legende riche
@@ -7284,8 +7281,8 @@ async def _pre_render_component_html(
             color_token = params.get("color", "")
             gradient = (
                 "linear-gradient(135deg,#e1000f,#aa0000)" if color_token == "marianne-red"
-                else "linear-gradient(135deg,#1f8d4d,#0a5d2e)" if color_token == "success-green"
-                else "linear-gradient(135deg,#000091,#0063cb)"  # default blue CEREMA
+                else "linear-gradient(135deg,#41701F,#0a5d2e)" if color_token == "success-green"
+                else "linear-gradient(135deg,#41701F,#6FAE45)"  # accent du produit
             )
             kpi = {
                 "value": params.get("value", "?"),
@@ -7420,16 +7417,16 @@ async def _pre_render_component_html(
             palette = params.get("palette", "monochrome")
             # Monochrome = degrade subtil de bleu Marianne (1 couleur dominante)
             monochrome_gradients = [
-                "linear-gradient(135deg,#000091,#0063cb)",  # bleu fonce
+                "linear-gradient(135deg,#41701F,#6FAE45)",  # accent du produit
                 "linear-gradient(135deg,#1212a1,#1d75d0)",  # legerement plus clair
                 "linear-gradient(135deg,#2424b0,#3d87d4)",
                 "linear-gradient(135deg,#3636bf,#5099d7)",
             ]
             color_map = {
                 "marianne-red": "linear-gradient(135deg,#e1000f,#aa0000)",
-                "success-green": "linear-gradient(135deg,#1f8d4d,#0a5d2e)",
+                "success-green": "linear-gradient(135deg,#41701F,#0a5d2e)",
                 "warning-orange": "linear-gradient(135deg,#b34000,#cd6133)",
-                "info-blue": "linear-gradient(135deg,#000091,#0063cb)",
+                "info-blue": "linear-gradient(135deg,#41701F,#0063cb)",
             }
             kpis = params.get("kpis", []) or []
             cols_min = int(params.get("columns_min", 140))
@@ -7466,7 +7463,7 @@ async def _pre_render_component_html(
             text = _h.escape(str(params.get("text", comp_manifest.get("title", ""))))
             sizes = {1: "32px", 2: "26px", 3: "20px", 4: "16px"}
             return (
-                f'<h{level} style="font-size:{sizes[level]};color:#161616;'
+                f'<h{level} style="font-size:{sizes[level]};color:#14202B;'
                 f'margin:24px 0 12px;font-weight:700;line-height:1.3">{text}</h{level}>'
             )
 
@@ -7481,7 +7478,7 @@ async def _pre_render_component_html(
                 parts = [p for p in [author, source_text] if p]
                 attr_html = f'<footer style="margin-top:8px;font-size:13px;color:#666">— {" · ".join(parts)}</footer>'
             return (
-                f'<blockquote style="border-left:4px solid #000091;'
+                f'<blockquote style="border-left:4px solid #41701F;'
                 f'padding:12px 18px;margin:18px 0;background:#f4f6fa;'
                 f'font-style:italic;color:#1a1a1a;font-size:16px;line-height:1.6">'
                 f'{text}{attr_html}</blockquote>'
@@ -7496,9 +7493,9 @@ async def _pre_render_component_html(
             style = params.get("style", "solid")
             if style not in ("solid", "dashed", "dotted"):
                 style = "solid"
-            color = params.get("color", "#000091")  # default bleu marianne (vs gris invisible)
+            color = params.get("color", "#41701F")  # default bleu marianne (vs gris invisible)
             if not isinstance(color, str) or len(color) > 7 or not color.startswith("#"):
-                color = "#000091"
+                color = "#41701F"
             variant = params.get("variant", "rule")
             if variant == "ornament":
                 # Trait court centre (beat narratif fort)
@@ -7796,7 +7793,7 @@ async def publish_component_endpoint(
         "<link rel='stylesheet' href='https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css'>"
         "<script src='https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js'></script>"
         "<script src='https://unpkg.com/chart.js@4.4.0/dist/chart.umd.js'></script>"
-        "<style>body{margin:0;font-family:Marianne,system-ui,sans-serif;background:#f6f6f6;padding:20px}</style>"
+        "<style>body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#f6f6f6;padding:20px}</style>"
         "</head><body>"
         f"{component_html}"
         "</body></html>"
@@ -9676,16 +9673,16 @@ def _render_publication_404_html(owner: str, kind: str, slug: str) -> HTMLRespon
 <meta charset="utf-8"/>
 <title>Publication introuvable — QGIS Service</title>
 <style>
-  body {{ margin:0; font-family: Marianne, system-ui, sans-serif; background:#f6f6f6; color:#161616 }}
+  body {{ margin:0; font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif; background:#f6f6f6; color:#14202B }}
   .wrap {{ max-width:640px; margin:64px auto; padding:32px; background:#fff; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,.06) }}
-  h1 {{ color:#000091; font-size:26px; margin:0 0 12px }}
+  h1 {{ color:#41701F; font-size:26px; margin:0 0 12px }}
   .lead {{ color:#3a3a3a; font-size:15px; line-height:1.55; margin:0 0 20px }}
-  .details {{ background:#f5f5fe; padding:14px 18px; border-radius:6px; font-size:13px; color:#3a3a3a; margin:16px 0 24px }}
+  .details {{ background:#EDF4E6; padding:14px 18px; border-radius:6px; font-size:13px; color:#3a3a3a; margin:16px 0 24px }}
   .details code {{ background:#fff; padding:2px 6px; border-radius:3px }}
   .actions {{ display:flex; gap:12px; flex-wrap:wrap }}
-  a.btn {{ display:inline-block; padding:10px 18px; background:#000091; color:#fff; text-decoration:none; border-radius:4px; font-size:14px; font-weight:600 }}
-  a.btn.secondary {{ background:#fff; color:#000091; border:1px solid #000091 }}
-  .banner {{ background:#000091; color:#fff; padding:10px 16px; font-size:13px; font-weight:600 }}
+  a.btn {{ display:inline-block; padding:10px 18px; background:#41701F; color:#fff; text-decoration:none; border-radius:4px; font-size:14px; font-weight:600 }}
+  a.btn.secondary {{ background:#fff; color:#41701F; border:1px solid #41701F }}
+  .banner {{ background:#41701F; color:#fff; padding:10px 16px; font-size:13px; font-weight:600 }}
   .banner span {{ opacity:.7; font-weight:400 }}
 </style>
 </head><body>
@@ -9772,22 +9769,22 @@ async def list_published_owner(owner: str) -> HTMLResponse:
 <meta charset="utf-8"/>
 <title>Publications de {owner} — QGIS Service</title>
 <style>
-  body {{ margin:0; font-family: Marianne, system-ui, sans-serif; background:#f6f6f6; color:#161616 }}
-  .banner {{ background:#000091; color:#fff; padding:10px 16px; font-size:13px; font-weight:600 }}
+  body {{ margin:0; font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif; background:#f6f6f6; color:#14202B }}
+  .banner {{ background:#41701F; color:#fff; padding:10px 16px; font-size:13px; font-weight:600 }}
   .banner span {{ opacity:.7; font-weight:400 }}
   .wrap {{ max-width:900px; margin:32px auto; padding:24px }}
-  h1 {{ color:#000091; font-size:28px; margin:0 0 8px }}
+  h1 {{ color:#41701F; font-size:28px; margin:0 0 8px }}
   .subtitle {{ color:#666; font-size:14px; margin:0 0 28px }}
-  .pub-row {{ display:block; background:#fff; border:1px solid #ececfe; border-radius:6px; padding:16px 20px; margin-bottom:10px; text-decoration:none; color:#161616; transition:box-shadow .15s }}
-  .pub-row:hover {{ box-shadow:0 2px 8px rgba(0,0,145,.12); border-color:#000091 }}
-  .pub-row-title {{ font-size:15px; font-weight:600; color:#000091; margin-bottom:6px }}
+  .pub-row {{ display:block; background:#fff; border:1px solid #EDF4E6; border-radius:6px; padding:16px 20px; margin-bottom:10px; text-decoration:none; color:#14202B; transition:box-shadow .15s }}
+  .pub-row:hover {{ box-shadow:0 2px 8px rgba(65,112,31,.14); border-color:#41701F }}
+  .pub-row-title {{ font-size:15px; font-weight:600; color:#41701F; margin-bottom:6px }}
   .pub-row-meta {{ display:flex; gap:12px; font-size:12px; color:#666; flex-wrap:wrap }}
-  .pub-badge {{ background:#ececfe; color:#000091; padding:2px 8px; border-radius:10px; font-weight:600 }}
+  .pub-badge {{ background:#EDF4E6; color:#41701F; padding:2px 8px; border-radius:10px; font-weight:600 }}
   .empty {{ padding:32px; text-align:center; color:#888; background:#fff; border-radius:6px; border:1px dashed #ddd }}
   .indispo {{ padding:24px 28px; color:#b34000; background:#fff4ed; border-radius:6px; border:1px solid #ffc7ab; line-height:1.6 }}
   .indispo span {{ display:block; margin-top:10px; font-size:12px; color:#666 }}
   .footer-nav {{ margin-top:32px; text-align:center }}
-  .footer-nav a {{ color:#000091; text-decoration:none; font-size:13px }}
+  .footer-nav a {{ color:#41701F; text-decoration:none; font-size:13px }}
 </style>
 </head><body>
 <div class="banner">QGIS <span>· Service</span></div>
@@ -10049,7 +10046,7 @@ async def serve_published(
                     pass
             banner = (
                 '<div id="publi-banner" style="position:fixed;top:0;left:0;right:0;'
-                'height:32px;background:#000091;color:#fff;display:flex;align-items:center;'
+                'height:32px;background:#41701F;color:#fff;display:flex;align-items:center;'
                 'padding:0 14px;font:13px system-ui,sans-serif;z-index:99999;gap:14px;'
                 'box-shadow:0 1px 4px rgba(0,0,0,.15)">'
                 '<span style="font-weight:700">QGIS</span>'
@@ -12129,6 +12126,9 @@ async def desk_page(request: Request):
         pass  # never block /desk rendering
 
     ctx = await _desk_context()
+    # Le bouton de compte signale une cle d'assistant manquante : sans cette
+    # valeur, l'indication ne s'afficherait jamais dans le bureau.
+    ctx["llm_key_missing"] = await _cle_assistant_manquante()
     return _jinja.TemplateResponse(request, "desk.html", ctx)
 
 
@@ -12148,17 +12148,7 @@ async def workspace_page(request: Request):
     # une alerte tant que la cle manque.
     # Non bloquant et timeout court : si l'agent ne repond pas, on n'affirme
     # rien plutot que d'alarmer a tort.
-    ctx["llm_key_missing"] = False
-    try:
-        ns = f"user-{_ONYXIA_USER}" if _ONYXIA_USER else auth._NAMESPACE
-        async with httpx.AsyncClient(timeout=3) as c:
-            r = await c.get(
-                f"http://qgis-agent.{ns}.svc.cluster.local:8888/api/status"
-            )
-        if r.status_code == 200:
-            ctx["llm_key_missing"] = not r.json().get("has_llm_key", True)
-    except Exception as exc:
-        log.debug("workspace: statut agent indisponible : %s", exc)
+    ctx["llm_key_missing"] = await _cle_assistant_manquante()
 
     # Sprint Day 5 Phase 1.7-C (2026-08-05) : propage status feedback llm-key
     # form (query string ?llm_key=updated|error|invalid, pose apres POST).
@@ -12187,6 +12177,30 @@ async def workspace_page(request: Request):
             "Réessaie ou consulte les logs kubectl logs qgis-agent-0."
         )
     return _jinja.TemplateResponse(request, "workspace.html", ctx)
+
+
+async def _cle_assistant_manquante() -> bool:
+    """L'assistant a-t-il une cle de connexion ?
+
+    Interroge /api/status de l'agent, route publique et sans secret. Non
+    bloquant, timeout court : quand l'agent ne repond pas on n'affirme rien
+    plutot que d'alarmer a tort.
+
+    Extrait de la vue workspace pour servir aussi au bureau, ou le bouton de
+    compte signale la cle manquante. Dupliquer l'appel aurait fait deriver les
+    deux surfaces des qu'on change de route ou de nom de champ.
+    """
+    try:
+        ns = f"user-{_ONYXIA_USER}" if _ONYXIA_USER else auth._NAMESPACE
+        async with httpx.AsyncClient(timeout=3) as c:
+            r = await c.get(
+                f"http://qgis-agent.{ns}.svc.cluster.local:8888/api/status"
+            )
+        if r.status_code == 200:
+            return not r.json().get("has_llm_key", True)
+    except Exception as exc:
+        log.debug("statut agent indisponible : %s", exc)
+    return False
 
 
 @app.post("/workspace/llm-key")
@@ -12623,17 +12637,59 @@ async def desk_save_study(sid: str):
     # on prend le meilleur effort : legacy toujours + pid-scope si connu.
     active_pid = await studies.get_active_project_id(_ONYXIA_USER)
     active_sid_verify = await studies.get_active_study_id(_ONYXIA_USER)
+
+    # Le sid vient d'une page qui l'a fige a son rendu et ne le met jamais a
+    # jour. Une page laissee ouverte demande donc a sauvegarder une etude qui
+    # n'est plus celle que QGIS a chargee -- et comme le beacon part aussi sur
+    # `visibilitychange`, il suffit d'un changement d'onglet pour ecrire le
+    # projet courant dans l'etude d'hier.
+    #
+    # On ne sauvegarde que si le sid demande est bien l'etude active. Refuser
+    # ne perd rien : quand le sid differe, QGIS n'a pas ce projet charge, et
+    # l'ecrire reviendrait a y copier le contenu d'un autre travail.
+    if active_sid_verify and active_sid_verify != sid:
+        log.info(
+            "Save desk refuse : sid demande %s, etude active %s",
+            sid, active_sid_verify,
+        )
+        return {
+            "ok": False,
+            "sid": sid,
+            "raison": "sid_perime",
+            "sid_actif": active_sid_verify,
+        }
+
     pid_for_save = active_pid if active_sid_verify == sid else None
     try:
-        await _execute_python_in_workspace(
+        sortie = await _execute_python_in_workspace(
             _ONYXIA_USER,
             studies.save_active_project_pod_code(sid, pid_for_save),
             timeout=15,
         )
-        return {"ok": True, "sid": sid, "pid": pid_for_save}
     except Exception as exc:
-        log.warning("Save desk étude %s : %s", sid, exc)
-        return {"ok": False, "error": str(exc)}
+        log.warning("Save desk étude %s : %s", sid, exc or type(exc).__name__)
+        return {"ok": False, "sid": sid, "raison": "erreur_pod",
+                "error": str(exc) or type(exc).__name__}
+
+    # Le code pod imprime son verdict. Sans marqueur de succes, la sauvegarde
+    # n'a pas eu lieu -- l'endpoint repondait pourtant `ok: True`, ce qui a
+    # laisse croire pendant des semaines que le projet etait ecrit.
+    texte = str(sortie or "")
+    if "STUDY_SAVE_REFUSED_INVALIDE" in texte:
+        raison = "projet_degrade"
+    elif "STUDY_SAVE_REFUSED" in texte:
+        raison = "projet_etranger"
+    elif "STUDY_SAVE_OK" in texte:
+        raison = None
+    elif "STUDY_SAVE_SKIP" in texte:
+        raison = "aucune_couche"
+    else:
+        raison = "sans_verdict"
+
+    if raison:
+        log.warning("Save desk étude %s non effectuee : %s", sid, raison)
+        return {"ok": False, "sid": sid, "pid": pid_for_save, "raison": raison}
+    return {"ok": True, "sid": sid, "pid": pid_for_save}
 
 
 # ── Proxy mémoire vers l'agent IA ─────────────────────────────────────────────

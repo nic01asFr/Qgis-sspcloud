@@ -4,6 +4,14 @@ USER root
 WORKDIR /opt/qgis-agent
 
 COPY agent/ .
+
+# La feuille du produit vit dans hub/ : une seule source pour les deux
+# services, copiee ici a la construction plutot que dupliquee en depot.
+# Le chat est servi soit en iframe via le proxy du hub (ou /static/
+# resout sur le hub), soit en direct sur son propre domaine -- d'ou le
+# montage cote agent, pour que les deux chemins fonctionnent.
+COPY hub/hub/static/produit.css agent/static/produit.css
+
 RUN pip install -e . --quiet --no-cache-dir
 
 ENV SERVICE_NAME=qgis-agent \

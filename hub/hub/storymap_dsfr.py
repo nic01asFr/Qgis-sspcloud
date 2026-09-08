@@ -8,12 +8,12 @@ Pattern extrait de trois exemples de référence :
 
 Principes invariants :
   1. Header (operateur optionnel, vide par defaut)
-  2. fr-notice (statut de l'étude)
+  2. qs-avis (statut de l'étude)
   3. Chapitres alternant fond gris/blanc (background-alt-grey)
   4. .chapter-title bleu france avec border-bottom 3px
   5. Section #methodo avec chain-badges : 📥 data → ⚙️ algo → 📊 result
      (c'est LE pattern d'explicabilité affichée illustrée et claire)
-  6. Section #tracabilite avec fr-accordion (sources / pipeline / fiabilité)
+  6. Section #tracabilite avec qs-accordeon (sources / pipeline / fiabilité)
   7. Footer DSFR
 
 Usage :
@@ -64,36 +64,46 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
-_DSFR_VERSION = "1.12.1"
+# La feuille du produit est INLINEE dans chaque livrable, pas liee.
+#
+# Un livrable est diffuse, parfois archive, souvent relu longtemps apres : le
+# faire dependre d'un CDN tiers pour son apparence, c'est accepter qu'il se
+# degrade tout seul le jour ou l'URL bouge. Les 28 Ko inlines suppriment cette
+# dependance -- il en restait deux (la charte d'Etat et ses utilitaires), il
+# n'en reste aucune.
+_FEUILLE_PRODUIT = (
+    Path(__file__).parent / "static" / "produit.css"
+).read_text(encoding="utf-8")
 _LEAFLET_VERSION = "1.9.4"
 
 
 # ── Styles communs (en plus de DSFR) ──────────────────────────────────────────
 
 _BASE_STYLES = r"""
-.chapter-title{font-size:18px;font-weight:700;color:var(--text-title-blue-france);
-  border-bottom:3px solid var(--border-action-high-blue-france);
+.chapter-title{font-size:18px;font-weight:700;color:var(--qs-accent);
+  border-bottom:3px solid var(--qs-accent);
   padding-bottom:8px;margin-bottom:16px}
 .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
   gap:12px;margin:16px 0}
 .kpi-card{background:#fff;border-radius:4px;padding:14px 16px;
-  border-top:4px solid var(--border-action-high-blue-france);
+  border-top:4px solid var(--qs-accent);
   box-shadow:0 1px 4px rgba(0,0,0,.08)}
 .kpi-card--red{border-top-color:#c1351a}
-.kpi-card--green{border-top-color:#1f6f3f}
-.kpi-card--orange{border-top-color:#d64d00}
-.kpi-value{font-size:1.8rem;font-weight:700;color:var(--text-title-grey);
+.kpi-card--green{border-top-color:var(--qs-succes)}
+.kpi-card--orange{border-top-color:var(--qs-alerte)}
+.kpi-value{font-size:1.8rem;font-weight:700;color:var(--qs-encre);
   line-height:1;margin-bottom:.35rem}
 .kpi-unit{font-size:.95rem;font-weight:400;color:#666;margin-left:4px}
 .kpi-label{font-size:.85rem;color:#666;margin-top:.25rem}
 .chain-badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-.chain-badges .fr-badge{font-size:.7rem}
+.chain-badges .qs-pastille{font-size:.7rem}
 .method-step{background:#fff;border-radius:4px;padding:14px 18px;
-  border-left:4px solid var(--border-action-high-blue-france);
+  border-left:4px solid var(--qs-accent);
   box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:12px}
-.method-step h3{font-size:1rem;font-weight:700;color:var(--text-title-blue-france);
+.method-step h3{font-size:1rem;font-weight:700;color:var(--qs-accent);
   margin:0 0 6px}
 .method-step p{font-size:.9rem;color:#555;margin:0 0 4px;line-height:1.5}
 .method-step .svg-explain{margin-top:10px;background:#fafafe;padding:10px;
@@ -128,8 +138,8 @@ def _kpi_card(kpi: dict[str, Any]) -> str:
 
 def _callout(text: str, kind: str = "info") -> str:
     return (
-        f'<div class="fr-callout fr-mt-2w">'
-        f'<p class="fr-callout__text">{text}</p>'
+        f'<div class="qs-encart qs-mt-2w">'
+        f'<p class="qs-encart__texte">{text}</p>'
         f'</div>'
     )
 
@@ -140,7 +150,7 @@ def _map_leaflet(block: dict[str, Any], idx: int) -> tuple[str, str]:
     center = block.get("center", [46.5, 2.5])
     zoom = block.get("zoom", 13)
     geojson_url = block.get("geojson_url", "")
-    style_js = block.get("style_js", "{color:'#000091',weight:2,fillOpacity:.4}")
+    style_js = block.get("style_js", "{color:'#41701F',weight:2,fillOpacity:.4}")
     popup_field = block.get("popup_field")
     caption = block.get("caption", "Cliquer une entité pour ses attributs.")
 
@@ -185,7 +195,7 @@ def _image(block: dict[str, Any]) -> str:
     caption = block.get("caption", "")
     cap_html = f'<p class="map-caption">{caption}</p>' if caption else ""
     return (
-        f'<figure class="fr-content-media">'
+        f'<figure class="qs-media">'
         f'<img src="{src}" alt="{alt}" '
         f'style="width:100%;border-radius:4px;box-shadow:0 1px 6px rgba(0,0,0,.12)">'
         f'{cap_html}</figure>'
@@ -215,17 +225,17 @@ def _method_step(step: dict[str, Any]) -> str:
         badges = '<div class="chain-badges">'
         if data_in:
             badges += (
-                f'<span class="fr-badge fr-badge--info fr-badge--sm fr-badge--no-icon">'
+                f'<span class="qs-pastille qs-pastille--info qs-pastille--sm">'
                 f'📥 {data_in}</span>'
             )
         if algo:
             badges += (
-                f'<span class="fr-badge fr-badge--new fr-badge--sm fr-badge--no-icon">'
+                f'<span class="qs-pastille qs-pastille--nouveau qs-pastille--sm">'
                 f'⚙️ {algo}</span>'
             )
         if result:
             badges += (
-                f'<span class="fr-badge fr-badge--success fr-badge--sm fr-badge--no-icon">'
+                f'<span class="qs-pastille qs-pastille--succes qs-pastille--sm">'
                 f'📊 {result}</span>'
             )
         badges += '</div>'
@@ -444,7 +454,7 @@ class StorymapBuilder:
             + self._render_scripts()
         )
 
-        return f'<!DOCTYPE html>\n<html lang="{self.lang}" data-fr-scheme="light">\n{head}\n<body>\n{body}\n</body>\n</html>\n'
+        return f'<!DOCTYPE html>\n<html lang="{self.lang}">\n{head}\n<body>\n{body}\n</body>\n</html>\n'
 
     # ── Rendu interne ─────────────────────────────────────────────────────
 
@@ -458,12 +468,10 @@ class StorymapBuilder:
         return f"""<head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
-<meta name="theme-color" content="#000091">
+<meta name="theme-color" content="#0E2433">
 <title>{self.title}{titre_suffixe}</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@{_DSFR_VERSION}/dist/dsfr.min.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@{_DSFR_VERSION}/dist/utility/utility.min.css">
 {leaflet}
-<style>{_BASE_STYLES}{self.extra_css}</style>
+<style>{_FEUILLE_PRODUIT}{_BASE_STYLES}{self.extra_css}</style>
 {self.extra_head}
 </head>"""
 
@@ -481,17 +489,17 @@ class StorymapBuilder:
                 if self.operator_sub else ""
             )
             bloc_operateur = (
-                '\n    <div class="fr-header__operator">'
-                f'\n      <p style="font-weight:700;font-size:15px;color:#000091">{self.operator}</p>'
+                '\n    <div class="qs-entete__marque-haut">'
+                f'\n      <p style="font-weight:700;font-size:15px;color:var(--qs-accent)">{self.operator}</p>'
                 f'{sous_titre}'
                 '\n    </div>'
             )
-        return f"""<header role="banner" class="fr-header">
-<div class="fr-header__body"><div class="fr-container"><div class="fr-header__body-row">
-  <div class="fr-header__brand fr-enlarge-link"><div class="fr-header__brand-top">{bloc_operateur}
+        return f"""<header role="banner" class="qs-entete">
+<div class="qs-entete__corps"><div class="qs-conteneur"><div class="qs-entete__ligne">
+  <div class="qs-entete__marque qs-lien-etendu"><div class="qs-entete__marque-haut">{bloc_operateur}
   </div>
-  <div class="fr-header__service"><a href="#"><p class="fr-header__service-title">{svc_title}</p></a>
-    <p class="fr-header__service-tagline">{self.subtitle}</p>
+  <div class="qs-entete__service"><a href="#"><p class="qs-entete__service-titre">{svc_title}</p></a>
+    <p class="qs-entete__service-accroche">{self.subtitle}</p>
   </div></div>
 </div></div></div>
 </header>"""
@@ -499,8 +507,8 @@ class StorymapBuilder:
     def _render_notice(self) -> str:
         if not self.notice:
             return ""
-        return f"""<div class="fr-notice fr-notice--info"><div class="fr-container"><div class="fr-notice__body">
-<p class="fr-notice__title">{self.notice}</p>
+        return f"""<div class="qs-avis qs-avis--info"><div class="qs-conteneur"><div class="qs-avis__corps">
+<p class="qs-avis__titre">{self.notice}</p>
 </div></div></div>"""
 
     def _render_hero(self) -> str:
@@ -511,10 +519,10 @@ class StorymapBuilder:
                 + "".join(_kpi_card(k) for k in self._kpis)
                 + '</div>'
             )
-        return f"""<section id="s0" class="fr-py-6w">
-<div class="fr-container">
-  <h1 class="fr-mb-1w">{self.title}</h1>
-  <p class="fr-text--lead">{self.subtitle}</p>
+        return f"""<section id="s0" class="qs-py-6w">
+<div class="qs-conteneur">
+  <h1 class="qs-mb-1w">{self.title}</h1>
+  <p class="qs-texte--lead">{self.subtitle}</p>
   {kpi_html}
 </div>
 </section>"""
@@ -525,9 +533,9 @@ class StorymapBuilder:
             bg_alt = ch["bg_alt"]
             if bg_alt is None:
                 bg_alt = (i % 2 == 0)  # alterne en partant du gris
-            bg = ' style="background:var(--background-alt-grey)"' if bg_alt else ""
+            bg = ' style="background:var(--qs-surface-2)"' if bg_alt else ""
             intro = (
-                f'<p class="fr-text--sm fr-mb-3w">{ch["intro"]}</p>'
+                f'<p class="qs-texte--sm qs-mb-3w">{ch["intro"]}</p>'
                 if ch["intro"] else ""
             )
             blocks_html = []
@@ -544,8 +552,8 @@ class StorymapBuilder:
                 elif kind == "html":
                     blocks_html.append(_html_block(b))
 
-            out.append(f"""<section id="ch{i+1}" class="fr-py-6w"{bg}>
-<div class="fr-container">
+            out.append(f"""<section id="ch{i+1}" class="qs-py-6w"{bg}>
+<div class="qs-conteneur">
   <p class="chapter-title">{ch["title"]}</p>
   {intro}
   {"".join(blocks_html)}
@@ -558,10 +566,10 @@ class StorymapBuilder:
             return ""
         m = self._methodology
         steps_html = "".join(_method_step(s) for s in m["steps"])
-        return f"""<section id="methodo" class="fr-py-6w" style="background:var(--background-alt-grey)">
-<div class="fr-container" style="max-width:900px">
+        return f"""<section id="methodo" class="qs-py-6w" style="background:var(--qs-surface-2)">
+<div class="qs-conteneur" style="max-width:900px">
   <p class="chapter-title">Comment cette carte est construite</p>
-  <p class="fr-text--sm fr-mb-3w">{m["intro"]}</p>
+  <p class="qs-texte--sm qs-mb-3w">{m["intro"]}</p>
   {steps_html}
 </div>
 </section>"""
@@ -571,18 +579,18 @@ class StorymapBuilder:
             return ""
         t = self._traceability
         sources_html = (
-            '<ul class="sources-list fr-mt-2w fr-text--sm">'
+            '<ul class="sources-list qs-mt-2w qs-texte--sm">'
             + "".join(f'<li>{s}</li>' for s in t["sources"])
             + '</ul>'
         )
         pipeline_html = ""
         if t["pipeline"]:
-            pipeline_html = f"""<section class="fr-accordion">
-<h3 class="fr-accordion__title">
-<button class="fr-accordion__btn" aria-expanded="false" aria-controls="acc-pipe">Pipeline de traitement ({len(t["pipeline"])} étapes)</button>
+            pipeline_html = f"""<section class="qs-accordeon">
+<h3 class="qs-accordeon__titre">
+<button class="qs-accordeon__btn" aria-expanded="false" aria-controls="acc-pipe">Pipeline de traitement ({len(t["pipeline"])} étapes)</button>
 </h3>
-<div class="fr-collapse" id="acc-pipe">
-<ol class="sources-list fr-text--sm">
+<div class="qs-repli" id="acc-pipe">
+<ol class="sources-list qs-texte--sm">
 {"".join(f'<li>{p}</li>' for p in t["pipeline"])}
 </ol>
 </div>
@@ -590,19 +598,19 @@ class StorymapBuilder:
 
         fiability_html = ""
         if t["fiability"]:
-            fiability_html = f"""<section class="fr-accordion">
-<h3 class="fr-accordion__title">
-<button class="fr-accordion__btn" aria-expanded="false" aria-controls="acc-fiab">Fiabilité &amp; limites</button>
+            fiability_html = f"""<section class="qs-accordeon">
+<h3 class="qs-accordeon__titre">
+<button class="qs-accordeon__btn" aria-expanded="false" aria-controls="acc-fiab">Fiabilité &amp; limites</button>
 </h3>
-<div class="fr-collapse" id="acc-fiab">
-<p class="fr-text--sm">{t["fiability"]}</p>
+<div class="qs-repli" id="acc-fiab">
+<p class="qs-texte--sm">{t["fiability"]}</p>
 </div>
 </section>"""
 
-        return f"""<section id="tracabilite" class="fr-py-6w">
-<div class="fr-container" style="max-width:900px">
+        return f"""<section id="tracabilite" class="qs-py-6w">
+<div class="qs-conteneur" style="max-width:900px">
   <p class="chapter-title">Traçabilité</p>
-  <p class="fr-text--sm">Sources utilisées pour produire cette carte :</p>
+  <p class="qs-texte--sm">Sources utilisées pour produire cette carte :</p>
   {sources_html}
   {pipeline_html}
   {fiability_html}
@@ -618,24 +626,23 @@ class StorymapBuilder:
             p for p in (self.operator, self.operator_sub) if p
         )
         signature = f"{signature} — {self.title}" if signature else self.title
-        return f"""<footer class="fr-footer" role="contentinfo"><div class="fr-container">
-<div class="fr-footer__body">
-  <div class="fr-footer__content">
-    <p class="fr-footer__content-desc">{signature}</p>
-    <ul class="fr-footer__content-list">
-      <li class="fr-footer__content-item"><a class="fr-footer__content-link" href="https://geoservices.ign.fr">geoservices.ign.fr</a></li>
+        return f"""<footer class="qs-pied" role="contentinfo"><div class="qs-conteneur">
+<div class="qs-pied__corps">
+  <div class="qs-pied__contenu">
+    <p class="qs-pied__desc">{signature}</p>
+    <ul class="qs-pied__liste">
+      <li class="qs-pied__item"><a class="qs-pied__lien" href="https://geoservices.ign.fr">geoservices.ign.fr</a></li>
     </ul>
   </div>
 </div>
-<div class="fr-footer__bottom"><ul class="fr-footer__bottom-list">
-  <li class="fr-footer__bottom-item"><span class="fr-footer__bottom-link">{license}</span></li>
+<div class="qs-pied__bas"><ul class="qs-pied__bas-liste">
+  <li class="qs-pied__bas-item"><span class="qs-pied__bas-lien">{license}</span></li>
 </ul></div>
 </div></footer>"""
 
     def _render_scripts(self) -> str:
         dsfr_js = (
             f'<script type="module" '
-            f'src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@{_DSFR_VERSION}/dist/dsfr.module.min.js">'
             f'</script>'
         )
         leaflet_js = (

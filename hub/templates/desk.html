@@ -1,18 +1,17 @@
 <!DOCTYPE html>
-<html lang="fr" data-fr-scheme="light">
+<html lang="fr">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
-<meta name="theme-color" content="#000091">
+<meta name="theme-color" content="#0E2433">
 <title>{{ active_study.name if active_study else 'Bureau de travail' }} — QGIS Service</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/dsfr.min.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.12.1/dist/utility/utility.min.css">
+<link rel="stylesheet" href="/static/produit.css">
 <!-- Chantier G4-b-3c : galerie de recettes web (section RECETTES du desk).
      CSS servi via app.mount("/static", ...) -> hub/hub/static/. -->
 <link rel="stylesheet" href="/static/recipe_gallery.css">
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
-  font-family:Marianne,arial,sans-serif}
+  font-family:var(--qs-police)}
 
 /* Layout hybride : Publications = drawer overlay (superpose le canvas) ;
    Chat = sidebar grid (décale le canvas, ne le couvre pas).
@@ -48,7 +47,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .desk.no-chat.show-publi{grid-template-columns:var(--publi-w,260px) 1fr 0 0}
 
 /* ── Header : 2 cols (centre + chat) ──────────────────────────── */
-.desk-header{grid-area:header;background:#fff;border-bottom:1px solid var(--border-default-grey);
+.desk-header{grid-area:header;background:#fff;border-bottom:1px solid var(--qs-trait);
   display:grid;grid-template-columns:1fr var(--chat-w,340px);
   position:relative;overflow:visible;transition:grid-template-columns .12s ease;
   min-width:0}
@@ -65,30 +64,30 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
    Quand un panel est replié, son en-tête disparaît (col grid à 0). */
 .hdr-left{min-width:0;display:flex;align-items:center;justify-content:space-between;
   padding:0 56px 0 16px;height:100%}
-.hdr-left .publi-label{font-size:11px;color:var(--text-mention-grey);
+.hdr-left .publi-label{font-size:11px;color:var(--qs-discret);
   text-transform:uppercase;letter-spacing:.5px;font-weight:700;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
-.hdr-left .publi-count{font-size:10px;color:var(--text-mention-grey);
+.hdr-left .publi-count{font-size:10px;color:var(--qs-discret);
   background:#fff;padding:1px 7px;border-radius:10px;
-  border:1px solid var(--border-default-grey);font-weight:600;flex-shrink:0}
+  border:1px solid var(--qs-trait);font-weight:600;flex-shrink:0}
 
 .hdr-right{min-width:0;display:flex;align-items:stretch;height:100%}
 .hdr-right .right-tab{flex:1;padding:0 6px;font-size:11.5px;font-weight:600;
   cursor:pointer;text-align:center;background:transparent;border:none;
-  color:var(--text-mention-grey);font-family:inherit;
+  color:var(--qs-discret);font-family:inherit;
   border-bottom:2px solid transparent;display:flex;align-items:center;
   justify-content:center;gap:6px;height:100%;white-space:nowrap;
   transition:background .12s ease,color .12s ease,border-color .12s ease}
-.hdr-right .right-tab.active{color:var(--text-action-high-blue-france);
-  background:#fff;border-bottom-color:var(--border-action-high-blue-france)}
+.hdr-right .right-tab.active{color:var(--qs-accent);
+  background:#fff;border-bottom-color:var(--qs-accent)}
 .hdr-right .right-tab:hover:not(.active){background:rgba(0,0,145,.05);
-  color:var(--text-default-grey)}
+  color:var(--qs-encre-2)}
 
 /* Col canvas : brand à gauche, contenu central (étude + Mon espace) à droite,
    space-between étale les éléments → pas de gros vide entre eux et les
    onglets Chat/Mémoire. */
-/* Padding gauche/droite réservé aux toggles 📚 (publi, 14px+36px=50px) et
-   💬 (chat, 14px+36px=50px). 60px de réserve laisse 10px d'aération entre
+/* Padding gauche/droite réservé aux toggles Ressources (publi, 14px+36px=50px) et
+   et Chat (chat, 14px+36px=50px). 60px de réserve laisse 10px d'aération entre
    le toggle et le bord du contenu navbar. */
 /* PAS de overflow:hidden ici : sinon le dropdown du sélecteur d'études
    (position:absolute, top:calc(100% + 6px)) est clippé sous la navbar et
@@ -111,9 +110,9 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .hdr-center{display:flex;align-items:center;padding:0 62px 0 60px;
   min-width:0;gap:12px;justify-content:flex-start}
 .hdr-center .brand{display:flex;align-items:baseline;gap:8px;white-space:nowrap}
-.hdr-center .brand .op{font-weight:700;color:#000091;font-size:15px;line-height:1;
+.hdr-center .brand .op{font-weight:700;color:var(--qs-accent);font-size:15px;line-height:1;
   letter-spacing:.4px}
-.hdr-center .brand .sub{font-size:11.5px;color:var(--text-mention-grey);font-weight:500;
+.hdr-center .brand .sub{font-size:11.5px;color:var(--qs-discret);font-weight:500;
   letter-spacing:.3px}
 .hdr-center .center-content{display:flex;align-items:center;gap:22px;
   white-space:nowrap;min-width:0}
@@ -123,7 +122,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
    carrés arrondis, emoji + barre d'état colorée en bas pour signaler
    visuellement ouvert/fermé. */
 .toggle-btn{position:absolute;top:50%;transform:translateY(-50%);
-  background:#fff;border:1px solid var(--border-default-grey);
+  background:#fff;border:1px solid var(--qs-trait);
   border-radius:6px;width:36px;height:32px;font-size:17px;cursor:pointer;
   font-family:inherit;display:flex;align-items:center;justify-content:center;
   line-height:1;padding:0 0 3px 0;z-index:10;box-shadow:0 1px 4px rgba(0,0,0,.08);
@@ -131,16 +130,16 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   transition:left .15s ease,right .15s ease,
   background .12s ease,box-shadow .12s ease,border-color .12s ease}
 .toggle-btn::after{content:"";position:absolute;left:6px;right:6px;bottom:3px;
-  height:2px;border-radius:1px;background:var(--background-alt-grey);
+  height:2px;border-radius:1px;background:var(--qs-surface-2);
   transition:background .12s ease,box-shadow .12s ease}
-.toggle-btn.active::after{background:var(--background-action-high-blue-france);
+.toggle-btn.active::after{background:var(--qs-accent);
   box-shadow:0 0 6px rgba(0,0,145,.35)}
-.toggle-btn:hover{background:var(--background-alt-blue-france);
-  border-color:var(--border-action-high-blue-france);
+.toggle-btn:hover{background:var(--qs-accent-pale);
+  border-color:var(--qs-accent);
   box-shadow:0 2px 8px rgba(0,0,145,.15)}
-.toggle-btn.active{border-color:var(--border-action-low-blue-france)}
+.toggle-btn.active{border-color:var(--qs-trait)}
 .toggle-btn:not(.active){background:#fafafa}
-.toggle-btn:not(.active):hover{background:var(--background-alt-blue-france)}
+.toggle-btn:not(.active):hover{background:var(--qs-accent-pale)}
 
 /* Publi est un drawer overlay : le toggle reste au bord gauche fixe.
    Chat est une sidebar grid : le toggle se positionne au bord du chat,
@@ -149,10 +148,12 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .toggle-chat{right:calc(var(--chat-w,340px) + 14px)}
 .desk.no-chat .toggle-chat{right:14px}
 
-.toggle-publi::before{content:"📚"}
-.toggle-chat::before{content:"💬"}
+/* Le trace vient de la classe `ic-*` posee sur le bouton ; ici on ne regle
+   que la taille, le masque etant deja pose par la feuille du produit. */
+.toggle-publi::before, .toggle-chat::before{width:15px;height:15px;
+  vertical-align:0}
 
-.hdr-center a.back-link{color:var(--text-action-high-blue-france);font-size:12px;
+.hdr-center a.back-link{color:var(--qs-accent);font-size:12px;
   text-decoration:none;white-space:nowrap;font-weight:500;display:flex;align-items:center;gap:4px}
 .hdr-center a.back-link:hover{text-decoration:underline}
 
@@ -168,26 +169,37 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
    .study-name fait le reste. .study-menu garde overflow:visible, sinon le
    menu deroulant des projets serait coupe. */
 .study-menu{position:relative;min-width:0}
-.study-trigger{background:var(--background-alt-blue-france);
-  color:var(--text-title-blue-france);padding:6px 12px;border-radius:3px;
+.study-trigger{background:var(--qs-accent-pale);
+  color:var(--qs-accent);padding:6px 12px;border-radius:3px;
   font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;
-  border:1px solid var(--border-action-low-blue-france);cursor:pointer;
+  border:1px solid var(--qs-trait);cursor:pointer;
   font-family:inherit;line-height:1.2;max-width:100%;overflow:hidden}
 /* Truncate progressive : titre étude prend priorité, profile peut disparaître
    en viewport étroit, puis l'étude elle-même tronque en ellipsis. min-width:0
    sur le flex parent pour activer le shrink. */
 .study-trigger .study-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   min-width:0;flex:1 1 auto}
-.study-trigger:hover{border-color:var(--border-action-high-blue-france)}
-.study-trigger .profile{font-size:10.5px;color:var(--text-mention-grey);font-weight:500;
+.study-trigger:hover{border-color:var(--qs-accent)}
+.study-trigger .profile{font-size:10.5px;color:var(--qs-discret);font-weight:500;
   flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* En dessous de ~900px viewport, on cache le profil et garde juste le titre. */
 @media (max-width:900px){
   .study-trigger .profile{display:none}
 }
 .study-trigger .caret{font-size:10px;opacity:.6}
+/* Fil d'Ariane. Les styles vivaient sur chaque element, donc rien n'etait
+   ciblable pour le compacter : sur telephone, l'etude, le projet et le bouton
+   de compte se chevauchaient faute de pouvoir en masquer une partie. */
+.study-trigger .fa-libelle{font-size:11px;color:var(--qs-discret);
+  text-transform:uppercase;letter-spacing:.3px;flex:0 0 auto}
+.study-trigger .fa-sep{color:var(--qs-discret);font-size:14px;margin:0 2px;
+  flex:0 0 auto}
+.study-trigger .fa-projet-nom{font-weight:500;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.hdr-center .center-content{min-width:0}
+.study-trigger{min-width:0}
 .study-dropdown{position:absolute;top:calc(100% + 6px);left:0;background:#fff;
-  border:1px solid var(--border-default-grey);border-radius:4px;
+  border:1px solid var(--qs-trait);border-radius:4px;
   box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:300px;max-width:360px;
   z-index:100;display:none;max-height:70vh;overflow-y:auto;overflow-x:hidden}
 .study-dropdown.open{display:block}
@@ -195,63 +207,75 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
    scroll horizontal disgracieux. min-width:0 sur le flex enfant + l'overflow
    ellipsis sur le span enfant suffit. */
 .study-dropdown .item{display:flex;align-items:center;gap:8px;padding:8px 12px;
-  font-size:12.5px;cursor:pointer;color:var(--text-default-grey);
-  border-bottom:1px solid var(--background-alt-grey);
+  font-size:12.5px;cursor:pointer;color:var(--qs-encre-2);
+  border-bottom:1px solid var(--qs-surface-2);
   min-width:0;max-width:100%}
-.study-dropdown .item > span:not(.ic){overflow:hidden;text-overflow:ellipsis;
-  white-space:nowrap;min-width:0;flex:1}
-.study-dropdown .item:hover{background:var(--background-alt-grey)}
-.study-dropdown .item.active{background:var(--background-alt-blue-france);
-  color:var(--text-action-high-blue-france);font-weight:600}
+/* `flex:1` revient au LIBELLE seul. La regle visait `:not(.ic)`, ce qui
+   incluait la pastille de comptage : celle-ci s'etirait alors sur toute la
+   largeur restante et rognait le nom de l'etude a cote d'elle. */
+.study-dropdown .item > span:not(.ic):not(.prof){overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.study-dropdown .item:hover{background:var(--qs-surface-2)}
+.study-dropdown .item.active{background:var(--qs-accent-pale);
+  color:var(--qs-accent);font-weight:600}
 .study-dropdown .item.active::after{content:"✓";margin-left:auto;font-weight:700}
 .study-dropdown .item .ic{font-size:13px;opacity:.7}
-.study-dropdown .item .prof{margin-left:auto;font-size:10px;color:var(--text-mention-grey);
-  background:var(--background-alt-grey);padding:1px 6px;border-radius:2px}
-.study-dropdown .item.active .prof{background:rgba(0,0,145,.1)}
+.study-dropdown .item .prof{margin-left:auto;font-size:10px;color:var(--qs-discret);
+  background:var(--qs-surface-2);padding:1px 6px;border-radius:2px}
+.study-dropdown .item.active .prof{background:rgba(65,112,31,.12)}
+/* Titre de section : le menu porte desormais deux listes -- les etudes, puis
+   les projets de celle qui est active. Sans separation nommee, les deux se
+   lisaient comme une seule enumeration. */
+.study-dropdown .sd-titre{font-size:10px;color:var(--qs-discret);
+  text-transform:uppercase;letter-spacing:.5px;padding:8px 10px 3px;
+  font-weight:600}
+.study-dropdown .sd-titre + .sd-titre,
+.study-dropdown form + .sd-titre{border-top:1px solid var(--qs-trait-2);
+  margin-top:4px}
 /* Sprint UX-3 fix (2026-06-21) : new-form passe en flex column pour avoir
    input PUIS bouton empile, lisible et plein-largeur les 2. Avant : input
    width:100% + button width:100% mais le browser les rendait sur la meme
    ligne dans certains cas (autoflow inline) -> bouton tronque hors du
    dropdown 360px max-width. */
-.study-dropdown .new-form{padding:10px 12px;background:var(--background-alt-grey);
-  border-top:1px solid var(--border-default-grey);
+.study-dropdown .new-form{padding:10px 12px;background:var(--qs-surface-2);
+  border-top:1px solid var(--qs-trait);
   display:flex;flex-direction:column;gap:6px}
 .study-dropdown .new-form input,.study-dropdown .new-form select{
   width:100%;box-sizing:border-box;
-  padding:6px 8px;font-size:11.5px;border:1px solid var(--border-default-grey);
+  padding:6px 8px;font-size:11.5px;border:1px solid var(--qs-trait);
   border-radius:3px;margin:0;font-family:inherit;background:#fff}
 .study-dropdown .new-form button{
   width:100%;box-sizing:border-box;
   padding:6px;font-size:11.5px;
-  background:var(--background-action-high-blue-france);color:#fff;border:none;
+  background:var(--qs-accent);color:#fff;border:none;
   border-radius:3px;cursor:pointer;font-family:inherit;font-weight:500}
 .study-dropdown .new-form button:hover{
   filter:brightness(1.1)}
 
 .desk-header .spacer{flex:1}
-.desk-header .user-chip{font-size:11.5px;color:var(--text-mention-grey);
-  padding:4px 10px;background:var(--background-alt-grey);border-radius:2px}
-.desk-header a{color:var(--text-action-high-blue-france);font-size:12px;text-decoration:none}
+.desk-header .user-chip{font-size:11.5px;color:var(--qs-discret);
+  padding:4px 10px;background:var(--qs-surface-2);border-radius:2px}
+.desk-header a{color:var(--qs-accent);font-size:12px;text-decoration:none}
 
 /* ── Panneau Ressources ────────────────────────────────────────
    Colonne de la grille en large (ne recouvre plus le canvas), calque
    glissant en dessous de 1100px ou l'ecran ne tient pas trois colonnes. */
 .desk-publi{grid-area:publi;
-  background:#fff;border-right:1px solid var(--border-default-grey);
+  background:#fff;border-right:1px solid var(--qs-trait);
   display:flex;flex-direction:column;overflow:hidden;
   min-width:0;visibility:hidden}
 .desk.show-publi .desk-publi{visibility:visible}
 
 /* Header du drawer (anciennement hdr-left dans la navbar) */
 .publi-drawer-header{display:flex;align-items:center;justify-content:space-between;
-  padding:10px 16px 10px 58px;border-bottom:1px solid var(--border-default-grey);
-  background:var(--background-alt-grey);min-height:38px}
-.publi-drawer-header .publi-label{font-size:11px;color:var(--text-mention-grey);
+  padding:10px 16px 10px 58px;border-bottom:1px solid var(--qs-trait);
+  background:var(--qs-surface-2);min-height:38px}
+.publi-drawer-header .publi-label{font-size:11px;color:var(--qs-discret);
   text-transform:uppercase;letter-spacing:.5px;font-weight:700;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
-.publi-drawer-header .publi-count{font-size:10px;color:var(--text-mention-grey);
+.publi-drawer-header .publi-count{font-size:10px;color:var(--qs-discret);
   background:#fff;padding:1px 7px;border-radius:10px;
-  border:1px solid var(--border-default-grey);font-weight:600;flex-shrink:0}
+  border:1px solid var(--qs-trait);font-weight:600;flex-shrink:0}
 /* Onglets internes du panel Ressources.
    Sprint Composants Phase 1+2+3 (2026-06-25) : 7 onglets dans drawer etroit
    (Couches/Composants/Assemblages/Exports/Livrables/Fichiers/Recettes).
@@ -260,21 +284,21 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
    - flex:0 0 calc(50% - 0px) -> 2 colonnes egales par defaut
    - padding/font reduits pour densite
    - scroll horizontal en fallback si la largeur drawer < 280px (tres etroit) */
-.rtabs{display:flex;flex-wrap:wrap;border-bottom:1px solid var(--border-default-grey);
+.rtabs{display:flex;flex-wrap:wrap;border-bottom:1px solid var(--qs-trait);
   background:#fafafa;flex-shrink:0;overflow-x:auto;
-  scrollbar-width:thin;scrollbar-color:var(--border-default-grey) transparent}
+  scrollbar-width:thin;scrollbar-color:var(--qs-trait) transparent}
 .rtabs::-webkit-scrollbar{height:4px}
-.rtabs::-webkit-scrollbar-thumb{background:var(--border-default-grey);border-radius:2px}
+.rtabs::-webkit-scrollbar-thumb{background:var(--qs-trait);border-radius:2px}
 .rtabs .rtab{flex:1 1 calc(33.333% - 0px);min-width:75px;
   padding:7px 4px;font-size:10.5px;font-weight:600;line-height:1.25;
   cursor:pointer;text-align:center;background:transparent;border:none;
-  color:var(--text-mention-grey);font-family:inherit;white-space:nowrap;
+  color:var(--qs-discret);font-family:inherit;white-space:nowrap;
   border-bottom:2px solid transparent;position:relative;
   transition:background .12s,color .12s,border-color .12s}
-.rtabs .rtab.active{color:var(--text-action-high-blue-france);
-  background:#fff;border-bottom-color:var(--border-action-high-blue-france)}
+.rtabs .rtab.active{color:var(--qs-accent);
+  background:#fff;border-bottom-color:var(--qs-accent)}
 .rtabs .rtab:hover:not(.active){background:rgba(0,0,145,.05);
-  color:var(--text-default-grey)}
+  color:var(--qs-encre-2)}
 /* Sprint UX-3 fix (2026-06-22) : indicateur visuel de scope sur les
    onglets ressources. Un petit point colore en haut-droite de l'onglet :
    - bleu CEREMA : per-projet (le contenu change selon le projet courant)
@@ -286,34 +310,34 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   width:5px;height:5px;border-radius:50%;
   opacity:.55;transition:opacity .12s}
 .rtabs .rtab[data-scope="project"]::after{
-  background:var(--background-action-high-blue-france)}
-.rtabs .rtab[data-scope="study"]::after{background:#d64d00}
+  background:var(--qs-accent)}
+.rtabs .rtab[data-scope="study"]::after{background:var(--qs-alerte)}
 .rtabs .rtab.active::after{opacity:.95}
 .rpane{display:none;flex:1;overflow:hidden;flex-direction:column}
 .rpane.active{display:flex}
 .publi-list{flex:1;overflow-y:auto;padding:6px 0}
 .publi-item{padding:8px 12px;font-size:12px;cursor:pointer;
-  display:flex;gap:8px;align-items:center;color:var(--text-default-grey);
-  border-bottom:1px solid var(--background-alt-grey);text-decoration:none}
-.publi-item:hover{background:var(--background-alt-grey)}
-.publi-item.is-active-study{background:#fff8f0;border-left:3px solid #d64d00}
+  display:flex;gap:8px;align-items:center;color:var(--qs-encre-2);
+  border-bottom:1px solid var(--qs-surface-2);text-decoration:none}
+.publi-item:hover{background:var(--qs-surface-2)}
+.publi-item.is-active-study{background:#fff8f0;border-left:3px solid var(--qs-alerte)}
 .publi-item .ic{font-size:14px;flex-shrink:0}
 .publi-item .info{flex:1;min-width:0;overflow:hidden}
 .publi-item .study-badge{display:inline-block;font-size:9.5px;
-  background:var(--background-alt-grey);color:var(--text-mention-grey);
+  background:var(--qs-surface-2);color:var(--qs-discret);
   padding:1px 5px;border-radius:2px;margin-top:3px;
   max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.publi-item.is-active-study .study-badge{background:#ffe7d6;color:#d64d00}
-.publi-item .name{font-weight:600;color:var(--text-title-grey);
+.publi-item.is-active-study .study-badge{background:var(--qs-alerte-pale);color:var(--qs-alerte)}
+.publi-item .name{font-weight:600;color:var(--qs-encre);
   white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font-size:12px}
-.publi-item .meta{font-size:10px;color:var(--text-mention-grey);margin-top:2px}
-.publi-empty{padding:20px 14px;font-size:11.5px;color:var(--text-mention-grey);text-align:center}
+.publi-item .meta{font-size:10px;color:var(--qs-discret);margin-top:2px}
+.publi-empty{padding:20px 14px;font-size:11.5px;color:var(--qs-discret);text-align:center}
 
 /* ── Resize handles ───────────────────────────────────────────── */
 .handle{background:transparent;cursor:col-resize;position:relative;z-index:5}
-.handle:hover,.handle.active{background:var(--border-action-high-blue-france)}
+.handle:hover,.handle.active{background:var(--qs-accent)}
 .handle::after{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-  width:2px;height:24px;background:var(--border-default-grey);border-radius:1px}
+  width:2px;height:24px;background:var(--qs-trait);border-radius:1px}
 .handle:hover::after,.handle.active::after{background:#fff}
 /* Seul le handle h2 (entre canvas et chat) existe en sidebar ; h1 disparaît
    puisque publi est un drawer overlay (pas redimensionnable via handle). */
@@ -351,13 +375,13 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .desk.qgis-scroll .desk-canvas .iframe-fit{
   height:100%;width:auto;aspect-ratio:16/9}
 .canvas-empty{height:100%;display:flex;align-items:center;justify-content:center;
-  flex-direction:column;gap:12px;color:var(--text-mention-grey);text-align:center;padding:30px;background:#fff}
+  flex-direction:column;gap:12px;color:var(--qs-discret);text-align:center;padding:30px;background:#fff}
 .canvas-empty .ic{font-size:3rem;opacity:.4}
-.canvas-empty h3{color:var(--text-title-blue-france);font-weight:600;margin:0}
-.canvas-empty p{margin:0;font-size:13px;max-width:340px;color:var(--text-mention-grey)}
+.canvas-empty h3{color:var(--qs-accent);font-weight:600;margin:0}
+.canvas-empty p{margin:0;font-size:13px;max-width:340px;color:var(--qs-discret)}
 
 /* ── Right panel (Chat + Mémoire) ────────────────────────────── */
-.desk-right{grid-area:chat;background:#fff;border-left:1px solid var(--border-default-grey);
+.desk-right{grid-area:chat;background:#fff;border-left:1px solid var(--qs-trait);
   display:flex;flex-direction:column;overflow:hidden}
 .right-pane{flex:1;overflow:hidden;display:none;flex-direction:column}
 .right-pane.active{display:flex}
@@ -366,88 +390,88 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 /* Mémoire éditeur */
 .mem-pane{flex:1;overflow-y:auto;padding:10px 12px}
 .mem-section{margin-bottom:18px}
-.mem-label{font-size:10px;color:var(--text-mention-grey);text-transform:uppercase;
+.mem-label{font-size:10px;color:var(--qs-discret);text-transform:uppercase;
   letter-spacing:.5px;font-weight:700;margin-bottom:8px;display:flex;justify-content:space-between;
   align-items:center}
-.mem-add-btn{background:transparent;border:1px solid var(--border-action-low-blue-france);
-  color:var(--text-action-high-blue-france);padding:2px 8px;border-radius:2px;
+.mem-add-btn{background:transparent;border:1px solid var(--qs-trait);
+  color:var(--qs-accent);padding:2px 8px;border-radius:2px;
   font-size:10px;cursor:pointer;font-family:inherit;font-weight:600}
-.mem-add-btn:hover{background:var(--background-alt-blue-france)}
-.mem-item{display:flex;gap:6px;padding:6px 8px;background:var(--background-alt-grey);
+.mem-add-btn:hover{background:var(--qs-accent-pale)}
+.mem-item{display:flex;gap:6px;padding:6px 8px;background:var(--qs-surface-2);
   border-radius:3px;margin-bottom:4px;align-items:flex-start;font-size:12px;
-  border-left:2px solid var(--border-action-low-blue-france)}
-.mem-item.explicit{border-left-color:#1f6f3f}
+  border-left:2px solid var(--qs-trait)}
+.mem-item.explicit{border-left-color:var(--qs-succes)}
 .mem-item .ic{flex-shrink:0;font-size:11px;line-height:1.4}
 .mem-item .body{flex:1;min-width:0}
-.mem-item .key{font-weight:700;color:var(--text-title-grey);font-size:11px;
+.mem-item .key{font-weight:700;color:var(--qs-encre);font-size:11px;
   text-transform:uppercase;letter-spacing:.3px}
-.mem-item .val{color:var(--text-default-grey);font-size:12px;line-height:1.4;
+.mem-item .val{color:var(--qs-encre-2);font-size:12px;line-height:1.4;
   margin-top:2px;word-break:break-word}
-.mem-item .val[contenteditable=true]{background:#fff;outline:1px solid var(--border-action-high-blue-france);
+.mem-item .val[contenteditable=true]{background:#fff;outline:1px solid var(--qs-accent);
   border-radius:2px;padding:2px 4px}
 .mem-item .actions{display:flex;flex-direction:column;gap:2px;flex-shrink:0}
 .mem-item .actions button{background:transparent;border:none;cursor:pointer;
-  font-size:11px;padding:1px 4px;color:var(--text-mention-grey);font-family:inherit}
-.mem-item .actions button:hover{color:var(--text-action-high-blue-france)}
+  font-size:11px;padding:1px 4px;color:var(--qs-discret);font-family:inherit}
+.mem-item .actions button:hover{color:var(--qs-accent)}
 .mem-item .actions .del:hover{color:#ce0500}
-.mem-add-form{display:none;background:var(--background-alt-grey);border-radius:3px;
-  padding:8px;margin-bottom:8px;border-left:2px solid var(--border-action-high-blue-france)}
+.mem-add-form{display:none;background:var(--qs-surface-2);border-radius:3px;
+  padding:8px;margin-bottom:8px;border-left:2px solid var(--qs-accent)}
 .mem-add-form.open{display:block}
 .mem-add-form input{width:100%;padding:4px 6px;font-size:11.5px;
-  border:1px solid var(--border-default-grey);border-radius:2px;margin-bottom:4px;
+  border:1px solid var(--qs-trait);border-radius:2px;margin-bottom:4px;
   font-family:inherit}
 .mem-add-form .row{display:flex;gap:4px}
-.mem-add-form button{flex:1;padding:4px;font-size:11px;background:var(--background-action-high-blue-france);
+.mem-add-form button{flex:1;padding:4px;font-size:11px;background:var(--qs-accent);
   color:#fff;border:none;border-radius:2px;cursor:pointer;font-family:inherit}
-.mem-add-form button.cancel{background:transparent;color:var(--text-mention-grey);
-  border:1px solid var(--border-default-grey)}
-.mem-empty{padding:14px 8px;font-size:11px;color:var(--text-mention-grey);text-align:center}
-.mem-help{font-size:10.5px;color:var(--text-mention-grey);line-height:1.5;
-  padding:8px 10px;background:var(--background-alt-blue-france);border-radius:3px;margin-bottom:12px}
+.mem-add-form button.cancel{background:transparent;color:var(--qs-discret);
+  border:1px solid var(--qs-trait)}
+.mem-empty{padding:14px 8px;font-size:11px;color:var(--qs-discret);text-align:center}
+.mem-help{font-size:10.5px;color:var(--qs-discret);line-height:1.5;
+  padding:8px 10px;background:var(--qs-accent-pale);border-radius:3px;margin-bottom:12px}
 
 /* Sections structurées markdown */
-.mem-md-section{background:#fff;border:1px solid var(--border-default-grey);
+.mem-md-section{background:#fff;border:1px solid var(--qs-trait);
   border-radius:4px;margin-bottom:10px;overflow:hidden}
-.mem-md-section.empty{background:var(--background-alt-grey)}
-.mem-md-head{padding:7px 10px;background:var(--background-alt-blue-france);
+.mem-md-section.empty{background:var(--qs-surface-2)}
+.mem-md-head{padding:7px 10px;background:var(--qs-accent-pale);
   display:flex;justify-content:space-between;align-items:center;
-  border-bottom:1px solid var(--border-default-grey);cursor:pointer}
-.mem-md-title{font-size:12px;font-weight:700;color:var(--text-title-blue-france);
+  border-bottom:1px solid var(--qs-trait);cursor:pointer}
+.mem-md-title{font-size:12px;font-weight:700;color:var(--qs-accent);
   display:flex;gap:6px;align-items:center}
-.mem-md-toggle{font-size:10px;color:var(--text-mention-grey);background:transparent;
+.mem-md-toggle{font-size:10px;color:var(--qs-discret);background:transparent;
   border:none;cursor:pointer;font-family:inherit}
 .mem-md-body{padding:0}
 .mem-md-body.collapsed{display:none}
-.mem-md-hint{font-size:10.5px;color:var(--text-mention-grey);padding:6px 10px;
-  font-style:italic;background:#fafafe;border-bottom:1px solid var(--background-alt-grey)}
+.mem-md-hint{font-size:10.5px;color:var(--qs-discret);padding:6px 10px;
+  font-style:italic;background:#fafafe;border-bottom:1px solid var(--qs-surface-2)}
 .mem-md-textarea{width:100%;border:none;padding:8px 10px;font-size:12px;
   font-family:inherit;line-height:1.5;resize:vertical;min-height:44px;max-height:300px;
-  color:var(--text-default-grey);background:#fff;box-sizing:border-box}
+  color:var(--qs-encre-2);background:#fff;box-sizing:border-box}
 .mem-md-textarea:focus{outline:none;background:#fffce8}
-.mem-md-actions{padding:5px 10px;background:var(--background-alt-grey);
-  border-top:1px solid var(--border-default-grey);display:none;align-items:center;
+.mem-md-actions{padding:5px 10px;background:var(--qs-surface-2);
+  border-top:1px solid var(--qs-trait);display:none;align-items:center;
   justify-content:space-between;font-size:10.5px}
 .mem-md-actions.dirty{display:flex}
-.mem-md-actions .save-btn{background:var(--background-action-high-blue-france);
+.mem-md-actions .save-btn{background:var(--qs-accent);
   color:#fff;border:none;padding:3px 10px;border-radius:2px;cursor:pointer;
   font-size:10.5px;font-family:inherit;font-weight:600}
-.mem-md-actions .saved-msg{color:#1f6f3f;font-weight:600;display:none}
+.mem-md-actions .saved-msg{color:var(--qs-succes);font-weight:600;display:none}
 .mem-md-actions.saved .saved-msg{display:inline}
 .mem-md-actions.saved .save-btn{display:none}
 
 /* ── Status bar ──────────────────────────────────────────────── */
-.desk-status{grid-area:status;background:#fff;border-top:1px solid var(--border-default-grey);
+.desk-status{grid-area:status;background:#fff;border-top:1px solid var(--qs-trait);
   padding:0 14px;display:flex;align-items:center;gap:12px;font-size:11px;
-  color:var(--text-mention-grey);overflow-x:auto;white-space:nowrap}
-.desk-status .user-chip{font-size:11px;color:var(--text-mention-grey);
-  padding:2px 8px;background:var(--background-alt-grey);border-radius:2px;
+  color:var(--qs-discret);overflow-x:auto;white-space:nowrap}
+.desk-status .user-chip{font-size:11px;color:var(--qs-discret);
+  padding:2px 8px;background:var(--qs-surface-2);border-radius:2px;
   font-weight:500}
 .desk-status .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;
-  background:var(--background-alt-grey);border-radius:2px}
-.desk-status .badge.ok{color:#1f6f3f}
+  background:var(--qs-surface-2);border-radius:2px}
+.desk-status .badge.ok{color:var(--qs-succes)}
 .desk-status .badge.warn{color:#b04400}
-.desk-status .sep{color:var(--border-default-grey)}
-.desk-status .recent-tool{color:var(--text-action-high-blue-france);font-weight:500}
+.desk-status .sep{color:var(--qs-trait)}
+.desk-status .recent-tool{color:var(--qs-accent);font-weight:500}
 
 /* Backdrop : actif quand publi drawer est ouvert (overlay) */
 /* Le voile n'a de sens qu'en mode calque : en colonne, le panneau ne
@@ -476,11 +500,64 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   .desk.show-publi .desk-publi{transform:translateX(0)}
 }
 
+/* ── Telephone (<820px) : plus aucune colonne, deux calques ──────────────
+ *
+ * Le palier 1100px laissait le chat en colonne de 340 px. Sur un ecran de
+ * 375, il ne restait donc que 29 px pour la carte : l'en-tete se chevauchait
+ * et le texte tombait mot par mot. Le bureau etait simplement inutilisable au
+ * telephone.
+ *
+ * En dessous de 820 px, le canvas prend toute la largeur et les deux panneaux
+ * deviennent des calques glissants, appeles par leurs boutons respectifs.
+ * C'est la seule disposition tenable : a cette largeur, deux zones cote a
+ * cote n'en font aucune de lisible.
+ */
+@media(max-width:820px){
+  .desk,
+  .desk.show-publi,
+  .desk.no-chat,
+  .desk.no-chat.show-publi{grid-template-columns:0 1fr 0 0}
+
+  .desk-right{position:fixed;top:48px;bottom:32px;right:0;z-index:30;
+    width:min(420px, 92vw);
+    box-shadow:0 0 28px rgba(0,0,0,.18);
+    transform:translateX(110%);transition:transform .2s ease;
+    visibility:visible}
+  /* `no-chat` reste la classe qui commande, pour ne pas ajouter un second
+     etat a tenir a jour. Ouvert ici veut dire : pose par-dessus la carte. */
+  .desk:not(.no-chat) .desk-right{transform:translateX(0)}
+  .desk.no-chat .hdr-right{display:none}
+
+  /* Le voile sert les deux calques. */
+  .desk:not(.no-chat) .desk-backdrop{opacity:1;pointer-events:auto}
+
+  /* Les onglets Chat/Memoire vivaient dans la colonne du chat, qui n'existe
+     plus : ils rejoignent le calque lui-meme. */
+  .hdr-right{position:fixed;top:0;right:0;height:48px;z-index:31;
+    background:#fff;padding-right:52px}
+}
+
 /* Très petit : la navbar centrale se compresse (brand + étude reste lisible) */
 @media(max-width:560px){
-  .hdr-center{padding:0 56px;gap:10px}
+  .hdr-center{padding:0 52px 0 56px;gap:8px}
   .hdr-center .brand .sub{display:none}
-  .study-trigger{max-width:200px}
+  /* Le projet actif reste lisible dans le menu, qui s'ouvre d'un geste ; sur
+     la barre, il ne laissait plus de place au nom de l'etude. */
+  .study-trigger .fa-libelle,
+  .study-trigger .fa-sep,
+  .study-trigger .fa-projet{display:none}
+  .study-trigger{max-width:none;min-width:0}
+  .study-trigger .study-name{max-width:96px}
+  .study-dropdown{min-width:0;width:calc(100vw - 24px);max-width:none;
+    left:auto;right:-44px}
+
+  /* Barre d'etat : elle defilait lateralement faute de place. On garde ce qui
+     renseigne sur l'etat du bureau -- session, moteur IA -- et on retire les
+     precisions qui ne se lisent qu'au repos. */
+  .desk-status #footer-publi-total,
+  .desk-status .recent-tool,
+  .desk-status .sep{display:none}
+  .desk-status{gap:10px}
 }
 </style>
 </head>
@@ -498,7 +575,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     <!-- Toggle Ressources au bord gauche : ouvre/ferme le drawer
          (Couches QGIS, Publi, Fichiers, Recettes). Sprint UX-1 2026-06-20 :
          tooltip clarifie + drawer ouvert par defaut. -->
-    <button class="toggle-btn toggle-publi" id="toggle-publi"
+    <button class="toggle-btn toggle-publi ic-livre" id="toggle-publi"
             title="Ouvrir/fermer le panneau Ressources (Couches · Publications · Fichiers · Recettes)"
             aria-label="Panneau Ressources"></button>
 
@@ -512,28 +589,28 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <span class="op">QGIS</span>
         <span class="sub">· Service</span>
       </a>
-      <span style="color:var(--text-mention-grey);font-size:14px;margin:0 -2px"
+      <span style="color:var(--qs-discret);font-size:14px;margin:0 -2px"
             aria-hidden="true">›</span>
       <div class="center-content">
         <div class="study-menu">
           <button class="study-trigger" id="study-trigger" onclick="toggleStudyMenu(event)"
                   title="{% if active_study %}Étude : {{ active_study.name }}{% if active_project %} — Projet : {{ active_project.label }}{% endif %} — clique pour changer de projet{% else %}Choisir une étude{% endif %}">
-            <span class="fr-icon-folder-2-line" aria-hidden="true"></span>
+            <span class="ic-dossier" aria-hidden="true"></span>
             {% if active_study %}
               {# Sprint isolation etudes-projets Fix #6 (2026-07-30) : badge
                  explicite 'Étude : X / Projet : Y' pour rendre l'isolation
                  visible au user. Sans projet actif, warning visuel. #}
-              <span style="font-size:11px;color:var(--text-mention-grey);text-transform:uppercase;letter-spacing:.3px">Étude&nbsp;:</span>
+              <span class="fa-libelle">Étude&nbsp;:</span>
               <span class="study-name">{{ active_study.name }}</span>
               {% if active_project %}
-              <span style="color:var(--text-mention-grey);font-size:14px;margin:0 2px" aria-hidden="true">›</span>
-              <span style="font-size:11px;color:var(--text-mention-grey);text-transform:uppercase;letter-spacing:.3px">Projet&nbsp;:</span>
-              <span style="font-weight:500"
+              <span class="fa-sep" aria-hidden="true">›</span>
+              <span class="fa-libelle fa-projet">Projet&nbsp;:</span>
+              <span class="fa-projet-nom fa-projet"
                     title="Projet actif : {{ active_project.label }}">
                 {{ active_project.label }}
               </span>
               {% else %}
-              <span style="font-size:11px;color:var(--warning-425);margin-left:6px"
+              <span style="font-size:11px;color:var(--qs-alerte);margin-left:6px"
                     title="Aucun projet actif — sélectionner un projet pour isoler tes travaux QGIS">
                 · aucun projet actif
               </span>
@@ -550,9 +627,9 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           <span id="mcp-session-badge"
                 style="display:none;font-size:11px;padding:2px 8px;
                        margin-left:8px;border-radius:4px;
-                       background:var(--background-alt-blue-france);
-                       color:var(--text-title-blue-france);
-                       border:1px solid var(--border-action-high-blue-france)"
+                       background:var(--qs-accent-pale);
+                       color:var(--qs-accent);
+                       border:1px solid var(--qs-accent)"
                 title=""></span>
           <script>
           (async function _loadMcpSessionsBadge(){
@@ -579,17 +656,49 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           })();
           </script>
           <div class="study-dropdown" id="study-dropdown">
-            {# Sprint UX-3 fix (2026-06-21) : dropdown desk = PROJETS UNIQUEMENT
-               de l'etude active. Plus de section 'Mes etudes' ici (changement
-               d'etude = retour /workspace pour bien voir le contexte cockpit).
-               Decision user : le desk est l'atelier sur 1 etude active ; pour
-               switcher d'etude, on remonte au workspace. #}
+            {# Les etudes se choisissent ICI.
+
+               Une decision anterieure les avait retirees de ce menu : changer
+               d'etude imposait de remonter au workspace, « pour bien voir le
+               contexte ». En pratique cela faisait quitter le bureau, donc
+               recharger la carte et perdre la session QGIS en cours, pour une
+               action aussi courante que passer d'un dossier a un autre.
+
+               Les trois routes concernees acceptent deja `return_to=desk` :
+               tout se fait sans quitter la page. Le workspace reste la vue
+               d'ensemble, il n'est plus un passage oblige. #}
+            {% if studies %}
+              <div class="sd-titre">Mes études</div>
+              {% for s in studies %}
+              <form method="POST"
+                    action="/workspace/study/{{ s.id }}/activate?return_to=desk"
+                    style="margin:0">
+                <button type="submit"
+                        class="item {% if s.id == active_study_id %}active{% endif %}"
+                        style="width:100%;text-align:left;background:transparent;border:none;font-family:inherit"
+                        title="{{ s.name }}{% if s.project_count %} — {{ s.project_count }} projet(s){% endif %}">
+                  {# L'etude active est deja marquee par la coche que
+                     `.item.active::after` pose a droite : en ajouter une a
+                     gauche en ferait deux pour la meme information. #}
+                  <span class="ic">
+                    <span class="ic-dossier ic--sm" aria-hidden="true"></span>
+                  </span>
+                  <span>{{ s.name }}</span>
+                  {% if s.project_count %}
+                  <span class="prof">{{ s.project_count }}</span>
+                  {% endif %}
+                </button>
+              </form>
+              {% endfor %}
+              <form class="new-form" method="POST"
+                    action="/workspace/study/new?return_to=desk" style="margin:6px 0 8px">
+                <input name="name" required placeholder="Nouvelle étude (sujet, territoire…)">
+                <button type="submit">+ Créer</button>
+              </form>
+            {% endif %}
+
             {% if active_study and projects_in_active_study %}
-              <div style="font-size:10px;color:var(--text-mention-grey);
-                          text-transform:uppercase;letter-spacing:.5px;
-                          padding:6px 10px 2px">
-                Projets de « {{ active_study.name }} »
-              </div>
+              <div class="sd-titre">Projets de « {{ active_study.name }} »</div>
               {% for p in projects_in_active_study %}
               <form method="POST"
                     action="/workspace/project/{{ active_study.id }}/{{ p.pid }}/activate?return_to=desk"
@@ -599,7 +708,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                         style="width:100%;text-align:left;background:transparent;border:none;font-family:inherit"
                         title="{{ p.label }}{% if p.is_default %} (projet principal){% endif %}">
                   <span class="ic">
-                    {% if active_project and active_project.pid == p.pid %}<span class="fr-icon-check-line fr-icon--sm" aria-hidden="true"></span>{% elif p.is_default %}<span class="fr-icon-star-line fr-icon--sm" aria-hidden="true"></span>{% else %}<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>{% endif %}
+                    {% if active_project and active_project.pid == p.pid %}<span class="ic-coche ic--sm" aria-hidden="true"></span>{% elif p.is_default %}<span class="ic-etoile ic--sm" aria-hidden="true"></span>{% else %}<span class="ic-fichier ic--sm" aria-hidden="true"></span>{% endif %}
                   </span>
                   <span>{{ p.label }}</span>
                 </button>
@@ -612,10 +721,14 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                 <button type="submit">+ Nouveau projet</button>
               </form>
             {% endif %}
+            {# Le workspace reste la vue d'ensemble -- cartes d'etudes,
+               tableau des publications, archivage. Il n'est plus un passage
+               oblige pour changer d'etude, seulement un endroit ou l'on va
+               quand on veut prendre du recul. #}
             <a href="/workspace" style="display:block;padding:8px 10px;
-               font-size:11px;color:var(--text-mention-grey);
-               text-decoration:none;border-top:1px solid var(--border-default-grey)">
-              ← Toutes mes études et publications
+               font-size:11px;color:var(--qs-discret);
+               text-decoration:none;border-top:1px solid var(--qs-trait)">
+              Vue d'ensemble : études archivées, publications
             </a>
           </div>
         </div>
@@ -627,16 +740,79 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <!-- Icone retour ↩ retiree : le brand "CEREMA · QGIS" sert maintenant
              de lien retour vers /workspace (fil d'Ariane). -->
       </div>
+
+      {# ── Compte ────────────────────────────────────────────────────────
+         L'identite tenait dans un mot en bas a droite de la barre d'etat, et
+         les reglages vivaient sur une autre page : pour lire sa cle il
+         fallait quitter son travail. Le bouton les reunit la ou on va les
+         chercher, et le panneau s'ouvre par-dessus le bureau sans le
+         recharger. Place dans hdr-center et non hdr-right, qui disparait
+         avec le panneau de chat. #}
+      <div class="qs-compte" id="compte">
+        <button type="button" class="qs-compte__btn" id="compte-btn"
+                aria-haspopup="menu" aria-expanded="false" aria-controls="compte-menu"
+                onclick="basculerMenuCompte(event)"
+                title="Mon compte, ma clé d'accès et les réglages de l'assistant">
+          <span class="qs-avatar" aria-hidden="true">{{ username[:2] }}</span>
+          <span class="qs-compte__nom">{{ username }}</span>
+        </button>
+
+        <div class="qs-menu" id="compte-menu" role="menu" hidden>
+          <div class="qs-menu__entete">
+            <span class="qs-avatar qs-avatar--lg" aria-hidden="true">{{ username[:2] }}</span>
+            <span class="qs-menu__identite">
+              <span class="qs-menu__nom">{{ username }}</span>
+              <span class="qs-menu__detail">Espace SSPCloud</span>
+            </span>
+          </div>
+
+          <button type="button" class="qs-menu__item ic-cadenas" role="menuitem"
+                  onclick="ouvrirCompte('acces')">
+            Ma clé d'accès
+          </button>
+          <button type="button" class="qs-menu__item ic-discussion" role="menuitem"
+                  onclick="ouvrirCompte('assistant')">
+            Clé de l'assistant
+            {% if llm_key_missing %}
+            <span class="qs-menu__suffixe" style="color:var(--qs-alerte)">à renseigner</span>
+            {% endif %}
+          </button>
+
+          <hr class="qs-menu__sep">
+
+          <a class="qs-menu__item ic-grille" role="menuitem" href="/workspace">
+            Mon espace de travail
+          </a>
+          <a class="qs-menu__item ic-archive" role="menuitem"
+             href="/published/{{ username }}/">
+            Mes publications
+          </a>
+
+          <hr class="qs-menu__sep">
+
+          <a class="qs-menu__item ic-livre" role="menuitem" target="_blank"
+             rel="noopener external"
+             href="https://github.com/nic01asFr/Qgis-sspcloud">
+            Documentation
+            <span class="qs-menu__suffixe ic-lien-externe ic--sm"
+                  aria-hidden="true"></span>
+          </a>
+          <a class="qs-menu__item ic-deconnexion qs-menu__item--danger" role="menuitem"
+             href="/auth/logout">
+            Se déconnecter
+          </a>
+        </div>
+      </div>
     </div>
 
     <!-- Colonne droite (alignée avec chat panel) : onglets Chat/Mémoire -->
     <div class="hdr-right">
-      <button class="right-tab active" data-tab="chat"><span class="fr-icon-chat-3-line fr-icon--sm" aria-hidden="true"></span> Chat</button>
-      <button class="right-tab" data-tab="memory"><span class="fr-icon-book-2-line fr-icon--sm" aria-hidden="true"></span> Mémoire</button>
+      <button class="right-tab active" data-tab="chat"><span class="ic-discussion ic--sm" aria-hidden="true"></span> Chat</button>
+      <button class="right-tab" data-tab="memory"><span class="ic-livre ic--sm" aria-hidden="true"></span> Mémoire</button>
     </div>
 
     <!-- Toggle chat au bord droit : position absolute en dehors du grid -->
-    <button class="toggle-btn toggle-chat" id="toggle-chat"
+    <button class="toggle-btn toggle-chat ic-discussion" id="toggle-chat"
             title="Masquer/afficher chat"></button>
 
   </header>
@@ -672,24 +848,24 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
        - ZIP etude (relocation depuis header desk)
        - [Futur Sprint Composants-3] : 'Publier Scene Manifest' -> 3 pivots #}
     {# Sprint Composants C11 (2026-06-27) : 3 onglets ideal, 3 questions naturelles.
-       - 📁 Sources : ce avec quoi je travaille (Couches + Fichiers + Recettes)
-       - 📚 Livrables : ce que je produis (Assemblages + Publications + Composants sous-menu)
-       - 🤖 Partages : ce que je partage live (Agents partages)
+       - Sources : ce avec quoi je travaille (Couches + Fichiers + Recettes)
+       - Livrables : ce que je produis (Assemblages + Publications + Composants sous-menu)
+       - Partages : ce que je partage live (Agents partages)
        Les anciens panes (composants, assemblies, exports, publi) restent
        au DOM (caches) pour compatibilite des loaders JS qui les referencent.
        Les onglets visibles pointent vers des nouveaux meta-panes. #}
     <div class="rtabs">
       <button class="rtab active" data-rtab="sources"
               title="Sources : ce avec quoi je travaille (couches + fichiers + recettes)">
-        <span class="fr-icon-database-line fr-icon--sm" aria-hidden="true"></span> Sources
+        <span class="ic-base-donnees ic--sm" aria-hidden="true"></span> Sources
       </button>
       <button class="rtab" data-rtab="livrables"
               title="Livrables : ce que je produis (assemblages + publications + composants)">
-        <span class="fr-icon-article-line fr-icon--sm" aria-hidden="true"></span> Livrables
+        <span class="ic-article ic--sm" aria-hidden="true"></span> Livrables
       </button>
       <button class="rtab" data-rtab="partages"
               title="Partages : assistants IA configurables que je partage en live">
-        <span class="fr-icon-team-line fr-icon--sm" aria-hidden="true"></span> Partages
+        <span class="ic-equipe ic--sm" aria-hidden="true"></span> Partages
       </button>
     </div>
 
@@ -706,16 +882,16 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     <div class="rpane active" data-rpane="sources">
       <style>
       .src-section{padding:10px 14px 8px;
-        border-bottom:1px solid var(--border-default-grey)}
+        border-bottom:1px solid var(--qs-trait)}
       .src-section:last-child{border-bottom:none}
       .src-section-header{display:flex;align-items:center;gap:6px;
-        font-size:11px;font-weight:700;color:#000091;
+        font-size:11px;font-weight:700;color:var(--qs-accent);
         text-transform:uppercase;letter-spacing:.3px;margin-bottom:6px}
       .src-section-content{font-size:12px}
       .src-action{display:block;padding:8px 14px;background:#f4f6fa;
-        text-align:center;font-weight:700;font-size:11px;color:#000091;
-        border-top:1px solid var(--border-default-grey);text-decoration:none}
-      .src-action:hover{background:#e3eaf5}
+        text-align:center;font-weight:700;font-size:11px;color:var(--qs-accent);
+        border-top:1px solid var(--qs-trait);text-decoration:none}
+      .src-action:hover{background:var(--qs-accent-pale)}
       </style>
       <div class="src-section">
         <div class="src-section-header">Couches QGIS du projet</div>
@@ -787,26 +963,26 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       <style>
       .liv-list{padding:8px 10px;display:flex;flex-direction:column;gap:8px;
         flex:1;overflow-y:auto}
-      .liv-card{background:#fff;border:1px solid var(--border-default-grey);
+      .liv-card{background:#fff;border:1px solid var(--qs-trait);
         border-left:3px solid #ccc;border-radius:4px;padding:9px 11px;
         font-size:12px;display:flex;flex-direction:column;gap:5px}
-      .liv-card.is-published{border-left-color:#1f8d4d}
-      .liv-card.is-draft{border-left-color:#d64d00}
+      .liv-card.is-published{border-left-color:var(--qs-succes)}
+      .liv-card.is-draft{border-left-color:var(--qs-alerte)}
       .liv-card-header{display:flex;align-items:center;gap:8px}
       .liv-card-icon{font-size:18px}
-      .liv-card-title{flex:1;font-weight:700;color:var(--text-title-grey);
+      .liv-card-title{flex:1;font-weight:700;color:var(--qs-encre);
         overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .liv-card-state{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600}
-      .liv-card-state.published{background:#d1f0d8;color:#1f8d4d}
-      .liv-card-state.draft{background:#ffe7d6;color:#d64d00}
-      .liv-card-meta{font-size:10px;color:var(--text-mention-grey);
+      .liv-card-state.published{background:#d1f0d8;color:var(--qs-succes)}
+      .liv-card-state.draft{background:var(--qs-alerte-pale);color:var(--qs-alerte)}
+      .liv-card-meta{font-size:10px;color:var(--qs-discret);
         display:flex;gap:6px;flex-wrap:wrap}
       .liv-card-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:3px}
       .liv-card-actions a, .liv-card-actions button{
         font-size:10.5px;padding:3px 8px;background:#f4f6fa;border:1px solid #d0d6e0;
-        border-radius:3px;cursor:pointer;color:#161616;text-decoration:none}
+        border-radius:3px;cursor:pointer;color:var(--qs-encre);text-decoration:none}
       .liv-card-actions a:hover, .liv-card-actions button:hover{
-        background:#e3eaf5;border-color:#000091}
+        background:var(--qs-accent-pale);border-color:var(--qs-accent)}
       .liv-card-toggle{font-size:10px;color:#666;cursor:pointer;
         user-select:none}
       /* Vague E1 D-QGIS-009 : Assembly Editor modal */
@@ -819,33 +995,33 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       #assembly-editor-header{display:flex;align-items:center;
         padding:14px 20px;border-bottom:1px solid #e5e5e5;background:#f6f6f6}
       #assembly-editor-title{flex:1;margin:0;font-size:16px;font-weight:700;
-        color:#000091}
+        color:var(--qs-accent)}
       #assembly-editor-close{background:none;border:none;font-size:18px;
         cursor:pointer;color:#666;width:32px;height:32px}
-      #assembly-editor-close:hover{color:#000091}
+      #assembly-editor-close:hover{color:var(--qs-accent)}
       #assembly-editor-body{flex:1;overflow-y:auto;padding:18px 20px}
       #assembly-editor-status{margin:0 0 16px;font-size:12px;color:#666;
         font-style:italic}
       #assembly-editor-footer{display:flex;gap:8px;justify-content:flex-end;
         padding:12px 20px;border-top:1px solid #e5e5e5;background:#fafafa}
-      .ae-btn-primary{background:#000091;color:#fff;border:none;
+      .ae-btn-primary{background:var(--qs-accent);color:#fff;border:none;
         padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:600}
       .ae-btn-primary:hover{background:#1212a4}
       .ae-btn-secondary{background:#fff;color:#666;border:1px solid #ccc;
         padding:8px 16px;border-radius:4px;cursor:pointer}
-      .ae-btn-secondary:hover{border-color:#000091;color:#000091}
+      .ae-btn-secondary:hover{border-color:var(--qs-accent);color:var(--qs-accent)}
       .ae-btn-mini{background:#fff;border:1px solid #ddd;border-radius:3px;
         padding:2px 6px;cursor:pointer;font-size:11px;color:#666}
-      .ae-btn-mini:hover{border-color:#000091;color:#000091}
+      .ae-btn-mini:hover{border-color:var(--qs-accent);color:var(--qs-accent)}
       .ae-btn-mini:disabled{opacity:0.3;cursor:not-allowed}
-      .ae-btn-danger{color:#d64d00}
-      .ae-btn-danger:hover{background:#ffe5e5;border-color:#d64d00}
+      .ae-btn-danger{color:var(--qs-alerte)}
+      .ae-btn-danger:hover{background:#ffe5e5;border-color:var(--qs-alerte)}
       .ae-section{background:#fff;border:1px solid #e5e5e5;border-radius:4px;
         padding:12px;margin-bottom:10px}
       .ae-section-header{display:flex;align-items:center;gap:6px;
         font-size:13px}
-      .ae-section-num{font-weight:700;color:#000091}
-      .ae-section-title{flex:1;font-weight:600;color:#161616}
+      .ae-section-num{font-weight:700;color:var(--qs-accent)}
+      .ae-section-title{flex:1;font-weight:600;color:var(--qs-encre)}
       .ae-section-count{font-size:11px;color:#666;margin-right:8px}
       .ae-comp-list{margin:8px 0 0;padding:0;list-style:none;
         font-size:12px}
@@ -860,9 +1036,9 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       .liv-card-children.expanded{display:block}
       .liv-child{padding:3px 0;color:#444}
       .liv-empty{text-align:center;padding:20px 14px;color:#888;font-size:11.5px}
-      .liv-create-row{padding:10px 14px;border-top:1px solid var(--border-default-grey);
-        background:#eef3f9}
-      .liv-create-title{font-size:10.5px;color:#000091;font-weight:600;margin-bottom:6px}
+      .liv-create-row{padding:10px 14px;border-top:1px solid var(--qs-trait);
+        background:var(--qs-accent-pale)}
+      .liv-create-title{font-size:10.5px;color:var(--qs-accent);font-weight:600;margin-bottom:6px}
       </style>
       {% if active_study %}
       <div class="liv-list" id="liv-list">
@@ -870,7 +1046,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       </div>
       <div class="liv-create-row">
         <div class="liv-create-title">Demander à l'assistant V1.5 :</div>
-        <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35;width:100%"
+        <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid var(--qs-trait);border-radius:4px;cursor:pointer;color:var(--qs-encre);line-height:1.35;width:100%"
                 data-prompt="J'aimerais créer un nouveau livrable pour cette étude. Quels types sont possibles (storymap interactive, rapport, jeu de données partageable, etc.) ? Propose-moi le plus adapté à ce que j'ai déjà.">
           Créer un nouveau livrable
         </button>
@@ -909,7 +1085,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       {# Filet quand la carte est blanche alors que des couches sont
          chargees : QGIS peut avoir redemarre seul dans le pod, auquel cas
          la vue reste sur l'etendue par defaut. Voir POST /desk/recadrer. #}
-      <button type="button" id="btn-recadrer" class="fr-btn fr-btn--sm fr-btn--secondary"
+      <button type="button" id="btn-recadrer" class="qs-btn qs-btn--sm qs-btn--secondaire"
               style="margin-top:10px;width:100%"
               title="Ajuste la vue sur l'étendue des couches chargées">
         Recadrer la carte
@@ -938,7 +1114,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             Création via l'agent IA (chat). Catalogue MVP :
             <em>interactive_map · legend · kpi_badge · narrative_text</em>.
           </p>
-          <button id="btn-refresh-components" class="fr-btn fr-btn--sm fr-btn--tertiary"
+          <button id="btn-refresh-components" class="qs-btn qs-btn--sm qs-btn--tertiaire"
                   onclick="loadComponents()" style="font-size:11px">
             ↻ Rafraîchir
           </button>
@@ -997,13 +1173,13 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           return;
         }
         const KIND_ICONS = {
-          interactive_map: '<span class="fr-icon-road-map-line fr-icon--sm" aria-hidden="true"></span>', scene_3d: '<span class="fr-icon-building-line fr-icon--sm" aria-hidden="true"></span>', chart: '<span class="fr-icon-line-chart-line fr-icon--sm" aria-hidden="true"></span>',
-          kpi_badge: '<span class="fr-icon-hashtag fr-icon--sm" aria-hidden="true"></span>', legend: '<span class="fr-icon-list-unordered fr-icon--sm" aria-hidden="true"></span>', narrative_text: '<span class="fr-icon-edit-box-line fr-icon--sm" aria-hidden="true"></span>',
-          data_table: '<span class="fr-icon-table-line fr-icon--sm" aria-hidden="true"></span>', media_embed: '<span class="fr-icon-image-line fr-icon--sm" aria-hidden="true"></span>', iframe_grist: '<span class="fr-icon-layout-grid-line fr-icon--sm" aria-hidden="true"></span>',
+          interactive_map: '<span class="ic-carte ic--sm" aria-hidden="true"></span>', scene_3d: '<span class="ic-batiment ic--sm" aria-hidden="true"></span>', chart: '<span class="ic-courbe ic--sm" aria-hidden="true"></span>',
+          kpi_badge: '<span class="ic-diese ic--sm" aria-hidden="true"></span>', legend: '<span class="ic-liste ic--sm" aria-hidden="true"></span>', narrative_text: '<span class="ic-editer-bloc ic--sm" aria-hidden="true"></span>',
+          data_table: '<span class="ic-tableau ic--sm" aria-hidden="true"></span>', media_embed: '<span class="ic-image ic--sm" aria-hidden="true"></span>', iframe_grist: '<span class="ic-grille ic--sm" aria-hidden="true"></span>',
         };
         list.innerHTML = data.map(c => `
           <div class="component-item">
-            <div class="component-icon">${KIND_ICONS[c.kind] || '<span class="fr-icon-shapes-line fr-icon--sm" aria-hidden="true"></span>'}</div>
+            <div class="component-icon">${KIND_ICONS[c.kind] || '<span class="ic-formes ic--sm" aria-hidden="true"></span>'}</div>
             <div class="component-body">
               <div class="component-title">${escapeHtml(c.title || c.cid)}</div>
               <div class="component-meta">
@@ -1013,7 +1189,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
               </div>
             </div>
             <a href="/studies/${sid}/components/${c.cid}/render"
-               target="_blank" class="fr-btn fr-btn--sm fr-btn--tertiary"
+               target="_blank" class="qs-btn qs-btn--sm qs-btn--tertiaire"
                style="font-size:10.5px;padding:4px 8px"
                title="Aperçu HTML du composant">
               Voir
@@ -1037,40 +1213,40 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     <style>
     .components-pane{padding:14px 12px;display:flex;flex-direction:column;gap:12px}
     .components-header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
-    .components-desc{font-size:11.5px;color:var(--text-mention-grey);
+    .components-desc{font-size:11.5px;color:var(--qs-discret);
       margin:0;line-height:1.45;flex:1}
     .components-list{display:flex;flex-direction:column;gap:6px}
     .component-item{display:flex;align-items:center;gap:10px;padding:10px;
-      background:var(--background-alt-grey);border-radius:6px;
-      border-left:3px solid #000091}
+      background:var(--qs-surface-2);border-radius:6px;
+      border-left:3px solid var(--qs-accent)}
     .component-icon{font-size:20px;flex-shrink:0}
     .component-body{flex:1;min-width:0}
     .component-title{font-size:12.5px;font-weight:600;margin:0 0 3px;
-      color:var(--text-title-blue-france);overflow:hidden;
+      color:var(--qs-accent);overflow:hidden;
       text-overflow:ellipsis;white-space:nowrap}
     .component-meta{display:flex;gap:6px;flex-wrap:wrap;
-      font-size:10px;color:var(--text-mention-grey)}
-    .component-kind{background:#e3eaf5;color:#000091;padding:1px 6px;
+      font-size:10px;color:var(--qs-discret)}
+    .component-kind{background:var(--qs-accent-pale);color:var(--qs-accent);padding:1px 6px;
       border-radius:8px;font-weight:600}
     .component-class{font-style:italic}
     .component-version{font-variant-numeric:tabular-nums;color:#666}
 
     /* Sprint Composants Phase 3b — quick-actions UI bridge */
     .quick-actions-block{display:flex;flex-direction:column;gap:5px;
-      padding:8px 10px;background:#eef3f9;border-radius:6px;
+      padding:8px 10px;background:var(--qs-accent-pale);border-radius:6px;
       border:1px dashed #91b0d6}
-    .quick-actions-title{font-size:10.5px;color:#000091;font-weight:600;
+    .quick-actions-title{font-size:10.5px;color:var(--qs-accent);font-weight:600;
       margin-bottom:2px}
     .quick-action-btn{font-size:11px;padding:6px 10px;text-align:left;
-      background:#fff;border:1px solid #c8d4e6;border-radius:4px;
-      cursor:pointer;color:#161616;line-height:1.35;
+      background:#fff;border:1px solid var(--qs-trait);border-radius:4px;
+      cursor:pointer;color:var(--qs-encre);line-height:1.35;
       transition:background 0.15s,border-color 0.15s}
-    .quick-action-btn:hover{background:#f0f5fc;border-color:#000091}
+    .quick-action-btn:hover{background:var(--qs-accent-pale);border-color:var(--qs-accent)}
     .quick-action-btn:active{background:#e0eaf8}
-    .quick-action-btn.copied{background:#d1f0d8;border-color:#1f8d4d}
+    .quick-action-btn.copied{background:#d1f0d8;border-color:var(--qs-succes)}
     /* Toast confirm copy */
     .quick-action-toast{position:fixed;bottom:24px;left:50%;
-      transform:translateX(-50%);padding:9px 16px;background:#1f8d4d;
+      transform:translateX(-50%);padding:9px 16px;background:var(--qs-succes);
       color:#fff;border-radius:4px;font-size:12px;
       box-shadow:0 2px 8px rgba(0,0,0,.25);z-index:9999;
       opacity:0;pointer-events:none;transition:opacity 0.25s}
@@ -1137,7 +1313,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             l'agent IA. <strong>audit_chain transverse</strong> calculé automatiquement
             au <em>publish</em> (signed_hash SHA256 + components_refs + scene_hashes).
           </p>
-          <button id="btn-refresh-assemblies" class="fr-btn fr-btn--sm fr-btn--tertiary"
+          <button id="btn-refresh-assemblies" class="qs-btn qs-btn--sm qs-btn--tertiaire"
                   onclick="loadAssemblies()" style="font-size:11px">
             ↻ Rafraîchir
           </button>
@@ -1193,37 +1369,37 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           return;
         }
         const KIND_ICONS = {
-          storymap_narrative_dsfr: '<span class="fr-icon-article-line fr-icon--sm" aria-hidden="true"></span>', dashboard: '<span class="fr-icon-dashboard-line fr-icon--sm" aria-hidden="true"></span>',
-          sheet_a4: '<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>', modal_embed: '<span class="fr-icon-window-line fr-icon--sm" aria-hidden="true"></span>', atlas_immersive: '<span class="fr-icon-building-line fr-icon--sm" aria-hidden="true"></span>',
+          storymap_narrative_dsfr: '<span class="ic-article ic--sm" aria-hidden="true"></span>', dashboard: '<span class="ic-tableau-bord ic--sm" aria-hidden="true"></span>',
+          sheet_a4: '<span class="ic-fichier ic--sm" aria-hidden="true"></span>', modal_embed: '<span class="ic-fenetre ic--sm" aria-hidden="true"></span>', atlas_immersive: '<span class="ic-batiment ic--sm" aria-hidden="true"></span>',
         };
         const AUDIENCE_LABELS = {
-          public: '<span class="fr-icon-earth-line fr-icon--sm" aria-hidden="true"></span> Public', cerema_internal: '<span class="fr-icon-building-line fr-icon--sm" aria-hidden="true"></span> Interne',
-          restricted: '<span class="fr-icon-lock-line fr-icon--sm" aria-hidden="true"></span> Restreint', confidential: '<span class="fr-icon-eye-off-line fr-icon--sm" aria-hidden="true"></span> Confidentiel',
+          public: '<span class="ic-globe ic--sm" aria-hidden="true"></span> Public', cerema_internal: '<span class="ic-batiment ic--sm" aria-hidden="true"></span> Interne',
+          restricted: '<span class="ic-cadenas ic--sm" aria-hidden="true"></span> Restreint', confidential: '<span class="ic-oeil-barre ic--sm" aria-hidden="true"></span> Confidentiel',
         };
         list.innerHTML = data.map(a => `
           <div class="assembly-item">
-            <div class="assembly-icon">${KIND_ICONS[a.kind] || '<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>'}</div>
+            <div class="assembly-icon">${KIND_ICONS[a.kind] || '<span class="ic-fichier ic--sm" aria-hidden="true"></span>'}</div>
             <div class="assembly-body">
               <div class="assembly-title">${escapeHtml(a.title || a.aid)}</div>
               <div class="assembly-meta">
                 <span class="assembly-kind">${escapeHtml(a.kind)}</span>
                 <span class="assembly-audience">${AUDIENCE_LABELS[a.classification] || a.classification}</span>
                 <span class="assembly-version">v${a.version_num}</span>
-                ${a.published_url ? '<span class="assembly-published"><span class="fr-icon-checkbox-circle-line fr-icon--sm" aria-hidden="true"></span> publié</span>' : '<span class="assembly-draft">brouillon</span>'}
+                ${a.published_url ? '<span class="assembly-published"><span class="ic-coche-cercle ic--sm" aria-hidden="true"></span> publié</span>' : '<span class="assembly-draft">brouillon</span>'}
               </div>
             </div>
             <div class="assembly-actions">
               <a href="/studies/${sid}/assemblies/${a.aid}/render" target="_blank"
-                 class="fr-btn fr-btn--sm fr-btn--tertiary"
+                 class="qs-btn qs-btn--sm qs-btn--tertiaire"
                  style="font-size:10.5px;padding:4px 8px"
-                 title="Preview HTML"><span class="fr-icon-eye-line fr-icon--sm" aria-hidden="true"></span></a>
+                 title="Preview HTML"><span class="ic-oeil ic--sm" aria-hidden="true"></span></a>
               ${a.published_url ?
                 `<a href="${escapeHtml(a.published_url)}" target="_blank"
-                    class="fr-btn fr-btn--sm" style="font-size:10.5px;padding:4px 8px"
-                    title="URL publiée S3"><span class="fr-icon-external-link-line fr-icon--sm" aria-hidden="true"></span></a>` :
+                    class="qs-btn qs-btn--sm" style="font-size:10.5px;padding:4px 8px"
+                    title="URL publiée S3"><span class="ic-lien-externe ic--sm" aria-hidden="true"></span></a>` :
                 `<button onclick="publishAssembly('${a.aid}')"
-                    class="fr-btn fr-btn--sm" style="font-size:10.5px;padding:4px 8px"
-                    title="Publier sur S3 avec audit_chain"><span class="fr-icon-upload-line fr-icon--sm" aria-hidden="true"></span></button>`}
+                    class="qs-btn qs-btn--sm" style="font-size:10.5px;padding:4px 8px"
+                    title="Publier sur S3 avec audit_chain"><span class="ic-televerser ic--sm" aria-hidden="true"></span></button>`}
             </div>
           </div>
         `).join('');
@@ -1259,24 +1435,24 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     <style>
     .assemblies-pane{padding:14px 12px;display:flex;flex-direction:column;gap:12px}
     .assemblies-header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
-    .assemblies-desc{font-size:11.5px;color:var(--text-mention-grey);
+    .assemblies-desc{font-size:11.5px;color:var(--qs-discret);
       margin:0;line-height:1.45;flex:1}
     .assemblies-list{display:flex;flex-direction:column;gap:6px}
     .assembly-item{display:flex;align-items:center;gap:10px;padding:10px;
-      background:var(--background-alt-grey);border-radius:6px;
-      border-left:3px solid #18753c}
+      background:var(--qs-surface-2);border-radius:6px;
+      border-left:3px solid var(--qs-succes)}
     .assembly-icon{font-size:22px;flex-shrink:0}
     .assembly-body{flex:1;min-width:0}
     .assembly-title{font-size:12.5px;font-weight:600;margin:0 0 3px;
-      color:var(--text-title-blue-france);overflow:hidden;
+      color:var(--qs-accent);overflow:hidden;
       text-overflow:ellipsis;white-space:nowrap}
     .assembly-meta{display:flex;gap:6px;flex-wrap:wrap;font-size:10px;
-      color:var(--text-mention-grey)}
-    .assembly-kind{background:#e8f5e9;color:#18753c;padding:1px 6px;
+      color:var(--qs-discret)}
+    .assembly-kind{background:#e8f5e9;color:var(--qs-succes);padding:1px 6px;
       border-radius:8px;font-weight:600}
     .assembly-audience{font-style:italic}
     .assembly-version{font-variant-numeric:tabular-nums;color:#666}
-    .assembly-published{background:#18753c;color:#fff;padding:1px 5px;
+    .assembly-published{background:var(--qs-succes);color:#fff;padding:1px 5px;
       border-radius:3px;font-weight:600}
     .assembly-draft{background:#ddd;color:#666;padding:1px 5px;
       border-radius:3px}
@@ -1308,7 +1484,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         {# ═══ NIVEAU ÉTUDE ═══════════════════════════════════════════ #}
         <div class="exports-zone">
           <div class="exports-zone-header">
-            <span class="exports-zone-icon fr-icon-bookmark-line" aria-hidden="true"></span>
+            <span class="exports-zone-icon ic-signet" aria-hidden="true"></span>
             <div class="exports-zone-titles">
               <h3 class="exports-zone-label">Niveau étude</h3>
               <p class="exports-zone-context">« {{ active_study.name }} »</p>
@@ -1323,7 +1499,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
               Idéal pour archiver ou partager hors ligne.
             </p>
             <a href="/studies/{{ active_study_id }}/export"
-               class="fr-btn fr-btn--sm" style="width:100%;text-align:center;font-weight:700"
+               class="qs-btn qs-btn--sm" style="width:100%;text-align:center;font-weight:700"
                title="Télécharger l'étude au format ZIP">
               ↓ Télécharger l'étude (ZIP)
             </a>
@@ -1336,7 +1512,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
               qui orchestre les composants des projets de l'étude.
               Publication S3 avec audit_chain + classification audience.
             </p>
-            <button type="button" class="fr-btn fr-btn--sm fr-btn--tertiary"
+            <button type="button" class="qs-btn qs-btn--sm qs-btn--tertiaire"
                     style="width:100%;text-align:center" disabled
                     title="Disponible après Sprint Composants Phase 3 (assemblages)">
               Générer storymap →
@@ -1348,7 +1524,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         {% if active_project %}
         <div class="exports-zone exports-zone--project">
           <div class="exports-zone-header">
-            <span class="exports-zone-icon fr-icon-bookmark-line" aria-hidden="true"></span>
+            <span class="exports-zone-icon ic-signet" aria-hidden="true"></span>
             <div class="exports-zone-titles">
               <h3 class="exports-zone-label">Niveau projet</h3>
               <p class="exports-zone-context">
@@ -1372,7 +1548,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
               version existe — le Scene Manifest embarqué pour interop
               cross-runtime (atlas, qgis2grist, ZEBRA).
             </p>
-            <button type="button" class="fr-btn fr-btn--sm"
+            <button type="button" class="qs-btn qs-btn--sm"
                     id="btn-export-grist"
                     style="width:100%;text-align:center;font-weight:700"
                     onclick="exportGristDoc()"
@@ -1391,7 +1567,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
               (couches + symbology + provenance). Format JSON pivot
               consommable par MapLibre, QGIS re-import, atlas widget Grist.
             </p>
-            <button type="button" class="fr-btn fr-btn--sm fr-btn--tertiary"
+            <button type="button" class="qs-btn qs-btn--sm qs-btn--tertiaire"
                     style="width:100%;text-align:center" disabled
                     title="Disponible après Sprint Composants Phase 4">
               Télécharger Scene Manifest →
@@ -1405,7 +1581,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
               embarqués (tables _meta_scene + scene_relations + scene_provenance).
               Pivot QGIS re-import + R + Python.
             </p>
-            <button type="button" class="fr-btn fr-btn--sm fr-btn--tertiary"
+            <button type="button" class="qs-btn qs-btn--sm qs-btn--tertiaire"
                     style="width:100%;text-align:center" disabled
                     title="Disponible après Sprint Composants Phase 4">
               Générer GPKG étendu →
@@ -1415,7 +1591,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         {% else %}
         <div class="exports-zone exports-zone--project exports-zone--empty">
           <div class="exports-zone-header">
-            <span class="exports-zone-icon fr-icon-bookmark-line" aria-hidden="true"></span>
+            <span class="exports-zone-icon ic-signet" aria-hidden="true"></span>
             <div class="exports-zone-titles">
               <h3 class="exports-zone-label">Niveau projet</h3>
               <p class="exports-zone-context exports-zone-context--hint">
@@ -1489,29 +1665,29 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     /* Sprint Composants Phase 1 (2026-06-25) : zones distinctes
        étude / projet pour clarifier le scope de chaque export. */
     .exports-zone{display:flex;flex-direction:column;gap:12px;
-      padding-bottom:14px;border-bottom:1px dashed var(--border-default-grey)}
+      padding-bottom:14px;border-bottom:1px dashed var(--qs-trait)}
     .exports-zone:last-child{border-bottom:0}
     .exports-zone--project{padding-top:6px}
     .exports-zone--empty .exports-zone-context--hint{font-style:italic;
-      color:var(--text-mention-grey)}
+      color:var(--qs-discret)}
     .exports-zone-header{display:flex;align-items:flex-start;gap:8px;
       padding:6px 4px}
     .exports-zone-icon{font-size:15px;line-height:1}
     .exports-zone-titles{flex:1;min-width:0}
     .exports-zone-label{font-size:11.5px;font-weight:700;margin:0 0 2px;
       text-transform:uppercase;letter-spacing:.5px;
-      color:var(--text-title-blue-france)}
-    .exports-zone-context{font-size:11.5px;color:var(--text-default-grey);
+      color:var(--qs-accent)}
+    .exports-zone-context{font-size:11.5px;color:var(--qs-encre-2);
       margin:0;font-weight:600}
     .exports-zone-hint{display:block;font-size:10px;font-weight:400;
-      color:var(--text-mention-grey);margin-top:2px;font-style:italic}
+      color:var(--qs-discret);margin-top:2px;font-style:italic}
 
-    .export-section{padding:12px;background:var(--background-alt-grey);
-      border-radius:6px;border-left:3px solid #d64d00}
+    .export-section{padding:12px;background:var(--qs-surface-2);
+      border-radius:6px;border-left:3px solid var(--qs-alerte)}
     .export-section.export-soon{border-left-color:#919191;opacity:.75}
     .export-section-title{font-size:12.5px;font-weight:700;margin:0 0 4px;
-      color:var(--text-title-blue-france);display:flex;align-items:center;gap:6px}
-    .export-section-desc{font-size:11px;color:var(--text-mention-grey);
+      color:var(--qs-accent);display:flex;align-items:center;gap:6px}
+    .export-section-desc{font-size:11px;color:var(--qs-discret);
       margin:0 0 10px;line-height:1.45}
     .soon-badge{font-size:9.5px;font-weight:600;background:#919191;color:#fff;
       padding:1px 6px;border-radius:8px;letter-spacing:.3px}
@@ -1519,8 +1695,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
        Grist (genere par exportGristDoc JS) - 3 etats : info/ok/err. */
     .export-status{margin-top:8px;padding:8px 10px;border-radius:4px;
       font-size:11px;line-height:1.5}
-    .export-status--info{background:#e9eafe;color:var(--text-action-high-blue-france)}
-    .export-status--ok{background:#dffee0;color:#18753c}
+    .export-status--info{background:#e9eafe;color:var(--qs-accent)}
+    .export-status--ok{background:#dffee0;color:var(--qs-succes)}
     .export-status--err{background:#ffe2e2;color:#b34000}
     .export-status-link{display:inline-block;margin-top:4px;font-weight:700;
       color:inherit;text-decoration:underline}
@@ -1537,12 +1713,12 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
              onclick="setActiveRender('{{ item.kind }}', '{{ item.slug }}', '{{ item.slug }}')"
              title="{{ item.url }}">
             <span class="ic">
-              {% if item.kind == 'storymap' %}<span class="fr-icon-article-line fr-icon--sm" aria-hidden="true"></span>
-              {% elif item.kind == 'flux' %}<span class="fr-icon-external-link-line fr-icon--sm" aria-hidden="true"></span>
-              {% elif item.kind == 'recipe' %}<span class="fr-icon-list-unordered fr-icon--sm" aria-hidden="true"></span>
-              {% elif item.kind == 'pdf' %}<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>
-              {% elif item.kind == 'dataset' %}<span class="fr-icon-line-chart-line fr-icon--sm" aria-hidden="true"></span>
-              {% else %}<span class="fr-icon-archive-line fr-icon--sm" aria-hidden="true"></span>{% endif %}
+              {% if item.kind == 'storymap' %}<span class="ic-article ic--sm" aria-hidden="true"></span>
+              {% elif item.kind == 'flux' %}<span class="ic-lien-externe ic--sm" aria-hidden="true"></span>
+              {% elif item.kind == 'recipe' %}<span class="ic-liste ic--sm" aria-hidden="true"></span>
+              {% elif item.kind == 'pdf' %}<span class="ic-fichier ic--sm" aria-hidden="true"></span>
+              {% elif item.kind == 'dataset' %}<span class="ic-courbe ic--sm" aria-hidden="true"></span>
+              {% else %}<span class="ic-archive ic--sm" aria-hidden="true"></span>{% endif %}
             </span>
             <div class="info">
               <div class="name">{{ item.slug }}</div>
@@ -1559,7 +1735,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             <span style="font-size:10px">
               Demande à l'agent : « publie cette storymap ».
               {% if catalog_total and catalog_total > 0 %}
-                <br><a href="/workspace" style="color:var(--text-action-high-blue-france)">
+                <br><a href="/workspace" style="color:var(--qs-accent)">
                   Voir les {{ catalog_total }} publications du compte
                 </a>
               {% endif %}
@@ -1579,7 +1755,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     <!-- V1.5 Sprint 1 : Onglet Recettes user (CRUD via /studies/{sid}/recipes) -->
     <div class="rpane" data-rpane="recipes">
       <div style="padding:6px 8px;">
-        <button id="recipes-new-btn" class="fr-btn fr-btn--sm fr-btn--secondary"
+        <button id="recipes-new-btn" class="qs-btn qs-btn--sm qs-btn--secondaire"
                 style="font-size:11px; padding:4px 8px;"
                 title="Créer une nouvelle recette YAML">
           ＋ Nouvelle recette
@@ -1598,27 +1774,27 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       <div class="agents-pane" style="padding:14px 12px;display:flex;flex-direction:column;gap:12px">
         {% if active_study %}
         <div class="agents-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-          <p class="agents-desc" style="font-size:11.5px;color:var(--text-mention-grey);margin:0;line-height:1.45;flex:1">
+          <p class="agents-desc" style="font-size:11.5px;color:var(--qs-discret);margin:0;line-height:1.45;flex:1">
             Agents partagés (assistants IA configurables) que tu publies pour diffusion.
             Chaque agent = profile + audience + scope étude + clé scopée révocable.
             <strong>Configuration via l'assistant</strong> (chat) — pose ton plan, valide, mint + publie.
           </p>
-          <button id="btn-refresh-agents" class="fr-btn fr-btn--sm fr-btn--tertiary"
+          <button id="btn-refresh-agents" class="qs-btn qs-btn--sm qs-btn--tertiaire"
                   onclick="loadAgents()" style="font-size:11px">↻ Rafraîchir</button>
         </div>
-        <div class="quick-actions-block" data-target="agents" style="background:#eef3f9;border:1px dashed #91b0d6;border-radius:6px;padding:8px 10px">
-          <div style="font-size:10.5px;color:#000091;font-weight:600;margin-bottom:5px">
+        <div class="quick-actions-block" data-target="agents" style="background:var(--qs-accent-pale);border:1px dashed #91b0d6;border-radius:6px;padding:8px 10px">
+          <div style="font-size:10.5px;color:var(--qs-accent);font-weight:600;margin-bottom:5px">
             Demander à l'assistant V1.5 :
           </div>
-          <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35"
+          <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid var(--qs-trait);border-radius:4px;cursor:pointer;color:var(--qs-encre);line-height:1.35"
                   data-prompt="Montre-moi mes assistants partagés actuels pour cette étude, et fais le point sur où on en est.">
             Mes assistants partagés actuels
           </button>
-          <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35;margin-top:5px"
+          <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid var(--qs-trait);border-radius:4px;cursor:pointer;color:var(--qs-encre);line-height:1.35;margin-top:5px"
                   data-prompt="Je voudrais partager cette étude avec mes collègues via un assistant qu'ils peuvent consulter directement. Propose-moi une configuration adaptée et préviens-moi des points d'attention (confidentialité, audience).">
             Créer un assistant pour mes collègues
           </button>
-          <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid #c8d4e6;border-radius:4px;cursor:pointer;color:#161616;line-height:1.35;margin-top:5px"
+          <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid var(--qs-trait);border-radius:4px;cursor:pointer;color:var(--qs-encre);line-height:1.35;margin-top:5px"
                   data-prompt="Vérifie qu'un assistant partagé visible par mes collègues serait bien configuré pour cette étude. Signale-moi les éventuels points d'attention (confidentialité, accès, etc.).">
             Vérifier la configuration avant partage
           </button>
@@ -1673,23 +1849,23 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           return;
         }
         const AUDIENCE_BADGE = {
-          public: {color: '#fff', bg: '#b34000', label: '<span class="fr-icon-earth-line fr-icon--sm" aria-hidden="true"></span> public'},
-          cerema_internal: {color: '#fff', bg: '#000091', label: '<span class="fr-icon-building-line fr-icon--sm" aria-hidden="true"></span> Interne'},
-          restricted: {color: '#fff', bg: '#6e445a', label: '<span class="fr-icon-lock-line fr-icon--sm" aria-hidden="true"></span> restreint'},
-          confidential: {color: '#fff', bg: '#000', label: '<span class="fr-icon-eye-off-line fr-icon--sm" aria-hidden="true"></span> confidentiel'},
+          public: {color: '#fff', bg: '#b34000', label: '<span class="ic-globe ic--sm" aria-hidden="true"></span> public'},
+          cerema_internal: {color: '#fff', bg: 'var(--qs-accent)', label: '<span class="ic-batiment ic--sm" aria-hidden="true"></span> Interne'},
+          restricted: {color: '#fff', bg: '#6e445a', label: '<span class="ic-cadenas ic--sm" aria-hidden="true"></span> restreint'},
+          confidential: {color: '#fff', bg: '#000', label: '<span class="ic-oeil-barre ic--sm" aria-hidden="true"></span> confidentiel'},
         };
         list.innerHTML = agents.map(a => {
-          const aud = AUDIENCE_BADGE[a.audience] || {color: '#161616', bg: '#ccc', label: a.audience};
+          const aud = AUDIENCE_BADGE[a.audience] || {color: 'var(--qs-encre)', bg: '#ccc', label: a.audience};
           const pub = a.published_url
-            ? `<a href="${a.published_url}" target="_blank" class="fr-btn fr-btn--sm fr-btn--tertiary" style="font-size:10.5px;padding:4px 8px" title="URL widget de l'agent partagé"><span class="fr-icon-eye-line fr-icon--sm" aria-hidden="true"></span> URL</a>`
+            ? `<a href="${a.published_url}" target="_blank" class="qs-btn qs-btn--sm qs-btn--tertiaire" style="font-size:10.5px;padding:4px 8px" title="URL widget de l'agent partagé"><span class="ic-oeil ic--sm" aria-hidden="true"></span> URL</a>`
             : '<span style="font-size:10px;color:#999;font-style:italic">draft (non publié)</span>';
-          return `<div class="agent-item" style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--background-alt-grey);border-radius:6px;border-left:3px solid ${aud.bg}">
-            <div style="font-size:20px"><span class="fr-icon-team-line fr-icon--md" aria-hidden="true"></span></div>
+          return `<div class="agent-item" style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--qs-surface-2);border-radius:6px;border-left:3px solid ${aud.bg}">
+            <div style="font-size:20px"><span class="ic-equipe ic--md" aria-hidden="true"></span></div>
             <div style="flex:1;min-width:0">
-              <div style="font-size:12.5px;font-weight:600;color:var(--text-title-blue-france);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(a.label || a.id_masked)}</div>
-              <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:10px;color:var(--text-mention-grey);margin-top:3px">
+              <div style="font-size:12.5px;font-weight:600;color:var(--qs-accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(a.label || a.id_masked)}</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:10px;color:var(--qs-discret);margin-top:3px">
                 <span style="background:${aud.bg};color:${aud.color};padding:1px 6px;border-radius:8px;font-weight:600">${aud.label}</span>
-                <span style="background:#e3eaf5;color:#000091;padding:1px 6px;border-radius:8px">${escapeHtml(a.persona || '?')}</span>
+                <span style="background:var(--qs-accent-pale);color:var(--qs-accent);padding:1px 6px;border-radius:8px">${escapeHtml(a.persona || '?')}</span>
                 <span style="font-variant-numeric:tabular-nums;color:#666">${escapeHtml(a.id_masked)}</span>
               </div>
             </div>
@@ -1719,7 +1895,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <span id="recipe-editor-meta" style="font-size:11px; color:#666;"></span>
         <button onclick="closeRecipeEditor()"
                 style="border:0; background:#eee; padding:4px 10px; border-radius:4px;
-                       cursor:pointer;"><span class="fr-icon-close-line fr-icon--sm" aria-hidden="true"></span> Fermer</button>
+                       cursor:pointer;"><span class="ic-fermer ic--sm" aria-hidden="true"></span> Fermer</button>
       </div>
       <div style="padding:12px 16px; display:flex; gap:8px; flex-wrap:wrap;">
         <input id="recipe-editor-slug" type="text" placeholder="slug (ex: ma_recette)"
@@ -1739,12 +1915,12 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                        white-space:pre; overflow:auto;"></textarea>
       <div id="recipe-editor-status" style="padding:4px 16px; min-height:20px; font-size:11px;"></div>
       <div style="padding:12px 16px; border-top:1px solid #ddd; display:flex; gap:8px; justify-content:flex-end;">
-        <button onclick="closeRecipeEditor()" class="fr-btn fr-btn--secondary fr-btn--sm">
+        <button onclick="closeRecipeEditor()" class="qs-btn qs-btn--secondaire qs-btn--sm">
           Annuler
         </button>
         <button id="recipe-editor-save" onclick="saveRecipeFromEditor()"
-                class="fr-btn fr-btn--sm">
-          <span class="fr-icon-save-line fr-icon--sm" aria-hidden="true"></span> Sauvegarder
+                class="qs-btn qs-btn--sm">
+          <span class="ic-enregistrer ic--sm" aria-hidden="true"></span> Sauvegarder
         </button>
       </div>
     </div>
@@ -1772,16 +1948,16 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     </div>
     {% else %}
     <div class="canvas-empty" id="canvas-empty-wake">
-      <div class="ic">🖥</div>
+      <div class="ic"><span class="ic-fenetre ic--lg" aria-hidden="true"></span></div>
       <h3>Bureau QGIS endormi</h3>
       <p>Le workspace est en mode économie d'énergie (scale 0). Une commande au chat le réveillera, ou clique ci-dessous (~35s).</p>
-      <button type="button" id="wake-btn" class="fr-btn fr-btn--secondary"
+      <button type="button" id="wake-btn" class="qs-btn qs-btn--secondaire"
               onclick="wakeWorkspace()">Réveiller le bureau</button>
     </div>
     <div class="canvas-empty" id="canvas-empty-waking" style="display:none">
       <style>@keyframes spin-w{to{transform:rotate(360deg)}}</style>
-      <div style="width:42px;height:42px;border:4px solid #e3e3fd;
-                  border-top-color:#000091;border-radius:50%;
+      <div style="width:42px;height:42px;border:4px solid var(--qs-accent-pale);
+                  border-top-color:var(--qs-accent);border-radius:50%;
                   animation:spin-w 1s linear infinite"></div>
       <h3>Démarrage du bureau QGIS…</h3>
       <p id="wake-progress">Provisionnement du pod K8s + Xvfb + QGIS (~35s).</p>
@@ -1798,7 +1974,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     <div class="right-pane active" data-pane="chat">
       <div id="agent-loader" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;gap:12px">
         <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
-        <div style="width:28px;height:28px;border:3px solid #e3e3fd;border-top-color:#000091;border-radius:50%;animation:spin 1s linear infinite"></div>
+        <div style="width:28px;height:28px;border:3px solid var(--qs-accent-pale);border-top-color:var(--qs-accent);border-radius:50%;animation:spin 1s linear infinite"></div>
         <p style="font-size:.85rem;color:#666;margin:0">Agent IA en démarrage…</p>
       </div>
       <iframe src="/agent/?embed=1" allow="microphone; clipboard-write" style="display:none"></iframe>
@@ -1820,9 +1996,9 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <!-- Facts auto-détectés (apprentissage automatique) -->
         <div class="mem-section">
           <div class="mem-label">
-            <span>🧠 Faits auto-détectés ({{ insights|length }})</span>
+            <span><span class="ic-memoire ic--sm" aria-hidden="true"></span> Faits auto-détectés ({{ insights|length }})</span>
           </div>
-          <div style="font-size:10.5px;color:var(--text-mention-grey);margin-bottom:6px;line-height:1.4">
+          <div style="font-size:10.5px;color:var(--qs-discret);margin-bottom:6px;line-height:1.4">
             L'agent capture des faits pendant tes conversations. Confirme ceux qui
             comptent en les recopiant dans tes sections ci-dessus, ou oublie les autres.
           </div>
@@ -1830,7 +2006,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             {% if insights %}
               {% for ins in insights %}
               <div class="mem-item {% if ins.source == 'explicit' %}explicit{% endif %}" data-id="{{ ins.id }}">
-                <span class="ic">{% if ins.source == 'explicit' %}📌{% else %}🧠{% endif %}</span>
+                <span class="ic {% if ins.source == 'explicit' %}ic-epingle{% else %}ic-memoire{% endif %} ic--sm"
+                      aria-hidden="true"></span>
                 <div class="body">
                   <div class="key">{{ ins.key }}</div>
                   <div class="val">{{ ins.value }}</div>
@@ -1869,7 +2046,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     </span>
     {% if insights|length > 0 %}
     <span class="sep">|</span>
-    <span title="Préférences et notes que l'agent a mémorisées">🧠 {{ insights|length }}</span>
+    <span title="Préférences et notes que l'agent a mémorisées"><span class="ic-memoire ic--sm" aria-hidden="true"></span> <span id="footer-insights-num">{{ insights|length }}</span></span>
     {% endif %}
     <span class="sep">|</span>
     <!-- Chip GPU/IA : etat du pod geoai-gpu (ready, dormant, off, busy).
@@ -1877,7 +2054,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
          /geoai/status toutes les 20s. Cache si pas deploye (ss_exists=false). -->
     <span id="gpu-chip" title="État du moteur IA Vision — clic pour réveiller"
           style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;
-                 padding:2px 8px;border-radius:10px;background:var(--background-alt-grey);
+                 padding:2px 8px;border-radius:10px;background:var(--qs-surface-2);
                  font-size:11px"
           onclick="wakeGpu()">
       <span id="gpu-dot"
@@ -1891,8 +2068,76 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     <span class="recent-tool">{{ t }}</span>
     {% endfor %}
     {% endif %}
-    <span style="margin-left:auto" class="user-chip">{{ username }}</span>
+    {# Le nom d'utilisateur a rejoint le bouton de compte, en haut a droite :
+       le repeter ici en faisait la seule information de la barre d'etat sans
+       lien avec l'etat du bureau. #}
   </footer>
+
+  {# ── Panneau de compte ───────────────────────────────────────────────
+     Ouvert par-dessus le bureau : consulter sa cle ou configurer
+     l'assistant ne doit pas couter le rechargement de la carte, ni la perte
+     de la session QGIS en cours. #}
+  <div class="qs-modale" id="compte-modale" hidden
+       role="dialog" aria-modal="true" aria-labelledby="compte-modale-titre">
+    <div class="qs-modale__fond" onclick="fermerCompte()"></div>
+    <div class="qs-modale__boite">
+      <div class="qs-modale__entete">
+        <span class="qs-avatar" aria-hidden="true">{{ username[:2] }}</span>
+        <h2 class="qs-modale__titre" id="compte-modale-titre">Mon compte</h2>
+        <button type="button" class="qs-modale__fermer ic-fermer"
+                onclick="fermerCompte()" aria-label="Fermer"></button>
+      </div>
+
+      <div class="qs-modale__corps">
+        <section data-section="acces">
+          <label class="qs-libelle" for="compte-cle">Ma clé d'accès personnelle</label>
+          <div class="qs-champ-copie">
+            <input class="qs-champ" id="compte-cle" type="password" readonly
+                   value="{{ hub_api_key or '' }}" autocomplete="off"
+                   aria-describedby="compte-cle-aide">
+            <button type="button" class="qs-btn qs-btn--sm qs-btn--tertiaire ic-oeil"
+                    onclick="basculerVisibiliteCle()" id="compte-cle-oeil"
+                    aria-label="Afficher ou masquer la clé"></button>
+            <button type="button" class="qs-btn qs-btn--sm qs-btn--tertiaire ic-copier"
+                    onclick="copierCle()" id="compte-cle-copie"
+                    aria-label="Copier la clé"></button>
+          </div>
+          <p class="qs-aide" id="compte-cle-aide">
+            Elle ouvre ton espace depuis n'importe quel navigateur, pendant
+            90&nbsp;jours. Elle se colle sur la page de connexion — jamais dans
+            une adresse.
+          </p>
+        </section>
+
+        <hr class="qs-menu__sep" style="margin:18px 0">
+
+        <section data-section="assistant">
+          <label class="qs-libelle" for="compte-llm">Clé de l'assistant</label>
+          <form id="compte-llm-form" onsubmit="return enregistrerCleAssistant(event)">
+            <div class="qs-champ-copie">
+              <input class="qs-champ" id="compte-llm" name="llm_api_key"
+                     type="password" placeholder="sk-…" autocomplete="off" required>
+              <button type="submit" class="qs-btn qs-btn--sm">Enregistrer</button>
+            </div>
+          </form>
+          <p class="qs-aide">
+            Sans elle, l'assistant ne répond pas. Récupère-la sur
+            <a href="https://llm.lab.sspcloud.fr" target="_blank"
+               rel="noopener external">llm.lab.sspcloud.fr</a>, onglet
+            <b>API keys</b>. Elle est enregistrée dans un secret de ton espace
+            et active immédiatement.
+          </p>
+          <p class="qs-aide" id="compte-llm-retour" role="status" hidden></p>
+        </section>
+      </div>
+
+      <div class="qs-modale__pied">
+        <button type="button" class="qs-btn qs-btn--tertiaire" onclick="fermerCompte()">
+          Fermer
+        </button>
+      </div>
+    </div>
+  </div>
 
 </div>
 
@@ -1910,6 +2155,16 @@ if (stored.chat) desk.style.setProperty('--chat-w', stored.chat + 'px');
 // Publi est un drawer overlay : fermé par défaut, pas de persistence ouverte
 // (l'utilisateur l'ouvre à la demande via 📚). Chat est une sidebar persistante.
 if (stored.collapseChat) desk.classList.add('no-chat');
+
+// Sur telephone les deux panneaux sont des calques poses sur la carte : les
+// ouvrir d'emblee cacherait ce que l'utilisateur vient consulter. On arrive
+// donc carte visible, quelle que soit la preference prise sur grand ecran --
+// elle n'a pas ete formulee pour ce format.
+const surTelephone = () => window.matchMedia('(max-width: 820px)').matches;
+if (surTelephone()) {
+  desk.classList.add('no-chat');
+  desk.classList.remove('show-publi');
+}
 syncToggles();
 
 // Ajuste --chat-w au resize pour garder QGIS toujours en 16:9 ancré haut-gauche.
@@ -1919,19 +2174,43 @@ syncToggles();
 const CHAT_NOMINAL = 340;
 const HANDLE = 6;
 const HEADER_H = 48, STATUS_H = 32;
+
+// La largeur du chat avait deux sources, qui se disputaient la meme variable.
+//
+// `updateLayout` la calcule pour garder le canvas QGIS en 16:9 ; la poignee
+// de redimensionnement la fixe a la main. Comme `updateLayout` s'execute au
+// chargement PUIS a chaque `resize`, il ecrasait systematiquement le reglage
+// de l'utilisateur : mesure sur le bureau, une largeur posee a 520 px
+// retombait a 476 px des le premier redimensionnement de fenetre. La valeur
+// etait pourtant bien enregistree -- elle ne survivait simplement jamais.
+//
+// Des que l'utilisateur a touche la poignee, sa largeur fait foi et le calcul
+// automatique se limite au defilement horizontal du canvas.
+let largeurChatChoisie = Number(stored.chat) || null;
+
 function updateLayout() {
+  // Sous 1100 px les panneaux passent en superposition et la grille change :
+  // poser une largeur en pixels n'y a plus de sens. `isNarrow` etait declare
+  // et cite en commentaire, mais aucune fonction ne l'appelait.
+  if (isNarrow()) {
+    desk.classList.remove('qgis-scroll');
+    return;
+  }
+
   const vw = window.innerWidth;
   const vh = window.innerHeight - HEADER_H - STATUS_H;
   const qgisWAtFullH = vh * 16 / 9;
+  const tientEnPleineHauteur =
+    qgisWAtFullH + (largeurChatChoisie || CHAT_NOMINAL) + HANDLE <= vw;
 
-  if (qgisWAtFullH + CHAT_NOMINAL + HANDLE <= vw) {
-    const chatW = vw - qgisWAtFullH - HANDLE;
-    desk.style.setProperty('--chat-w', chatW + 'px');
-    desk.classList.remove('qgis-scroll');
+  if (largeurChatChoisie) {
+    desk.style.setProperty('--chat-w', largeurChatChoisie + 'px');
+  } else if (tientEnPleineHauteur) {
+    desk.style.setProperty('--chat-w', (vw - qgisWAtFullH - HANDLE) + 'px');
   } else {
     desk.style.setProperty('--chat-w', CHAT_NOMINAL + 'px');
-    desk.classList.add('qgis-scroll');
   }
+  desk.classList.toggle('qgis-scroll', !tientEnPleineHauteur);
 }
 updateLayout();
 window.addEventListener('resize', updateLayout);
@@ -1940,7 +2219,31 @@ window.addEventListener('resize', updateLayout);
 // sendBeacon survit à la fermeture du tab et garantit que le .qgz est écrit
 // même si l'utilisateur ferme brutalement. Fallback fetch keepalive pour
 // les rares navigateurs qui mishandle sendBeacon.
-const _activeStudyId = {{ active_study_id|tojson if active_study_id else 'null' }};
+let _cachedActiveSid = null;  // sid resolu dynamiquement, partage avec les onglets
+
+// Fige au rendu, cette valeur vieillit : une page laissee ouverte pendant que
+// l'utilisateur bascule d'etude continue de viser l'ancienne. On part donc de
+// la valeur rendue, mais on la reactualise (voir _rafraichirEtudeActive).
+let _activeStudyId = {{ active_study_id|tojson if active_study_id else 'null' }};
+
+// Le serveur refuse desormais un sid perime, mais autant ne pas le lui
+// envoyer : on resynchronise quand l'onglet redevient visible, moment ou
+// l'utilisateur revient justement d'un eventuel changement d'etude.
+async function _rafraichirEtudeActive() {
+  try {
+    const r = await fetch('/studies/active', { credentials: 'include' });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d && d.id && d.id !== _activeStudyId) {
+      _activeStudyId = d.id;
+      _cachedActiveSid = d.id;
+    }
+  } catch (e) { /* hors ligne : on garde la derniere valeur connue */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') _rafraichirEtudeActive();
+});
+
 function _saveActiveStudyBeacon() {
   if (!_activeStudyId) return;
   const url = `/desk/study/${_activeStudyId}/save`;
@@ -1979,9 +2282,32 @@ function syncToggles() {
   tC?.classList.toggle('active', !desk.classList.contains('no-chat'));
 }
 
+// Ouverture du panneau Ressources : preference propre, distincte de
+// `desk-layout` qui ne retient que les largeurs.
+//
+// Le suffixe v2 a ete pose lors du passage a l'ouverture sur demande : sans
+// changer de cle, les utilisateurs qui avaient le panneau ouvert par defaut
+// l'auraient garde ouvert par-dessus le canvas.
+const _RESS_PREF_KEY = 'qgis_desk_resources_open_v2';
+
+function memoriserOuvertureRessources() {
+  try {
+    localStorage.setItem(_RESS_PREF_KEY,
+      desk.classList.contains('show-publi') ? '1' : '0');
+  } catch (e) {
+    // Navigation privee ou stockage refuse : la session reste utilisable,
+    // seule la memoire d'un chargement a l'autre est perdue.
+  }
+}
+
 function togglePanel(side) {
   if (side === 'publi') {
     desk.classList.toggle('show-publi');
+    // La preference d'ouverture du panneau gauche s'ecrivait depuis un SECOND
+    // ecouteur pose sur le meme bouton, mille lignes plus bas, qui devait
+    // attendre 150 ms pour lire l'etat parce que l'ordre d'execution des deux
+    // n'etait pas garanti. On l'ecrit ici, ou l'etat vient d'etre pose.
+    memoriserOuvertureRessources();
   } else {
     desk.classList.toggle('no-chat');
   }
@@ -1991,10 +2317,14 @@ function togglePanel(side) {
 document.getElementById('toggle-publi').addEventListener('click', () => togglePanel('publi'));
 document.getElementById('toggle-chat').addEventListener('click', () => togglePanel('chat'));
 
-// Backdrop : un click ferme le drawer publi
+// Le voile ferme ce qui est pose par-dessus la carte. Sur telephone les deux
+// panneaux sont des calques, il doit donc fermer aussi le chat -- sinon le
+// seul moyen de revenir a la carte serait le petit bouton du bord.
 document.getElementById('desk-backdrop').addEventListener('click', () => {
   desk.classList.remove('show-publi');
+  if (surTelephone()) desk.classList.add('no-chat');
   syncToggles();
+  memoriserOuvertureRessources();
 });
 
 // ── Resize handles ───────────────────────────────────────────
@@ -2018,6 +2348,11 @@ document.querySelectorAll('.handle').forEach(h => {
       h.classList.remove('active');
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      // A partir d'ici, la largeur du chat est un choix, plus un calcul.
+      if (target !== 'publi') {
+        largeurChatChoisie = parseInt(
+          getComputedStyle(desk).getPropertyValue('--chat-w'), 10) || null;
+      }
       saveLayout();
     };
     document.addEventListener('mousemove', onMove);
@@ -2028,12 +2363,120 @@ document.querySelectorAll('.handle').forEach(h => {
 // ── Dropdown études ────────────────────────────────────────
 function toggleStudyMenu(e) {
   e.stopPropagation();
+  fermerMenuCompte();
   document.getElementById('study-dropdown').classList.toggle('open');
 }
 document.addEventListener('click', (e) => {
   const dd = document.getElementById('study-dropdown');
   if (!e.target.closest('.study-menu')) dd.classList.remove('open');
+  if (!e.target.closest('.qs-compte')) fermerMenuCompte();
 });
+
+// ── Compte ─────────────────────────────────────────────────────────────
+// Deux menus coexistent dans la barre : ouvrir l'un ferme l'autre, sinon ils
+// se superposent. Chacun garde son declencheur, mais la fermeture au clic
+// exterieur est traitee au meme endroit, ci-dessus.
+
+function fermerMenuCompte() {
+  const menu = document.getElementById('compte-menu');
+  const btn = document.getElementById('compte-btn');
+  if (!menu) return;
+  menu.hidden = true;
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+function basculerMenuCompte(e) {
+  e.stopPropagation();
+  const menu = document.getElementById('compte-menu');
+  const btn = document.getElementById('compte-btn');
+  const ouvert = menu.hidden;
+  document.getElementById('study-dropdown')?.classList.remove('open');
+  menu.hidden = !ouvert;
+  btn.setAttribute('aria-expanded', String(ouvert));
+}
+
+function ouvrirCompte(section) {
+  fermerMenuCompte();
+  const modale = document.getElementById('compte-modale');
+  modale.hidden = false;
+  // Le champ vise recoit le focus : le menu annonce une destination precise,
+  // la modale doit y conduire plutot que de laisser chercher.
+  const cible = section === 'assistant'
+    ? document.getElementById('compte-llm')
+    : document.getElementById('compte-cle');
+  cible?.scrollIntoView({block: 'nearest'});
+  if (section === 'assistant') cible?.focus();
+}
+
+function fermerCompte() {
+  document.getElementById('compte-modale').hidden = true;
+  const retour = document.getElementById('compte-llm-retour');
+  if (retour) retour.hidden = true;
+  document.getElementById('compte-btn')?.focus();
+}
+
+// Echap ferme ce qui est ouvert, du plus superficiel au plus profond.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const modale = document.getElementById('compte-modale');
+  const menu = document.getElementById('compte-menu');
+  if (modale && !modale.hidden) { fermerCompte(); return; }
+  if (menu && !menu.hidden) fermerMenuCompte();
+});
+
+function basculerVisibiliteCle() {
+  const champ = document.getElementById('compte-cle');
+  const bouton = document.getElementById('compte-cle-oeil');
+  const cache = champ.type === 'password';
+  champ.type = cache ? 'text' : 'password';
+  bouton.classList.toggle('ic-oeil', !cache);
+  bouton.classList.toggle('ic-oeil-barre', cache);
+}
+
+async function copierCle() {
+  const champ = document.getElementById('compte-cle');
+  const bouton = document.getElementById('compte-cle-copie');
+  if (!champ.value) return;
+  try {
+    await navigator.clipboard.writeText(champ.value);
+  } catch (err) {
+    // Sans permission presse-papiers (contexte non securise, refus), la
+    // selection laisse au moins un Ctrl+C possible.
+    champ.type = 'text';
+    champ.select();
+    return;
+  }
+  const avant = bouton.className;
+  bouton.className = 'qs-btn qs-btn--sm qs-btn--tertiaire ic-coche';
+  setTimeout(() => { bouton.className = avant; }, 1400);
+}
+
+async function enregistrerCleAssistant(e) {
+  e.preventDefault();
+  const champ = document.getElementById('compte-llm');
+  const retour = document.getElementById('compte-llm-retour');
+  const corps = new URLSearchParams({llm_api_key: champ.value});
+  retour.hidden = false;
+  retour.textContent = 'Enregistrement…';
+  retour.style.color = 'var(--qs-discret)';
+  try {
+    const r = await fetch('/workspace/llm-key', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: corps,
+    });
+    if (!r.ok) throw new Error('http_' + r.status);
+    champ.value = '';
+    retour.textContent = 'Clé enregistrée. L\'assistant peut répondre.';
+    retour.style.color = 'var(--qs-succes)';
+  } catch (err) {
+    retour.textContent = "L'enregistrement a échoué. Réessaie, ou passe par "
+      + 'Mon espace de travail.';
+    retour.style.color = 'var(--qs-danger)';
+  }
+  return false;
+}
 
 // ── Onglets panel droit ───────────────────────────────────
 document.querySelectorAll('.right-tab').forEach(t => {
@@ -2077,7 +2520,7 @@ async function loadMemorySections() {
             oninput="markDirty(this)">${escapeHtml(content)}</textarea>
           <div class="mem-md-actions" data-key="${s.key}">
             <span class="saved-msg">✓ Enregistré</span>
-            <span style="color:var(--text-mention-grey)">Modifications non sauvegardées</span>
+            <span style="color:var(--qs-discret)">Modifications non sauvegardées</span>
             <button class="save-btn" onclick="saveSection('${s.key}')">Enregistrer</button>
           </div>
         </div>
@@ -2147,12 +2590,11 @@ async function delIns(id) {
         if (m) lbl.innerHTML = lbl.innerHTML.replace(/\(\d+\)/, '(' + cards.length + ')');
       }
       // Mettre à jour le compteur de la status bar
-      const statusInsights = document.querySelector('.desk-status');
-      if (statusInsights) {
-        statusInsights.innerHTML = statusInsights.innerHTML.replace(
-          /🧠 \d+ insights/, '🧠 ' + cards.length + ' insights'
-        );
-      }
+      // Le compteur porte un id : l'ancienne version cherchait le mot
+      // "insights" dans le HTML de la barre, mot que le gabarit n'ecrit pas.
+      // Le remplacement ne s'appliquait donc jamais.
+      const compteurFaits = document.getElementById('footer-insights-num');
+      if (compteurFaits) compteurFaits.textContent = cards.length;
       if (!cards.length) {
         document.getElementById('ins-list').innerHTML =
           '<div class="mem-empty">Plus aucun fait auto-détecté.</div>';
@@ -2423,7 +2865,7 @@ async function openAssemblyEditor(aid) {
       <div id="assembly-editor-content">
         <div id="assembly-editor-header">
           <h2 id="assembly-editor-title">Éditer assemblage</h2>
-          <button onclick="closeAssemblyEditor()" id="assembly-editor-close"><span class="fr-icon-close-line fr-icon--sm" aria-hidden="true"></span></button>
+          <button onclick="closeAssemblyEditor()" id="assembly-editor-close"><span class="ic-fermer ic--sm" aria-hidden="true"></span></button>
         </div>
         <div id="assembly-editor-body">
           <p id="assembly-editor-status">Chargement…</p>
@@ -2431,7 +2873,7 @@ async function openAssemblyEditor(aid) {
         </div>
         <div id="assembly-editor-footer">
           <button onclick="closeAssemblyEditor()" class="ae-btn-secondary">Annuler</button>
-          <button onclick="saveAssemblyEditor()" class="ae-btn-primary"><span class="fr-icon-save-line fr-icon--sm" aria-hidden="true"></span> Enregistrer (nouvelle version)</button>
+          <button onclick="saveAssemblyEditor()" class="ae-btn-primary"><span class="ic-enregistrer ic--sm" aria-hidden="true"></span> Enregistrer (nouvelle version)</button>
         </div>
       </div>
     `;
@@ -2479,7 +2921,7 @@ function renderEditorSections() {
       `<li class="ae-comp">
         ${c.ref ? `<code>${escapeHtml(c.ref)}</code>` : `<em>${escapeHtml(c.kind || 'inline')}</em>`}
         <button onclick="removeComponentFromSection(${idx}, '${c.ref || ''}')"
-                class="ae-btn-mini" title="Supprimer"><span class="fr-icon-close-line fr-icon--sm" aria-hidden="true"></span></button>
+                class="ae-btn-mini" title="Supprimer"><span class="ic-fermer ic--sm" aria-hidden="true"></span></button>
         <button onclick="duplicateComponentInSection(${idx}, '${c.ref || ''}')"
                 class="ae-btn-mini" title="Dupliquer">⎘</button>
       </li>`
@@ -2491,7 +2933,7 @@ function renderEditorSections() {
         <span class="ae-section-count">${compsCount} composant(s)</span>
         <button onclick="moveSection(${idx}, -1)" class="ae-btn-mini" ${idx === 0 ? 'disabled' : ''} title="Monter">↑</button>
         <button onclick="moveSection(${idx}, 1)" class="ae-btn-mini" ${idx === sections.length - 1 ? 'disabled' : ''} title="Descendre">↓</button>
-        <button onclick="deleteSection(${idx})" class="ae-btn-mini ae-btn-danger" title="Supprimer"><span class="fr-icon-delete-line fr-icon--sm" aria-hidden="true"></span></button>
+        <button onclick="deleteSection(${idx})" class="ae-btn-mini ae-btn-danger" title="Supprimer"><span class="ic-supprimer ic--sm" aria-hidden="true"></span></button>
       </div>
       <ul class="ae-comp-list">${compsList}</ul>
     </div>`;
@@ -2648,7 +3090,7 @@ async function loadLivrables() {
       } catch{}
       cards.push({
         type: 'assembly',
-        icon: '<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>',
+        icon: '<span class="ic-fichier ic--sm" aria-hidden="true"></span>',
         title: a.title || a.aid,
         kind: a.kind,
         state: isPub ? 'published' : 'draft',
@@ -2660,7 +3102,7 @@ async function loadLivrables() {
           ? [{label:'Voir',  href: _rewriteS3UrlToHub(a.published_url, a.aid), target:'_blank'},
              {label:'Métadonnées', onclick: `openAssemblyEditor('${a.aid}')`, title: 'Editer titre/audience/sections (mode expert JSON). Pour edition visuelle, utiliser BlockNote.'},
              {label:'BlockNote', href:`/editor/${sid}/assembly/${a.aid}`, target:'_blank'}]
-          : [{label:'<span class="fr-icon-eye-line fr-icon--sm" aria-hidden="true"></span> Preview', href:`/studies/${sid}/assemblies/${a.aid}/render`, target:'_blank'},
+          : [{label:'<span class="ic-oeil ic--sm" aria-hidden="true"></span> Preview', href:`/studies/${sid}/assemblies/${a.aid}/render`, target:'_blank'},
              {label:'Métadonnées', onclick: `openAssemblyEditor('${a.aid}')`, title: 'Editer titre/audience/sections (mode expert JSON). Pour edition visuelle, utiliser BlockNote.'},
              {label:'BlockNote', href:`/editor/${sid}/assembly/${a.aid}`, target:'_blank'},
              {label:'⎘ Cloner', onclick: `cloneAssembly('${a.aid}', '${(a.title || a.aid).replace(/'/g, "\\'")}')`},
@@ -2673,12 +3115,12 @@ async function loadLivrables() {
       if (it.kind === 'assembly') return;
       cards.push({
         type: 'catalog',
-        icon: it.kind === 'storymap' ? '<span class="fr-icon-article-line fr-icon--sm" aria-hidden="true"></span>'
-            : it.kind === 'flux'     ? '<span class="fr-icon-external-link-line fr-icon--sm" aria-hidden="true"></span>'
-            : it.kind === 'recipe'   ? '<span class="fr-icon-list-unordered fr-icon--sm" aria-hidden="true"></span>'
-            : it.kind === 'pdf'      ? '<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>'
-            : it.kind === 'dataset'  ? '<span class="fr-icon-line-chart-line fr-icon--sm" aria-hidden="true"></span>'
-            : '<span class="fr-icon-archive-line fr-icon--sm" aria-hidden="true"></span>',
+        icon: it.kind === 'storymap' ? '<span class="ic-article ic--sm" aria-hidden="true"></span>'
+            : it.kind === 'flux'     ? '<span class="ic-lien-externe ic--sm" aria-hidden="true"></span>'
+            : it.kind === 'recipe'   ? '<span class="ic-liste ic--sm" aria-hidden="true"></span>'
+            : it.kind === 'pdf'      ? '<span class="ic-fichier ic--sm" aria-hidden="true"></span>'
+            : it.kind === 'dataset'  ? '<span class="ic-courbe ic--sm" aria-hidden="true"></span>'
+            : '<span class="ic-archive ic--sm" aria-hidden="true"></span>',
         title: it.slug,
         kind: it.kind,
         state: 'published',
@@ -2712,7 +3154,7 @@ async function loadLivrables() {
     };
 
     target.innerHTML = cards.map((c, idx) => {
-      const stateLabel = c.state === 'published' ? '<span class="fr-icon-checkbox-circle-line fr-icon--sm" aria-hidden="true"></span> publié' : '<span class="fr-icon-draft-line fr-icon--sm" aria-hidden="true"></span> draft';
+      const stateLabel = c.state === 'published' ? '<span class="ic-coche-cercle ic--sm" aria-hidden="true"></span> publié' : '<span class="ic-brouillon ic--sm" aria-hidden="true"></span> draft';
       const meta = [
         KIND_LABEL[c.kind] || c.kind,
         c.size_kb ? `${c.size_kb} ko` : '',
@@ -2724,7 +3166,7 @@ async function loadLivrables() {
         </div>
         <div class="liv-card-children" id="liv-children-${idx}">
           ${c.children.map(comp => `
-            <div class="liv-child">${comp.kind ? '<span class="fr-icon-shapes-line fr-icon--sm" aria-hidden="true"></span> ' + escapeHtml(comp.kind) + ' — ' : ''}${escapeHtml(comp.title || comp.cid || '?')}</div>
+            <div class="liv-child">${comp.kind ? '<span class="ic-formes ic--sm" aria-hidden="true"></span> ' + escapeHtml(comp.kind) + ' — ' : ''}${escapeHtml(comp.title || comp.cid || '?')}</div>
           `).join('')}
         </div>
       ` : '';
@@ -2835,7 +3277,7 @@ async function loadResourceLayers() {
       const typ = (l.type || l.geom_type || '').toString();
       const n = (l.feature_count != null) ? ` · ${l.feature_count}` : '';
       return `<div class="publi-item">
-        <span class="ic fr-icon-map-pin-2-line" aria-hidden="true"></span>
+        <span class="ic ic-epingle" aria-hidden="true"></span>
         <div class="info">
           <div class="name">${name.replace(/</g, '&lt;')}</div>
           <div class="meta">${typ}${n}</div>
@@ -2868,8 +3310,8 @@ async function loadResourceFiles() {
       const name = (f.name || '?').toString();
       const kind = (f.kind || 'file').toString();
       const size = f.size_kb != null ? ` · ${f.size_kb} ko` : '';
-      const ic = kind === 'dir' ? '<span class="fr-icon-folder-2-line fr-icon--sm" aria-hidden="true"></span>' : (kind === 'data' ? '<span class="fr-icon-database-line fr-icon--sm" aria-hidden="true"></span>'
-              : kind === 'export' ? '<span class="fr-icon-download-line fr-icon--sm" aria-hidden="true"></span>' : kind === 'note' ? '<span class="fr-icon-edit-box-line fr-icon--sm" aria-hidden="true"></span>' : '<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>');
+      const ic = kind === 'dir' ? '<span class="ic-dossier ic--sm" aria-hidden="true"></span>' : (kind === 'data' ? '<span class="ic-base-donnees ic--sm" aria-hidden="true"></span>'
+              : kind === 'export' ? '<span class="ic-telecharger ic--sm" aria-hidden="true"></span>' : kind === 'note' ? '<span class="ic-editer-bloc ic--sm" aria-hidden="true"></span>' : '<span class="ic-fichier ic--sm" aria-hidden="true"></span>');
       return `<div class="publi-item" title="${(f.path||'').replace(/"/g, '&quot;')}">
         <span class="ic">${ic}</span>
         <div class="info">
@@ -2891,9 +3333,8 @@ async function loadResourceFiles() {
 // envoyé automatiquement, middleware OIDC valide via auth.get_current_user.
 
 let _resRecipesLoaded = false;
-// `_activeStudyId` const Jinja injecte au render (L800) peut etre null si le
-// user n'a pas encore choisi d'etude. Fallback dynamique via /studies/active.
-let _cachedActiveSid = null;  // cache sid resolu dynamiquement
+// `_cachedActiveSid` est declare plus haut, avec le beacon, parce que
+// `_rafraichirEtudeActive` l'alimente.
 
 async function _getActiveStudyId() {
   // Priorite : const Jinja (peut etre null si la page est rendue sans etude)
@@ -2936,18 +3377,18 @@ async function loadResourceRecipes() {
       const v = r.version_num ? `v${r.version_num}` : '—';
       const sz = r.size != null ? ` · ${Math.round(r.size/1024*10)/10} ko` : '';
       const sha = r.sha ? r.sha.substring(0, 8) : '';
-      const pub = r.published_at ? '<span class="fr-icon-external-link-line fr-icon--sm" aria-hidden="true"></span> ' : '';
+      const pub = r.published_at ? '<span class="ic-lien-externe ic--sm" aria-hidden="true"></span> ' : '';
       return `<div class="publi-item" data-slug="${slug.replace(/"/g, '&quot;')}">
-        <span class="ic fr-icon-list-unordered" aria-hidden="true"></span>
+        <span class="ic ic-liste" aria-hidden="true"></span>
         <div class="info" style="flex:1;">
           <div class="name">${pub}${name.replace(/</g, '&lt;')}</div>
           <div class="meta">${fmt.toUpperCase()} · ${v} · ${sha}${sz}</div>
         </div>
         <div style="display:flex; gap:2px;">
           <button onclick="openRecipeEditor('${slug.replace(/'/g, '\\\'')}', false)"
-                  title="Voir / Éditer" style="border:0; background:transparent; cursor:pointer; padding:2px 4px;"><span class="fr-icon-edit-line fr-icon--sm" aria-hidden="true"></span></button>
+                  title="Voir / Éditer" style="border:0; background:transparent; cursor:pointer; padding:2px 4px;"><span class="ic-editer ic--sm" aria-hidden="true"></span></button>
           <button onclick="deleteRecipe('${slug.replace(/'/g, '\\\'')}')"
-                  title="Supprimer (archive)" style="border:0; background:transparent; cursor:pointer; padding:2px 4px;"><span class="fr-icon-delete-line fr-icon--sm" aria-hidden="true"></span></button>
+                  title="Supprimer (archive)" style="border:0; background:transparent; cursor:pointer; padding:2px 4px;"><span class="ic-supprimer ic--sm" aria-hidden="true"></span></button>
         </div>
       </div>`;
     }).join('');
@@ -3091,7 +3532,7 @@ document.getElementById('toggle-publi')?.addEventListener('click', () => {
 
 // Sprint UX-1 (2026-06-20) : drawer Ressources ouvert par defaut au 1er load.
 // Probleme observe : les 4 onglets Couches/Publi/Fichiers/Recettes (V1.5 S1)
-// sont caches derriere le toggle 📚 a gauche -> mauvaise decouvrabilite =
+// sont caches derriere le bouton Ressources a gauche -> mauvaise decouvrabilite =
 // Sprint UX-3 fix (2026-06-21) : opt-in au lieu d'opt-out. Le drawer
 // Ressources est un overlay (position:fixed) qui chevauche le canvas QGIS
 // -> user signalait 'le canvas est coupe par le drawer'. On garde FERME
@@ -3102,25 +3543,27 @@ document.getElementById('toggle-publi')?.addEventListener('click', () => {
 // sticky pref ='1' herites du Sprint UX-1 (drawer ouvert par defaut). Sans
 // le bump, les anciens users garderaient le drawer ouvert et couvriraient
 // le canvas alors qu'on a explicitement passe en opt-in.
-const _RESS_PREF_KEY = 'qgis_desk_resources_open_v2';
 const _ressOpenPref = localStorage.getItem(_RESS_PREF_KEY);
 if (_ressOpenPref === '1') {
   // L'user l'avait explicitement ouvert -> respecter
   desk.classList.add('show-publi');
+  syncToggles();
   if (!_resLayersLoaded) {
     loadResourceLayers();
     _resLayersLoaded = true;
   }
 }
-// Memorise la preference apres chaque toggle
-document.getElementById('toggle-publi')?.addEventListener('click', () => {
-  setTimeout(() => {
-    localStorage.setItem(_RESS_PREF_KEY,
-      desk.classList.contains('show-publi') ? '1' : '0');
-  }, 150);
-});
+// L'ecriture de la preference a rejoint `togglePanel`, qui pose l'etat.
+// Elle vivait ici, dans un SECOND ecouteur sur le meme bouton, oblige
+// d'attendre 150 ms pour lire un etat que l'autre ecouteur venait de poser :
+// deux abonnes au meme clic, dont l'ordre n'est pas garanti par la
+// specification. Le delai masquait la course, il ne la supprimait pas.
 
-// Sidebar gauche RESSOURCES est toujours visible (pas un drawer toggle).
+// Le panneau Ressources est un tiroir, ouvert sur demande -- le commentaire
+// qui tenait ici affirmait l'inverse ('toujours visible, pas un drawer') et
+// renvoyait vers 'UN AUTRE drawer' qui n'existe pas : il decrivait un etat du
+// code anterieur au passage en ouverture sur demande.
+//
 // L'onglet Couches est actif par defaut : on charge ses donnees immediatement
 // au render. Sans cela, le placeholder "Chargement..." persiste indefiniment
 // car le hook click toggle-publi du header concerne UN AUTRE drawer (publi-only).
@@ -3287,10 +3730,10 @@ async function refreshCatalogPanel() {
           c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
         const labels = d.study_labels || {};
         const activeSid = d.active_study_id;
-        const ICONS = {storymap:'<span class="fr-icon-article-line fr-icon--sm" aria-hidden="true"></span>', pdf:'<span class="fr-icon-file-line fr-icon--sm" aria-hidden="true"></span>', dataset:'<span class="fr-icon-line-chart-line fr-icon--sm" aria-hidden="true"></span>', flux:'<span class="fr-icon-external-link-line fr-icon--sm" aria-hidden="true"></span>', recipe:'<span class="fr-icon-list-unordered fr-icon--sm" aria-hidden="true"></span>'};
+        const ICONS = {storymap:'<span class="ic-article ic--sm" aria-hidden="true"></span>', pdf:'<span class="ic-fichier ic--sm" aria-hidden="true"></span>', dataset:'<span class="ic-courbe ic--sm" aria-hidden="true"></span>', flux:'<span class="ic-lien-externe ic--sm" aria-hidden="true"></span>', recipe:'<span class="ic-liste ic--sm" aria-hidden="true"></span>'};
         list.innerHTML = d.items.map(it => {
           const kind = it.kind || 'fichier';
-          const ic = ICONS[kind] || '<span class="fr-icon-archive-line fr-icon--sm" aria-hidden="true"></span>';
+          const ic = ICONS[kind] || '<span class="ic-archive ic--sm" aria-hidden="true"></span>';
           const slug = escapeHtml(it.slug);
           const hubUrl = it.hub_url || it.url || '#';
           // size_kb fourni par le serveur (cf. /desk/catalog enrichi).
@@ -3356,7 +3799,7 @@ async function refreshGpuChip() {
       color = '#ccc'; label = 'GPU dormant';
       title = "Pod GeoAI dormant — clic pour réveiller (~30s)";
     } else if (s.health === 'ready') {
-      color = '#18753c'; label = 'GPU prêt';
+      color = 'var(--qs-succes)'; label = 'GPU prêt';
       title = "Pod GeoAI actif — modèles SAM2/DeepForest chargés";
     } else {
       color = '#0078f0'; label = 'GPU démarre…';

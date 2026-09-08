@@ -125,6 +125,20 @@ templates      = Jinja2Templates(directory=str(_templates_dir))
 
 app = FastAPI(title="QGIS Agent", docs_url=None, redoc_url=None)
 
+# La feuille du produit, copiee depuis hub/ a la construction de l'image (voir
+# Dockerfile.agent). Le chat est atteint de deux facons : en iframe via le
+# proxy du hub, ou /static/ resout deja sur le hub ; et en direct sur son
+# propre domaine, ou il faut ce montage. Sans lui, l'acces direct rendait une
+# page sans aucun style.
+_static_dir = Path(__file__).parent.parent / "static"
+if _static_dir.exists():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+    log.info("Feuille du produit servie depuis %s", _static_dir)
+else:
+    log.warning("Feuille du produit absente (%s) : le chat sera sans style en "
+                "acces direct", _static_dir)
+
 
 # ── Phase 0ter Steps 7-8 (RGPD) : Middleware OIDC agent ───────────────────────
 # Sans cela, n'importe qui avec l'URL user-X-qgis-agent.user.lab.sspcloud.fr
