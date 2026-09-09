@@ -39,7 +39,7 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, WebSocket, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, WebSocket, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -9176,6 +9176,181 @@ async def list_study_publications(
     return {"sid": sid, "count": len(matched), "publications": matched}
 
 
+def _safe_study_relpath(path: str) -> str | None:
+    """Chemin relatif à /data/studies/{sid}/ — rejette traversal."""
+    if not path or path.startswith("/") or ".." in path.replace("\\", "/"):
+        return None
+    norm = path.replace("\\", "/").lstrip("/")
+    allowed = ("data/", "exports/", "notes.md", "projects/")
+    if norm == "notes.md" or any(norm.startswith(p) for p in allowed):
+        return norm
+    return None
+
+
+async def _stream_pod_file(username: str, pod_path: str, download_name: str) -> Response:
+    """Lit un fichier sur le PVC workspace (via execute_python) et le stream."""
+    read_code = f"""
+import base64
+from pathlib import Path
+p = Path({pod_path!r})
+if not p.exists() or not p.is_file():
+    print("ERROR: fichier introuvable")
+else:
+    print(f"FILE_SIZE={{p.stat().st_size}}")
+    print("---B64_START---")
+    print(base64.b64encode(p.read_bytes()).decode())
+    print("---B64_END---")
+"""
+    try:
+        raw = await _execute_python_in_workspace(username, read_code, timeout=120)
+    except Exception as exc:
+        raise HTTPException(500, f"Lecture fichier : {exc}") from exc
+    import re as _re
+    match = _re.search(r"---B64_START---\s*(.*?)\s*---B64_END---", raw or "", _re.DOTALL)
+    if not match:
+        raise HTTPException(404, "Fichier introuvable sur le workspace")
+    import base64
+    b64 = match.group(1).replace("\n", "").replace(" ", "")
+    content = base64.b64decode(b64)
+    safe_name = download_name.replace('"', "").replace("\n", "") or "fichier"
+    return Response(
+        content=content,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
+
+
+@app.get("/studies/{sid}/file/{path:path}")
+async def download_study_file(
+    sid: str,
+    path: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Télécharge un fichier relatif à l'étude (data/, exports/, projects/, notes.md)."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    rel = _safe_study_relpath(path)
+    if not rel:
+        raise HTTPException(400, "Chemin de fichier non autorisé")
+    pod_path = f"/data/studies/{sid}/{rel}"
+    return await _stream_pod_file(user["username"], pod_path, Path(rel).name)
+
+
+@app.get("/studies/{sid}/project/download")
+async def download_study_project(
+    sid: str,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Télécharge le project.qgz du projet actif (save préalable)."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    active_sid = await studies.get_active_study_id(user["username"])
+    active_pid = await studies.get_active_project_id(user["username"])
+    pid_for_save = active_pid if active_sid == sid else None
+    proj = None
+    if active_pid and active_sid == sid:
+        proj = await studies.get_project(active_pid, user["username"])
+    if not proj:
+        projs = await studies.list_projects(sid)
+        proj = next((p for p in projs if p.get("is_default")), projs[0] if projs else None)
+    if not proj:
+        raise HTTPException(404, "Aucun projet QGIS pour cette étude")
+    try:
+        await _execute_python_in_workspace(
+            user["username"],
+            studies.save_active_project_pod_code(sid, proj.get("pid")),
+        )
+    except Exception as exc:
+        log.warning("Save préalable download project %s : %s", sid, exc)
+    qgz_path = proj.get("qgz_path") or f"/data/studies/{sid}/project.qgz"
+    label = (proj.get("label") or "projet").replace(" ", "_")[:40]
+    return await _stream_pod_file(
+        user["username"], qgz_path, f"{label}.qgz",
+    )
+
+
+@app.post("/studies/{sid}/upload")
+async def upload_study_file(
+    sid: str,
+    file: UploadFile = File(...),
+    target: str = Form("data"),
+    user: dict = Depends(auth.get_current_user),
+):
+    """Upload un fichier vers l'étude (data/ par défaut, ou project.qgz si target=project)."""
+    if not _STUDIES_AVAILABLE:
+        raise HTTPException(503, "Module studies indisponible")
+    s = await studies.get_study(sid, user["username"])
+    if not s:
+        raise HTTPException(404, "Étude introuvable")
+    raw_name = (file.filename or "fichier").replace("\\", "/").split("/")[-1].strip()
+    if not raw_name or raw_name.startswith(".") or ".." in raw_name:
+        raise HTTPException(400, "Nom de fichier invalide")
+    content = await file.read()
+    max_mb = int(os.environ.get("STUDY_UPLOAD_MAX_MB", "50"))
+    if len(content) > max_mb * 1024 * 1024:
+        raise HTTPException(413, f"Fichier trop volumineux (max {max_mb} Mo)")
+    temp_name = f"upload-{secrets.token_hex(8)}-{raw_name}"
+    ok, msg = await _upload_bytes_to_workspace(
+        user["username"], temp_name, content,
+        file.content_type or "application/octet-stream",
+    )
+    if not ok:
+        raise HTTPException(502, f"Upload workspace : {msg}")
+
+    dest_rel = f"data/{raw_name}"
+    if target == "project" and raw_name.lower().endswith(".qgz"):
+        active_sid = await studies.get_active_study_id(user["username"])
+        active_pid = await studies.get_active_project_id(user["username"])
+        proj = None
+        if active_pid and active_sid == sid:
+            proj = await studies.get_project(active_pid, user["username"])
+        if not proj:
+            projs = await studies.list_projects(sid)
+            proj = next((p for p in projs if p.get("is_default")), projs[0] if projs else None)
+        if not proj:
+            raise HTTPException(404, "Aucun projet cible pour le .qgz")
+        dest = proj.get("qgz_path") or f"/data/studies/{sid}/project.qgz"
+        dest_rel = f"projects/{proj.get('pid')}/project.qgz"
+        move_code = f"""
+from pathlib import Path
+src = Path("/data/{temp_name}")
+dest = Path({dest!r})
+dest.parent.mkdir(parents=True, exist_ok=True)
+dest.write_bytes(src.read_bytes())
+src.unlink(missing_ok=True)
+print("OK project", dest)
+"""
+    else:
+        dest = f"/data/studies/{sid}/{dest_rel}"
+        move_code = f"""
+from pathlib import Path
+src = Path("/data/{temp_name}")
+dest = Path({dest!r})
+dest.parent.mkdir(parents=True, exist_ok=True)
+dest.write_bytes(src.read_bytes())
+src.unlink(missing_ok=True)
+print("OK data", dest)
+"""
+    try:
+        out = await _execute_python_in_workspace(user["username"], move_code, timeout=30)
+    except Exception as exc:
+        raise HTTPException(500, f"Déplacement fichier : {exc}") from exc
+    if "OK" not in (out or ""):
+        raise HTTPException(500, f"Échec enregistrement : {(out or '')[:200]}")
+    return {
+        "ok": True,
+        "filename": raw_name,
+        "path": dest_rel,
+        "size_kb": round(len(content) / 1024, 1),
+    }
+
+
 @app.get("/studies/{sid}/export")
 async def export_study(
     sid: str,
@@ -13240,8 +13415,10 @@ async def desk_study_files():
             "    if notes.exists():\n"
             "        sz = notes.stat().st_size\n"
             "        out.append({'name': 'notes.md', 'kind': 'note',\n"
-            "                    'size_kb': round(sz/1024, 1),\n"
+                    "                    'size_kb': round(sz/1024, 1),\n"
             "                    'path': 'notes.md'})\n"
+            "for item in out:\n"
+            "    item['download_url'] = '/studies/' + sid + '/file/' + item['path']\n"
             "print('<<<FILES>>>' + json.dumps(out[:60]) + '<<<END>>>')\n"
         )
         stdout = await _execute_python_in_workspace(_ONYXIA_USER, code, timeout=5)

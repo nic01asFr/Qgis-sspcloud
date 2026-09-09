@@ -884,17 +884,60 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         text-align:center;font-weight:700;font-size:11px;color:var(--qs-accent);
         border-top:1px solid var(--qs-trait);text-decoration:none}
       .src-action:hover{background:var(--qs-accent-pale)}
+      .src-actions-row{display:flex;gap:6px;padding:0 0 8px;flex-wrap:wrap}
+      .src-actions-row a,.src-actions-row button{
+        flex:1;min-width:120px;padding:6px 8px;font-size:10.5px;font-weight:600;
+        border:1px solid var(--qs-trait);border-radius:3px;background:#fff;
+        color:var(--qs-accent);cursor:pointer;text-align:center;text-decoration:none;
+        font-family:inherit}
+      .src-actions-row a:hover,.src-actions-row button:hover{background:var(--qs-accent-pale)}
+      .src-upload{border:1px dashed var(--qs-trait);border-radius:4px;padding:10px;
+        margin-bottom:8px;text-align:center;font-size:11px;color:var(--qs-discret);
+        background:var(--qs-surface-2);cursor:pointer}
+      .src-upload.dragover{border-color:var(--qs-accent);background:var(--qs-accent-pale)}
+      .src-upload input{display:none}
+      .src-file-dl{color:var(--qs-accent);text-decoration:none;font-size:10px;margin-left:4px}
+      .src-file-dl:hover{text-decoration:underline}
       </style>
       <div class="src-section">
-        <div class="src-section-header">Couches QGIS du projet</div>
-        <div class="src-section-content" id="src-layers-content">
-          <div class="publi-empty">Chargement…</div>
+        <div class="src-section-header">Projet QGIS</div>
+        <div class="src-section-content" id="src-project-content">
+          {% if active_study_id %}
+          <div class="src-actions-row">
+            <a href="/studies/{{ active_study_id }}/project/download"
+               title="Télécharger le project.qgz (save préalable)">↓ Projet .qgz</a>
+            <button type="button" id="src-upload-qgz-btn"
+                    title="Remplacer le projet actif par un fichier .qgz">↑ Importer .qgz</button>
+            <input type="file" id="src-upload-qgz-input" accept=".qgz,.qgs" hidden>
+          </div>
+          {% if active_project %}
+          <p style="font-size:11px;color:var(--qs-discret);margin:0 0 6px">
+            Projet actif : <strong>{{ active_project.label }}</strong>
+          </p>
+          {% endif %}
+          {% else %}
+          <div class="publi-empty">Aucune étude active.</div>
+          {% endif %}
         </div>
       </div>
       <div class="src-section">
-        <div class="src-section-header">Fichiers de l'étude</div>
+        <div class="src-section-header">Couches QGIS du projet</div>
+        <div class="src-section-content" id="src-layers-content">
+          <div id="src-layers-list"><div class="publi-empty">Chargement…</div></div>
+        </div>
+      </div>
+      <div class="src-section">
+        <div class="src-section-header">Données &amp; fichiers</div>
         <div class="src-section-content" id="src-files-content">
-          <div class="publi-empty">Chargement…</div>
+          {% if active_study_id %}
+          <label class="src-upload" id="src-upload-zone" for="src-upload-data-input">
+            Glisse des fichiers ici ou clique pour ajouter dans <code>data/</code>
+            <input type="file" id="src-upload-data-input" multiple
+                   accept=".gpkg,.geojson,.json,.shp,.zip,.tif,.tiff,.csv,.qgz,.qgs,.md,.pdf">
+          </label>
+          <div id="src-upload-status" style="font-size:10px;color:var(--qs-discret);min-height:14px"></div>
+          {% endif %}
+          <div id="src-files-list"><div class="publi-empty">Chargement…</div></div>
         </div>
       </div>
       <div class="src-section">
@@ -944,8 +987,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       </div>
       {% if active_study %}
       <a href="/studies/{{ active_study_id }}/export"
-         class="src-action" title="Télécharger l'étude (ZIP)">
-        ↓ Télécharger l'étude (ZIP)
+         class="src-action" title="Archive complète : project.qgz, data/, exports/, notes">
+        ↓ Télécharger l'étude complète (ZIP)
       </a>
       {% endif %}
     </div>
@@ -2840,24 +2883,10 @@ document.querySelectorAll('.rtab').forEach(t => {
 /* ── Loaders meta-panes C11 ─────────────────────────────────────────────── */
 
 async function loadSources() {
-  // Charge les 3 sources en parallèle puis transfère le HTML rendu
-  // dans les 3 sections empilées du meta-pane Sources.
   if (!_resLayersLoaded) { try { await loadResourceLayers(); } catch{} _resLayersLoaded = true; }
   if (!_resFilesLoaded)  { try { await loadResourceFiles();  } catch{} _resFilesLoaded = true; }
-  // Chantier G4-b-3c : la section RECETTES est desormais SSR (galerie
-  // rendue par Jinja2 dans #src-recipes-content au chargement du desk).
-  // On charge encore loadResourceRecipes() pour peupler le rpane user
-  // CRUD (rpane[data-rpane="recipes"] + #resources-recipes-list), mais
-  // on n'ecrase plus le contenu SSR de #src-recipes-content.
   try { await loadResourceRecipes(); } catch{}
-  // Move HTML des anciens panes vers les nouvelles sections (référence directe)
-  const srcLayers = document.getElementById('src-layers-content');
-  const srcFiles  = document.getElementById('src-files-content');
-  const lyEl = document.getElementById('resources-layers-list');
-  const fiEl = document.getElementById('resources-files-list');
-  if (srcLayers && lyEl)   srcLayers.innerHTML  = lyEl.outerHTML;
-  if (srcFiles  && fiEl)   srcFiles.innerHTML   = fiEl.outerHTML;
-  // NB : plus de transfert sur srcRecipes — la galerie SSR reste intacte.
+  initSourcesUpload();
 }
 
 async function loadPartages() {
@@ -3300,7 +3329,8 @@ document.addEventListener('click', (e) => {
 // Couches QGIS — consomme /desk/layers (hub), qui interroge MCP get_project_info.
 // Distingue 3 états : workspace endormi / projet vide / projet avec couches.
 async function loadResourceLayers() {
-  const c = document.getElementById('resources-layers-list');
+  const c = document.getElementById('src-layers-list')
+         || document.getElementById('resources-layers-list');
   if (!c) return;
   c.innerHTML = '<div class="publi-empty">Chargement…</div>';
   try {
@@ -3346,7 +3376,8 @@ async function loadResourceLayers() {
 
 // Fichiers de l'étude — consomme /desk/study-files (à ajouter côté hub).
 async function loadResourceFiles() {
-  const c = document.getElementById('resources-files-list');
+  const c = document.getElementById('src-files-list')
+         || document.getElementById('resources-files-list');
   if (!c) return;
   c.innerHTML = '<div class="publi-empty">Chargement…</div>';
   try {
@@ -3355,19 +3386,23 @@ async function loadResourceFiles() {
     const d = await r.json();
     const files = (d && d.files) || [];
     if (!files.length) {
-      c.innerHTML = '<div class="publi-empty">Aucun fichier (data/, exports/, notes.md vides).</div>';
+      c.innerHTML = '<div class="publi-empty">Aucun fichier dans data/ ou exports/. ' +
+                    'Ajoute des données via la zone ci-dessus.</div>';
       return;
     }
     c.innerHTML = files.map(f => {
       const name = (f.name || '?').toString();
       const kind = (f.kind || 'file').toString();
       const size = f.size_kb != null ? ` · ${f.size_kb} ko` : '';
+      const dl = f.download_url
+        ? `<a class="src-file-dl" href="${f.download_url}" download title="Télécharger">↓</a>`
+        : '';
       const ic = kind === 'dir' ? '<span class="ic-dossier ic--sm" aria-hidden="true"></span>' : (kind === 'data' ? '<span class="ic-base-donnees ic--sm" aria-hidden="true"></span>'
               : kind === 'export' ? '<span class="ic-telecharger ic--sm" aria-hidden="true"></span>' : kind === 'note' ? '<span class="ic-editer-bloc ic--sm" aria-hidden="true"></span>' : '<span class="ic-fichier ic--sm" aria-hidden="true"></span>');
       return `<div class="publi-item" title="${(f.path||'').replace(/"/g, '&quot;')}">
         <span class="ic">${ic}</span>
         <div class="info">
-          <div class="name">${name.replace(/</g, '&lt;')}</div>
+          <div class="name">${name.replace(/</g, '&lt;')}${dl}</div>
           <div class="meta">${kind}${size}</div>
         </div>
       </div>`;
@@ -3377,6 +3412,69 @@ async function loadResourceFiles() {
                                             : 'workspace endormi ou liste indisponible';
     c.innerHTML = `<div class="publi-empty">${reason}. ` +
                   `<a href="#" onclick="loadResourceFiles();return false">Réessayer ↻</a></div>`;
+  }
+}
+
+let _srcUploadInit = false;
+async function _uploadStudyFiles(fileList, target) {
+  const sid = _activeStudyId || await _getActiveStudyId();
+  if (!sid) return;
+  const status = document.getElementById('src-upload-status');
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  if (status) status.textContent = `Envoi de ${files.length} fichier(s)…`;
+  let ok = 0;
+  for (const file of files) {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (target === 'project') fd.append('target', 'project');
+    try {
+      const r = await fetch(`/studies/${sid}/upload`, {
+        method: 'POST', body: fd, credentials: 'include',
+      });
+      if (r.ok) ok++;
+      else if (status) {
+        const err = await r.json().catch(() => ({}));
+        status.textContent = err.detail || `Échec upload (${r.status})`;
+      }
+    } catch (e) {
+      if (status) status.textContent = 'Upload impossible (workspace injoignable ?)';
+    }
+  }
+  if (status && ok) status.textContent = `${ok} fichier(s) enregistré(s) dans l'étude.`;
+  _resFilesLoaded = false;
+  await loadResourceFiles();
+  _resFilesLoaded = true;
+}
+
+function initSourcesUpload() {
+  if (_srcUploadInit) return;
+  _srcUploadInit = true;
+  const zone = document.getElementById('src-upload-zone');
+  const dataInput = document.getElementById('src-upload-data-input');
+  const qgzBtn = document.getElementById('src-upload-qgz-btn');
+  const qgzInput = document.getElementById('src-upload-qgz-input');
+  if (dataInput) {
+    dataInput.addEventListener('change', () => {
+      _uploadStudyFiles(dataInput.files, 'data');
+      dataInput.value = '';
+    });
+  }
+  if (zone && dataInput) {
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+    zone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      zone.classList.remove('dragover');
+      _uploadStudyFiles(e.dataTransfer.files, 'data');
+    });
+  }
+  if (qgzBtn && qgzInput) {
+    qgzBtn.addEventListener('click', () => qgzInput.click());
+    qgzInput.addEventListener('change', () => {
+      _uploadStudyFiles(qgzInput.files, 'project');
+      qgzInput.value = '';
+    });
   }
 }
 
