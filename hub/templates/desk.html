@@ -2381,8 +2381,8 @@ function syncToggles() {
   tC?.classList.toggle('active', cOpen);
   tP?.setAttribute('aria-expanded', String(rOpen));
   tC?.setAttribute('aria-expanded', String(cOpen));
-  tP?.dataset.mode = layoutState.resources.mode;
-  tC?.dataset.mode = layoutState.chat.mode;
+  if (tP) tP.dataset.mode = layoutState.resources.mode;
+  if (tC) tC.dataset.mode = layoutState.chat.mode;
 }
 
 // Ouverture du panneau Ressources : preference propre, distincte de
