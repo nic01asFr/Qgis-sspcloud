@@ -334,10 +334,12 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .publi-empty{padding:20px 14px;font-size:11.5px;color:var(--qs-discret);text-align:center}
 
 /* ── Resize handles ───────────────────────────────────────────── */
-.handle{background:transparent;cursor:col-resize;position:relative;z-index:5}
+.handle{background:transparent;cursor:col-resize;position:relative;z-index:5;touch-action:none}
 .handle:hover,.handle.active{background:var(--qs-accent)}
+/* Zone de capture élargie (14px) autour de la colonne grid de 6px */
+.handle::before{content:"";position:absolute;top:0;bottom:0;left:-4px;right:-4px}
 .handle::after{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-  width:2px;height:24px;background:var(--qs-trait);border-radius:1px}
+  width:2px;height:24px;background:var(--qs-trait);border-radius:1px;pointer-events:none}
 .handle:hover::after,.handle.active::after{background:#fff}
 /* Seul le handle h2 (entre canvas et chat) existe en sidebar ; h1 disparaît
    puisque publi est un drawer overlay (pas redimensionnable via handle). */
@@ -2182,6 +2184,7 @@ const HEADER_H = 48, STATUS_H = 32;
 // Des que l'utilisateur a touche la poignee, sa largeur fait foi et le calcul
 // automatique se limite au defilement horizontal du canvas.
 let largeurChatChoisie = Number(stored.chat) || null;
+let _redimensionneChat = false;
 
 function _publiColWidth() {
   if (isNarrow()) return 0;
@@ -2193,12 +2196,16 @@ function clampLayoutToViewport(vw) {
   if (surTelephone() || desk.classList.contains('no-chat')) return;
   const chatW = parseInt(getComputedStyle(desk).getPropertyValue('--chat-w') || String(CHAT_NOMINAL), 10);
   const handleW = HANDLE;
-  if (vw - chatW - handleW < CANVAS_MIN_W) {
-    desk.style.setProperty('--chat-w', Math.max(CHAT_MIN, vw - CANVAS_MIN_W - handleW) + 'px');
+  const maxChat = vw - CANVAS_MIN_W - handleW;
+  if (chatW > maxChat) {
+    const clamped = Math.max(CHAT_MIN, maxChat);
+    desk.style.setProperty('--chat-w', clamped + 'px');
+    if (largeurChatChoisie) largeurChatChoisie = clamped;
   }
 }
 
 function updateLayout() {
+  if (_redimensionneChat) return;
   const vw = window.innerWidth;
   const vh = window.innerHeight - HEADER_H - STATUS_H;
   const publiW = _publiColWidth();
@@ -2239,7 +2246,9 @@ window.addEventListener('resize', () => {
 (function observeCanvasResize() {
   const canvas = document.querySelector('.desk-canvas');
   if (!canvas || typeof ResizeObserver === 'undefined') return;
-  new ResizeObserver(() => updateLayout()).observe(canvas);
+  new ResizeObserver(() => {
+    if (!_redimensionneChat) updateLayout();
+  }).observe(canvas);
 })();
 
 // Save du projet QGIS de l'étude active lors de la fermeture / navigation.
@@ -2354,37 +2363,47 @@ document.getElementById('desk-backdrop').addEventListener('click', () => {
   memoriserOuvertureRessources();
 });
 
-// ── Resize handles ───────────────────────────────────────────
+// ── Resize handles (Pointer Events + verrou pendant drag) ─────
 document.querySelectorAll('.handle').forEach(h => {
-  h.addEventListener('mousedown', (e) => {
+  h.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
     e.preventDefault();
+    h.setPointerCapture(e.pointerId);
     h.classList.add('active');
     const target = h.dataset.target;
+    const isChat = target === 'chat';
     const cssVar = '--' + (target === 'publi' ? 'publi-w' : 'chat-w');
     const startX = e.clientX;
     const startW = parseInt(getComputedStyle(desk).getPropertyValue(cssVar) ||
-                            (target === 'publi' ? '240' : '380'));
+                            (target === 'publi' ? '240' : CHAT_NOMINAL), 10);
+    if (isChat) _redimensionneChat = true;
     const onMove = (ev) => {
+      if (ev.pointerId !== e.pointerId) return;
       const delta = ev.clientX - startX;
       const newW = target === 'publi'
         ? Math.max(160, Math.min(420, startW + delta))
-        : Math.max(280, Math.min(600, startW - delta));
+        : Math.max(CHAT_MIN, Math.min(600, startW - delta));
       desk.style.setProperty(cssVar, newW + 'px');
+      if (isChat) largeurChatChoisie = newW;
     };
-    const onUp = () => {
+    const onEnd = (ev) => {
+      if (ev.pointerId !== e.pointerId) return;
+      h.releasePointerCapture(ev.pointerId);
       h.classList.remove('active');
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      // A partir d'ici, la largeur du chat est un choix, plus un calcul.
-      if (target !== 'publi') {
+      h.removeEventListener('pointermove', onMove);
+      h.removeEventListener('pointerup', onEnd);
+      h.removeEventListener('pointercancel', onEnd);
+      if (isChat) {
+        _redimensionneChat = false;
         largeurChatChoisie = parseInt(
           getComputedStyle(desk).getPropertyValue('--chat-w'), 10) || null;
       }
       saveLayout();
       updateLayout();
     };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    h.addEventListener('pointermove', onMove);
+    h.addEventListener('pointerup', onEnd);
+    h.addEventListener('pointercancel', onEnd);
   });
 });
 
