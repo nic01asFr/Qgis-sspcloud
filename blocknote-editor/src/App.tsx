@@ -161,7 +161,7 @@ function AssemblyTitle({
   return (
     <div
       style={{
-        padding: '20px 24px 8px',
+        padding: '12px 20px 6px',
         background: '#fff',
         borderBottom: '1px solid #f0f0f0',
         position: 'relative',
@@ -175,14 +175,14 @@ function AssemblyTitle({
         aria-label="Titre du livrable"
         style={{
           width: '100%',
-          fontSize: 30,
+          fontSize: 22,
           fontWeight: 700,
-          color: '#000091',
+          color: '#161616',
           background: 'transparent',
           border: 'none',
           outline: 'none',
           padding: 0,
-          fontFamily: 'Marianne, system-ui, sans-serif',
+          fontFamily: 'system-ui, -apple-system, sans-serif',
           fontStyle: title ? 'normal' : 'italic',
         }}
       />
@@ -190,15 +190,15 @@ function AssemblyTitle({
         style={{
           fontSize: 11,
           color: status === 'error' ? '#a50f15' : status === 'saving' ? '#0063cb' : status === 'saved' ? '#1f8d4d' : '#999',
-          marginTop: 4,
+          marginTop: 2,
           height: 14,
           transition: 'color 0.2s',
         }}
       >
-        {status === 'idle' && title !== lastSavedRef.current && '• modification en attente'}
+        {status === 'idle' && title !== lastSavedRef.current && 'modification en attente'}
         {status === 'saving' && 'Sauvegarde…'}
-        {status === 'saved' && '✓ Titre sauvegardé'}
-        {status === 'error' && '⚠ Erreur sauvegarde titre'}
+        {status === 'saved' && 'Titre sauvegardé'}
+        {status === 'error' && 'Erreur sauvegarde titre'}
       </div>
     </div>
   );
@@ -389,7 +389,7 @@ function BlockNoteContent({
           minHeight: 0,
         }}
       >
-        <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
+        <div style={{ flex: 1, overflow: 'auto', padding: '12px 16px' }}>
           <BlockNoteView
             editor={editor}
             theme="light"
@@ -458,42 +458,43 @@ function SaveStatusBar({
   let label = '';
   let color = '#666';
   if (status.type === 'idle') {
-    label = 'En attente de modifications…';
+    label = '';
   } else if (status.type === 'pending') {
     const elapsed = Math.round((now - status.sinceMs) / 1000);
     const remaining = Math.max(0, 30 - elapsed);
-    label = `Modifications en attente — sauvegarde dans ${remaining}s`;
+    label = `Sauvegarde dans ${remaining}s`;
     color = '#b34000';
   } else if (status.type === 'saving') {
-    label = 'Sauvegarde en cours…';
+    label = 'Sauvegarde…';
     color = '#0063cb';
   } else if (status.type === 'saved') {
     const elapsed = Math.round((now - status.atTime) / 1000);
     label =
       elapsed < 5
-        ? `✓ Sauvegardé (v${status.versionNum})`
-        : `✓ Sauvegardé il y a ${elapsed}s (v${status.versionNum})`;
+        ? `Sauvegardé (v${status.versionNum})`
+        : `Sauvegardé il y a ${elapsed}s (v${status.versionNum})`;
     color = '#1f8d4d';
   } else if (status.type === 'error') {
-    label = `⚠ Erreur sauvegarde : ${status.message.slice(0, 80)}`;
+    label = `Erreur sauvegarde : ${status.message.slice(0, 80)}`;
     color = '#a50f15';
   } else if (status.type === 'conflict') {
-    label = `⚠ Conflit : l'assembly a été modifié ailleurs (serveur v${status.currentVersionNum}, vous v${status.sourceVersionNum})`;
+    label = `Conflit : modifié ailleurs (serveur v${status.currentVersionNum}, vous v${status.sourceVersionNum})`;
     color = '#a50f15';
   }
 
   return (
     <div
       style={{
-        padding: '6px 24px',
+        padding: '4px 16px',
         background: '#fff',
         borderTop: '1px solid #e5e5e5',
-        fontSize: 12,
+        fontSize: 11,
         color,
         fontWeight: 500,
         display: 'flex',
         alignItems: 'center',
         gap: 12,
+        minHeight: 28,
       }}
     >
       <span style={{ flex: 1 }}>{label}</span>
@@ -566,46 +567,48 @@ function App() {
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <header
         style={{
-          padding: '12px 24px',
+          padding: '8px 16px',
           background: '#fff',
           borderBottom: '1px solid #e5e5e5',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 16,
+          gap: 12,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <strong style={{ color: '#000091', fontSize: 14 }}>
-            CEREMA · QGIS · Éditeur
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+          <strong style={{ color: '#161616', fontSize: 13, whiteSpace: 'nowrap' }}>
+            QGIS · Éditeur
           </strong>
           {assembly?.manifest && (
-            <span style={{ color: '#666', fontSize: 13 }}>{assembly.manifest.title}</span>
+            <span style={{ color: '#666', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {assembly.manifest.title}
+            </span>
           )}
         </div>
-        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#666', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 10, fontSize: 11, color: '#666', alignItems: 'center', flexShrink: 0 }}>
           {assembly?.metadata && (
             <>
               <span>v{currentVersionNum}</span>
-              <span>•</span>
-              <span style={{ color: '#0063cb' }}>{assembly.manifest.audience}</span>
-              {/* Sprint 2 P1 (8.8) : bouton 'Apercu DSFR strict' qui ouvre
-                  la storymap publiable dans un drawer modal. Marie peut voir
-                  le rendu final (avec header/footer DSFR, mentions legales)
-                  vs vue 'nue' BlockNote. */}
-              <span>•</span>
+              {assembly.manifest.audience && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>{assembly.manifest.audience}</span>
+                </>
+              )}
+              {/* Aperçu du rendu publié (/render) — même endpoint, libellé
+                  produit sans jargon DSFR dans le chrome éditeur. */}
               <button
                 type="button"
                 onClick={() => {
                   const url = `/studies/${sid}/assemblies/${aid}/render`;
-                  // Ouvrir dans un drawer modal full-height
                   const drawer = document.getElementById('dsfr-preview-drawer');
                   if (drawer) drawer.remove();
                   const overlay = document.createElement('div');
                   overlay.id = 'dsfr-preview-drawer';
                   overlay.style.cssText = `
                     position: fixed; inset: 0; z-index: 9999;
-                    background: rgba(0,0,0,0.5); display: flex;
+                    background: rgba(0,0,0,0.4); display: flex;
                     align-items: stretch; justify-content: flex-end;
                   `;
                   overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
@@ -613,18 +616,19 @@ function App() {
                   drawer2.style.cssText = `
                     width: 75%; max-width: 1400px; background: #fff;
                     display: flex; flex-direction: column;
-                    box-shadow: -8px 0 24px rgba(0,0,0,0.15);
+                    box-shadow: -4px 0 16px rgba(0,0,0,0.12);
                   `;
                   drawer2.innerHTML = `
-                    <div style="padding:12px 20px;background:#000091;color:#fff;
+                    <div style="padding:10px 16px;background:#161616;color:#fff;
                                 display:flex;justify-content:space-between;
                                 align-items:center;font-family:system-ui">
-                      <strong style="font-size:14px">Aperçu DSFR strict — storymap publiable</strong>
+                      <strong style="font-size:13px">Aperçu publié</strong>
                       <button id="dsfr-drawer-close" style="background:none;border:none;
-                              color:#fff;font-size:24px;cursor:pointer;padding:0 8px">×</button>
+                              color:#fff;font-size:22px;cursor:pointer;padding:0 6px"
+                              aria-label="Fermer">×</button>
                     </div>
                     <iframe src="${url}" style="flex:1;width:100%;border:none"
-                            title="Aperçu DSFR strict"></iframe>
+                            title="Aperçu publié"></iframe>
                   `;
                   overlay.appendChild(drawer2);
                   document.body.appendChild(overlay);
@@ -634,17 +638,17 @@ function App() {
                 }}
                 style={{
                   background: '#fff',
-                  border: '1px solid #000091',
-                  color: '#000091',
-                  padding: '3px 10px',
+                  border: '1px solid #dddddd',
+                  color: '#161616',
+                  padding: '3px 8px',
                   fontSize: 11,
                   borderRadius: 3,
                   cursor: 'pointer',
                   fontWeight: 500,
                 }}
-                title="Voir le rendu DSFR final (avec header/footer/mentions legales)"
+                title="Voir le rendu publié (storymap)"
               >
-                👁 Aperçu DSFR
+                Aperçu
               </button>
             </>
           )}
@@ -681,18 +685,19 @@ function App() {
 
       <footer
         style={{
-          padding: '8px 24px',
+          padding: '4px 16px',
           background: '#f6f6f6',
           borderTop: '1px solid #e5e5e5',
-          fontSize: 11,
-          color: '#666',
+          fontSize: 10,
+          color: '#888',
           display: 'flex',
-          gap: 12,
+          gap: 10,
+          alignItems: 'center',
         }}
       >
-        <span>D-QGIS-010 · BlockNote v0.22</span>
-        <span>•</span>
-        <span>{`v${__EDITOR_VERSION__} (13 blocks · autosave 30s · conflict resolver)`}</span>
+        <span>{`Éditeur v${__EDITOR_VERSION__}`}</span>
+        <span aria-hidden="true">·</span>
+        <span>autosave 30s</span>
         <span style={{ marginLeft: 'auto' }}>
           {assembly?.manifest?.layout?.sections?.length ?? 0} sections
         </span>

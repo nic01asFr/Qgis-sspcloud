@@ -396,7 +396,7 @@ export function AgentPanel({
     if (sug.hint && !sug.tool) {
       // Escalade chat principal : message inline sobre (fin des alert())
       setErrorMsg(
-        `Cette action necessite l'assistant complet. Ouvrez le chat CEREMA principal et demandez : "${sug.prompt}"`,
+        `Cette action nécessite l'assistant complet. Ouvrez le chat principal et demandez : "${sug.prompt}"`,
       );
       return;
     }
@@ -474,7 +474,7 @@ export function AgentPanel({
     return (
       <aside
         className="cerema-panel collapsed"
-        aria-label="Assistant redaction CEREMA (reduit)"
+        aria-label="Assistant rédaction (réduit)"
         style={{
           background: T.blueMarianne,
           borderLeft: `1px solid ${T.blueMarianneBorder}`,
@@ -489,8 +489,8 @@ export function AgentPanel({
           type="button"
           className="cerema-btn"
           onClick={toggleCollapse}
-          aria-label="Ouvrir l'assistant redaction CEREMA"
-          title="Ouvrir l'assistant redaction CEREMA"
+          aria-label="Ouvrir l'assistant rédaction"
+          title="Ouvrir l'assistant rédaction"
           style={{
             background: 'transparent',
             border: 'none',
@@ -531,7 +531,7 @@ export function AgentPanel({
     <aside
       className="cerema-panel"
       role="complementary"
-      aria-label="Assistant redaction CEREMA"
+      aria-label="Assistant rédaction"
       style={{
         background: T.blueMarianneLight,
         borderLeft: `1px solid ${T.blueMarianneBorder}`,
@@ -545,7 +545,7 @@ export function AgentPanel({
       {/* Header */}
       <div
         style={{
-          padding: `${T.space3}px ${T.space4}px`,
+          padding: `${T.space2}px ${T.space3}px`,
           background: T.blueMarianne,
           color: T.white,
           display: 'flex',
@@ -554,8 +554,8 @@ export function AgentPanel({
         }}
       >
         <IconLogo />
-        <div style={{ flex: 1, fontWeight: T.fontWeightBold, fontSize: T.fontSizeLg }}>
-          Assistant redaction CEREMA
+        <div style={{ flex: 1, fontWeight: T.fontWeightBold, fontSize: T.fontSizeMd }}>
+          Assistant rédaction
         </div>
         <button
           type="button"

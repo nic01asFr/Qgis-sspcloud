@@ -231,18 +231,18 @@ body, #root {
 [data-content-type="kpiBadge"]:hover::after,
 [data-content-type="legend"]:hover::after,
 [data-content-type="separator"]:hover::after {
-  content: "✏️ Cliquer pour modifier";
+  content: "Cliquer pour modifier";
   position: absolute;
-  top: -28px;
+  top: -26px;
   right: 0;
-  background: #000091;
+  background: #161616;
   color: #fff;
   font-size: 11px;
-  font-weight: 600;
-  padding: 4px 8px;
+  font-weight: 500;
+  padding: 3px 8px;
   border-radius: 3px;
   white-space: nowrap;
   z-index: 100;
   pointer-events: none;
-  font-family: 'Marianne', system-ui, sans-serif;
+  font-family: system-ui, -apple-system, sans-serif;
 }
