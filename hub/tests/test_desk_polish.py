@@ -21,7 +21,9 @@ def test_escape_ferme_overlays_desk() -> None:
     assert "function fermerOverlaysDesk()" in _DESK
     chunk = _DESK.split("document.addEventListener('keydown'")[1].split("});")[0]
     assert "fermerOverlaysDesk()" in chunk
-    assert "layoutState.deckView" in _DESK.split("function fermerOverlaysDesk()")[1].split("document.getElementById('desk-backdrop')")[0]
+    overlay = _DESK.split("function fermerOverlaysDesk()")[1].split("document.getElementById('desk-backdrop')")[0]
+    assert "layoutState.resources.mode" in overlay
+    assert "deck-tab" not in _DESK
 
 
 def test_backdrop_utilise_fermer_overlays() -> None:

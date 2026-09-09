@@ -11,8 +11,11 @@ _DESK = (Path(__file__).resolve().parents[1] / "templates" / "desk.html").read_t
 
 def test_sources_upload_zone_et_glisser_deposer_panneau() -> None:
     assert 'id="src-upload-zone"' in _DESK
+    assert 'id="src-upload-browse-btn"' in _DESK
     assert "_bindSrcDropTarget(srcPane, zone)" in _DESK
     assert "Glisser-déposer des couches ou fichiers" in _DESK
+    assert "function _setUploadStatus(" in _DESK
+    assert "deck-tab" not in _DESK
 
 
 def test_sections_fichiers_et_couches_repliees_par_defaut() -> None:

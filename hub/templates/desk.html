@@ -342,27 +342,6 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .canvas-empty h3{color:var(--qs-accent);font-weight:600;margin:0}
 .canvas-empty p{margin:0;font-size:13px;max-width:340px;color:var(--qs-discret)}
 
-/* ── Deck bureau : onglets Carte / Sources / Livrables ──────── */
-.deck-tabs{display:flex;flex-shrink:0;border-bottom:1px solid var(--qs-trait);
-  background:#fafafa;gap:0}
-.deck-tab{flex:0 0 auto;padding:7px 14px;font-size:11px;font-weight:600;
-  border:none;border-bottom:2px solid transparent;background:transparent;
-  color:var(--qs-discret);cursor:pointer;font-family:inherit}
-.deck-tab:hover{color:var(--qs-accent);background:rgba(0,0,145,.04)}
-.deck-tab.active{color:var(--qs-accent);background:#fff;
-  border-bottom-color:var(--qs-accent)}
-.deck-body{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
-.deck-pane{display:none;flex:1;min-height:0;flex-direction:column;overflow:hidden}
-.deck-pane.active{display:flex}
-.deck-pane .rpane{flex:1;min-height:0;overflow:auto}
-.deck-pane .rpane.active{display:flex;flex-direction:column}
-.deck-pane--sources .src-list{max-height:none}
-.deck-pane--sources .rct-cards{display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
-.deck-pane--livrables .liv-list{display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;
-  align-content:start}
-
 /* ── Right panel (iframe chat agent) ─────────────────────────── */
 .desk-right{grid-area:chat;background:#fff;border-left:1px solid var(--qs-trait);
   display:flex;flex-direction:column;overflow:hidden;min-height:0}
@@ -841,14 +820,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         color:var(--qs-accent);cursor:pointer;text-align:center;text-decoration:none;
         font-family:inherit}
       .src-actions-row a:hover,.src-actions-row button:hover{background:var(--qs-accent-pale)}
-      .src-upload{border:1px dashed var(--qs-trait);border-radius:4px;padding:8px 6px;
+      .src-upload{display:flex;flex-direction:column;align-items:center;gap:6px;
+        border:1px dashed var(--qs-trait);border-radius:4px;padding:10px 8px;
         margin-bottom:4px;text-align:center;font-size:10.5px;line-height:1.35;
-        color:var(--qs-discret);background:var(--qs-surface-2);cursor:pointer}
+        color:var(--qs-discret);background:var(--qs-surface-2)}
+      .src-upload-lead,.src-upload-hint{margin:0}
+      .src-upload-hint{font-size:9.5px}
+      .src-upload-status{font-size:10px;color:var(--qs-discret);min-height:14px}
+      .src-upload-status.ok{color:var(--qs-succes)}
+      .src-upload-status.err{color:var(--qs-alerte)}
       .src-upload.dragover,.rpane[data-rpane=sources].src-dragover .src-upload{
         border-color:var(--qs-accent);background:var(--qs-accent-pale);color:var(--qs-accent)}
       .rpane[data-rpane=sources].src-dragover{outline:2px dashed var(--qs-accent);
         outline-offset:-3px}
-      .src-upload input{display:none}
       .src-list{max-height:220px;overflow-y:auto;margin:0;padding:0}
       .src-row{display:flex;align-items:center;gap:5px;padding:2px 0;
         font-size:10.5px;line-height:1.25;color:var(--qs-encre-2);
@@ -891,13 +875,16 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <div class="src-section-header">Importer des données</div>
         <div class="src-section-content" id="src-files-upload">
           {% if active_study_id %}
-          <label class="src-upload" id="src-upload-zone" for="src-upload-data-input">
-            Glisser-déposer des couches ou fichiers ici<br>
-            <span style="font-size:9.5px">.gpkg · .geojson · .shp/.zip · .tif · .csv · … → <code>data/</code></span>
-            <input type="file" id="src-upload-data-input" multiple
+          <div class="src-upload" id="src-upload-zone" role="group"
+               aria-label="Importer des fichiers vers data/">
+            <p class="src-upload-lead">Glisser-déposer des couches ou fichiers ici</p>
+            <button type="button" class="qs-btn qs-btn--sm qs-btn--secondaire"
+                    id="src-upload-browse-btn">Parcourir…</button>
+            <p class="src-upload-hint">.gpkg · .geojson · .shp/.zip · .tif · .csv · … → <code>data/</code></p>
+            <input type="file" id="src-upload-data-input" multiple hidden
                    accept=".gpkg,.geojson,.json,.shp,.zip,.tif,.tiff,.kml,.kmz,.gml,.tab,.sqlite,.csv,.dbf,.prj,.qgz,.qgs,.md,.pdf">
-          </label>
-          <div id="src-upload-status" style="font-size:10px;color:var(--qs-discret);min-height:12px"></div>
+          </div>
+          <div id="src-upload-status" class="src-upload-status" role="status" aria-live="polite"></div>
           {% else %}
           <div class="src-empty">Active une étude pour importer.</div>
           {% endif %}
@@ -1961,18 +1948,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 
   <div class="handle h1" data-target="publi"></div>
 
-  <!-- ── CANVAS / DECK BUREAU ───────────────────────────────────── -->
+  <!-- ── CANVAS QGIS ────────────────────────────────────────────── -->
   <section class="desk-canvas">
-    <div class="deck-tabs" role="tablist" aria-label="Vue bureau">
-      <button type="button" class="deck-tab active" data-deck-tab="carte"
-              role="tab" aria-selected="true">Carte</button>
-      <button type="button" class="deck-tab" data-deck-tab="sources"
-              role="tab" aria-selected="false">Sources</button>
-      <button type="button" class="deck-tab" data-deck-tab="livrables"
-              role="tab" aria-selected="false">Livrables</button>
-    </div>
-    <div class="deck-body">
-    <div class="deck-pane deck-pane--carte active" data-deck-pane="carte" role="tabpanel">
     {% if novnc_url and session_ready %}
     <div class="iframe-fit" id="qgis-vnc-wrap">
       {# Phase 0ter Steps 4-6 : iframe noVNC same-origin via reverse proxy hub
@@ -2004,12 +1981,6 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       <p style="font-size:11px;opacity:.7" id="wake-elapsed">0s écoulées</p>
     </div>
     {% endif %}
-    </div><!-- /.deck-pane--carte -->
-    <div class="deck-pane deck-pane--sources" data-deck-pane="sources"
-         id="desk-deck-sources-host" role="tabpanel"></div>
-    <div class="deck-pane deck-pane--livrables" data-deck-pane="livrables"
-         id="desk-deck-livrables-host" role="tabpanel"></div>
-    </div><!-- /.deck-body -->
   </section>
 
   <div class="handle h2" data-target="chat"></div>
@@ -2160,7 +2131,7 @@ const PUBLI_NOMINAL = 240;
 const CANVAS_MIN_W = 320;
 const HANDLE = 6;
 
-// Flags lazy-load : en tete de script pour eviter TDZ avec setDeckView hoiste.
+// Flags lazy-load ressources (en tete de script : evite TDZ avec fonctions hoistees).
 let _src_loaded = false;
 let _liv_loaded = false;
 
@@ -2176,7 +2147,7 @@ function _defaultResourcesOpenMode() {
 function _loadLayoutState() {
   const rawV3 = JSON.parse(localStorage.getItem('desk-layout-v3') || 'null');
   if (rawV3 && rawV3.resources && rawV3.chat) {
-    if (!rawV3.deckView) rawV3.deckView = 'carte';
+    delete rawV3.deckView;
     return rawV3;
   }
 
@@ -2203,13 +2174,12 @@ function _loadLayoutState() {
       width: v2.chat || CHAT_NOMINAL,
       lastOpenMode: _defaultChatOpenMode(),
     },
-    deckView: 'carte',
   };
 }
 
 const layoutState = _loadLayoutState();
 
-// Etat resize / lazy-load : avant tout applyPanelState() ou setDeckView() hoistes.
+// Etat resize : avant tout applyPanelState() hoiste.
 let largeurChatChoisie = layoutState.chat.width || null;
 let _redimensionneChat = false;
 
@@ -2218,7 +2188,6 @@ function applyPanelState() {
   const c = layoutState.chat.mode;
   desk.dataset.resources = r;
   desk.dataset.chat = c;
-  desk.dataset.deckView = layoutState.deckView || 'carte';
   desk.classList.toggle('show-publi', r !== 'collapsed');
   desk.classList.toggle('no-chat', c === 'collapsed');
   desk.style.setProperty('--publi-w', layoutState.resources.width + 'px');
@@ -2401,40 +2370,13 @@ function _cyclePanelMode(block, defaultOpenMode) {
   }
 }
 
-function _publiRpanesHostEl() {
-  return document.getElementById('publi-rpanes-host');
-}
-function _deckHostEl(name) {
-  return document.getElementById('desk-deck-' + name + '-host');
-}
-
-function _remountRpanesToPubli() {
-  const host = _publiRpanesHostEl();
-  ['sources', 'livrables'].forEach(name => {
-    const pane = document.querySelector(`.rpane[data-rpane="${name}"]`);
-    if (pane && host) host.appendChild(pane);
-  });
-}
-
 function togglePanel(side, opts) {
   const shift = opts && opts.shiftKey;
   if (side === 'publi') {
-    const wasCollapsed = layoutState.resources.mode === 'collapsed';
     if (shift) _cyclePanelMode(layoutState.resources, _defaultResourcesOpenMode);
     else _togglePanelBlock(layoutState.resources, _defaultResourcesOpenMode);
     if (isNarrow() && layoutState.resources.mode === 'panel') {
       layoutState.resources.mode = 'deck';
-    }
-    if (wasCollapsed && layoutState.resources.mode !== 'collapsed' &&
-        layoutState.deckView !== 'carte') {
-      const tab = layoutState.deckView;
-      layoutState.deckView = 'carte';
-      _remountRpanesToPubli();
-      syncDeckTabs();
-      document.querySelectorAll('.rtab').forEach(x =>
-        x.classList.toggle('active', x.dataset.rtab === tab));
-      document.querySelectorAll('.rpane').forEach(p =>
-        p.classList.toggle('active', p.dataset.rpane === tab));
     }
     memoriserOuvertureRessources();
   } else {
@@ -2450,67 +2392,11 @@ function togglePanel(side, opts) {
 document.getElementById('toggle-publi')?.addEventListener('click', (e) => togglePanel('publi', e));
 document.getElementById('toggle-chat')?.addEventListener('click', (e) => togglePanel('chat', e));
 
-// ── Deck bureau : Carte / Sources / Livrables ───────────────────
-function _mountRpane(name) {
-  const pane = document.querySelector(`.rpane[data-rpane="${name}"]`);
-  if (!pane) return;
-  const publiHost = _publiRpanesHostEl();
-  const deckHost = (name === 'sources' || name === 'livrables') ? _deckHostEl(name) : null;
-  if (layoutState.deckView === name && deckHost) {
-    deckHost.appendChild(pane);
-    pane.classList.add('active');
-  } else if (publiHost && pane.parentElement !== publiHost) {
-    publiHost.appendChild(pane);
-  }
-}
-
-function syncDeckTabs() {
-  const view = layoutState.deckView || 'carte';
-  document.querySelectorAll('.deck-tab').forEach(btn => {
-    const on = btn.dataset.deckTab === view;
-    btn.classList.toggle('active', on);
-    btn.setAttribute('aria-selected', String(on));
-  });
-  document.querySelectorAll('.deck-pane').forEach(pane => {
-    pane.classList.toggle('active', pane.dataset.deckPane === view);
-  });
-}
-
-function setDeckView(view) {
-  if (!view || view === layoutState.deckView) return;
-  layoutState.deckView = view;
-  if (view === 'carte') {
-    _remountRpanesToPubli();
-  } else {
-    layoutState.resources.mode = 'collapsed';
-    _mountRpane(view);
-    if (view === 'sources') {
-      if (!_src_loaded) { loadSources(); _src_loaded = true; }
-      else refreshSourcesSummaries();
-      document.querySelectorAll('.rtab').forEach(x =>
-        x.classList.toggle('active', x.dataset.rtab === 'sources'));
-    } else if (view === 'livrables') {
-      loadLivrables();
-      _liv_loaded = true;
-      document.querySelectorAll('.rtab').forEach(x =>
-        x.classList.toggle('active', x.dataset.rtab === 'livrables'));
-    }
-  }
-  syncDeckTabs();
-  applyPanelState();
-}
-
 function fermerOverlaysDesk() {
   let closed = false;
   const dd = document.getElementById('study-dropdown');
   if (dd?.classList.contains('open')) {
     dd.classList.remove('open');
-    closed = true;
-  }
-  if (layoutState.deckView && layoutState.deckView !== 'carte') {
-    layoutState.deckView = 'carte';
-    _remountRpanesToPubli();
-    syncDeckTabs();
     closed = true;
   }
   if (layoutState.resources.mode === 'deck') {
@@ -2854,15 +2740,6 @@ document.querySelectorAll('.rtab').forEach(t => {
   t.addEventListener('click', () => {
     document.querySelectorAll('.rtab').forEach(x => x.classList.toggle('active', x === t));
     const target = t.dataset.rtab;
-    if ((target === 'sources' || target === 'livrables') &&
-        layoutState.deckView !== 'carte') {
-      layoutState.deckView = 'carte';
-      _remountRpanesToPubli();
-      syncDeckTabs();
-    }
-    const pane = document.querySelector(`.rpane[data-rpane="${target}"]`);
-    const publiHost = _publiRpanesHostEl();
-    if (pane && publiHost) publiHost.appendChild(pane);
     document.querySelectorAll('.rpane').forEach(p =>
       p.classList.toggle('active', p.dataset.rpane === target)
     );
@@ -3598,14 +3475,25 @@ async function loadResourceFiles() {
 }
 
 let _srcUploadInit = false;
+function _setUploadStatus(msg, kind) {
+  const status = document.getElementById('src-upload-status');
+  if (!status) return;
+  status.textContent = msg || '';
+  status.classList.remove('ok', 'err');
+  if (kind) status.classList.add(kind);
+}
+
 async function _uploadStudyFiles(fileList, target) {
   const sid = _activeStudyId || await _getActiveStudyId();
-  if (!sid) return;
-  const status = document.getElementById('src-upload-status');
+  if (!sid) {
+    _setUploadStatus('Aucune étude active.', 'err');
+    return;
+  }
   const files = Array.from(fileList || []);
   if (!files.length) return;
-  if (status) status.textContent = `Envoi de ${files.length} fichier(s)…`;
+  _setUploadStatus(`Envoi de ${files.length} fichier(s)…`, null);
   let ok = 0;
+  let lastErr = '';
   for (const file of files) {
     const fd = new FormData();
     fd.append('file', file);
@@ -3614,16 +3502,23 @@ async function _uploadStudyFiles(fileList, target) {
       const r = await fetch(`/studies/${sid}/upload`, {
         method: 'POST', body: fd, credentials: 'include',
       });
-      if (r.ok) ok++;
-      else if (status) {
+      if (r.ok) {
+        ok++;
+      } else {
         const err = await r.json().catch(() => ({}));
-        status.textContent = err.detail || `Échec upload (${r.status})`;
+        lastErr = err.detail || `Échec upload (${r.status})`;
       }
     } catch (e) {
-      if (status) status.textContent = 'Upload impossible (workspace injoignable ?)';
+      lastErr = 'Upload impossible (workspace injoignable ?)';
     }
   }
-  if (status && ok) status.textContent = `${ok} fichier(s) enregistré(s) dans l'étude.`;
+  if (ok && ok === files.length) {
+    _setUploadStatus(`${ok} fichier(s) enregistré(s) dans l'étude.`, 'ok');
+  } else if (ok) {
+    _setUploadStatus(`${ok}/${files.length} fichier(s) enregistré(s). ${lastErr}`, 'err');
+  } else {
+    _setUploadStatus(lastErr || 'Échec de l\'upload.', 'err');
+  }
   _resFilesLoaded = false;
   await refreshSourcesSummaries();
   if (_isSrcSectionExpanded('files')) {
@@ -3657,6 +3552,7 @@ function initSourcesUpload() {
   _srcUploadInit = true;
   const zone = document.getElementById('src-upload-zone');
   const dataInput = document.getElementById('src-upload-data-input');
+  const browseBtn = document.getElementById('src-upload-browse-btn');
   const qgzBtn = document.getElementById('src-upload-qgz-btn');
   const qgzInput = document.getElementById('src-upload-qgz-input');
   const srcPane = document.querySelector('.rpane[data-rpane="sources"]');
@@ -3664,6 +3560,12 @@ function initSourcesUpload() {
     dataInput.addEventListener('change', () => {
       _uploadStudyFiles(dataInput.files, 'data');
       dataInput.value = '';
+    });
+  }
+  if (browseBtn && dataInput) {
+    browseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dataInput.click();
     });
   }
   _bindSrcDropTarget(zone, zone);
@@ -3934,24 +3836,6 @@ if (document.getElementById('src-files-summary') && !_src_loaded) {
   loadSources();
   _src_loaded = true;
 }
-
-// Deck : listeners + restauration apres loaders (evite TDZ loadSources / _deckHosts).
-document.querySelectorAll('.deck-tab').forEach(btn => {
-  btn.addEventListener('click', () => setDeckView(btn.dataset.deckTab));
-});
-(function initDeckViewFromLayout() {
-  syncDeckTabs();
-  const view = layoutState.deckView || 'carte';
-  if (view === 'carte') return;
-  _mountRpane(view);
-  syncDeckTabs();
-  if (view === 'sources') {
-    if (!_src_loaded) { loadSources(); _src_loaded = true; }
-  } else if (view === 'livrables') {
-    loadLivrables();
-    _liv_loaded = true;
-  }
-})();
 
 // Auto-polling au chargement si le serveur a lance un wake en arriere-plan.
 (function pollWorkspaceOnLoad() {
