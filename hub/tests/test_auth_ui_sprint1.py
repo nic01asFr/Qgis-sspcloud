@@ -32,7 +32,8 @@ def test_oauth_authorize_n_utilise_pas_tailwind_cdn() -> None:
 
 
 def test_logout_redirige_vers_login() -> None:
-    assert 'RedirectResponse("/login?logged_out=1"' in _MAIN
+    assert 'RedirectResponse("/login?error=logged_out"' in _MAIN
+    assert "elif error == \"logged_out\":" in _MAIN
 
 
 def test_workspace_affiche_les_erreurs_query() -> None:

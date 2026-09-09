@@ -2744,7 +2744,7 @@ async def hub_logout():
     Efface `oidc_token` (Domain=. et sans domain, pour couvrir les 2 cas
     portail-set et hub-set) + `hub_api_key`. Redirect vers /onboarding.
     """
-    response = RedirectResponse("/login?logged_out=1", status_code=302)
+    response = RedirectResponse("/login?error=logged_out", status_code=302)
     # Clear oidc_token dans les 2 domains (legacy portail + nouveau hub)
     response.delete_cookie("oidc_token", domain=".user.lab.sspcloud.fr")
     response.delete_cookie("oidc_token")
