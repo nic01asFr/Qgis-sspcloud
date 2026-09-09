@@ -149,12 +149,17 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
    `max-width:100%` borne le trigger a son parent ; l'ellipsis existant sur
    .study-name fait le reste. .study-menu garde overflow:visible, sinon le
    menu deroulant des projets serait coupe. */
-.study-menu{position:relative;min-width:0}
+/* inline-flex : largeur du menu = largeur du trigger (le dropdown
+   fermé ne participe pas au sizing). Le panneau ouvert prend alors
+   exactement la largeur du composant du haut. */
+.study-menu{position:relative;min-width:0;max-width:100%;
+  display:inline-flex;flex-direction:column;align-items:stretch}
 .study-trigger{background:var(--qs-accent-pale);
   color:var(--qs-accent);padding:6px 12px;border-radius:3px;
   font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;
   border:1px solid var(--qs-trait);cursor:pointer;
-  font-family:inherit;line-height:1.2;max-width:100%;overflow:hidden}
+  font-family:inherit;line-height:1.2;max-width:100%;overflow:hidden;
+  width:100%;box-sizing:border-box}
 /* Truncate progressive : titre étude prend priorité, profile peut disparaître
    en viewport étroit, puis l'étude elle-même tronque en ellipsis. min-width:0
    sur le flex parent pour activer le shrink. */
@@ -179,9 +184,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .hdr-center .center-content{min-width:0}
 .study-trigger{min-width:0}
-.study-dropdown{position:absolute;top:calc(100% + 6px);left:0;background:#fff;
-  border:1px solid var(--qs-trait);border-radius:4px;
-  box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:300px;max-width:360px;
+.study-dropdown{position:absolute;top:calc(100% + 6px);left:0;right:0;
+  width:100%;min-width:100%;max-width:none;box-sizing:border-box;
+  background:#fff;border:1px solid var(--qs-trait);border-radius:4px;
+  box-shadow:0 4px 16px rgba(0,0,0,.12);
   z-index:100;display:none;max-height:70vh;overflow-y:auto;overflow-x:hidden}
 .study-dropdown.open{display:block}
 /* Sprint UX-3 fix (2026-06-21) : items truncated proprement, plus de
@@ -207,27 +213,24 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 /* Titre de section : le menu porte desormais deux listes -- les etudes, puis
    les projets de celle qui est active. Sans separation nommee, les deux se
    lisaient comme une seule enumeration. */
+/* Titres courts : le contexte (nom d'étude) est déjà dans le trigger. */
 .study-dropdown .sd-titre{font-size:10px;color:var(--qs-discret);
   text-transform:uppercase;letter-spacing:.5px;padding:8px 10px 3px;
   font-weight:600}
 .study-dropdown .sd-titre + .sd-titre,
 .study-dropdown form + .sd-titre{border-top:1px solid var(--qs-trait-2);
   margin-top:4px}
-/* Sprint UX-3 fix (2026-06-21) : new-form passe en flex column pour avoir
-   input PUIS bouton empile, lisible et plein-largeur les 2. Avant : input
-   width:100% + button width:100% mais le browser les rendait sur la meme
-   ligne dans certains cas (autoflow inline) -> bouton tronque hors du
-   dropdown 360px max-width. */
-.study-dropdown .new-form{padding:10px 12px;background:var(--qs-surface-2);
+/* Création inline : input + bouton sur une seule ligne (largeur = trigger). */
+.study-dropdown .new-form{padding:8px 10px;background:var(--qs-surface-2);
   border-top:1px solid var(--qs-trait);
-  display:flex;flex-direction:column;gap:6px}
+  display:flex;flex-direction:row;align-items:center;gap:6px}
 .study-dropdown .new-form input,.study-dropdown .new-form select{
-  width:100%;box-sizing:border-box;
+  flex:1;min-width:0;width:auto;box-sizing:border-box;
   padding:6px 8px;font-size:11.5px;border:1px solid var(--qs-trait);
   border-radius:3px;margin:0;font-family:inherit;background:#fff}
 .study-dropdown .new-form button{
-  width:100%;box-sizing:border-box;
-  padding:6px;font-size:11.5px;
+  flex:0 0 auto;width:auto;box-sizing:border-box;
+  padding:6px 10px;font-size:11.5px;white-space:nowrap;
   background:var(--qs-accent);color:#fff;border:none;
   border-radius:3px;cursor:pointer;font-family:inherit;font-weight:500}
 .study-dropdown .new-form button:hover{
@@ -596,7 +599,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                tout se fait sans quitter la page. Le workspace reste la vue
                d'ensemble, il n'est plus un passage oblige. #}
             {% if studies %}
-              <div class="sd-titre">Mes études</div>
+              <div class="sd-titre">Études</div>
               {% for s in studies %}
               <form method="POST"
                     action="/workspace/study/{{ s.id }}/activate?return_to=desk"
@@ -605,9 +608,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                         class="item {% if s.id == active_study_id %}active{% endif %}"
                         style="width:100%;text-align:left;background:transparent;border:none;font-family:inherit"
                         title="{{ s.name }}{% if s.project_count %} — {{ s.project_count }} projet(s){% endif %}">
-                  {# L'etude active est deja marquee par la coche que
-                     `.item.active::after` pose a droite : en ajouter une a
-                     gauche en ferait deux pour la meme information. #}
+                  {# Actif = coche ::after a droite uniquement (pas de double). #}
                   <span class="ic">
                     <span class="ic-dossier ic--sm" aria-hidden="true"></span>
                   </span>
@@ -619,15 +620,15 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
               </form>
               {% endfor %}
               <form class="new-form" method="POST"
-                    action="/workspace/study/new?return_to=desk" style="margin:6px 0 8px">
-                <input name="name" required placeholder="Nouvelle étude (sujet, territoire…)">
+                    action="/workspace/study/new?return_to=desk">
+                <input name="name" required placeholder="Nouvelle étude…">
                 <button type="submit">+ Créer</button>
               </form>
             {% endif %}
 
-            {% if active_study and projects_in_active_study %}
-              <div class="sd-titre">Projets de « {{ active_study.name }} »</div>
-              {% for p in projects_in_active_study %}
+            {% if active_study %}
+              <div class="sd-titre">Projets</div>
+              {% for p in projects_in_active_study or [] %}
               <form method="POST"
                     action="/workspace/project/{{ active_study.id }}/{{ p.pid }}/activate?return_to=desk"
                     style="margin:0">
@@ -636,27 +637,22 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                         style="width:100%;text-align:left;background:transparent;border:none;font-family:inherit"
                         title="{{ p.label }}{% if p.is_default %} (projet principal){% endif %}">
                   <span class="ic">
-                    {% if active_project and active_project.pid == p.pid %}<span class="ic-coche ic--sm" aria-hidden="true"></span>{% elif p.is_default %}<span class="ic-etoile ic--sm" aria-hidden="true"></span>{% else %}<span class="ic-fichier ic--sm" aria-hidden="true"></span>{% endif %}
+                    {% if p.is_default %}<span class="ic-etoile ic--sm" aria-hidden="true"></span>{% else %}<span class="ic-fichier ic--sm" aria-hidden="true"></span>{% endif %}
                   </span>
                   <span>{{ p.label }}</span>
                 </button>
               </form>
               {% endfor %}
               <form class="new-form" method="POST"
-                    action="/workspace/project/{{ active_study.id }}/new?return_to=desk"
-                    style="margin:6px 0 0">
-                <input name="label" required placeholder="Nouveau projet (scénario, brouillon…)">
-                <button type="submit">+ Nouveau projet</button>
+                    action="/workspace/project/{{ active_study.id }}/new?return_to=desk">
+                <input name="label" required placeholder="Nouveau projet…">
+                <button type="submit">+ Créer</button>
               </form>
             {% endif %}
-            {# Le workspace reste la vue d'ensemble -- cartes d'etudes,
-               tableau des publications, archivage. Il n'est plus un passage
-               oblige pour changer d'etude, seulement un endroit ou l'on va
-               quand on veut prendre du recul. #}
             <a href="/workspace" style="display:block;padding:8px 10px;
                font-size:11px;color:var(--qs-discret);
                text-decoration:none;border-top:1px solid var(--qs-trait)">
-              Vue d'ensemble : études archivées, publications
+              Vue d’ensemble…
             </a>
           </div>
         </div>
