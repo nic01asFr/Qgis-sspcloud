@@ -31,6 +31,14 @@ def test_embed_masque_footer_et_lien_bureau() -> None:
     assert "body.embed .chat-toolbar .tool-btn-label{display:none}" in chunk
 
 
+def test_embed_ne_rend_pas_le_footer_html() -> None:
+    """Le pied de page n'est pas envoyé au navigateur en ?embed=1."""
+    foot_start = _CHAT.index('class="qs-pied"')
+    assert _CHAT.rfind("{% if not embed %}", 0, foot_start) < foot_start
+    foot_end = _CHAT.index("{% endif %}", foot_start)
+    assert foot_end > foot_start
+
+
 def test_nouvelle_conversation_sans_confirm() -> None:
     chunk = _CHAT.split("function startNewConversation()")[1].split("function toggleHistoryPopover")[0]
     assert "confirm(" not in chunk

@@ -889,6 +889,7 @@ async def index(request: Request):
     if not session_id:
         session_id = str(uuid.uuid4())
 
+    embed = request.query_params.get("embed") == "1"
     return templates.TemplateResponse(request, "chat.html", {
         "profile_id":      profile_id,
         "hub_url":         _HUB_URL,
@@ -897,6 +898,7 @@ async def index(request: Request):
         "projects":        projects[:5],
         "session_id":      session_id,
         "session_resumed": session_resumed,
+        "embed":           embed,
     })
 
 

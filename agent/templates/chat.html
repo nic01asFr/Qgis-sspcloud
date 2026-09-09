@@ -363,8 +363,9 @@ body.embed .msg .bubble pre{max-width:100%}
 }
 </style>
 </head>
-<body>
+<body{% if embed %} class="embed"{% endif %}>
 
+{% if not embed %}
 <header role="banner" class="qs-entete">
 <div class="qs-entete__corps"><div class="qs-conteneur qs-conteneur--large"><div class="qs-entete__ligne">
   {# Ni « République Française », ni nom d'opérateur : cette interface est
@@ -384,6 +385,7 @@ body.embed .msg .bubble pre{max-width:100%}
   </div>
 </div></div></div>
 </header>
+{% endif %}
 
 {# Sprint UX-3 (2026-06-21) : navbar globale retiree. Les liens entre vues
    sont deja accessibles via la toolbar chat (Bureau ↗), le footer
@@ -771,10 +773,8 @@ body.embed .msg .bubble pre{max-width:100%}
   </main>
 </div>
 
-{# Sprint UX-2 (2026-06-21) : footer DSFR officiel avec 3 colonnes de
-   liens utiles + bottom-list mentions legales. Avant : 1 ligne minimaliste
-   sans valeur ajoutee. Maintenant : Service / Aide / Source/Donnees +
-   bandeau mentions. #}
+{# En mode embed (iframe desk), pas de pied de page : liens deja dans le desk. #}
+{% if not embed %}
 <footer class="qs-pied" role="contentinfo"><div class="qs-conteneur qs-conteneur--large">
   <div class="qs-pied__corps">
     <div class="qs-pied__contenu">
@@ -811,9 +811,10 @@ body.embed .msg .bubble pre{max-width:100%}
     </li>
   </ul></div>
 </div></footer>
+{% endif %}
 
 <script>
-// Mode embed (iframe) — activé par ?embed=1
+// Mode embed (iframe) — classe aussi posée côté serveur si ?embed=1
 if (new URLSearchParams(location.search).get('embed') === '1') {
   document.body.classList.add('embed');
 }
