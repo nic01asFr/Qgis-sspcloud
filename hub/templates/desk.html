@@ -31,7 +31,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
    au lieu d'etre masque. En dessous de 1100px l'ecran est trop etroit pour
    trois colonnes, on repasse alors en calque (cf. media query). */
 /* Grille composable : colonnes pilotées par data-resources / data-chat.
-   Defaut = les deux panels repliés, QGIS pleine largeur. */
+   Defaut = les deux panels repliés, QGIS pleine largeur.
+   Contrat UX (2026-09-10) : seul le CHAT en mode panel décale la carte.
+   Les ressources sont toujours en calque (deck) — elles n'occupent
+   jamais une colonne de grille. */
 .desk{display:grid;
   grid-template-columns:0 1fr 0 0;
   grid-template-rows:48px 1fr 32px;
@@ -41,14 +44,17 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     "status status status status";
   height:100vh;width:100vw;background:#f4f4f6;
   transition:grid-template-columns .2s ease}
-.desk[data-resources="panel"]{grid-template-columns:var(--publi-w,240px) 1fr 0 0}
+/* Ressources ouvertes (panel legacy ou deck) : grille inchangée, calque CSS. */
+.desk[data-resources="panel"],
+.desk[data-resources="deck"]{grid-template-columns:0 1fr 0 0}
 .desk[data-chat="panel"]{grid-template-columns:0 1fr 6px var(--chat-w,300px)}
-.desk[data-resources="panel"][data-chat="panel"]{
-  grid-template-columns:var(--publi-w,240px) 1fr 6px var(--chat-w,300px)}
-/* Compat legacy (sync depuis applyPanelState) */
-.desk.show-publi:not([data-resources]){grid-template-columns:var(--publi-w,240px) 1fr 0 0}
+.desk[data-resources="panel"][data-chat="panel"],
+.desk[data-resources="deck"][data-chat="panel"]{
+  grid-template-columns:0 1fr 6px var(--chat-w,300px)}
+/* Compat legacy (sync depuis applyPanelState) — ressources ne poussent plus. */
+.desk.show-publi:not([data-resources]){grid-template-columns:0 1fr 0 0}
 .desk.no-chat:not([data-chat]){grid-template-columns:0 1fr 0 0}
-.desk.no-chat.show-publi:not([data-resources]){grid-template-columns:var(--publi-w,240px) 1fr 0 0}
+.desk.no-chat.show-publi:not([data-resources]){grid-template-columns:0 1fr 0 0}
 
 /* ── Header : navbar flex (toggles fixes, plus de position absolute) ─ */
 .desk-header{grid-area:header;background:#fff;border-bottom:1px solid var(--qs-trait);
@@ -334,15 +340,39 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 
 /* ── Canvas (QGIS noVNC iframe) ──────────────────────────────── */
 /* scaleViewport=true (noVNC) adapte le framebuffer au conteneur plein ecran.
-   Le proxy hub injecte du CSS dans vnc_lite.html pour masquer top_bar. */
+   Le proxy hub injecte du CSS dans vnc_lite.html pour masquer top_bar.
+   Chat ouvert (panel) : cadre en relief + trame de lignes croisées derrière
+   (plus de noir plat) — la trame est ancrée au conteneur pour que le
+   resize du chat donne une sensation de profondeur. */
 .desk-canvas{grid-area:canvas;background:#fff;overflow:hidden;position:relative;
-  min-width:0;min-height:0;display:flex;flex-direction:column}
+  min-width:0;min-height:0;display:flex;flex-direction:column;
+  transition:padding .2s ease,background-color .2s ease}
 .desk-canvas .iframe-fit{
   flex:1;min-height:0;width:100%;height:100%;
-  position:relative;overflow:hidden;background:#fff}
+  position:relative;overflow:hidden;background:#fff;
+  transition:box-shadow .2s ease,border-radius .2s ease}
 .desk-canvas .iframe-fit iframe{
   position:absolute;inset:0;width:100%;height:100%;
   border:none;display:block;background:#fff}
+/* Relief quand le chat décale la carte */
+.desk[data-chat="panel"] .desk-canvas{
+  padding:10px 10px 10px 12px;
+  background-color:#dfe3ea;
+  background-image:
+    linear-gradient(135deg,rgba(255,255,255,.55) 1px,transparent 1px),
+    linear-gradient(45deg,rgba(20,30,50,.07) 1px,transparent 1px),
+    linear-gradient(135deg,transparent 48%,rgba(0,0,145,.04) 49%,rgba(0,0,145,.04) 51%,transparent 52%),
+    linear-gradient(45deg,transparent 48%,rgba(0,0,0,.03) 49%,rgba(0,0,0,.03) 51%,transparent 52%);
+  background-size:28px 28px,28px 28px,56px 56px,56px 56px;
+  background-position:0 0,0 0,0 0,14px 14px}
+.desk[data-chat="panel"] .desk-canvas .iframe-fit{
+  border-radius:8px;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.7) inset,
+    0 0 0 1px rgba(15,23,42,.1),
+    0 10px 28px rgba(15,23,42,.14),
+    0 2px 6px rgba(15,23,42,.08);
+  background:#0b1220}
 .canvas-empty{height:100%;display:flex;align-items:center;justify-content:center;
   flex-direction:column;gap:12px;color:var(--qs-discret);text-align:center;padding:30px;background:#fff}
 .canvas-empty .ic{font-size:3rem;opacity:.4}
@@ -440,19 +470,23 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .desk-status .sep{color:var(--qs-trait)}
 .desk-status .recent-tool{color:var(--qs-accent);font-weight:500}
 
-/* Backdrop : actif en mode deck (panel overlay), pas en mode panel colonne. */
+/* Backdrop de base (caché) — activé quand ressources overlay ou chat deck. */
 .desk-backdrop{display:none;position:fixed;top:48px;right:0;bottom:32px;left:0;
   background:rgba(0,0,0,.25);z-index:25;opacity:0;pointer-events:none;
   transition:opacity .15s ease}
-.desk[data-resources="deck"] .desk-backdrop,
-.desk[data-chat="deck"] .desk-backdrop{
-  display:block;opacity:1;pointer-events:auto}
-
-/* ── Mode deck ressources (desktop overlay) ───────────────────── */
+/* ── Mode deck / panel ressources : toujours calque (ne décale pas la carte) */
+.desk[data-resources="panel"] .desk-publi,
 .desk[data-resources="deck"] .desk-publi{
   position:fixed;top:48px;bottom:32px;left:0;z-index:30;
   width:var(--publi-w,240px);max-width:85vw;visibility:visible;
   box-shadow:0 0 28px rgba(0,0,0,.18);transform:translateX(0)}
+.desk[data-resources="collapsed"] .desk-publi{
+  visibility:hidden;pointer-events:none}
+/* Backdrop : ressources (toujours overlay) ou chat en deck */
+.desk[data-resources="panel"] .desk-backdrop,
+.desk[data-resources="deck"] .desk-backdrop,
+.desk[data-chat="deck"] .desk-backdrop{
+  display:block;opacity:1;pointer-events:auto}
 /* ── Mode deck chat (desktop overlay) ─────────────────────────── */
 .desk[data-chat="deck"] .desk-right{
   position:fixed;top:48px;bottom:32px;right:0;z-index:30;
@@ -2169,14 +2203,18 @@ let _liv_loaded = false;
 function _defaultChatOpenMode() {
   return surTelephone() || isNarrow() ? 'deck' : 'panel';
 }
+/* Ressources : toujours calque — ne décale jamais la carte (seul le chat panel le fait). */
 function _defaultResourcesOpenMode() {
-  return isNarrow() ? 'deck' : 'panel';
+  return 'deck';
 }
 
 function _loadLayoutState() {
   const rawV3 = JSON.parse(localStorage.getItem('desk-layout-v3') || 'null');
   if (rawV3 && rawV3.resources && rawV3.chat) {
     delete rawV3.deckView;
+    // Migration : ressources ne sont plus une colonne — panel → deck.
+    if (rawV3.resources.mode === 'panel') rawV3.resources.mode = 'deck';
+    if (rawV3.resources.lastOpenMode === 'panel') rawV3.resources.lastOpenMode = 'deck';
     return rawV3;
   }
 
@@ -2402,11 +2440,12 @@ function _cyclePanelMode(block, defaultOpenMode) {
 function togglePanel(side, opts) {
   const shift = opts && opts.shiftKey;
   if (side === 'publi') {
-    if (shift) _cyclePanelMode(layoutState.resources, _defaultResourcesOpenMode);
-    else _togglePanelBlock(layoutState.resources, _defaultResourcesOpenMode);
-    if (isNarrow() && layoutState.resources.mode === 'panel') {
+    // Ressources : pas de cycle panel/deck — overlay uniquement.
+    _togglePanelBlock(layoutState.resources, _defaultResourcesOpenMode);
+    if (layoutState.resources.mode === 'panel') {
       layoutState.resources.mode = 'deck';
     }
+    layoutState.resources.lastOpenMode = 'deck';
     memoriserOuvertureRessources();
   } else {
     if (shift) _cyclePanelMode(layoutState.chat, _defaultChatOpenMode);
@@ -2428,7 +2467,8 @@ function fermerOverlaysDesk() {
     dd.classList.remove('open');
     closed = true;
   }
-  if (layoutState.resources.mode === 'deck') {
+  if (layoutState.resources.mode === 'deck' ||
+      layoutState.resources.mode === 'panel') {
     layoutState.resources.lastOpenMode = 'deck';
     layoutState.resources.mode = 'collapsed';
     closed = true;

@@ -1,4 +1,4 @@
-"""Structure UX workspace (option C) : navbar desk, liste compacte, un seul CTA bureau."""
+"""Structure UX workspace A : dashboard 2 colonnes, navbar desk, sans section Paramètres."""
 
 from __future__ import annotations
 
@@ -46,7 +46,25 @@ def test_un_seul_acces_bureau_sur_etude_active() -> None:
     assert "Continuer sur" in _WORKSPACE
     assert "Ouvrir le bureau" not in _WORKSPACE
     # Action unique pour les autres études
-    assert ">Ouvrir<" in _WORKSPACE.replace(" ", "") or ">\n            Ouvrir\n" in _WORKSPACE
+    assert "Ouvrir" in _WORKSPACE
+    assert 'action="/workspace/study/{{ s.id }}/activate?return_to=desk"' in _WORKSPACE
+
+
+def test_section_parametres_supprimee() -> None:
+    assert 'id="parametres"' not in _WORKSPACE
+    assert "params-hint" not in _WORKSPACE
+    # Titre de section page (pas le libellé menu / modale)
+    assert ">Paramètres<" not in _WORKSPACE
+    assert "<h2>Paramètres</h2>" not in _WORKSPACE
+
+
+def test_layout_dashboard_deux_colonnes() -> None:
+    assert "ws-dash" in _WORKSPACE
+    assert "ws-col" in _WORKSPACE
+    assert "ws-col--left" in _WORKSPACE
+    assert "ws-col--right" in _WORKSPACE
+    assert "1.5fr 1fr" in _WORKSPACE
+    assert "max-width:1120px" in _WORKSPACE or "max-width: 1120px" in _WORKSPACE
 
 
 def test_variables_jinja_preservees() -> None:

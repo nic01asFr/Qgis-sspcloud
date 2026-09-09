@@ -7,7 +7,7 @@
 <title>Mon espace — QGIS Service</title>
 <link rel="stylesheet" href="/static/produit.css">
 <style>
-/* Refonte UX workspace (option C) : navbar alignée desk, liste études en lignes. */
+/* Workspace A : dashboard 2 colonnes, navbar alignée desk. */
 
 /* Navbar — même squelette que desk (.desk-nav) */
 .ws-header{background:#fff;border-bottom:1px solid var(--qs-trait);
@@ -29,12 +29,17 @@
 .hdr-center .brand .sub{font-size:11.5px;color:var(--qs-discret);font-weight:500;
   letter-spacing:.3px}
 
-/* Contenu principal un peu plus dense */
-.ws-main{padding:20px 0 40px}
-.ws-main > .qs-conteneur{max-width:960px}
+/* Contenu principal — dashboard horizontal */
+.ws-main{padding:14px 0 32px}
+.ws-main > .qs-conteneur{max-width:1120px}
+
+.ws-dash{display:grid;grid-template-columns:1.5fr 1fr;gap:20px;align-items:start}
+.ws-col{min-width:0}
+.ws-col--left{display:flex;flex-direction:column;gap:0}
+.ws-col--right{display:flex;flex-direction:column;gap:16px}
 
 .section-title{display:flex;align-items:baseline;gap:10px;
-  margin:0 0 10px;padding-bottom:6px;
+  margin:0 0 8px;padding-bottom:5px;
   border-bottom:2px solid var(--qs-accent)}
 .section-title h2{font-size:1.05rem;font-weight:700;
   color:var(--qs-accent);margin:0;line-height:1}
@@ -42,10 +47,10 @@
   font-weight:500;padding:2px 7px;background:var(--qs-surface-2);
   border-radius:10px}
 
-/* Hero : un seul CTA bureau */
-.hero{margin:0 0 22px}
-.hero-cta{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.hero-cta .qs-btn--lg{font-weight:700;padding:12px 24px;font-size:1rem;
+/* Hero CTA bureau (colonne droite) */
+.hero{margin:0}
+.hero-cta{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.hero-cta .qs-btn--lg{font-weight:700;padding:11px 20px;font-size:.95rem;
   border-radius:6px;box-shadow:0 2px 8px rgba(0,0,145,.18)}
 .hero-cta .qs-btn--lg:hover{box-shadow:0 4px 14px rgba(0,0,145,.28)}
 .hero-status{display:inline-flex;align-items:center;gap:6px;font-size:.8rem;
@@ -55,24 +60,24 @@
 .hero-status-sleep .dot{background:#919191}
 
 /* Lignes d'études compactes */
-.study-list{display:flex;flex-direction:column;gap:0;margin:0 0 14px;
+.study-list{display:flex;flex-direction:column;gap:0;margin:0 0 10px;
   border:1px solid var(--qs-trait);border-radius:6px;background:#fff;
   overflow:hidden}
 .study-row{display:grid;
   grid-template-columns:minmax(0,1.4fr) auto auto auto;
-  align-items:center;gap:10px 14px;
-  padding:10px 14px;border-bottom:1px solid var(--qs-surface-2);
+  align-items:center;gap:8px 12px;
+  padding:8px 12px;border-bottom:1px solid var(--qs-surface-2);
   min-width:0}
 .study-row:last-child{border-bottom:none}
 .study-row.is-active{background:linear-gradient(90deg,#fff8f3 0%,#fff 70%)}
 .study-row.is-archived{opacity:.88}
-.study-row__name{margin:0;font-size:.95rem;font-weight:650;color:var(--qs-accent);
+.study-row__name{margin:0;font-size:.9rem;font-weight:650;color:var(--qs-accent);
   display:flex;align-items:center;gap:8px;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .study-row__name a{color:inherit;text-decoration:none}
 .study-row__name a:hover{text-decoration:underline}
-.study-row__meta{font-size:.78rem;color:var(--qs-discret);white-space:nowrap}
-.study-row__when{font-size:.78rem;color:var(--qs-discret);white-space:nowrap}
+.study-row__meta{font-size:.75rem;color:var(--qs-discret);white-space:nowrap}
+.study-row__when{font-size:.75rem;color:var(--qs-discret);white-space:nowrap}
 .study-row__actions{display:flex;align-items:center;gap:6px;justify-content:flex-end}
 .study-row__actions form{margin:0}
 .study-row__actions .qs-btn{font-size:.75rem;padding:.28rem .65rem}
@@ -92,29 +97,51 @@
 }
 
 /* Nouvelle étude : une ligne */
-.new-study-form{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 28px;align-items:center}
-.new-study-form input{flex:1;min-width:200px}
+.new-study-form{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px;align-items:center}
+.new-study-form input{flex:1;min-width:160px}
+
+/* Archivées compactes */
+.archived-block{margin-top:4px}
+.archived-block > summary{cursor:pointer;font-size:.85rem;font-weight:650;
+  color:var(--qs-discret);list-style:none;display:flex;align-items:baseline;gap:8px;
+  padding:4px 0}
+.archived-block > summary::-webkit-details-marker{display:none}
+.archived-block > summary .count{font-size:.75rem;color:var(--qs-discret);
+  font-weight:500;padding:2px 7px;background:var(--qs-surface-2);border-radius:10px}
+.archived-block[open] > summary{margin-bottom:8px;color:var(--qs-accent)}
 
 /* Empty states discrets */
-.empty-state{padding:18px 16px;color:var(--qs-discret);
+.empty-state{padding:14px 12px;color:var(--qs-discret);
   background:var(--qs-surface-2);border-radius:6px;
-  border:1px dashed var(--qs-trait);font-size:.85rem;margin-bottom:14px}
+  border:1px dashed var(--qs-trait);font-size:.85rem;margin-bottom:10px}
 .empty-state .icon{font-size:1.4rem;margin-right:8px;opacity:.65}
 
 /* Livrables / mémoire densifiés */
-.qs-tableau{font-size:.82rem}
-.livrables-intro{font-size:.8rem;color:var(--qs-discret);margin:0 0 10px}
-.memo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
-  gap:10px;margin-top:8px}
+.qs-tableau{font-size:.8rem}
+.livrables-intro{font-size:.78rem;color:var(--qs-discret);margin:0 0 8px}
+.memo-grid{display:grid;grid-template-columns:1fr;gap:8px;margin-top:6px}
 .memo-card{background:var(--qs-surface-2);border-radius:6px;
-  padding:12px 14px;font-size:.82rem}
-.memo-card h3{font-size:.9rem;margin:0 0 6px;font-weight:700;
+  padding:10px 12px;font-size:.8rem}
+.memo-card h3{font-size:.85rem;margin:0 0 5px;font-weight:700;
   color:var(--qs-accent)}
-.memo-card ul{margin:0;padding-left:16px;line-height:1.5}
-.memo-empty{font-size:.82rem;color:var(--qs-discret);
-  background:var(--qs-surface-2);padding:12px 14px;border-radius:6px;
+.memo-card ul{margin:0;padding-left:16px;line-height:1.45}
+.memo-empty{font-size:.8rem;color:var(--qs-discret);
+  background:var(--qs-surface-2);padding:10px 12px;border-radius:6px;
   border:1px dashed var(--qs-trait)}
-.params-hint{font-size:.8rem;color:var(--qs-discret);margin:0 0 10px}
+
+.ws-block{min-width:0}
+
+/* Stack mobile : CTA → études → livrables → mémoire */
+@media (max-width:900px){
+  .ws-dash{grid-template-columns:1fr;gap:16px}
+  .ws-col--right{display:contents}
+  .ws-col--left{display:contents}
+  .ws-block--cta{order:1}
+  .ws-block--studies{order:2}
+  .ws-block--livrables{order:3}
+  .ws-block--memo{order:4}
+  .ws-dash{display:flex;flex-direction:column}
+}
 </style>
 </head>
 <body>
@@ -153,12 +180,12 @@
 
           {% if hub_api_key %}
           <button type="button" class="qs-menu__item ic-cadenas" role="menuitem"
-                  onclick="ouvrirParametre('param-acces')">
+                  onclick="ouvrirCompte('acces')">
             Ma clé d'accès
           </button>
           {% endif %}
           <button type="button" class="qs-menu__item ic-discussion" role="menuitem"
-                  onclick="ouvrirParametre('param-assistant')">
+                  onclick="ouvrirCompte('assistant')">
             Clé de l'assistant
             {% if llm_key_missing %}
             <span class="qs-menu__suffixe" style="color:var(--qs-alerte)">à renseigner</span>
@@ -205,345 +232,343 @@
   </div>
   {% endif %}
 
-  {# Un seul accès bureau si étude active #}
-  {% if active_study %}
-  <div class="hero">
-    <div class="hero-cta">
-      <a href="/desk" class="qs-btn qs-btn--lg ic-fenetre qs-btn--icone-gauche">
-        Continuer sur « {{ active_study.name }} »
-      </a>
-      <span class="hero-status hero-status-{% if session_ready %}ok{% else %}sleep{% endif %}"
-            title="{% if session_ready %}Bureau QGIS prêt{% else %}Bureau en veille — s'ouvre depuis le bureau (~35 s){% endif %}">
-        <span class="dot"></span>
-        Bureau {% if session_ready %}actif{% else %}en veille{% endif %}
-      </span>
-    </div>
-  </div>
-  {% elif not studies %}
-  <div class="hero">
-    <div class="hero-cta">
-      <button type="button" class="qs-btn qs-btn--lg ic-ajout-cercle qs-btn--icone-gauche"
-              onclick="document.getElementById('new-study-name').focus();
-                       document.getElementById('new-study-name').scrollIntoView({behavior:'smooth',block:'center'})">
-        Démarrer ma première étude
-      </button>
-    </div>
-  </div>
-  {% endif %}
+  <div class="ws-dash">
 
-  <div class="section-title">
-    <h2>Mes études</h2>
-    <span class="count">
-      {{ studies|length }}
-      {% if studies|length == 1 %}en cours{% else %}en cours{% endif %}
-    </span>
-  </div>
-
-  {% if studies %}
-  <div class="study-list" role="list">
-    {% for s in studies %}
-    <div class="study-row{% if s.id == active_study_id %} is-active{% endif %}{% if s.origin == 'demo' %} is-demo{% endif %}"
-         role="listitem">
-      <h3 class="study-row__name" title="{{ s.name }}">
-        {% if s.id == active_study_id %}
-        <a href="/desk"><span class="ic-fenetre ic--sm" aria-hidden="true"></span> {{ s.name }}</a>
-        {% else %}
-        <span class="ic-dossier ic--sm" aria-hidden="true"></span> {{ s.name }}
-        {% endif %}
-        {% if s.id == active_study_id %}<span class="active-badge">ACTIVE</span>{% endif %}
-        {% if s.origin == 'demo' %}
-        <span class="demo-badge" title="Étude créée depuis un modèle de démonstration">DÉMO</span>
-        {% endif %}
-      </h3>
-      <span class="study-row__meta">
-        {% if s.project_count and s.project_count > 0 %}
-        {{ s.project_count }} {% if s.project_count == 1 %}projet{% else %}projets{% endif %}
-        {% else %}
-        —
-        {% endif %}
-      </span>
-      <span class="study-row__when">
-        {% if s.last_active_label %}{{ s.last_active_label }}{% else %}—{% endif %}
-      </span>
-      <div class="study-row__actions">
-        {% if s.id != active_study_id %}
-        <form method="POST" action="/workspace/study/{{ s.id }}/activate?return_to=desk">
-          <button type="submit" class="qs-btn qs-btn--sm" style="font-weight:650">
-            Ouvrir
-          </button>
-        </form>
-        {% endif %}
-        <form method="POST" action="/workspace/study/{{ s.id }}/archive"
-              onsubmit="return confirm('Archiver cette étude ? Vous pourrez toujours en créer une nouvelle.');">
-          <button type="submit" class="qs-btn qs-btn--tertiaire qs-btn--sm"
-                  title="Archiver cette étude (réversible, le dossier reste sur le PVC)">
-            Archiver
-          </button>
-        </form>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div class="empty-state">
-    <span class="icon ic-dossier" aria-hidden="true"></span>
-    Aucune étude pour l'instant. Démarrez votre première étude ci-dessous.
-  </div>
-  {% endif %}
-
-  <form method="POST" action="/workspace/study/new" class="new-study-form">
-    <input id="new-study-name" name="name" type="text" required
-           placeholder="Nouvelle étude (sujet, territoire…)"
-           class="qs-champ" aria-label="Nom de la nouvelle étude">
-    <button type="submit" class="qs-btn">Créer</button>
-  </form>
-
-  {% if archived_studies %}
-  <div class="section-title qs-mt-4w">
-    <h2>Études archivées</h2>
-    <span class="count">{{ archived_studies|length }}</span>
-  </div>
-  <div class="study-list" role="list">
-    {% for s in archived_studies %}
-    <div class="study-row is-archived" role="listitem">
-      <h3 class="study-row__name">
-        <span class="ic-dossier ic--sm" aria-hidden="true"></span> {{ s.name }}
-      </h3>
-      <span class="study-row__meta"></span>
-      <span class="study-row__when"></span>
-      <div class="study-row__actions">
-        <form method="POST" action="/workspace/study/{{ s.id }}/restore">
-          <button type="submit" class="qs-btn qs-btn--secondaire qs-btn--sm">Restaurer</button>
-        </form>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-  {% endif %}
-
-  <div class="section-title qs-mt-4w">
-    <h2>Mes livrables publiés</h2>
-    <span class="count">{{ catalog_count }}</span>
-  </div>
-  {% if catalog_items %}
-  <p class="livrables-intro">Cartes, rapports et recettes accessibles publiquement.</p>
-  {% if catalog_ailleurs or catalog_tronques %}
-  <p class="livrables-intro">
-    {% if catalog_ailleurs %}{{ catalog_ailleurs }} autre{{ 's' if catalog_ailleurs > 1 }}
-    publication{{ 's' if catalog_ailleurs > 1 }} hors de cette etude.{% endif %}
-    {% if catalog_tronques %}{{ catalog_tronques }} de plus non affichee{{ 's' if catalog_tronques > 1 }} ici.{% endif %}
-    <a href="/published/{{ username }}/">Voir toutes mes publications</a>
-  </p>
-  {% endif %}
-  {% set study_names = {} %}
-  {% for s in studies %}{% set _ = study_names.update({s.id: s.name}) %}{% endfor %}
-  <div class="qs-tableau">
-  <table>
-    <thead>
-      <tr><th>Type</th><th>Slug</th><th>Étude</th><th>Taille</th><th>Date</th><th>Lien</th><th>Actions</th></tr>
-    </thead>
-    <tbody>
-      {% for item in catalog_items %}
-      <tr data-slug="{{ item.slug }}" data-kind="{{ item.kind }}">
-        <td><span class="qs-pastille qs-pastille--sm qs-pastille--info">{{ item.kind }}</span></td>
-        <td>{{ item.slug }}</td>
-        <td>
-          {% if item.study_id and item.study_id in study_names %}
-            <span class="qs-pastille qs-pastille--sm"
-                  style="background:var(--qs-alerte-pale);color:var(--qs-alerte)"
-                  title="Étude : {{ study_names[item.study_id] }}">
-              {{ study_names[item.study_id] }}
-            </span>
-          {% elif item.study_id %}
-            <span class="qs-texte--sm" style="opacity:.55">{{ item.study_id }}</span>
-          {% else %}
-            <span class="qs-texte--sm" style="opacity:.55">—</span>
-          {% endif %}
-        </td>
-        <td>{{ item.size_kb }} ko</td>
-        <td>{{ item.date }}</td>
-        <td><a href="{{ item.hub_url }}" target="_blank" class="qs-lien">Ouvrir →</a></td>
-        <td>
-          <button type="button" class="qs-btn qs-btn--nu qs-btn--sm ic-supprimer qs-btn--icone-gauche"
-                  onclick="unpublishArtifact('{{ item.kind }}', '{{ item.slug }}', this)"
-                  title="Dépublier ce livrable (suppression S3 + catalogue). Action irréversible.">
-            Dépublier
-          </button>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-  <script>
-  async function unpublishArtifact(kind, slug, btn) {
-    if (!confirm(`Dépublier « ${slug} » (${kind}) ?\n\nLe fichier sera supprimé du stockage S3 et retiré du catalogue. Cette action est irréversible.`)) {
-      return;
-    }
-    btn.disabled = true;
-    btn.textContent = '⏳ Suppression…';
-    try {
-      const r = await fetch(`/publish/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (r.status === 204 || r.ok) {
-        const tr = btn.closest('tr');
-        tr.style.transition = 'opacity .3s';
-        tr.style.opacity = '0';
-        setTimeout(() => tr.remove(), 300);
-      } else {
-        const txt = await r.text();
-        alert(`Échec de la dépublication (HTTP ${r.status}) : ${txt.slice(0, 200)}`);
-        btn.disabled = false;
-        btn.textContent = 'Dépublier';
-      }
-    } catch (e) {
-      alert(`Erreur réseau : ${e.message || e}`);
-      btn.disabled = false;
-      btn.textContent = 'Dépublier';
-    }
-  }
-  </script>
-  {% else %}
-  <div class="empty-state">
-    <span class="icon ic-archive" aria-hidden="true"></span>
-    {% if catalog_total %}
-    Aucune publication rattachée à cette étude.
-    Tu en as {{ catalog_total }} au total —
-    <a href="/published/{{ username }}/">voir toutes mes publications</a>.
-    {% else %}
-    Aucune publication pour l'instant. Demande à l'agent dans le bureau
-    de publier une storymap ou un PDF pour faire apparaître les livrables ici.
-    {% endif %}
-  </div>
-  {% endif %}
-
-  <div class="section-title qs-mt-4w">
-    <h2>Ce que l'agent sait de toi</h2>
-    <span class="count">
-      {% set memo_count = (preferences|length if preferences else 0) + (insights|length if insights else 0) %}
-      {{ memo_count }}
-    </span>
-  </div>
-  {% if insights or preferences %}
-  <div class="memo-grid">
-    {% if preferences %}
-    <div class="memo-card">
-      <h3><span class="ic-signet ic--sm" aria-hidden="true"></span> Préférences explicites</h3>
-      <ul>
-        {% for k, v in preferences.items() %}
-        <li><strong>{{ k }}</strong> : {{ v }}</li>
-        {% endfor %}
-      </ul>
-    </div>
-    {% endif %}
-    {% if insights %}
-    <div class="memo-card">
-      <h3><span class="ic-ampoule ic--sm" aria-hidden="true"></span> Insights agentiques</h3>
-      <ul>
-        {% for ins in insights[:10] %}
-        <li><strong>{{ ins.key }}</strong> : {{ ins.value }}</li>
-        {% endfor %}
-      </ul>
-    </div>
-    {% endif %}
-  </div>
-  {% else %}
-  <div class="memo-empty">
-    Aucun élément encore. Au fil de tes conversations, l'agent notera
-    ici ce qu'il apprend de toi.
-  </div>
-  {% endif %}
-
-  <div class="section-title qs-mt-4w" id="parametres">
-    <h2>Paramètres</h2>
-  </div>
-  <p class="params-hint">Clé d'accès et configuration de l'assistant — aussi via le menu compte.</p>
-
-  {% if hub_api_key %}
-  <details class="qs-encart qs-encart--attention qs-mb-3w" id="param-acces"
-           style="padding:10px 14px;font-size:13px">
-    <summary style="cursor:pointer;font-weight:600;color:#845d29">
-      <span class="ic-cadenas ic--sm" aria-hidden="true"></span> Ma clé d'accès personnelle
-    </summary>
-    <div class="qs-mt-2w">
-      <p style="margin:0 0 8px 0">
-        <b>Une fois retenue, tu n'as plus besoin du portail OIDC.</b>
-        Garde-la de côté : elle te reconnecte depuis n'importe quel
-        navigateur, pour 90 jours à chaque fois.
-      </p>
-      <div style="background:#fff;border:1px solid #ddd;border-radius:4px;
-                  padding:10px;margin-bottom:8px;font-family:monospace;
-                  font-size:11.5px;word-break:break-all">
-        <div style="color:#666;font-size:10px;text-transform:uppercase;
-                    letter-spacing:.5px;margin-bottom:4px">Clé API</div>
-        <div id="hub-api-key-value">{{ hub_api_key }}</div>
-      </div>
-      <div style="display:flex;gap:8px">
-        <button type="button" class="qs-btn qs-btn--sm qs-btn--secondaire ic-presse-papier qs-btn--icone-gauche"
-                onclick="navigator.clipboard.writeText(document.getElementById('hub-api-key-value').textContent).then(()=>this.textContent='Clé copiée')">
-          Copier la clé
-        </button>
-      </div>
-      <p style="margin:12px 0 0 0;color:#666;font-size:11px">
-        Cette clé sert aussi au connecteur MCP (Claude Desktop, Cursor,
-        Cline) — voir <a href="/auth/apikey">/auth/apikey</a> pour la
-        configuration prête à copier. Tu la retrouves également dans
-        <a href="https://datalab.sspcloud.fr/my-services" target="_blank"
-        rel="noopener">Onyxia &gt; Mes services</a> &gt; QGIS Hub &gt; notes
-        d'installation.
-      </p>
-    </div>
-  </details>
-  {% endif %}
-
-  <details class="qs-encart qs-encart--attention qs-mb-3w" id="param-assistant"
-           style="padding:10px 14px;font-size:13px"
-           {% if llm_key_missing %}open{% endif %}>
-    <summary style="cursor:pointer;font-weight:600;color:#845d29">
-      <span class="ic-discussion ic--sm" aria-hidden="true"></span> Assistant IA — clé de connexion
-    </summary>
-    <div class="qs-mt-2w">
-      <p style="margin:0 0 8px 0">
-        L'assistant a besoin d'une clé pour répondre. Récupère-la sur
-        <a href="https://llm.lab.sspcloud.fr" target="_blank">llm.lab.sspcloud.fr</a>
-        (onglet <b>API keys</b>) ou utilise ta clé OpenAI compatible.
-      </p>
-      {% if llm_key_status_msg %}
-      <div style="background:{{ '#e6f7e6' if llm_key_status_ok else '#fdecea' }};
-                  color:{{ '#0a5c0a' if llm_key_status_ok else '#a11414' }};
-                  padding:8px 10px;border-radius:4px;margin-bottom:8px;font-size:12px">
-        {{ llm_key_status_msg }}
-      </div>
-      {% endif %}
-      <form method="POST" action="/workspace/llm-key" style="display:flex;gap:8px;align-items:flex-end">
-        <div style="flex:1">
-          <label for="llm_key_input" style="display:block;font-size:11px;color:#666;
-                 text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">
-            Clé de connexion (jamais réaffichée après enregistrement)
-          </label>
-          <input type="password" name="llm_api_key" id="llm_key_input" required
-                 placeholder="sk-..." autocomplete="off"
-                 style="width:100%;padding:8px 10px;border:1px solid #ddd;
-                        border-radius:4px;font-family:monospace;font-size:12px" />
+    {# ── Colonne gauche : études ── #}
+    <div class="ws-col ws-col--left">
+      <div class="ws-block ws-block--studies">
+        <div class="section-title">
+          <h2>Mes études</h2>
+          <span class="count">
+            {{ studies|length }}
+            {% if studies|length == 1 %}en cours{% else %}en cours{% endif %}
+          </span>
         </div>
-        <button type="submit" class="qs-btn qs-btn--sm">
-          Enregistrer
-        </button>
-      </form>
-      <p style="margin:8px 0 0 0;color:#666;font-size:11px">
-        La clé est enregistrée dans un secret Kubernetes de ton espace et
-        activée immédiatement (aucune interruption). Tu n'auras pas à la
-        ressaisir : elle est conservée après un redémarrage ou une mise à
-        jour du service.
-      </p>
+
+        {% if studies %}
+        <div class="study-list" role="list">
+          {% for s in studies %}
+          <div class="study-row{% if s.id == active_study_id %} is-active{% endif %}{% if s.origin == 'demo' %} is-demo{% endif %}"
+               role="listitem">
+            <h3 class="study-row__name" title="{{ s.name }}">
+              {% if s.id == active_study_id %}
+              <a href="/desk"><span class="ic-fenetre ic--sm" aria-hidden="true"></span> {{ s.name }}</a>
+              {% else %}
+              <span class="ic-dossier ic--sm" aria-hidden="true"></span> {{ s.name }}
+              {% endif %}
+              {% if s.id == active_study_id %}<span class="active-badge">ACTIVE</span>{% endif %}
+              {% if s.origin == 'demo' %}
+              <span class="demo-badge" title="Étude créée depuis un modèle de démonstration">DÉMO</span>
+              {% endif %}
+            </h3>
+            <span class="study-row__meta">
+              {% if s.project_count and s.project_count > 0 %}
+              {{ s.project_count }} {% if s.project_count == 1 %}projet{% else %}projets{% endif %}
+              {% else %}
+              —
+              {% endif %}
+            </span>
+            <span class="study-row__when">
+              {% if s.last_active_label %}{{ s.last_active_label }}{% else %}—{% endif %}
+            </span>
+            <div class="study-row__actions">
+              {% if s.id != active_study_id %}
+              <form method="POST" action="/workspace/study/{{ s.id }}/activate?return_to=desk">
+                <button type="submit" class="qs-btn qs-btn--sm" style="font-weight:650">
+                  Ouvrir
+                </button>
+              </form>
+              {% endif %}
+              <form method="POST" action="/workspace/study/{{ s.id }}/archive"
+                    onsubmit="return confirm('Archiver cette étude ? Vous pourrez toujours en créer une nouvelle.');">
+                <button type="submit" class="qs-btn qs-btn--tertiaire qs-btn--sm"
+                        title="Archiver cette étude (réversible, le dossier reste sur le PVC)">
+                  Archiver
+                </button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+          <span class="icon ic-dossier" aria-hidden="true"></span>
+          Aucune étude pour l'instant. Démarrez votre première étude ci-dessous.
+        </div>
+        {% endif %}
+
+        <form method="POST" action="/workspace/study/new" class="new-study-form">
+          <input id="new-study-name" name="name" type="text" required
+                 placeholder="Nouvelle étude (sujet, territoire…)"
+                 class="qs-champ" aria-label="Nom de la nouvelle étude">
+          <button type="submit" class="qs-btn">Créer</button>
+        </form>
+
+        {% if archived_studies %}
+        <details class="archived-block">
+          <summary>
+            Études archivées
+            <span class="count">{{ archived_studies|length }}</span>
+          </summary>
+          <div class="study-list" role="list">
+            {% for s in archived_studies %}
+            <div class="study-row is-archived" role="listitem">
+              <h3 class="study-row__name">
+                <span class="ic-dossier ic--sm" aria-hidden="true"></span> {{ s.name }}
+              </h3>
+              <span class="study-row__meta"></span>
+              <span class="study-row__when"></span>
+              <div class="study-row__actions">
+                <form method="POST" action="/workspace/study/{{ s.id }}/restore">
+                  <button type="submit" class="qs-btn qs-btn--secondaire qs-btn--sm">Restaurer</button>
+                </form>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+      </div>
     </div>
-  </details>
+
+    {# ── Colonne droite : CTA + livrables + mémoire ── #}
+    <div class="ws-col ws-col--right">
+
+      <div class="ws-block ws-block--cta">
+        {% if active_study %}
+        <div class="hero">
+          <div class="hero-cta">
+            <a href="/desk" class="qs-btn qs-btn--lg ic-fenetre qs-btn--icone-gauche">
+              Continuer sur « {{ active_study.name }} »
+            </a>
+            <span class="hero-status hero-status-{% if session_ready %}ok{% else %}sleep{% endif %}"
+                  title="{% if session_ready %}Bureau QGIS prêt{% else %}Bureau en veille — s'ouvre depuis le bureau (~35 s){% endif %}">
+              <span class="dot"></span>
+              Bureau {% if session_ready %}actif{% else %}en veille{% endif %}
+            </span>
+          </div>
+        </div>
+        {% elif not studies %}
+        <div class="hero">
+          <div class="hero-cta">
+            <button type="button" class="qs-btn qs-btn--lg ic-ajout-cercle qs-btn--icone-gauche"
+                    onclick="document.getElementById('new-study-name').focus();
+                             document.getElementById('new-study-name').scrollIntoView({behavior:'smooth',block:'center'})">
+              Démarrer ma première étude
+            </button>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="ws-block ws-block--livrables">
+        <div class="section-title">
+          <h2>Mes livrables publiés</h2>
+          <span class="count">{{ catalog_count }}</span>
+        </div>
+        {% if catalog_items %}
+        <p class="livrables-intro">Cartes, rapports et recettes accessibles publiquement.</p>
+        {% if catalog_ailleurs or catalog_tronques %}
+        <p class="livrables-intro">
+          {% if catalog_ailleurs %}{{ catalog_ailleurs }} autre{{ 's' if catalog_ailleurs > 1 }}
+          publication{{ 's' if catalog_ailleurs > 1 }} hors de cette etude.{% endif %}
+          {% if catalog_tronques %}{{ catalog_tronques }} de plus non affichee{{ 's' if catalog_tronques > 1 }} ici.{% endif %}
+          <a href="/published/{{ username }}/">Voir toutes mes publications</a>
+        </p>
+        {% endif %}
+        {% set study_names = {} %}
+        {% for s in studies %}{% set _ = study_names.update({s.id: s.name}) %}{% endfor %}
+        <div class="qs-tableau">
+        <table>
+          <thead>
+            <tr><th>Type</th><th>Slug</th><th>Étude</th><th>Taille</th><th>Date</th><th>Lien</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            {% for item in catalog_items %}
+            <tr data-slug="{{ item.slug }}" data-kind="{{ item.kind }}">
+              <td><span class="qs-pastille qs-pastille--sm qs-pastille--info">{{ item.kind }}</span></td>
+              <td>{{ item.slug }}</td>
+              <td>
+                {% if item.study_id and item.study_id in study_names %}
+                  <span class="qs-pastille qs-pastille--sm"
+                        style="background:var(--qs-alerte-pale);color:var(--qs-alerte)"
+                        title="Étude : {{ study_names[item.study_id] }}">
+                    {{ study_names[item.study_id] }}
+                  </span>
+                {% elif item.study_id %}
+                  <span class="qs-texte--sm" style="opacity:.55">{{ item.study_id }}</span>
+                {% else %}
+                  <span class="qs-texte--sm" style="opacity:.55">—</span>
+                {% endif %}
+              </td>
+              <td>{{ item.size_kb }} ko</td>
+              <td>{{ item.date }}</td>
+              <td><a href="{{ item.hub_url }}" target="_blank" class="qs-lien">Ouvrir →</a></td>
+              <td>
+                <button type="button" class="qs-btn qs-btn--nu qs-btn--sm ic-supprimer qs-btn--icone-gauche"
+                        onclick="unpublishArtifact('{{ item.kind }}', '{{ item.slug }}', this)"
+                        title="Dépublier ce livrable (suppression S3 + catalogue). Action irréversible.">
+                  Dépublier
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        </div>
+        <script>
+        async function unpublishArtifact(kind, slug, btn) {
+          if (!confirm(`Dépublier « ${slug} » (${kind}) ?\n\nLe fichier sera supprimé du stockage S3 et retiré du catalogue. Cette action est irréversible.`)) {
+            return;
+          }
+          btn.disabled = true;
+          btn.textContent = '⏳ Suppression…';
+          try {
+            const r = await fetch(`/publish/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}`, {
+              method: 'DELETE',
+              credentials: 'include',
+            });
+            if (r.status === 204 || r.ok) {
+              const tr = btn.closest('tr');
+              tr.style.transition = 'opacity .3s';
+              tr.style.opacity = '0';
+              setTimeout(() => tr.remove(), 300);
+            } else {
+              const txt = await r.text();
+              alert(`Échec de la dépublication (HTTP ${r.status}) : ${txt.slice(0, 200)}`);
+              btn.disabled = false;
+              btn.textContent = 'Dépublier';
+            }
+          } catch (e) {
+            alert(`Erreur réseau : ${e.message || e}`);
+            btn.disabled = false;
+            btn.textContent = 'Dépublier';
+          }
+        }
+        </script>
+        {% else %}
+        <div class="empty-state">
+          <span class="icon ic-archive" aria-hidden="true"></span>
+          {% if catalog_total %}
+          Aucune publication rattachée à cette étude.
+          Tu en as {{ catalog_total }} au total —
+          <a href="/published/{{ username }}/">voir toutes mes publications</a>.
+          {% else %}
+          Aucune publication pour l'instant. Demande à l'agent dans le bureau
+          de publier une storymap ou un PDF pour faire apparaître les livrables ici.
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="ws-block ws-block--memo">
+        <div class="section-title">
+          <h2>Ce que l'agent sait de toi</h2>
+          <span class="count">
+            {% set memo_count = (preferences|length if preferences else 0) + (insights|length if insights else 0) %}
+            {{ memo_count }}
+          </span>
+        </div>
+        {% if insights or preferences %}
+        <div class="memo-grid">
+          {% if preferences %}
+          <div class="memo-card">
+            <h3><span class="ic-signet ic--sm" aria-hidden="true"></span> Préférences explicites</h3>
+            <ul>
+              {% for k, v in preferences.items() %}
+              <li><strong>{{ k }}</strong> : {{ v }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% endif %}
+          {% if insights %}
+          <div class="memo-card">
+            <h3><span class="ic-ampoule ic--sm" aria-hidden="true"></span> Insights agentiques</h3>
+            <ul>
+              {% for ins in insights[:10] %}
+              <li><strong>{{ ins.key }}</strong> : {{ ins.value }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% endif %}
+        </div>
+        {% else %}
+        <div class="memo-empty">
+          Aucun élément encore. Au fil de tes conversations, l'agent notera
+          ici ce qu'il apprend de toi.
+        </div>
+        {% endif %}
+      </div>
+
+    </div>
+  </div>
 
 </div>
 </section>
 </main>
+
+{# Réglages compte (hors page) — ouverts via le menu, pas de section Paramètres #}
+<div class="qs-modale" id="compte-modale" hidden
+     role="dialog" aria-modal="true" aria-labelledby="compte-modale-titre">
+  <div class="qs-modale__fond" onclick="fermerCompte()"></div>
+  <div class="qs-modale__boite" style="max-width:440px">
+    <div class="qs-modale__entete">
+      <span class="qs-avatar" aria-hidden="true">{{ username[:2] }}</span>
+      <h2 class="qs-modale__titre" id="compte-modale-titre">Mon compte</h2>
+      <button type="button" class="qs-modale__fermer ic-fermer"
+              onclick="fermerCompte()" aria-label="Fermer"></button>
+    </div>
+    <div class="qs-modale__corps" style="font-size:13px">
+      {% if hub_api_key %}
+      <section data-section="acces" id="param-acces">
+        <p style="margin:0 0 8px;font-weight:600">Ma clé d'accès personnelle</p>
+        <div style="background:#fff;border:1px solid #ddd;border-radius:4px;
+                    padding:10px;margin-bottom:8px;font-family:monospace;
+                    font-size:11.5px;word-break:break-all">
+          <div id="hub-api-key-value">{{ hub_api_key }}</div>
+        </div>
+        <button type="button" class="qs-btn qs-btn--sm qs-btn--secondaire"
+                onclick="navigator.clipboard.writeText(document.getElementById('hub-api-key-value').textContent).then(()=>this.textContent='Clé copiée')">
+          Copier la clé
+        </button>
+        <p style="margin:10px 0 0;color:#666;font-size:11px">
+          Aussi disponible sur <a href="/auth/apikey">/auth/apikey</a>.
+        </p>
+      </section>
+      <hr class="qs-menu__sep" style="margin:16px 0">
+      {% endif %}
+      <section data-section="assistant" id="param-assistant">
+        <p style="margin:0 0 8px;font-weight:600">Clé de l'assistant</p>
+        {% if llm_key_status_msg %}
+        <div style="background:{{ '#e6f7e6' if llm_key_status_ok else '#fdecea' }};
+                    color:{{ '#0a5c0a' if llm_key_status_ok else '#a11414' }};
+                    padding:8px 10px;border-radius:4px;margin-bottom:8px;font-size:12px">
+          {{ llm_key_status_msg }}
+        </div>
+        {% endif %}
+        <form method="POST" action="/workspace/llm-key" style="display:flex;gap:8px;align-items:flex-end">
+          <div style="flex:1">
+            <label for="llm_key_input" style="display:block;font-size:11px;color:#666;margin-bottom:4px">
+              Clé de connexion (jamais réaffichée après enregistrement)
+            </label>
+            <input type="password" name="llm_api_key" id="llm_key_input" required
+                   placeholder="sk-..." autocomplete="off" class="qs-champ"
+                   style="width:100%;font-family:monospace;font-size:12px">
+          </div>
+          <button type="submit" class="qs-btn qs-btn--sm">Enregistrer</button>
+        </form>
+        <p style="margin:8px 0 0;color:#666;font-size:11px">
+          Récupère-la sur
+          <a href="https://llm.lab.sspcloud.fr" target="_blank" rel="noopener">llm.lab.sspcloud.fr</a>
+          (onglet API keys).
+        </p>
+      </section>
+    </div>
+    <div class="qs-modale__pied">
+      <button type="button" class="qs-btn qs-btn--tertiaire" onclick="fermerCompte()">Fermer</button>
+    </div>
+  </div>
+</div>
 
 <footer class="qs-pied" role="contentinfo"><div class="qs-conteneur">
 <div class="qs-pied__corps">
@@ -601,12 +626,22 @@ function basculerMenuCompte(e) {
   btn.setAttribute('aria-expanded', String(ouvert));
 }
 
-function ouvrirParametre(id) {
+function fermerCompte() {
+  const modale = document.getElementById('compte-modale');
+  if (modale) modale.hidden = true;
+}
+
+function ouvrirCompte(section) {
   fermerMenuCompte();
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.open = true;
-  el.scrollIntoView({behavior: 'smooth', block: 'center'});
+  const modale = document.getElementById('compte-modale');
+  if (!modale) return;
+  modale.hidden = false;
+  const cible = modale.querySelector(`[data-section="${section}"]`);
+  if (cible) cible.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  if (section === 'assistant') {
+    const input = document.getElementById('llm_key_input');
+    if (input) setTimeout(() => input.focus(), 50);
+  }
 }
 
 document.addEventListener('click', (e) => {
@@ -614,7 +649,10 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') fermerMenuCompte();
+  if (e.key === 'Escape') {
+    fermerMenuCompte();
+    fermerCompte();
+  }
 });
 </script>
 

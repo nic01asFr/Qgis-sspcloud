@@ -22,6 +22,17 @@ def test_grille_defaut_sans_colonne_chat() -> None:
     assert 'data-resources="panel"' in _DESK
 
 
+def test_ressources_ne_decalent_pas_la_carte() -> None:
+    """Seul le chat panel réduit la grille ; ressources = calque."""
+    assert "return 'deck';" in _DESK
+    assert "function _defaultResourcesOpenMode()" in _DESK
+    # Plus de colonne publi qui pousse le canvas
+    assert "var(--publi-w,240px) 1fr 0 0" not in _DESK
+    assert "var(--publi-w,240px) 1fr 6px" not in _DESK
+    assert '[data-chat="panel"] .desk-canvas' in _DESK
+    assert "background-size:28px 28px" in _DESK
+
+
 def test_layout_v3_persiste() -> None:
     assert "desk-layout-v3" in _DESK
     assert "function applyPanelState()" in _DESK
