@@ -50,9 +50,9 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
 .context-chip .ctx-caret{font-size:9px;opacity:.6}
 
 /* Mémoire drawer : pan latéral droit par-dessus la zone messages, sans casser le layout */
-.memory-drawer{position:absolute;top:0;right:0;bottom:0;width:340px;background:#fff;
+.memory-drawer{position:absolute;top:0;right:0;bottom:0;width:min(340px,100%);background:#fff;
   border-left:1px solid var(--qs-trait);box-shadow:-4px 0 12px rgba(0,0,0,.06);
-  transform:translateX(100%);transition:transform .2s ease;z-index:20;
+  transform:translateX(100%);transition:transform .2s ease;z-index:250;
   display:flex;flex-direction:column}
 .memory-drawer.open{transform:translateX(0)}
 .memory-drawer header{padding:10px 14px;border-bottom:1px solid var(--qs-trait);
@@ -335,15 +335,18 @@ body.embed .msg .bubble details.embed-screenshot{display:none !important}
 .llm-banner .verify-status.ok{color:var(--qs-succes)}
 .llm-banner .verify-status.err{color:#b34000}
 
-/* Mode embed (?embed=1) : enlève header/sidebar pour iframe */
+/* Mode embed (?embed=1) : enlève chrome standalone inutile dans le desk */
 body.embed .qs-entete,
 body.embed .qs-pied,
 body.embed .chat-sidebar,
-body.embed .chat-toolbar a[href*="/"],
-/* En mode embed (desk), la mémoire s'ouvre via le drawer interne du chat
-   (bouton livre à côté de + et Historique), par-dessus la conversation. */
-body.embed .chat-app{grid-template-columns:1fr;overflow-x:hidden}
-body.embed .chat-toolbar{padding:6px 10px;font-size:11.5px}
+body.embed .chat-toolbar a.tool-btn-link{display:none !important}
+/* Mémoire : drawer interne (bouton livre), par-dessus la conversation. */
+body.embed .chat-app{grid-template-columns:1fr;overflow-x:hidden;flex:1;min-height:0}
+body.embed .chat-main{min-height:0}
+body.embed .chat-toolbar{padding:6px 8px;font-size:11.5px;gap:6px;flex-wrap:nowrap}
+body.embed .chat-toolbar .tool-btn-label{display:none}
+body.embed .chat-toolbar .tool-btn{padding:4px 6px;min-width:28px}
+body.embed .chat-input .hint{display:none}
 /* Cap dur sur la largeur des bulles en embed pour éviter qu'une longue
    URL/tool result ne pousse l'iframe en horizontal scroll. */
 body.embed .msg .bubble{max-width:100%;overflow-wrap:anywhere}
@@ -465,7 +468,7 @@ body.embed .msg .bubble pre{max-width:100%}
         <span class="ic-reglages ic--sm" aria-hidden="true"></span> <span class="tool-btn-label">Technique</span>
       </button>
       <button type="button" class="tool-btn" id="btn-memory"
-              onclick="toggleMemoryDrawer()" aria-label="Memoire de l'agent"
+              onclick="toggleMemoryDrawer()" aria-label="Mémoire de l'agent"
               title="Voir et éditer la mémoire de l'agent">
         <span class="ic-livre ic--sm" aria-hidden="true"></span> <span class="tool-btn-label">Mémoire</span>
       </button>
@@ -1172,7 +1175,11 @@ async function toggleMemoryDrawer(forceState) {
   const willOpen = forceState !== undefined ? forceState : !drawer.classList.contains('open');
   drawer.classList.toggle('open', willOpen);
   drawer.setAttribute('aria-hidden', willOpen ? 'false' : 'true');
-  if (willOpen) await loadMemoryPanel();
+  if (willOpen) {
+    toggleHistoryPopover(null, false);
+    toggleTechPopover(null, false);
+    await loadMemoryPanel();
+  }
 }
 
 function toggleMemSection(key) {

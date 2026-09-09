@@ -23,6 +23,14 @@ def test_drawer_memoire_pas_masque_en_embed() -> None:
     assert "body.embed #btn-memory,\nbody.embed .memory-drawer{display:none" not in _CHAT
 
 
+def test_embed_masque_footer_et_lien_bureau() -> None:
+    chunk = _CHAT.split("Mode embed")[1].split("Sprint UX-1")[0]
+    assert "body.embed .qs-pied" in chunk
+    assert "display:none !important" in chunk
+    assert "body.embed .chat-toolbar a.tool-btn-link" in chunk
+    assert "body.embed .chat-toolbar .tool-btn-label{display:none}" in chunk
+
+
 def test_nouvelle_conversation_sans_confirm() -> None:
     chunk = _CHAT.split("function startNewConversation()")[1].split("function toggleHistoryPopover")[0]
     assert "confirm(" not in chunk
