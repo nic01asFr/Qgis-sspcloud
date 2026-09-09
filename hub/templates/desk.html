@@ -342,6 +342,27 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .canvas-empty h3{color:var(--qs-accent);font-weight:600;margin:0}
 .canvas-empty p{margin:0;font-size:13px;max-width:340px;color:var(--qs-discret)}
 
+/* ── Deck bureau : onglets Carte / Sources / Livrables ──────── */
+.deck-tabs{display:flex;flex-shrink:0;border-bottom:1px solid var(--qs-trait);
+  background:#fafafa;gap:0}
+.deck-tab{flex:0 0 auto;padding:7px 14px;font-size:11px;font-weight:600;
+  border:none;border-bottom:2px solid transparent;background:transparent;
+  color:var(--qs-discret);cursor:pointer;font-family:inherit}
+.deck-tab:hover{color:var(--qs-accent);background:rgba(0,0,145,.04)}
+.deck-tab.active{color:var(--qs-accent);background:#fff;
+  border-bottom-color:var(--qs-accent)}
+.deck-body{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
+.deck-pane{display:none;flex:1;min-height:0;flex-direction:column;overflow:hidden}
+.deck-pane.active{display:flex}
+.deck-pane .rpane{flex:1;min-height:0;overflow:auto}
+.deck-pane .rpane.active{display:flex;flex-direction:column}
+.deck-pane--sources .src-list{max-height:none}
+.deck-pane--sources .rct-cards{display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.deck-pane--livrables .liv-list{display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;
+  align-content:start}
+
 /* ── Right panel (iframe chat agent) ─────────────────────────── */
 .desk-right{grid-area:chat;background:#fff;border-left:1px solid var(--qs-trait);
   display:flex;flex-direction:column;overflow:hidden;min-height:0}
@@ -815,6 +836,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <span class="ic-article ic--sm" aria-hidden="true"></span> Livrables
       </button>
     </div>
+
+    <div class="publi-rpanes" id="publi-rpanes-host">
 
     {# ═══════════════════════════════════════════════════════════════════
        Sprint Composants C11 (2026-06-27) : 3 META-panneaux principaux.
@@ -1850,6 +1873,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         {% endif %}
       </div>
     </div>
+    </div><!-- /#publi-rpanes-host -->
     <script>
     async function loadAgents(listId) {
       const list = document.getElementById(listId || 'agents-list');
@@ -1972,12 +1996,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 
   <div class="handle h1" data-target="publi"></div>
 
-  <!-- ── CANVAS QGIS ────────────────────────────────────────────── -->
+  <!-- ── CANVAS / DECK BUREAU ───────────────────────────────────── -->
   <section class="desk-canvas">
+    <div class="deck-tabs" role="tablist" aria-label="Vue bureau">
+      <button type="button" class="deck-tab active" data-deck-tab="carte"
+              role="tab" aria-selected="true">Carte</button>
+      <button type="button" class="deck-tab" data-deck-tab="sources"
+              role="tab" aria-selected="false">Sources</button>
+      <button type="button" class="deck-tab" data-deck-tab="livrables"
+              role="tab" aria-selected="false">Livrables</button>
+    </div>
+    <div class="deck-body">
+    <div class="deck-pane deck-pane--carte active" data-deck-pane="carte" role="tabpanel">
     {% if novnc_url and session_ready %}
-    <!-- wrapper iframe-fit : aspect-ratio 16:9 dans le canvas (1fr grid).
-         scale=true → scaleViewport noVNC (fit intégral, pas de scrollbar).
-         Le proxy hub masque le chrome noVNC (top_bar) dans vnc_lite.html. -->
     <div class="iframe-fit" id="qgis-vnc-wrap">
       {# Phase 0ter Steps 4-6 : iframe noVNC same-origin via reverse proxy hub
          /workspace/vnc/* (au lieu de l'ingress public qgis-workspace-X-novnc.*
@@ -2008,6 +2039,12 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       <p style="font-size:11px;opacity:.7" id="wake-elapsed">0s écoulées</p>
     </div>
     {% endif %}
+    </div><!-- /.deck-pane--carte -->
+    <div class="deck-pane deck-pane--sources" data-deck-pane="sources"
+         id="desk-deck-sources-host" role="tabpanel"></div>
+    <div class="deck-pane deck-pane--livrables" data-deck-pane="livrables"
+         id="desk-deck-livrables-host" role="tabpanel"></div>
+    </div><!-- /.deck-body -->
   </section>
 
   <div class="handle h2" data-target="chat"></div>
@@ -2162,7 +2199,10 @@ function _defaultResourcesOpenMode() {
 
 function _loadLayoutState() {
   const rawV3 = JSON.parse(localStorage.getItem('desk-layout-v3') || 'null');
-  if (rawV3 && rawV3.resources && rawV3.chat) return rawV3;
+  if (rawV3 && rawV3.resources && rawV3.chat) {
+    if (!rawV3.deckView) rawV3.deckView = 'carte';
+    return rawV3;
+  }
 
   const legacy = JSON.parse(localStorage.getItem('desk-layout') || 'null');
   const v2 = JSON.parse(localStorage.getItem('desk-layout-v2') || 'null') || legacy || {};
@@ -2187,6 +2227,7 @@ function _loadLayoutState() {
       width: v2.chat || CHAT_NOMINAL,
       lastOpenMode: _defaultChatOpenMode(),
     },
+    deckView: 'carte',
   };
 }
 
@@ -2197,6 +2238,7 @@ function applyPanelState() {
   const c = layoutState.chat.mode;
   desk.dataset.resources = r;
   desk.dataset.chat = c;
+  desk.dataset.deckView = layoutState.deckView || 'carte';
   desk.classList.toggle('show-publi', r !== 'collapsed');
   desk.classList.toggle('no-chat', c === 'collapsed');
   desk.style.setProperty('--publi-w', layoutState.resources.width + 'px');
@@ -2370,15 +2412,49 @@ function _togglePanelBlock(block, defaultOpenMode) {
   }
 }
 
-function togglePanel(side) {
+function _cyclePanelMode(block, defaultOpenMode) {
+  if (block.mode === 'collapsed') {
+    block.mode = block.lastOpenMode || defaultOpenMode();
+  } else if (block.mode === 'panel') {
+    block.lastOpenMode = 'deck';
+    block.mode = 'deck';
+  } else {
+    block.lastOpenMode = 'panel';
+    block.mode = 'panel';
+  }
+}
+
+function _remountRpanesToPubli() {
+  ['sources', 'livrables'].forEach(name => {
+    const pane = document.querySelector(`.rpane[data-rpane="${name}"]`);
+    if (pane && _publiRpanesHost) _publiRpanesHost.appendChild(pane);
+  });
+}
+
+function togglePanel(side, opts) {
+  const shift = opts && opts.shiftKey;
   if (side === 'publi') {
-    _togglePanelBlock(layoutState.resources, _defaultResourcesOpenMode);
+    const wasCollapsed = layoutState.resources.mode === 'collapsed';
+    if (shift) _cyclePanelMode(layoutState.resources, _defaultResourcesOpenMode);
+    else _togglePanelBlock(layoutState.resources, _defaultResourcesOpenMode);
     if (isNarrow() && layoutState.resources.mode === 'panel') {
       layoutState.resources.mode = 'deck';
     }
+    if (wasCollapsed && layoutState.resources.mode !== 'collapsed' &&
+        layoutState.deckView !== 'carte') {
+      const tab = layoutState.deckView;
+      layoutState.deckView = 'carte';
+      _remountRpanesToPubli();
+      syncDeckTabs();
+      document.querySelectorAll('.rtab').forEach(x =>
+        x.classList.toggle('active', x.dataset.rtab === tab));
+      document.querySelectorAll('.rpane').forEach(p =>
+        p.classList.toggle('active', p.dataset.rpane === tab));
+    }
     memoriserOuvertureRessources();
   } else {
-    _togglePanelBlock(layoutState.chat, _defaultChatOpenMode);
+    if (shift) _cyclePanelMode(layoutState.chat, _defaultChatOpenMode);
+    else _togglePanelBlock(layoutState.chat, _defaultChatOpenMode);
     if (surTelephone() && layoutState.chat.mode === 'panel') {
       layoutState.chat.mode = 'deck';
     }
@@ -2386,8 +2462,67 @@ function togglePanel(side) {
   applyPanelState();
 }
 
-document.getElementById('toggle-publi').addEventListener('click', () => togglePanel('publi'));
-document.getElementById('toggle-chat').addEventListener('click', () => togglePanel('chat'));
+document.getElementById('toggle-publi').addEventListener('click', (e) => togglePanel('publi', e));
+document.getElementById('toggle-chat').addEventListener('click', (e) => togglePanel('chat', e));
+
+// ── Deck bureau : Carte / Sources / Livrables ───────────────────
+const _publiRpanesHost = document.getElementById('publi-rpanes-host');
+const _deckHosts = {
+  sources: document.getElementById('desk-deck-sources-host'),
+  livrables: document.getElementById('desk-deck-livrables-host'),
+};
+
+function _mountRpane(name) {
+  const pane = document.querySelector(`.rpane[data-rpane="${name}"]`);
+  if (!pane) return;
+  const host = name === 'sources' || name === 'livrables' ? _deckHosts[name] : null;
+  if (layoutState.deckView === name && host) {
+    host.appendChild(pane);
+    pane.classList.add('active');
+  } else if (_publiRpanesHost && pane.parentElement !== _publiRpanesHost) {
+    _publiRpanesHost.appendChild(pane);
+  }
+}
+
+function syncDeckTabs() {
+  const view = layoutState.deckView || 'carte';
+  document.querySelectorAll('.deck-tab').forEach(btn => {
+    const on = btn.dataset.deckTab === view;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-selected', String(on));
+  });
+  document.querySelectorAll('.deck-pane').forEach(pane => {
+    pane.classList.toggle('active', pane.dataset.deckPane === view);
+  });
+}
+
+function setDeckView(view) {
+  if (!view || view === layoutState.deckView) return;
+  layoutState.deckView = view;
+  if (view === 'carte') {
+    _remountRpanesToPubli();
+  } else {
+    layoutState.resources.mode = 'collapsed';
+    _mountRpane(view);
+    if (view === 'sources') {
+      if (!_src_loaded) { loadSources(); _src_loaded = true; }
+      else refreshSourcesSummaries();
+      document.querySelectorAll('.rtab').forEach(x =>
+        x.classList.toggle('active', x.dataset.rtab === 'sources'));
+    } else if (view === 'livrables') {
+      loadLivrables();
+      _liv_loaded = true;
+      document.querySelectorAll('.rtab').forEach(x =>
+        x.classList.toggle('active', x.dataset.rtab === 'livrables'));
+    }
+  }
+  syncDeckTabs();
+  applyPanelState();
+}
+
+document.querySelectorAll('.deck-tab').forEach(btn => {
+  btn.addEventListener('click', () => setDeckView(btn.dataset.deckTab));
+});
 
 // Le voile ferme ce qui est pose par-dessus la carte. Sur telephone les deux
 // panneaux sont des calques, il doit donc fermer aussi le chat -- sinon le
@@ -2724,6 +2859,14 @@ document.querySelectorAll('.rtab').forEach(t => {
   t.addEventListener('click', () => {
     document.querySelectorAll('.rtab').forEach(x => x.classList.toggle('active', x === t));
     const target = t.dataset.rtab;
+    if ((target === 'sources' || target === 'livrables') &&
+        layoutState.deckView !== 'carte') {
+      layoutState.deckView = 'carte';
+      _remountRpanesToPubli();
+      syncDeckTabs();
+    }
+    const pane = document.querySelector(`.rpane[data-rpane="${target}"]`);
+    if (pane && _publiRpanesHost) _publiRpanesHost.appendChild(pane);
     document.querySelectorAll('.rpane').forEach(p =>
       p.classList.toggle('active', p.dataset.rpane === target)
     );
@@ -2742,6 +2885,20 @@ document.querySelectorAll('.rtab').forEach(t => {
     if (uiKind) _signalUiContext(uiKind);
   });
 });
+
+(function initDeckViewFromLayout() {
+  syncDeckTabs();
+  const view = layoutState.deckView || 'carte';
+  if (view === 'carte') return;
+  _mountRpane(view);
+  syncDeckTabs();
+  if (view === 'sources') {
+    if (!_src_loaded) { loadSources(); _src_loaded = true; }
+  } else if (view === 'livrables') {
+    loadLivrables();
+    _liv_loaded = true;
+  }
+})();
 
 /* ── Loaders meta-panes C11 ─────────────────────────────────────────────── */
 
