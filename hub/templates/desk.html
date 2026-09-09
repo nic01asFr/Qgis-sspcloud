@@ -2396,10 +2396,18 @@ function _cyclePanelMode(block, defaultOpenMode) {
   }
 }
 
+function _publiRpanesHostEl() {
+  return document.getElementById('publi-rpanes-host');
+}
+function _deckHostEl(name) {
+  return document.getElementById('desk-deck-' + name + '-host');
+}
+
 function _remountRpanesToPubli() {
+  const host = _publiRpanesHostEl();
   ['sources', 'livrables'].forEach(name => {
     const pane = document.querySelector(`.rpane[data-rpane="${name}"]`);
-    if (pane && _publiRpanesHost) _publiRpanesHost.appendChild(pane);
+    if (pane && host) host.appendChild(pane);
   });
 }
 
@@ -2434,25 +2442,20 @@ function togglePanel(side, opts) {
   applyPanelState();
 }
 
-document.getElementById('toggle-publi').addEventListener('click', (e) => togglePanel('publi', e));
-document.getElementById('toggle-chat').addEventListener('click', (e) => togglePanel('chat', e));
+document.getElementById('toggle-publi')?.addEventListener('click', (e) => togglePanel('publi', e));
+document.getElementById('toggle-chat')?.addEventListener('click', (e) => togglePanel('chat', e));
 
 // ── Deck bureau : Carte / Sources / Livrables ───────────────────
-const _publiRpanesHost = document.getElementById('publi-rpanes-host');
-const _deckHosts = {
-  sources: document.getElementById('desk-deck-sources-host'),
-  livrables: document.getElementById('desk-deck-livrables-host'),
-};
-
 function _mountRpane(name) {
   const pane = document.querySelector(`.rpane[data-rpane="${name}"]`);
   if (!pane) return;
-  const host = name === 'sources' || name === 'livrables' ? _deckHosts[name] : null;
-  if (layoutState.deckView === name && host) {
-    host.appendChild(pane);
+  const publiHost = _publiRpanesHostEl();
+  const deckHost = (name === 'sources' || name === 'livrables') ? _deckHostEl(name) : null;
+  if (layoutState.deckView === name && deckHost) {
+    deckHost.appendChild(pane);
     pane.classList.add('active');
-  } else if (_publiRpanesHost && pane.parentElement !== _publiRpanesHost) {
-    _publiRpanesHost.appendChild(pane);
+  } else if (publiHost && pane.parentElement !== publiHost) {
+    publiHost.appendChild(pane);
   }
 }
 
@@ -2491,10 +2494,6 @@ function setDeckView(view) {
   syncDeckTabs();
   applyPanelState();
 }
-
-document.querySelectorAll('.deck-tab').forEach(btn => {
-  btn.addEventListener('click', () => setDeckView(btn.dataset.deckTab));
-});
 
 function fermerOverlaysDesk() {
   let closed = false;
@@ -2860,7 +2859,8 @@ document.querySelectorAll('.rtab').forEach(t => {
       syncDeckTabs();
     }
     const pane = document.querySelector(`.rpane[data-rpane="${target}"]`);
-    if (pane && _publiRpanesHost) _publiRpanesHost.appendChild(pane);
+    const publiHost = _publiRpanesHostEl();
+    if (pane && publiHost) publiHost.appendChild(pane);
     document.querySelectorAll('.rpane').forEach(p =>
       p.classList.toggle('active', p.dataset.rpane === target)
     );
@@ -2879,20 +2879,6 @@ document.querySelectorAll('.rtab').forEach(t => {
     if (uiKind) _signalUiContext(uiKind);
   });
 });
-
-(function initDeckViewFromLayout() {
-  syncDeckTabs();
-  const view = layoutState.deckView || 'carte';
-  if (view === 'carte') return;
-  _mountRpane(view);
-  syncDeckTabs();
-  if (view === 'sources') {
-    if (!_src_loaded) { loadSources(); _src_loaded = true; }
-  } else if (view === 'livrables') {
-    loadLivrables();
-    _liv_loaded = true;
-  }
-})();
 
 /* ── Loaders meta-panes C11 ─────────────────────────────────────────────── */
 
@@ -3946,6 +3932,24 @@ if (document.getElementById('src-files-summary') && !_src_loaded) {
   loadSources();
   _src_loaded = true;
 }
+
+// Deck : listeners + restauration apres loaders (evite TDZ loadSources / _deckHosts).
+document.querySelectorAll('.deck-tab').forEach(btn => {
+  btn.addEventListener('click', () => setDeckView(btn.dataset.deckTab));
+});
+(function initDeckViewFromLayout() {
+  syncDeckTabs();
+  const view = layoutState.deckView || 'carte';
+  if (view === 'carte') return;
+  _mountRpane(view);
+  syncDeckTabs();
+  if (view === 'sources') {
+    if (!_src_loaded) { loadSources(); _src_loaded = true; }
+  } else if (view === 'livrables') {
+    loadLivrables();
+    _liv_loaded = true;
+  }
+})();
 
 // Auto-polling au chargement si le serveur a lance un wake en arriere-plan.
 (function pollWorkspaceOnLoad() {

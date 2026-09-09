@@ -28,7 +28,15 @@ def test_deck_view_persiste_layout_v3() -> None:
 def test_relocation_rpanes_deck() -> None:
     assert "function _mountRpane(" in _DESK
     assert "function _remountRpanesToPubli(" in _DESK
-    assert "_deckHosts" in _DESK
+    assert "function _deckHostEl(" in _DESK
+    assert "const _deckHosts" not in _DESK
+
+
+def test_deck_init_apres_loaders() -> None:
+    assert "initDeckViewFromLayout" in _DESK
+    loaders = _DESK.index("async function loadSources()")
+    init = _DESK.index("function initDeckViewFromLayout()")
+    assert init > loaders
 
 
 def test_shift_clic_cycle_panel_deck() -> None:
