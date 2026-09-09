@@ -1034,6 +1034,9 @@ _OIDC_MIDDLEWARE_PUBLIC = (
     # car l'user arrive sans cookie (bootstrap initial).
     "/onboarding",
     "/auth/token-login",
+    # Logout doit toujours purger les cookies, y compris session expiree ou
+    # cookies incoherents — sinon le middleware intercepte avant le handler.
+    "/auth/logout",
     # Sprint Day 5 Phase 2-1 (2026-08-05) : /login-password legacy garde
     # pour redirect 301 vers /login (compat bookmarks users). Retirer apres
     # 3 mois. Publique car aucun secret ne transite (juste redirect).

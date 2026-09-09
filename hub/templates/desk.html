@@ -2647,8 +2647,13 @@ function _handleRecipeDeepLink() {
   const recipeId = parts[3];
   if (!sid || !recipeId) return;
 
-  // Activer le pane Chat si masque, puis envoyer le request quand l'iframe
-  // est prete. Simple heuristique : on retente toutes les 300ms pendant 10s.
+  const desk = document.querySelector('.desk');
+  if (desk && desk.classList.contains('no-chat')) {
+    desk.classList.remove('no-chat');
+    if (typeof syncToggles === 'function') syncToggles();
+    if (typeof saveLayout === 'function') saveLayout();
+    document.querySelector('.right-tab[data-tab="chat"]')?.click();
+  }
   const iframe = document.querySelector('.right-pane[data-pane="chat"] iframe');
   if (!iframe) return;
   let attempts = 0;
@@ -3572,6 +3577,25 @@ if (document.getElementById('resources-layers-list') && !_resLayersLoaded) {
   _resLayersLoaded = true;
 }
 
+// Auto-polling au chargement si le serveur a lance un wake en arriere-plan.
+(function pollWorkspaceOnLoad() {
+  const empty = document.getElementById('canvas-empty-wake');
+  if (!empty || empty.style.display === 'none') return;
+  let sec = 0;
+  const tick = setInterval(async () => {
+    sec += 2;
+    if (sec > 90) { clearInterval(tick); return; }
+    try {
+      const r = await fetch('/desk/workspace-status', {cache: 'no-store'});
+      const d = await r.json();
+      if (d.status === 'ready') {
+        clearInterval(tick);
+        location.reload();
+      }
+    } catch {}
+  }, 2000);
+})();
+
 // ── Réveil du bureau QGIS : feedback visuel + polling ─────────────────────
 // Sans ce hook, le clic 'Réveiller le bureau' POST puis redirige sur /desk
 // qui rerender 'Bureau endormi' tant que le pod n'est pas ready (~35s) ;
@@ -3611,7 +3635,9 @@ async function wakeWorkspace() {
       'Toujours en cours — Xvfb + QGIS prennent parfois plus de 30s sur node froid.';
     if (sec > 90) {
       clearInterval(tick);
-      progress.textContent = 'Démarrage anormalement long, ouvre la console K8s.';
+      _wakeInProgress = false;
+      if (wakeBtn) wakeBtn.disabled = false;
+      progress.textContent = 'Démarrage anormalement long — réessaie ou consulte les logs du pod.';
       return;
     }
     try {

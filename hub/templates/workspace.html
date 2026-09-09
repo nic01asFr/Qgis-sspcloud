@@ -126,6 +126,10 @@
   </div>
   <div class="qs-entete__service"><a href="/workspace"><p class="qs-entete__service-titre">Mon espace de travail</p></a>
     <p class="qs-entete__service-accroche">{{ username }}@sspcloud</p>
+  </div>
+  <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+    <a href="/desk" class="qs-btn qs-btn--secondaire qs-btn--sm ic-fenetre qs-btn--icone-gauche">Bureau</a>
+    <a href="/auth/logout" class="qs-btn qs-btn--nu qs-btn--sm">Se déconnecter</a>
   </div></div>
 </div></div></div>
 </header>
@@ -137,6 +141,12 @@
 <main role="main">
 <section class="qs-py-4w">
 <div class="qs-conteneur">
+
+  {% if workspace_error %}
+  <div class="qs-alerte qs-alerte--attention qs-mb-3w" role="alert">
+    <p>{{ workspace_error }}</p>
+  </div>
+  {% endif %}
 
   {% if llm_key_missing %}
   <div class="qs-alerte qs-alerte--attention qs-mb-3w">
@@ -162,7 +172,7 @@
         Continuer mon travail sur « {{ active_study.name }} »
       </a>
       <span class="hero-status hero-status-{% if session_ready %}ok{% else %}sleep{% endif %}"
-            title="{% if session_ready %}Bureau QGIS prêt{% else %}Bureau QGIS en veille (se réveille au premier message){% endif %}">
+            title="{% if session_ready %}Bureau QGIS prêt{% else %}Bureau en veille — s'ouvre depuis le bureau (~35 s){% endif %}">
         <span class="dot"></span>
         Bureau {% if session_ready %}actif{% else %}en veille{% endif %}
       </span>
@@ -307,6 +317,26 @@
     </div>
   </div>
 
+  {% if archived_studies %}
+  <div class="section-title qs-mt-5w">
+    <h2>Études archivées</h2>
+    <span class="count">{{ archived_studies|length }}</span>
+  </div>
+  <p class="section-desc">Les fichiers sont conservés. Tu peux restaurer une étude pour la retrouver dans la liste active.</p>
+  <div class="study-grid">
+    {% for s in archived_studies %}
+    <div class="study-card" style="opacity:.85;border-left-color:var(--qs-discret)">
+      <div class="study-card-header">
+        <h3 class="study-name"><span class="ic-dossier ic--sm" aria-hidden="true"></span> {{ s.name }}</h3>
+      </div>
+      <form method="POST" action="/workspace/study/{{ s.id }}/restore" style="margin-top:8px">
+        <button type="submit" class="qs-btn qs-btn--secondaire qs-btn--sm">Restaurer</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   {# ═════════════════════════════════════════════════════════════════════
      SECTION LIVRABLES — sortie du travail effectue.
      Titre + compteur, table si rempli, empty state simple si vide.
@@ -327,7 +357,8 @@
   {% endif %}
   {% set study_names = {} %}
   {% for s in studies %}{% set _ = study_names.update({s.id: s.name}) %}{% endfor %}
-  <table class="qs-tableau">
+  <div class="qs-tableau">
+  <table>
     <thead>
       <tr><th>Type</th><th>Slug</th><th>Étude</th><th>Taille</th><th>Date</th><th>Lien</th><th>Actions</th></tr>
     </thead>
@@ -363,6 +394,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   <script>
   async function unpublishArtifact(kind, slug, btn) {
     if (!confirm(`Dépublier « ${slug} » (${kind}) ?\n\nLe fichier sera supprimé du stockage S3 et retiré du catalogue. Cette action est irréversible.`)) {

@@ -1640,6 +1640,7 @@ async def oauth_authorize(
     state: str = "",
     code_challenge: str = "",
     code_challenge_method: str = "S256",
+    error: str = "",
 ):
     """
     Endpoint d'autorisation OAuth — Claude Desktop redirige ici.
@@ -1664,29 +1665,30 @@ async def oauth_authorize(
         "redirect_uri": redirect_uri, "state": state,
         "code_challenge": code_challenge, "code_challenge_method": code_challenge_method,
     })
+    err_html = ""
+    if error == "invalid_key":
+        err_html = _auth_alert_html(
+            "Clé refusée. Elle commence par <code>qgis_</code> — "
+            "vérifie que tu l'as copiée en entier depuis l'installation ou Mes services."
+        )
     return HTMLResponse(f"""<!DOCTYPE html><html lang="fr">
-<head><meta charset="UTF-8"><title>QgisRemoteMCP — Autorisation</title>
-<script src="https://cdn.tailwindcss.com"></script></head>
-<body class="bg-gray-50 flex items-center justify-center min-h-screen">
-<div class="bg-white rounded-xl border border-gray-200 p-8 w-full max-w-md space-y-4">
-  <div class="text-center"><span class="text-3xl">🗺</span>
-    <h1 class="font-semibold text-gray-900 mt-2">Autoriser Claude Desktop</h1>
-    <p class="text-sm text-gray-500">Saisissez votre clé API hub pour autoriser l'accès à QGIS.</p>
-  </div>
-  <form action="/authorize/confirm?{params}" method="POST" class="space-y-3">
-    <input name="api_key" type="password" required
-      placeholder="qgis_votrenom_..."
-      class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"/>
-    <p class="text-xs text-gray-400">
-      Votre clé API est disponible sur le portail ou via
-      <code>POST /auth/apikey</code> avec votre token SSPCloud.
-    </p>
-    <button type="submit"
-      class="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
-      Autoriser →
-    </button>
+<head><meta charset="UTF-8"><title>Autoriser Claude — QGIS Service</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/static/produit.css"></head>
+<body class="qs-conteneur" style="display:flex;align-items:center;justify-content:center;min-height:100vh">
+<main class="qs-encart" style="max-width:28rem;width:100%">
+  <h1>Autoriser Claude</h1>
+  <p class="qs-texte-discret">Colle ta clé d'accès hub pour connecter Claude Desktop ou claude.ai à QGIS.</p>
+  {err_html}
+  <form action="/authorize/confirm?{params}" method="POST">
+    <label for="oauth_api_key">Clé d'accès</label>
+    <input id="oauth_api_key" name="api_key" type="password" required
+      placeholder="qgis_…" class="qs-champ" autocomplete="off">
+    <p class="qs-texte-discret">Disponible dans le terminal d'installation ou
+    <a href="https://datalab.sspcloud.fr/my-services" target="_blank" rel="noopener">Mes services → QGIS Hub</a>.</p>
+    <button type="submit" class="qs-btn qs-btn--primaire">Autoriser</button>
   </form>
-</div></body></html>""")
+</main></body></html>""")
 
 
 @app.post("/authorize/confirm", response_class=HTMLResponse)
@@ -1704,7 +1706,14 @@ async def oauth_authorize_confirm(
     key = api_key.strip()
     user = await auth._validate_api_key(key)
     if not user:
-        return HTMLResponse("<p>Clé invalide.</p>", status_code=401)
+        q = urllib.parse.urlencode({
+            "response_type": response_type, "client_id": client_id,
+            "redirect_uri": redirect_uri, "state": state,
+            "code_challenge": code_challenge,
+            "code_challenge_method": code_challenge_method,
+            "error": "invalid_key",
+        })
+        return RedirectResponse(f"/authorize?{q}", status_code=302)
 
     resp = _issue_auth_code(user, key, code_challenge, redirect_uri, state)
     # Poser le cookie pour éviter la saisie la prochaine fois
@@ -2557,8 +2566,34 @@ async def _proxy_to_geoai(request: Request, target_url: str) -> Response:
 
 # ── Sprint Day 5 Phase 1 (2026-08-04) : bootstrap OIDC hub (remplace portail) ──
 
+def _auth_alert_html(message: str) -> str:
+    """Alerte d'erreur auth — meme patron que /login."""
+    return (
+        f'<p role="alert" style="color:#b32100;background:#fff4f3;padding:10px;'
+        f'border-left:4px solid #ce0500;border-radius:2px">{message}</p>'
+    )
+
+
+def _onboarding_error_html(error: str, detail: str = "") -> str:
+    messages = {
+        "token_vide": "Colle ton <code>id-token</code> SSPCloud dans le champ ci-dessous.",
+        "token_malforme": "Ce token n'est pas lisible. Copie-le en entier depuis "
+                          "<b>Mon compte → Connexion à Kubernetes → id-token</b>.",
+        "mauvais_type_token": "Tu as collé un <b>refresh-token</b>. Prends "
+                              "<code>id-token</code> (dernière ligne, commence par "
+                              "<code>eyJhbGciOiJSUzI1Ni…</code>).",
+        "token_invalide": "Token refusé ou expiré. Regénère-le sur datalab.sspcloud.fr "
+                          "et réessaie.",
+        "mauvais_espace": detail or "Ce token appartient à un autre espace SSPCloud.",
+    }
+    msg = messages.get(error)
+    if not msg:
+        return ""
+    return _auth_alert_html(msg)
+
+
 @app.get("/onboarding", response_class=HTMLResponse)
-async def hub_onboarding(request: Request):
+async def hub_onboarding(request: Request, error: str = "", detail: str = ""):
     """Page d'onboarding hub qui remplace le portail nic01asfr.
 
     L'user y arrive quand il n'a aucun cookie valide (bootstrap initial ou
@@ -2575,45 +2610,54 @@ async def hub_onboarding(request: Request):
     """
     onyxia_user = os.environ.get("ONYXIA_USER", "")
     account_url = "https://datalab.sspcloud.fr/account/k8sCodeSnippets"
+    err_html = _onboarding_error_html(error, detail)
     return HTMLResponse(f"""<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>Connexion — QGIS Service</title>
+<title>Compte SSPCloud (secours) — QGIS Service</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0E2433">
+{_FAVICON_TAG}
+<link rel="stylesheet" href="/static/produit.css">
 <style>
-body{{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;max-width:720px;margin:60px auto;padding:0 20px}}
-h1{{color:#41701F;font-size:24px}}
-.step{{background:#EDF4E6;border-left:4px solid #41701F;padding:16px 20px;margin:20px 0;border-radius:2px}}
-textarea{{width:100%;min-height:120px;font-family:monospace;font-size:11px;padding:8px;border:1px solid #ddd;border-radius:2px}}
-button{{background:#41701F;color:#fff;padding:10px 24px;border:none;border-radius:2px;font-size:14px;cursor:pointer;font-family:inherit}}
-button:hover{{background:#1212ff}}
-a{{color:#41701F}}
-.hint{{color:#666;font-size:12px;margin-top:4px}}
+body{{max-width:720px;margin:40px auto 60px;padding:0 20px}}
+textarea{{width:100%;min-height:120px;font-family:monospace;font-size:11px}}
 </style>
 </head>
-<body>
-<h1>🗺 QGIS Service — Connexion</h1>
+<body class="qs-conteneur">
+<header role="banner" class="qs-entete">
+  <div class="qs-marque"><span class="qs-marque__titre">QGIS Service</span>
+  <span class="qs-marque__sous">SSPCloud · secours OIDC</span></div>
+</header>
+<main role="main">
+<h1>Connexion avec ton compte SSPCloud</h1>
 <p>Bienvenue{f' <b>{onyxia_user}</b>' if onyxia_user else ''}. Colle ton token
-OIDC SSPCloud pour te connecter au service. Une fois connecté, tu n'auras
-plus besoin de cette étape pendant 90 jours (cookie stable).</p>
+OIDC pour te connecter. Une fois connecté, tu n'auras plus besoin de cette
+étape pendant 90 jours.</p>
 
-<div class="step">
-<h2>Étape 1/1 · Colle ton token OIDC</h2>
-<p>Ouvre <a href="{account_url}" target="_blank">ton compte SSPCloud</a>,
+{err_html}
+
+<div class="qs-encart">
+<h2>Colle ton token OIDC</h2>
+<p>Ouvre <a href="{account_url}" target="_blank" rel="noopener">ton compte SSPCloud</a>,
 copie le champ <code>id-token</code> (commence par <code>eyJhbGciOiJSUzI1Ni…</code>)
 et colle-le ci-dessous.</p>
 
 <form method="POST" action="/auth/token-login">
-  <textarea name="token" placeholder="eyJhbGciOiJSUzI1Ni…" required></textarea>
-  <p class="hint">Le token est stocké en cookie httponly, valide ~1h côté OIDC
-  puis remplacé par un cookie <code>hub_api_key</code> stable 90 jours (auto-set).</p>
-  <button type="submit">Se connecter →</button>
+  <label for="token">Token OIDC (id-token)</label>
+  <textarea id="token" name="token" placeholder="eyJhbGciOiJSUzI1Ni…" required
+            aria-describedby="token-hint"></textarea>
+  <p id="token-hint" class="qs-texte-discret">Cookie httponly, puis clé stable 90 jours.</p>
+  <button type="submit" class="qs-btn qs-btn--primaire">Se connecter</button>
 </form>
 </div>
 
-<p style="color:#888;font-size:12px;margin-top:40px">
-QGIS Service — Sprint Day 5 (portail absorbé côté hub).
+<p class="qs-texte-discret" style="margin-top:2rem">
+<b>Tu as ta clé d'accès ?</b> Utilise plutôt
+<a href="/login">la page de connexion principale</a>.
 </p>
+</main>
 </body>
 </html>""")
 
@@ -2700,7 +2744,7 @@ async def hub_logout():
     Efface `oidc_token` (Domain=. et sans domain, pour couvrir les 2 cas
     portail-set et hub-set) + `hub_api_key`. Redirect vers /onboarding.
     """
-    response = RedirectResponse("/onboarding", status_code=302)
+    response = RedirectResponse("/login?logged_out=1", status_code=302)
     # Clear oidc_token dans les 2 domains (legacy portail + nouveau hub)
     response.delete_cookie("oidc_token", domain=".user.lab.sspcloud.fr")
     response.delete_cookie("oidc_token")
@@ -2751,9 +2795,11 @@ async def hub_login_form(request: Request, error: str = "", key: str = ""):
                     'border-left:4px solid #ce0500;border-radius:2px">Clé refusée. Elle commence '
                     'par <code>qgis_</code> — vérifie que tu l\'as copiée en entier.</p>')
     elif error == "empty":
-        err_html = ('<p role="alert" style="color:#b32100;background:#fff4f3;padding:10px;'
-                    'border-left:4px solid #ce0500;border-radius:2px">Colle ta clé d\'accès '
-                    'dans le champ ci-dessous.</p>')
+        err_html = _auth_alert_html("Colle ta clé d'accès dans le champ ci-dessous.")
+    elif error == "logged_out":
+        err_html = ('<p role="status" style="color:#33591A;background:#EDF4E6;padding:10px;'
+                    'border-left:4px solid #41701F;border-radius:2px">'
+                    'Tu es déconnecté. Reconnecte-toi avec ta clé d\'accès.</p>')
     return HTMLResponse(f"""<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -12176,6 +12222,34 @@ async def workspace_page(request: Request):
             "Échec propagation agent (webhook /api/reload-llm-key). "
             "Réessaie ou consulte les logs kubectl logs qgis-agent-0."
         )
+
+    _ws_err = request.query_params.get("error", "")
+    _ws_err_msgs = {
+        "name_required": "Donne un nom à ton étude avant de la créer.",
+        "create_failed": "Impossible de créer l'étude. Réessaie dans un instant.",
+        "activate_failed": "Impossible d'activer cette étude. Vérifie que le bureau répond.",
+        "archive_failed": "Impossible d'archiver cette étude.",
+        "restore_failed": "Impossible de restaurer cette étude.",
+        "exception": "Une erreur inattendue s'est produite. Réessaie.",
+    }
+    if _ws_err in _ws_err_msgs:
+        ctx["workspace_error"] = _ws_err_msgs[_ws_err]
+
+    ctx["archived_studies"] = []
+    try:
+        api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+        async with httpx.AsyncClient(timeout=8, base_url=_SELF_URL) as c:
+            r = await c.get(
+                "/studies?archived=true",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if r.status_code == 200:
+                ctx["archived_studies"] = [
+                    s for s in r.json() if s.get("status") == "archived"
+                ]
+    except Exception as exc:
+        log.debug("liste etudes archivees indisponible : %s", exc)
+
     return _jinja.TemplateResponse(request, "workspace.html", ctx)
 
 
@@ -12497,21 +12571,17 @@ async def workspace_create_study(request: Request):
 
 @app.post("/workspace/study/{sid}/activate")
 async def workspace_activate_study(sid: str, request: Request):
+    return_to = request.query_params.get("return_to", "")
+    target = "/desk" if return_to == "desk" else "/workspace"
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
-        # Bug B fix v2 (2026-06-02) : timeout 15s -> 60s pour absorber le worst
-        # case ou _execute_python_in_workspace (appele par /studies/{sid}/activate
-        # via activate_pod_code) timeout 30s MCP quand le workspace est endormi.
         async with httpx.AsyncClient(timeout=60, base_url=_SELF_URL) as c:
-            await c.post(f"/studies/{sid}/activate",
-                         headers={"Authorization": f"Bearer {api_key}"})
-            # Bug B fix (2026-06-01) : trigger wake aussi à l'activation
-            # d'une étude existante depuis l'UI. Même raison que dans
-            # workspace_create_study — sans wake, le _execute_python_in_workspace
-            # de activate_pod_code échoue silencieusement et le projet QGIS de
-            # l'étude n'est pas chargé. Idempotent : si le workspace est déjà
-            # Ready, _auto_activate_active_study_after_wake ré-exécutera
-            # activate_pod_code (qui se contente de read le .qgz à nouveau).
+            ar = await c.post(
+                f"/studies/{sid}/activate",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if ar.status_code >= 400:
+                return RedirectResponse(f"{target}?error=activate_failed", status_code=302)
             try:
                 await c.post("/workspace/wake",
                              headers={"Authorization": f"Bearer {api_key}"})
@@ -12521,24 +12591,44 @@ async def workspace_activate_study(sid: str, request: Request):
                     wake_exc,
                 )
     except Exception:
-        pass
-    return_to = request.query_params.get("return_to", "")
-    target = "/desk" if return_to == "desk" else "/workspace"
+        return RedirectResponse(f"{target}?error=activate_failed", status_code=302)
     return RedirectResponse(target, status_code=302)
 
 
 @app.post("/workspace/study/{sid}/archive")
 async def workspace_archive_study(sid: str, request: Request):
+    return_to = request.query_params.get("return_to", "")
+    target = "/desk" if return_to == "desk" else "/workspace"
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
         async with httpx.AsyncClient(timeout=15, base_url=_SELF_URL) as c:
-            await c.delete(f"/studies/{sid}",
-                           headers={"Authorization": f"Bearer {api_key}"})
+            r = await c.delete(
+                f"/studies/{sid}",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if r.status_code >= 400:
+                return RedirectResponse(f"{target}?error=archive_failed", status_code=302)
     except Exception:
-        pass
-    return_to = request.query_params.get("return_to", "")
-    target = "/desk" if return_to == "desk" else "/workspace"
+        return RedirectResponse(f"{target}?error=archive_failed", status_code=302)
     return RedirectResponse(target, status_code=302)
+
+
+@app.post("/workspace/study/{sid}/restore")
+async def workspace_restore_study(sid: str, request: Request):
+    """Restaure une étude archivée (status active)."""
+    try:
+        api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+        async with httpx.AsyncClient(timeout=15, base_url=_SELF_URL) as c:
+            r = await c.patch(
+                f"/studies/{sid}",
+                json={"status": "active"},
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if r.status_code >= 400:
+                return RedirectResponse("/workspace?error=restore_failed", status_code=302)
+    except Exception:
+        return RedirectResponse("/workspace?error=restore_failed", status_code=302)
+    return RedirectResponse("/workspace", status_code=302)
 
 
 # ── Sprint UX-3 Commit 3 : UI wrappers projects (form POST -> 302 redirect) ──
