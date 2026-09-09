@@ -955,7 +955,12 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                 </div>
                 <div class="rct-card-meta">
                   <span class="rct-source">{{ r.source or "?" }}</span>
-                  <span class="rct-author">{{ r.author or "?" }}</span>
+                  {# Badge auteur uniquement pour les recipes user. Les
+                     recipes example ne portent pas d'estampe institutionnelle
+                     (ce ne sont pas des recettes officielles Cerema). #}
+                  {% if r.source == 'user' and r.author %}
+                  <span class="rct-author">{{ r.author }}</span>
+                  {% endif %}
                 </div>
                 <div class="rct-card-cta">Executer &rarr;</div>
               </a>

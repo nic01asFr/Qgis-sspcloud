@@ -27,7 +27,7 @@ manifest_version: "0.3.1"      # ancre la compat SceneManifest
 id: diagnostic_parc_bati_temporel
 title: "Diagnostic du parc bâti par période"
 version: "1.0"
-author: "cerema"
+author: "exemple"
 use_cases: [diagnostic_temporel]
 depends_on_datasources: [bdtopo_batiments, arrondissements_marseille]
 output_kind: component          # component | assembly

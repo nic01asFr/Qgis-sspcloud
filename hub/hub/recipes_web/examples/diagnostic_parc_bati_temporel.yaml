@@ -18,7 +18,7 @@ manifest_version: "0.3.1"
 id: diagnostic_parc_bati_temporel
 title: "Diagnostic du parc bati par periode de construction (Marseille 4e)"
 version: "1.0"
-author: "cerema"
+author: "exemple"
 use_cases:
   - diagnostic_temporel
 depends_on_datasources:
