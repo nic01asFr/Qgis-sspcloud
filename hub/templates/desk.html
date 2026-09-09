@@ -53,13 +53,16 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 /* ── Header : navbar flex (toggles fixes, plus de position absolute) ─ */
 .desk-header{grid-area:header;background:#fff;border-bottom:1px solid var(--qs-trait);
   display:block;position:relative;overflow:visible;min-width:0}
-.desk-nav{display:flex;align-items:center;height:48px;padding:0 8px;gap:8px;min-width:0}
-.desk-nav__left,.desk-nav__actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
-.desk-nav__left .brand{display:flex;align-items:baseline;gap:8px;white-space:nowrap}
-.desk-nav__left .brand .op{font-weight:700;color:var(--qs-accent);font-size:15px;line-height:1}
-.desk-nav__left .brand .sub{font-size:11.5px;color:var(--qs-discret);font-weight:500}
-.desk-nav__context{flex:1;min-width:0;display:flex;align-items:center;gap:12px;overflow:visible}
-.desk-nav__actions{margin-left:auto}
+/* Grille 3 colonnes egales : le bloc brand + etude/projet reste
+   optiquement centre meme si gauche (toggle) et droite (toggle+compte)
+   n'ont pas la meme largeur. */
+.desk-nav{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+  align-items:center;height:48px;padding:0 8px;gap:8px;min-width:0}
+.desk-nav__left,.desk-nav__actions{display:flex;align-items:center;gap:6px;min-width:0}
+.desk-nav__left{justify-self:start}
+.desk-nav__context{justify-self:center;min-width:0;max-width:100%;
+  display:flex;align-items:center;overflow:visible}
+.desk-nav__actions{justify-self:end}
 
 /* hdr-left = en-tête du panel Publications fusionné dans la navbar. */
 .hdr-left{min-width:0;display:flex;align-items:center;justify-content:space-between;
@@ -94,7 +97,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
    Le padding-right de 20px etait inferieur aux 50px occupes par le
    bouton et sa marge. Porte a 62px, comme a gauche. */
 .hdr-center{display:flex;align-items:center;padding:0;min-width:0;gap:12px;
-  justify-content:flex-start;flex:1}
+  justify-content:center}
 .hdr-center .brand{display:flex;align-items:baseline;gap:8px;white-space:nowrap}
 .hdr-center .brand .op{font-weight:700;color:var(--qs-accent);font-size:15px;line-height:1;
   letter-spacing:.4px}
@@ -542,15 +545,15 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                 title="Ouvrir/fermer le panneau Ressources (Sources · Livrables · Recettes)"
                 aria-label="Panneau Ressources" aria-expanded="false"
                 aria-controls="desk-publi-panel"></button>
-        <a href="/workspace" class="brand" style="text-decoration:none;color:inherit"
-           title="Retour à mon espace de travail">
-          <span class="op">QGIS</span>
-          <span class="sub">· Service</span>
-        </a>
       </div>
 
       <div class="desk-nav__context">
     <div class="hdr-center">
+      <a href="/workspace" class="brand" style="text-decoration:none;color:inherit"
+         title="Retour à mon espace de travail">
+        <span class="op">QGIS</span>
+        <span class="sub">· Service</span>
+      </a>
       <div class="center-content">
         <div class="study-menu">
           <button class="study-trigger" id="study-trigger" onclick="toggleStudyMenu(event)"
