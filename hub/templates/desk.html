@@ -2160,6 +2160,10 @@ const PUBLI_NOMINAL = 240;
 const CANVAS_MIN_W = 320;
 const HANDLE = 6;
 
+// Flags lazy-load : en tete de script pour eviter TDZ avec setDeckView hoiste.
+let _src_loaded = false;
+let _liv_loaded = false;
+
 // ── Etat persisté layout v3 (panels composables) ───────────────
 
 function _defaultChatOpenMode() {
@@ -2845,9 +2849,6 @@ function _signalUiContext(kind) {
    Les anciennes valeurs data-rtab (layers, files, recipes, components,
    assemblies, exports, publi, agents) restent pour la compat retro JS mais
    ne sont plus utilisees par les boutons visibles. */
-let _liv_loaded = false;
-let _src_loaded = false;
-
 document.querySelectorAll('.rtab').forEach(t => {
   t.addEventListener('click', () => {
     document.querySelectorAll('.rtab').forEach(x => x.classList.toggle('active', x === t));
