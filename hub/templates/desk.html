@@ -601,41 +601,6 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             {% endif %}
             <span class="caret">▾</span>
           </button>
-          {# Sprint isolation Day 3.1c (2026-08-02) : badge divergence
-             session MCP externe (Claude Desktop / claude.ai). Rempli par
-             fetch /diagnostics/mcp-sessions au load + poll 30s. Vide par
-             defaut = pas d'affichage. #}
-          <span id="mcp-session-badge"
-                style="display:none;font-size:11px;padding:2px 8px;
-                       margin-left:8px;border-radius:4px;
-                       background:var(--qs-accent-pale);
-                       color:var(--qs-accent);
-                       border:1px solid var(--qs-accent)"
-                title=""></span>
-          <script>
-          (async function _loadMcpSessionsBadge(){
-            const el = document.getElementById('mcp-session-badge');
-            if (!el) return;
-            async function refresh(){
-              try {
-                const r = await fetch('/diagnostics/mcp-sessions', {credentials:'same-origin'});
-                if (!r.ok) return;
-                const data = await r.json();
-                const diverging = (data.mcp_sessions || []).filter(s => s.diverges_from_db);
-                if (diverging.length === 0){
-                  el.style.display = 'none';
-                  return;
-                }
-                const names = diverging.map(s => s.study_name || s.sid).join(', ');
-                el.textContent = 'MCP: ' + names;
-                el.title = diverging.length + ' session(s) MCP externe(s) sur autre(s) etude(s) : ' + names + '. L\'UI desk affiche l\'etude par defaut du user; les clients MCP (Claude Desktop, claude.ai) ont leur propre contexte session-scoped.';
-                el.style.display = 'inline-block';
-              } catch(e){ /* silent */ }
-            }
-            refresh();
-            setInterval(refresh, 30000);
-          })();
-          </script>
           <div class="study-dropdown" id="study-dropdown">
             {# Les etudes se choisissent ICI.
 
@@ -2080,6 +2045,13 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     <span class="sep">|</span>
     <span title="Préférences et notes que l'agent a mémorisées"><span class="ic-memoire ic--sm" aria-hidden="true"></span> <span id="footer-insights-num">{{ insights|length }}</span></span>
     {% endif %}
+    {# Badge divergence session MCP externe — status bar pour ne pas encombrer le menu etude. #}
+    <span class="sep" id="mcp-session-sep" style="display:none">|</span>
+    <span id="mcp-session-badge"
+          style="display:none;font-size:11px;padding:1px 7px;border-radius:4px;
+                 background:var(--qs-accent-pale);color:var(--qs-accent);
+                 border:1px solid var(--qs-accent)"
+          title=""></span>
     <span class="sep">|</span>
     <!-- Chip GPU/IA : etat du pod geoai-gpu (ready, dormant, off, busy).
          Cliquable pour reveiller le pod a la demande. Polling
@@ -2524,21 +2496,42 @@ document.querySelectorAll('.deck-tab').forEach(btn => {
   btn.addEventListener('click', () => setDeckView(btn.dataset.deckTab));
 });
 
-// Le voile ferme ce qui est pose par-dessus la carte. Sur telephone les deux
-// panneaux sont des calques, il doit donc fermer aussi le chat -- sinon le
-// seul moyen de revenir a la carte serait le petit bouton du bord.
-document.getElementById('desk-backdrop').addEventListener('click', () => {
+function fermerOverlaysDesk() {
+  let closed = false;
+  const dd = document.getElementById('study-dropdown');
+  if (dd?.classList.contains('open')) {
+    dd.classList.remove('open');
+    closed = true;
+  }
+  if (layoutState.deckView && layoutState.deckView !== 'carte') {
+    layoutState.deckView = 'carte';
+    _remountRpanesToPubli();
+    syncDeckTabs();
+    closed = true;
+  }
   if (layoutState.resources.mode === 'deck') {
     layoutState.resources.lastOpenMode = 'deck';
     layoutState.resources.mode = 'collapsed';
+    closed = true;
   }
   if (layoutState.chat.mode === 'deck' ||
       (surTelephone() && layoutState.chat.mode === 'panel')) {
     layoutState.chat.lastOpenMode = layoutState.chat.mode;
     layoutState.chat.mode = 'collapsed';
+    closed = true;
   }
-  applyPanelState();
-  memoriserOuvertureRessources();
+  if (closed) {
+    applyPanelState();
+    memoriserOuvertureRessources();
+  }
+  return closed;
+}
+
+// Le voile ferme ce qui est pose par-dessus la carte. Sur telephone les deux
+// panneaux sont des calques, il doit donc fermer aussi le chat -- sinon le
+// seul moyen de revenir a la carte serait le petit bouton du bord.
+document.getElementById('desk-backdrop').addEventListener('click', () => {
+  fermerOverlaysDesk();
 });
 
 // ── Resize handles (Pointer Events + verrou pendant drag) ─────
@@ -2646,7 +2639,8 @@ document.addEventListener('keydown', (e) => {
   const modale = document.getElementById('compte-modale');
   const menu = document.getElementById('compte-menu');
   if (modale && !modale.hidden) { fermerCompte(); return; }
-  if (menu && !menu.hidden) fermerMenuCompte();
+  if (menu && !menu.hidden) { fermerMenuCompte(); return; }
+  fermerOverlaysDesk();
 });
 
 function basculerVisibiliteCle() {
@@ -4171,6 +4165,34 @@ window.addEventListener('message', (e) => {
     refreshCatalogPanel();
   }
 });
+
+// ── Badge divergence session MCP externe (status bar) ─────────────────────
+(async function _loadMcpSessionsBadge() {
+  const el = document.getElementById('mcp-session-badge');
+  const sep = document.getElementById('mcp-session-sep');
+  if (!el) return;
+  async function refresh() {
+    try {
+      const r = await fetch('/diagnostics/mcp-sessions', { credentials: 'same-origin' });
+      if (!r.ok) return;
+      const data = await r.json();
+      const diverging = (data.mcp_sessions || []).filter(s => s.diverges_from_db);
+      if (diverging.length === 0) {
+        el.style.display = 'none';
+        if (sep) sep.style.display = 'none';
+        return;
+      }
+      const names = diverging.map(s => s.study_name || s.sid).join(', ');
+      el.textContent = 'MCP: ' + names;
+      el.title = diverging.length + ' session(s) MCP externe(s) sur autre(s) etude(s) : ' + names
+        + '. L\'UI desk affiche l\'etude par defaut du user; les clients MCP ont leur propre contexte session-scoped.';
+      el.style.display = 'inline-block';
+      if (sep) sep.style.display = '';
+    } catch (e) { /* silent */ }
+  }
+  refresh();
+  setInterval(refresh, 30000);
+})();
 
 // ── Chip GPU/IA : etat live du pod geoai-gpu via /geoai/status ────────────
 // Etats (cf. hub /geoai/status) :
