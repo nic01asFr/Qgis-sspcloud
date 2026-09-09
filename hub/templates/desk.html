@@ -2209,6 +2209,10 @@ function _loadLayoutState() {
 
 const layoutState = _loadLayoutState();
 
+// Etat resize / lazy-load : avant tout applyPanelState() ou setDeckView() hoistes.
+let largeurChatChoisie = layoutState.chat.width || null;
+let _redimensionneChat = false;
+
 function applyPanelState() {
   const r = layoutState.resources.mode;
   const c = layoutState.chat.mode;
@@ -2236,9 +2240,6 @@ applyPanelState();
 // Priorite au canvas QGIS : panneaux compacts par defaut, iframe fill + scaleViewport.
 // La poignee fixe la largeur a la main ; updateLayout ne l'ecrase plus sauf
 // clamp si le viewport devient trop etroit pour le canvas minimum.
-let largeurChatChoisie = layoutState.chat.width || null;
-let _redimensionneChat = false;
-
 function _defaultChatWidth() {
   return isNarrow() ? CHAT_NOMINAL_NARROW : CHAT_NOMINAL;
 }

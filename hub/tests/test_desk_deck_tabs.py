@@ -39,6 +39,13 @@ def test_deck_init_apres_loaders() -> None:
     assert init > loaders
 
 
+def test_etat_resize_avant_apply_panel() -> None:
+    chunk = _DESK.split("const layoutState = _loadLayoutState();")[1]
+    redim = chunk.index("let _redimensionneChat")
+    apply = chunk.index("applyPanelState();")
+    assert redim < apply
+
+
 def test_shift_clic_cycle_panel_deck() -> None:
     assert "function _cyclePanelMode(" in _DESK
     assert "opts && opts.shiftKey" in _DESK
