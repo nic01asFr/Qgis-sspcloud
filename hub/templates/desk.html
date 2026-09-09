@@ -531,6 +531,46 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   .desk-status .sep{display:none}
   .desk-status{gap:10px}
 }
+
+/* Modal éditeur recettes YAML (Sources) — compact, jetons produit */
+#recipe-editor-overlay{
+  display:none;position:fixed;inset:0;z-index:9999;
+  background:rgba(19,33,44,.45);align-items:center;justify-content:center;
+  padding:16px}
+#recipe-editor-overlay.is-open{display:flex}
+#recipe-editor-overlay .re-dialog{
+  background:#fff;width:min(880px,100%);max-height:min(90vh,720px);
+  display:flex;flex-direction:column;border-radius:6px;
+  border:1px solid var(--qs-trait);
+  box-shadow:0 8px 28px rgba(19,33,44,.18)}
+#recipe-editor-overlay .re-head{
+  padding:10px 14px;border-bottom:1px solid var(--qs-trait);
+  display:flex;align-items:center;gap:10px;flex-shrink:0}
+#recipe-editor-overlay .re-head strong{flex:1;font-size:13px;color:var(--qs-encre);
+  font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#recipe-editor-overlay #recipe-editor-meta{font-size:11px;color:var(--qs-discret);flex-shrink:0}
+#recipe-editor-overlay .re-fields{
+  padding:10px 14px;display:flex;gap:8px;flex-wrap:wrap;flex-shrink:0}
+#recipe-editor-overlay .re-fields input,
+#recipe-editor-overlay .re-fields select{
+  flex:1;min-width:140px;padding:5px 8px;border:1px solid var(--qs-trait);
+  border-radius:3px;font-size:12px;font-family:inherit;color:var(--qs-encre-2);
+  background:#fff}
+#recipe-editor-overlay .re-fields select{flex:0 0 auto;min-width:88px}
+#recipe-editor-overlay #recipe-editor-content{
+  flex:1;min-height:280px;margin:0 14px;padding:8px 10px;
+  font-family:ui-monospace,Consolas,Menlo,monospace;font-size:12px;line-height:1.45;
+  border:1px solid var(--qs-trait);border-radius:3px;white-space:pre;
+  overflow:auto;resize:vertical;color:var(--qs-encre);background:var(--qs-surface-2)}
+#recipe-editor-overlay #recipe-editor-status{
+  padding:2px 14px;min-height:18px;font-size:11px;flex-shrink:0}
+#recipe-editor-overlay .re-foot{
+  padding:10px 14px;border-top:1px solid var(--qs-trait);
+  display:flex;gap:8px;justify-content:flex-end;flex-shrink:0}
+#recipe-editor-overlay .re-close{
+  border:0;background:transparent;padding:2px 6px;cursor:pointer;
+  color:var(--qs-discret);border-radius:3px;line-height:1}
+#recipe-editor-overlay .re-close:hover{background:var(--qs-surface-2);color:var(--qs-encre)}
 </style>
 </head>
 <body>
@@ -1899,49 +1939,40 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     </script>
   </aside>
 
-  <!-- V1.5 Sprint 1 : Modal éditeur YAML recettes user (overlay full-screen) -->
-  <div id="recipe-editor-overlay" style="
-       display:none; position:fixed; inset:0; z-index:9999;
-       background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
-    <div style="background:white; width:80%; max-width:900px; max-height:90vh;
-                display:flex; flex-direction:column; border-radius:6px;
-                box-shadow:0 8px 32px rgba(0,0,0,0.4);">
-      <div style="padding:12px 16px; border-bottom:1px solid #ddd;
-                  display:flex; align-items:center; gap:12px;">
-        <strong style="flex:1;" id="recipe-editor-title">Recette : —</strong>
-        <span id="recipe-editor-meta" style="font-size:11px; color:#666;"></span>
-        <button onclick="closeRecipeEditor()"
-                style="border:0; background:#eee; padding:4px 10px; border-radius:4px;
-                       cursor:pointer;"><span class="ic-fermer ic--sm" aria-hidden="true"></span> Fermer</button>
+  <!-- V1.5 Sprint 1 : Modal éditeur YAML recettes user (overlay) -->
+  <div id="recipe-editor-overlay" role="dialog" aria-modal="true"
+       aria-labelledby="recipe-editor-title">
+    <div class="re-dialog">
+      <div class="re-head">
+        <strong id="recipe-editor-title">Recette</strong>
+        <span id="recipe-editor-meta"></span>
+        <button type="button" class="re-close" onclick="closeRecipeEditor()"
+                aria-label="Fermer" title="Fermer (Échap)">
+          <span class="ic-fermer ic--sm" aria-hidden="true"></span>
+        </button>
       </div>
-      <div style="padding:12px 16px; display:flex; gap:8px; flex-wrap:wrap;">
+      <div class="re-fields">
         <input id="recipe-editor-slug" type="text" placeholder="slug (ex: ma_recette)"
-               style="flex:1; min-width:180px; padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+               autocomplete="off" spellcheck="false">
         <input id="recipe-editor-name" type="text" placeholder="Nom affiché"
-               style="flex:1; min-width:180px; padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
-        <select id="recipe-editor-format"
-                style="padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
+               autocomplete="off">
+        <select id="recipe-editor-format" aria-label="Format">
           <option value="yaml">YAML</option>
           <option value="json">JSON</option>
         </select>
       </div>
       <textarea id="recipe-editor-content" spellcheck="false"
-                style="flex:1; min-height:400px; margin:0 16px; padding:10px;
-                       font-family:'Courier New', monospace; font-size:12px;
-                       border:1px solid #ccc; border-radius:4px;
-                       white-space:pre; overflow:auto;"></textarea>
-      <div id="recipe-editor-status" style="padding:4px 16px; min-height:20px; font-size:11px;"></div>
-      <div style="padding:12px 16px; border-top:1px solid #ddd; display:flex; gap:8px; justify-content:flex-end;">
-        <button onclick="closeRecipeEditor()" class="qs-btn qs-btn--secondaire qs-btn--sm">
-          Annuler
-        </button>
-        <button id="recipe-editor-save" onclick="saveRecipeFromEditor()"
+                aria-label="Contenu de la recette"></textarea>
+      <div id="recipe-editor-status" role="status"></div>
+      <div class="re-foot">
+        <button type="button" onclick="closeRecipeEditor()"
+                class="qs-btn qs-btn--secondaire qs-btn--sm">Annuler</button>
+        <button type="button" id="recipe-editor-save" onclick="saveRecipeFromEditor()"
                 class="qs-btn qs-btn--sm">
           <span class="ic-enregistrer ic--sm" aria-hidden="true"></span> Sauvegarder
         </button>
       </div>
     </div>
-
   </div>
 
   <div class="handle h1" data-target="publi"></div>
@@ -3711,12 +3742,21 @@ async function openRecipeEditor(slug, isNew) {
       contentEl.value = `Erreur fetch: ${e.message}`;
     }
   }
-  overlay.style.display = 'flex';
+  overlay.classList.add('is-open');
+  (isNew ? slugEl : contentEl).focus();
 }
 
 function closeRecipeEditor() {
-  document.getElementById('recipe-editor-overlay').style.display = 'none';
+  const overlay = document.getElementById('recipe-editor-overlay');
+  overlay.classList.remove('is-open');
+  overlay.style.display = '';
 }
+
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  const overlay = document.getElementById('recipe-editor-overlay');
+  if (overlay && overlay.classList.contains('is-open')) closeRecipeEditor();
+});
 
 async function saveRecipeFromEditor() {
   const slug = document.getElementById('recipe-editor-slug').value.trim();
