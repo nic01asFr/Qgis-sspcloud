@@ -53,16 +53,17 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 /* ── Header : navbar flex (toggles fixes, plus de position absolute) ─ */
 .desk-header{grid-area:header;background:#fff;border-bottom:1px solid var(--qs-trait);
   display:block;position:relative;overflow:visible;min-width:0}
-/* Grille 3 colonnes egales : le bloc brand + etude/projet reste
-   optiquement centre meme si gauche (toggle) et droite (toggle+compte)
-   n'ont pas la meme largeur. */
-.desk-nav{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
-  align-items:center;height:48px;padding:0 8px;gap:8px;min-width:0}
-.desk-nav__left,.desk-nav__actions{display:flex;align-items:center;gap:6px;min-width:0}
-.desk-nav__left{justify-self:start}
-.desk-nav__context{justify-self:center;min-width:0;max-width:100%;
-  display:flex;align-items:center;overflow:visible}
-.desk-nav__actions{justify-self:end}
+/* Navbar : toggles en absolute sur les bords, bloc brand+étude
+   vraiment centré. Évite la colonne 1fr vide à gauche qui lisait
+   comme un champ fantôme entre le toggle et le brand. */
+.desk-nav{display:flex;align-items:center;justify-content:center;
+  position:relative;height:48px;padding:0 52px;gap:0;min-width:0}
+.desk-nav__left,.desk-nav__actions{display:flex;align-items:center;gap:6px;
+  position:absolute;top:50%;transform:translateY(-50%);z-index:5}
+.desk-nav__left{left:8px}
+.desk-nav__actions{right:8px}
+.desk-nav__context{min-width:0;max-width:calc(100% - 120px);
+  display:flex;align-items:center;justify-content:center;overflow:visible}
 
 /* hdr-left = en-tête du panel Publications fusionné dans la navbar. */
 .hdr-left{min-width:0;display:flex;align-items:center;justify-content:space-between;
@@ -96,7 +97,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
    Mesure : bouton x=461..497, zone projet x=196..491, soit 30px manges.
    Le padding-right de 20px etait inferieur aux 50px occupes par le
    bouton et sa marge. Porte a 62px, comme a gauche. */
-.hdr-center{display:flex;align-items:center;padding:0;min-width:0;gap:12px;
+.hdr-center{display:flex;align-items:center;padding:0;min-width:0;gap:8px;
   justify-content:center}
 .hdr-center .brand{display:flex;align-items:baseline;gap:8px;white-space:nowrap}
 .hdr-center .brand .op{font-weight:700;color:var(--qs-accent);font-size:15px;line-height:1;
@@ -563,14 +564,12 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                   title="{% if active_study %}Étude : {{ active_study.name }}{% if active_project %} — Projet : {{ active_project.label }}{% endif %} — clique pour changer de projet{% else %}Choisir une étude{% endif %}">
             <span class="ic-dossier" aria-hidden="true"></span>
             {% if active_study %}
-              {# Sprint isolation etudes-projets Fix #6 (2026-07-30) : badge
-                 explicite 'Étude : X / Projet : Y' pour rendre l'isolation
-                 visible au user. Sans projet actif, warning visuel. #}
-              <span class="fa-libelle">Étude&nbsp;:</span>
+              {# Libellés Étude:/Projet: omis : déjà portés par le contexte
+                 du trigger et le dropdown. Moins de bruit, plus de place
+                 pour les noms. #}
               <span class="study-name">{{ active_study.name }}</span>
               {% if active_project %}
               <span class="fa-sep" aria-hidden="true">›</span>
-              <span class="fa-libelle fa-projet">Projet&nbsp;:</span>
               <span class="fa-projet-nom fa-projet"
                     title="Projet actif : {{ active_project.label }}">
                 {{ active_project.label }}
@@ -860,11 +859,6 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
               <span class="ic-editer ic--sm" aria-hidden="true"></span> .qgz</button>
             <input type="file" id="src-upload-qgz-input" accept=".qgz,.qgs" hidden>
           </div>
-          {% if active_project %}
-          <p style="font-size:10px;color:var(--qs-discret);margin:0;line-height:1.3">
-            Actif : <strong>{{ active_project.label }}</strong>
-          </p>
-          {% endif %}
           {% else %}
           <div class="src-empty">Aucune étude active.</div>
           {% endif %}
