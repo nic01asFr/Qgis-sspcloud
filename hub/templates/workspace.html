@@ -7,31 +7,45 @@
 <title>Mon espace — QGIS Service</title>
 <link rel="stylesheet" href="/static/produit.css">
 <style>
-/* Sprint UX-3 refonte 'ideale' (2026-06-21 v3) :
-   Principes :
-   - Une page, un objectif : aider l'user a reprendre / demarrer / explorer
-   - Pas de KPI abstrait (chiffres deja visibles dans les sections)
-   - Pas d'ancres intra-page comme CTA (incoherent avec liens externes)
-   - Chaque bouton = action ou page (jamais une ancre)
-   - Hierarchie : action principale > liste > actions secondaires
-*/
+/* Refonte UX workspace (option C) : navbar alignée desk, liste études en lignes. */
 
-/* Section title compact : juste le nom + compteur badge */
+/* Navbar — même squelette que desk (.desk-nav) */
+.ws-header{background:#fff;border-bottom:1px solid var(--qs-trait);
+  position:sticky;top:0;z-index:50}
+.desk-nav{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+  align-items:center;height:48px;padding:0 12px;gap:8px;min-width:0;
+  max-width:1100px;margin:0 auto}
+.desk-nav__left,.desk-nav__actions{display:flex;align-items:center;gap:6px;min-width:0}
+.desk-nav__left{justify-self:start}
+.desk-nav__context{justify-self:center;min-width:0;max-width:100%;
+  display:flex;align-items:center;overflow:visible}
+.desk-nav__actions{justify-self:end}
+.hdr-center{display:flex;align-items:center;padding:0;min-width:0;gap:12px;
+  justify-content:center}
+.hdr-center .brand{display:flex;align-items:baseline;gap:8px;white-space:nowrap;
+  text-decoration:none;color:inherit}
+.hdr-center .brand .op{font-weight:700;color:var(--qs-accent);font-size:15px;line-height:1;
+  letter-spacing:.4px}
+.hdr-center .brand .sub{font-size:11.5px;color:var(--qs-discret);font-weight:500;
+  letter-spacing:.3px}
+
+/* Contenu principal un peu plus dense */
+.ws-main{padding:20px 0 40px}
+.ws-main > .qs-conteneur{max-width:960px}
+
 .section-title{display:flex;align-items:baseline;gap:10px;
-  margin:0 0 6px;padding-bottom:8px;
+  margin:0 0 10px;padding-bottom:6px;
   border-bottom:2px solid var(--qs-accent)}
-.section-title h2{font-size:1.15rem;font-weight:700;
+.section-title h2{font-size:1.05rem;font-weight:700;
   color:var(--qs-accent);margin:0;line-height:1}
-.section-title .count{font-size:.78rem;color:var(--qs-discret);
-  font-weight:500;padding:2px 8px;background:var(--qs-surface-2);
+.section-title .count{font-size:.75rem;color:var(--qs-discret);
+  font-weight:500;padding:2px 7px;background:var(--qs-surface-2);
   border-radius:10px}
-.section-desc{font-size:.85rem;color:var(--qs-discret);
-  margin:0 0 18px;line-height:1.5;max-width:760px}
 
-/* Hero : titre + sous-titre + action principale + statut bureau */
-.hero{margin:6px 0 36px}
-.hero-cta{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:10px}
-.hero-cta .qs-btn--lg{font-weight:700;padding:16px 32px;font-size:1.05rem;
+/* Hero : un seul CTA bureau */
+.hero{margin:0 0 22px}
+.hero-cta{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.hero-cta .qs-btn--lg{font-weight:700;padding:12px 24px;font-size:1rem;
   border-radius:6px;box-shadow:0 2px 8px rgba(0,0,145,.18)}
 .hero-cta .qs-btn--lg:hover{box-shadow:0 4px 14px rgba(0,0,145,.28)}
 .hero-status{display:inline-flex;align-items:center;gap:6px;font-size:.8rem;
@@ -40,106 +54,141 @@
 .hero-status-ok .dot{background:var(--qs-succes);box-shadow:0 0 0 3px rgba(24,117,60,.18)}
 .hero-status-sleep .dot{background:#919191}
 
-/* Card etude : layout simple et clair */
-.study-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));
-  gap:14px;margin:12px 0 28px}
-.study-card{background:#fff;border-radius:8px;padding:16px 18px;
-  border:1px solid var(--qs-trait);
-  border-left:4px solid var(--qs-accent);
-  box-shadow:0 1px 3px rgba(0,0,0,.05);transition:all .15s;
-  display:flex;flex-direction:column;gap:6px}
-.study-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.08)}
-.study-card.is-active{border-left-color:var(--qs-alerte);
-  background:linear-gradient(180deg,#fff8f3 0%,#fff 100%)}
-.study-card-header{display:flex;align-items:center;justify-content:space-between;
-  gap:8px;margin-bottom:4px}
-.study-name{font-size:1.05rem;font-weight:700;color:var(--qs-accent);
-  margin:0;line-height:1.25;flex:1;min-width:0;
+/* Lignes d'études compactes */
+.study-list{display:flex;flex-direction:column;gap:0;margin:0 0 14px;
+  border:1px solid var(--qs-trait);border-radius:6px;background:#fff;
+  overflow:hidden}
+.study-row{display:grid;
+  grid-template-columns:minmax(0,1.4fr) auto auto auto;
+  align-items:center;gap:10px 14px;
+  padding:10px 14px;border-bottom:1px solid var(--qs-surface-2);
+  min-width:0}
+.study-row:last-child{border-bottom:none}
+.study-row.is-active{background:linear-gradient(90deg,#fff8f3 0%,#fff 70%)}
+.study-row.is-archived{opacity:.88}
+.study-row__name{margin:0;font-size:.95rem;font-weight:650;color:var(--qs-accent);
+  display:flex;align-items:center;gap:8px;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.study-meta{font-size:.78rem;color:var(--qs-discret);
-  display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;line-height:1.5;
-  margin-bottom:6px}
-.study-meta .sep{opacity:.4}
-.study-actions{display:flex;gap:8px;margin-top:6px;padding-top:10px;
-  border-top:1px solid var(--qs-surface-2)}
-.study-actions form{margin:0}
-.study-actions .qs-btn{font-size:.78rem;padding:.35rem .7rem}
+.study-row__name a{color:inherit;text-decoration:none}
+.study-row__name a:hover{text-decoration:underline}
+.study-row__meta{font-size:.78rem;color:var(--qs-discret);white-space:nowrap}
+.study-row__when{font-size:.78rem;color:var(--qs-discret);white-space:nowrap}
+.study-row__actions{display:flex;align-items:center;gap:6px;justify-content:flex-end}
+.study-row__actions form{margin:0}
+.study-row__actions .qs-btn{font-size:.75rem;padding:.28rem .65rem}
 .active-badge{display:inline-flex;align-items:center;gap:5px;
   background:var(--qs-alerte);color:#fff;padding:2px 8px;border-radius:10px;
   font-size:.65rem;font-weight:700;letter-spacing:.4px;flex-shrink:0}
 .active-badge::before{content:"";width:5px;height:5px;border-radius:50%;
   background:#fff;display:inline-block}
+.demo-badge{display:inline-flex;align-items:center;
+  background:#f5a623;color:#3a2a00;padding:2px 8px;border-radius:10px;
+  font-size:.65rem;font-weight:700;letter-spacing:.4px;flex-shrink:0}
 
-/* Section creer une etude : compact, integre apres la liste */
-.new-study{background:linear-gradient(135deg,#EDF4E6 0%,#fff 100%);
-  border:1px solid var(--qs-trait);border-radius:8px;
-  padding:18px 20px;margin:0 0 32px}
-.new-study-title{font-size:.98rem;font-weight:700;color:var(--qs-accent);
-  margin:0 0 4px;display:flex;align-items:center;gap:6px}
-.new-study-desc{font-size:.82rem;color:var(--qs-discret);margin:0 0 12px}
-.new-study-form{display:flex;gap:8px;flex-wrap:wrap}
-.new-study-form input{flex:1;min-width:240px}
-.tpl-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
-.tpl-chip{font-size:.75rem;padding:4px 10px;
-  background:#fff;border:1px solid var(--qs-trait);
-  border-radius:14px;cursor:pointer;transition:all .12s;
-  color:var(--qs-encre-2);font-family:inherit}
-.tpl-chip:hover{background:var(--qs-accent);
-  color:#fff;border-color:transparent}
+@media (max-width:720px){
+  .study-row{grid-template-columns:minmax(0,1fr) auto;gap:6px 10px}
+  .study-row__meta,.study-row__when{grid-column:1 / -1}
+  .study-row__actions{grid-column:1 / -1;justify-content:flex-start}
+}
+
+/* Nouvelle étude : une ligne */
+.new-study-form{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 28px;align-items:center}
+.new-study-form input{flex:1;min-width:200px}
 
 /* Empty states discrets */
-.empty-state{padding:24px 20px;color:var(--qs-discret);
-  background:var(--qs-surface-2);border-radius:8px;
-  border:1px dashed var(--qs-trait);font-size:.88rem}
-.empty-state .icon{font-size:1.6rem;margin-right:8px;opacity:.65}
+.empty-state{padding:18px 16px;color:var(--qs-discret);
+  background:var(--qs-surface-2);border-radius:6px;
+  border:1px dashed var(--qs-trait);font-size:.85rem;margin-bottom:14px}
+.empty-state .icon{font-size:1.4rem;margin-right:8px;opacity:.65}
 
-/* Livrables list compact */
-.qs-tableau{font-size:.85rem}
-.qs-carte__titre{font-size:1rem}
-
-/* Memoire compacte en bas */
-.memo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
-  gap:12px;margin-top:10px}
-.memo-card{background:var(--qs-surface-2);border-radius:8px;
-  padding:14px 16px;font-size:.85rem}
-.memo-card h3{font-size:.95rem;margin:0 0 8px;font-weight:700;
+/* Livrables / mémoire densifiés */
+.qs-tableau{font-size:.82rem}
+.livrables-intro{font-size:.8rem;color:var(--qs-discret);margin:0 0 10px}
+.memo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:10px;margin-top:8px}
+.memo-card{background:var(--qs-surface-2);border-radius:6px;
+  padding:12px 14px;font-size:.82rem}
+.memo-card h3{font-size:.9rem;margin:0 0 6px;font-weight:700;
   color:var(--qs-accent)}
-.memo-card ul{margin:0;padding-left:18px;line-height:1.6}
-.memo-empty{font-size:.85rem;color:var(--qs-discret);
-  background:var(--qs-surface-2);padding:14px 18px;border-radius:8px;
+.memo-card ul{margin:0;padding-left:16px;line-height:1.5}
+.memo-empty{font-size:.82rem;color:var(--qs-discret);
+  background:var(--qs-surface-2);padding:12px 14px;border-radius:6px;
   border:1px dashed var(--qs-trait)}
+.params-hint{font-size:.8rem;color:var(--qs-discret);margin:0 0 10px}
 </style>
 </head>
 <body>
-<header role="banner" class="qs-entete">
-<div class="qs-entete__corps"><div class="qs-conteneur"><div class="qs-entete__ligne">
-  {# Ni bloc « République Française », ni nom d'opérateur : ce service
-     s'installe en trois minutes par n'importe qui sur SSPCloud, et son en-tête
-     ne peut pas affirmer une identité d'État ni un exploitant que l'instance
-     n'a pas. L'attribution vit dans le dépôt — README, LICENSE — où elle est
-     vraie et où la Licence Ouverte 2.0 l'exige. #}
-  <div class="qs-entete__marque qs-lien-etendu"><div class="qs-entete__marque-haut">
-    <div class="qs-entete__marque-haut">
-      <p style="font-weight:700;font-size:15px;color:var(--qs-accent)">QGIS Service</p>
-      <p style="font-size:11px;color:#666">SSPCloud</p>
+
+<header class="ws-header" role="banner">
+  <nav class="desk-nav" aria-label="Navigation espace de travail">
+    <div class="desk-nav__left"></div>
+
+    <div class="desk-nav__context">
+      <div class="hdr-center">
+        <a href="/workspace" class="brand" title="Mon espace de travail">
+          <span class="op">QGIS</span>
+          <span class="sub">· Service</span>
+        </a>
+      </div>
     </div>
-  </div>
-  <div class="qs-entete__service"><a href="/workspace"><p class="qs-entete__service-titre">Mon espace de travail</p></a>
-    <p class="qs-entete__service-accroche">{{ username }}@sspcloud</p>
-  </div>
-  <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
-    <a href="/desk" class="qs-btn qs-btn--secondaire qs-btn--sm ic-fenetre qs-btn--icone-gauche">Bureau</a>
-    <a href="/auth/logout" class="qs-btn qs-btn--nu qs-btn--sm">Se déconnecter</a>
-  </div></div>
-</div></div></div>
+
+    <div class="desk-nav__actions">
+      <div class="qs-compte" id="compte">
+        <button type="button" class="qs-compte__btn" id="compte-btn"
+                aria-haspopup="menu" aria-expanded="false" aria-controls="compte-menu"
+                onclick="basculerMenuCompte(event)"
+                title="Mon compte, ma clé d'accès et les réglages de l'assistant">
+          <span class="qs-avatar" aria-hidden="true">{{ username[:2] }}</span>
+          <span class="qs-compte__nom">{{ username }}</span>
+        </button>
+
+        <div class="qs-menu" id="compte-menu" role="menu" hidden>
+          <div class="qs-menu__entete">
+            <span class="qs-avatar qs-avatar--lg" aria-hidden="true">{{ username[:2] }}</span>
+            <span class="qs-menu__identite">
+              <span class="qs-menu__nom">{{ username }}</span>
+              <span class="qs-menu__detail">Espace SSPCloud</span>
+            </span>
+          </div>
+
+          {% if hub_api_key %}
+          <button type="button" class="qs-menu__item ic-cadenas" role="menuitem"
+                  onclick="ouvrirParametre('param-acces')">
+            Ma clé d'accès
+          </button>
+          {% endif %}
+          <button type="button" class="qs-menu__item ic-discussion" role="menuitem"
+                  onclick="ouvrirParametre('param-assistant')">
+            Clé de l'assistant
+            {% if llm_key_missing %}
+            <span class="qs-menu__suffixe" style="color:var(--qs-alerte)">à renseigner</span>
+            {% endif %}
+          </button>
+
+          <hr class="qs-menu__sep">
+
+          <a class="qs-menu__item ic-fenetre" role="menuitem" href="/desk">
+            Bureau de travail
+          </a>
+          <a class="qs-menu__item ic-archive" role="menuitem"
+             href="/published/{{ username }}/">
+            Mes publications
+          </a>
+
+          <hr class="qs-menu__sep">
+
+          <a class="qs-menu__item ic-deconnexion qs-menu__item--danger" role="menuitem"
+             href="/auth/logout">
+            Se déconnecter
+          </a>
+        </div>
+      </div>
+    </div>
+  </nav>
 </header>
 
-{# Sprint UX-3 (2026-06-21) : navbar globale retiree. Les liens entre vues
-   sont accessibles via les CTA principaux (Continuer mon travail, cards
-   etudes) et le footer (Bureau de travail, Agent IA seul). #}
-
-<main role="main">
-<section class="qs-py-4w">
+<main role="main" class="ws-main">
+<section>
 <div class="qs-conteneur">
 
   {% if workspace_error %}
@@ -152,24 +201,16 @@
   <div class="qs-alerte qs-alerte--attention qs-mb-3w">
     <h3 class="qs-alerte__titre">Assistant IA en attente de configuration</h3>
     <p>Ta clé LLM n'est pas renseignée : l'assistant ne peut pas répondre.
-       Ouvre le bloc ci-dessous pour la saisir (moins d'une minute).</p>
+       Ouvre le menu compte → Clé de l'assistant (moins d'une minute).</p>
   </div>
   {% endif %}
 
-
-  {# ═════════════════════════════════════════════════════════════════════
-     HERO — action principale contextuelle.
-     - Si etude active : bouton 'Continuer mon travail sur X' + indic bureau
-     - Si vierge (jamais cree d'etude) : bouton 'Demarrer ma premiere etude'
-       qui focus le form (au lieu d'une ancre)
-     - Si etudes mais aucune active : pas de hero (la liste juste en dessous
-       sert d'orientation, l'user clique Ouvrir sur la card de son choix)
-     ════════════════════════════════════════════════════════════════════ #}
+  {# Un seul accès bureau si étude active #}
   {% if active_study %}
   <div class="hero">
     <div class="hero-cta">
       <a href="/desk" class="qs-btn qs-btn--lg ic-fenetre qs-btn--icone-gauche">
-        Continuer mon travail sur « {{ active_study.name }} »
+        Continuer sur « {{ active_study.name }} »
       </a>
       <span class="hero-status hero-status-{% if session_ready %}ok{% else %}sleep{% endif %}"
             title="{% if session_ready %}Bureau QGIS prêt{% else %}Bureau en veille — s'ouvre depuis le bureau (~35 s){% endif %}">
@@ -190,14 +231,6 @@
   </div>
   {% endif %}
 
-  {# ═════════════════════════════════════════════════════════════════════
-     SECTION ÉTUDES — coeur de la page.
-     - Titre + compteur badge ('Mes études · 1' au lieu d'un KPI separe)
-     - Liste de cards : icone + nom + meta (projets, principal) + actions
-     - Action primaire = OUVRIR (active + redirect /desk en 1 clic)
-     - Action secondaire = Archiver (uniquement, plus de ZIP confusant)
-     - Sur card active : 'Ouvrir le bureau' a la place + badge ACTIVE
-     ════════════════════════════════════════════════════════════════════ #}
   <div class="section-title">
     <h2>Mes études</h2>
     <span class="count">
@@ -205,49 +238,38 @@
       {% if studies|length == 1 %}en cours{% else %}en cours{% endif %}
     </span>
   </div>
-  <p class="section-desc">
-    Une étude regroupe votre dossier de travail : carte QGIS, données,
-    conversations avec l'assistant, et livrables.
-  </p>
 
   {% if studies %}
-  <div class="study-grid">
+  <div class="study-list" role="list">
     {% for s in studies %}
-    <div class="study-card{% if s.id == active_study_id %} is-active{% endif %}{% if s.origin == 'demo' %} is-demo{% endif %}">
-      <div class="study-card-header">
-        <h3 class="study-name" title="{{ s.name }}">
-          {% if s.id == active_study_id %}<span class="ic-fenetre ic--sm" aria-hidden="true"></span>{% else %}<span class="ic-dossier ic--sm" aria-hidden="true"></span>{% endif %} {{ s.name }}
-        </h3>
+    <div class="study-row{% if s.id == active_study_id %} is-active{% endif %}{% if s.origin == 'demo' %} is-demo{% endif %}"
+         role="listitem">
+      <h3 class="study-row__name" title="{{ s.name }}">
+        {% if s.id == active_study_id %}
+        <a href="/desk"><span class="ic-fenetre ic--sm" aria-hidden="true"></span> {{ s.name }}</a>
+        {% else %}
+        <span class="ic-dossier ic--sm" aria-hidden="true"></span> {{ s.name }}
+        {% endif %}
         {% if s.id == active_study_id %}<span class="active-badge">ACTIVE</span>{% endif %}
         {% if s.origin == 'demo' %}
-        <span class="active-badge" style="background:#f5a623;color:#3a2a00"
-              title="Étude créée depuis un modèle de démonstration">DÉMO</span>
+        <span class="demo-badge" title="Étude créée depuis un modèle de démonstration">DÉMO</span>
         {% endif %}
-      </div>
-      <div class="study-meta">
+      </h3>
+      <span class="study-row__meta">
         {% if s.project_count and s.project_count > 0 %}
-        <span><span class="ic-dossier ic--sm" aria-hidden="true"></span> {{ s.project_count }} {% if s.project_count == 1 %}projet{% else %}projets{% endif %}</span>
-        {% endif %}
-        {% if s.default_project %}
-        <span class="sep">·</span>
-        <span><span class="ic-etoile ic--sm" aria-hidden="true"></span> {{ s.default_project.label }}</span>
-        {% endif %}
-        {# Repere temporel : seul moyen de distinguer deux etudes homonymes. #}
-        {% if s.last_active_label %}
-        <span class="sep">·</span>
-        <span title="Dernière ouverture de cette étude"><span class="ic-horloge ic--sm" aria-hidden="true"></span> {{ s.last_active_label }}</span>
-        {% endif %}
-      </div>
-      <div class="study-actions">
-        {% if s.id == active_study_id %}
-        <a href="/desk" class="qs-btn qs-btn--sm ic-fenetre qs-btn--icone-gauche" style="font-weight:700;flex:1;text-align:center">
-          Ouvrir le bureau
-        </a>
+        {{ s.project_count }} {% if s.project_count == 1 %}projet{% else %}projets{% endif %}
         {% else %}
-        <form method="POST" action="/workspace/study/{{ s.id }}/activate?return_to=desk"
-              style="flex:1">
-          <button type="submit" class="qs-btn qs-btn--sm" style="font-weight:700;width:100%">
-            Ouvrir l'étude →
+        —
+        {% endif %}
+      </span>
+      <span class="study-row__when">
+        {% if s.last_active_label %}{{ s.last_active_label }}{% else %}—{% endif %}
+      </span>
+      <div class="study-row__actions">
+        {% if s.id != active_study_id %}
+        <form method="POST" action="/workspace/study/{{ s.id }}/activate?return_to=desk">
+          <button type="submit" class="qs-btn qs-btn--sm" style="font-weight:650">
+            Ouvrir
           </button>
         </form>
         {% endif %}
@@ -263,92 +285,50 @@
     {% endfor %}
   </div>
   {% else %}
-  <div class="empty-state" style="margin-bottom:18px">
+  <div class="empty-state">
     <span class="icon ic-dossier" aria-hidden="true"></span>
     Aucune étude pour l'instant. Démarrez votre première étude ci-dessous.
   </div>
   {% endif %}
 
-  {# Section creer une etude : compact, juste apres la liste.
-     L'user fini de regarder ses etudes -> il peut en creer une. #}
-  <div class="new-study">
-    <h3 class="new-study-title">
-      <span class="ic-ajout-cercle" aria-hidden="true"></span>
-      <span>Démarrer une nouvelle étude</span>
-    </h3>
-    <p class="new-study-desc">
-      Choisissez un nom descriptif pour la repérer facilement.
-    </p>
-    <form method="POST" action="/workspace/study/new" class="new-study-form">
-      <input id="new-study-name" name="name" type="text" required
-             placeholder="ex : Risque inondation Le Lavandou"
-             class="qs-champ">
-      <button type="submit" class="qs-btn">+ Créer l'étude</button>
-    </form>
-    {# V1.20.4 : les chips 'Idees' pre-remplissent juste le nom d'etude
-       (vierge). Un futur sprint pourra proposer des templates 'demo' pre-
-       peuples si l'agent demande explicitement (bouton dedie 'Ouvrir un
-       exemple de risque inondation') pour eviter le carry-over des titres
-       techniques 'Demo Vague E2' dans les etudes reelles. #}
-    <div class="tpl-chips">
-      <span style="font-size:.75rem;color:var(--qs-discret);align-self:center;margin-right:2px">
-        Idées de sujet :
-      </span>
-      <button type="button" class="tpl-chip"
-              title="Cliquez pour pré-remplir le champ nom, puis complétez et validez"
-              onclick="document.getElementById('new-study-name').value='Risque inondation '; document.getElementById('new-study-name').focus();">
-        Risque inondation
-      </button>
-      <button type="button" class="tpl-chip"
-              title="Cliquez pour pré-remplir le champ nom, puis complétez et validez"
-              onclick="document.getElementById('new-study-name').value='Cadastre solaire '; document.getElementById('new-study-name').focus();">
-        Cadastre solaire
-      </button>
-      <button type="button" class="tpl-chip"
-              title="Cliquez pour pré-remplir le champ nom, puis complétez et validez"
-              onclick="document.getElementById('new-study-name').value='Densité bâti '; document.getElementById('new-study-name').focus();">
-        Densité bâti
-      </button>
-      <button type="button" class="tpl-chip"
-              title="Cliquez pour pré-remplir le champ nom, puis complétez et validez"
-              onclick="document.getElementById('new-study-name').value='Détection SAM3 '; document.getElementById('new-study-name').focus();">
-        Détection IA (SAM3)
-      </button>
-    </div>
-  </div>
+  <form method="POST" action="/workspace/study/new" class="new-study-form">
+    <input id="new-study-name" name="name" type="text" required
+           placeholder="Nouvelle étude (sujet, territoire…)"
+           class="qs-champ" aria-label="Nom de la nouvelle étude">
+    <button type="submit" class="qs-btn">Créer</button>
+  </form>
 
   {% if archived_studies %}
-  <div class="section-title qs-mt-5w">
+  <div class="section-title qs-mt-4w">
     <h2>Études archivées</h2>
     <span class="count">{{ archived_studies|length }}</span>
   </div>
-  <p class="section-desc">Les fichiers sont conservés. Tu peux restaurer une étude pour la retrouver dans la liste active.</p>
-  <div class="study-grid">
+  <div class="study-list" role="list">
     {% for s in archived_studies %}
-    <div class="study-card" style="opacity:.85;border-left-color:var(--qs-discret)">
-      <div class="study-card-header">
-        <h3 class="study-name"><span class="ic-dossier ic--sm" aria-hidden="true"></span> {{ s.name }}</h3>
+    <div class="study-row is-archived" role="listitem">
+      <h3 class="study-row__name">
+        <span class="ic-dossier ic--sm" aria-hidden="true"></span> {{ s.name }}
+      </h3>
+      <span class="study-row__meta"></span>
+      <span class="study-row__when"></span>
+      <div class="study-row__actions">
+        <form method="POST" action="/workspace/study/{{ s.id }}/restore">
+          <button type="submit" class="qs-btn qs-btn--secondaire qs-btn--sm">Restaurer</button>
+        </form>
       </div>
-      <form method="POST" action="/workspace/study/{{ s.id }}/restore" style="margin-top:8px">
-        <button type="submit" class="qs-btn qs-btn--secondaire qs-btn--sm">Restaurer</button>
-      </form>
     </div>
     {% endfor %}
   </div>
   {% endif %}
 
-  {# ═════════════════════════════════════════════════════════════════════
-     SECTION LIVRABLES — sortie du travail effectue.
-     Titre + compteur, table si rempli, empty state simple si vide.
-     ════════════════════════════════════════════════════════════════════ #}
-  <div class="section-title qs-mt-5w">
+  <div class="section-title qs-mt-4w">
     <h2>Mes livrables publiés</h2>
     <span class="count">{{ catalog_count }}</span>
   </div>
   {% if catalog_items %}
-  <p class="qs-texte--sm qs-mb-3w">Cartes, rapports et recettes accessibles publiquement (sans authentification).</p>
+  <p class="livrables-intro">Cartes, rapports et recettes accessibles publiquement.</p>
   {% if catalog_ailleurs or catalog_tronques %}
-  <p class="qs-texte--sm qs-mb-3w">
+  <p class="livrables-intro">
     {% if catalog_ailleurs %}{{ catalog_ailleurs }} autre{{ 's' if catalog_ailleurs > 1 }}
     publication{{ 's' if catalog_ailleurs > 1 }} hors de cette etude.{% endif %}
     {% if catalog_tronques %}{{ catalog_tronques }} de plus non affichee{{ 's' if catalog_tronques > 1 }} ici.{% endif %}
@@ -439,23 +419,13 @@
   </div>
   {% endif %}
 
-  {# ═════════════════════════════════════════════════════════════════════
-     SECTION MEMOIRE — ce que l'agent retient.
-     Toujours visible (transparence). Compteur de prefs + insights dans
-     le badge. Cards compactes en grid 2 cols, ou empty state simple.
-     ════════════════════════════════════════════════════════════════════ #}
-  <div class="section-title qs-mt-5w">
+  <div class="section-title qs-mt-4w">
     <h2>Ce que l'agent sait de toi</h2>
     <span class="count">
       {% set memo_count = (preferences|length if preferences else 0) + (insights|length if insights else 0) %}
       {{ memo_count }}
     </span>
   </div>
-  <p class="section-desc">
-    L'agent retient des préférences durables et des insights extraits de
-    tes conversations. Tout reste sur ton espace, tu peux les effacer
-    depuis le bureau.
-  </p>
   {% if insights or preferences %}
   <div class="memo-grid">
     {% if preferences %}
@@ -482,37 +452,18 @@
   {% else %}
   <div class="memo-empty">
     Aucun élément encore. Au fil de tes conversations, l'agent notera
-    ici ce qu'il apprend de toi (zones favorites, sujets récurrents…).
+    ici ce qu'il apprend de toi.
   </div>
   {% endif %}
 
-
-  {# ═════════════════════════════════════════════════════════════════════
-     PARAMETRES — deplaces du haut de page le 2026-08-23.
-     Ces deux depliants occupaient la zone la plus visible pour des reglages
-     consultes deux fois par an, repoussant "Continuer mon travail" a 470px
-     du haut. La cle de l'assistant est desormais reprise du profil SSPCloud
-     et conservee : ce bloc ne sert plus qu'en cas de changement.
-     L'alerte, elle, reste en tete : elle signale une action requise.
-     ════════════════════════════════════════════════════════════════════ #}
-  <div class="section-title qs-mt-5w">
+  <div class="section-title qs-mt-4w" id="parametres">
     <h2>Paramètres</h2>
   </div>
-  <p class="section-desc">
-    Ta clé d'accès et la configuration de l'assistant. Tu n'as normalement
-    pas besoin d'y revenir.
-  </p>
-  {# ═════════════════════════════════════════════════════════════════════
-     Sprint UX Day 4.3a (2026-08-03) : bloc "Ma cle d'acces personnelle".
-     Le user retient sa cle une seule fois pour ne plus avoir a repasser
-     par le portail OIDC (Sprint Day 4 auth persistante). Repliable, pas
-     tape a l'oeil : par defaut ferme, click pour afficher.
-     Securise : cette page /workspace est deja gated par middleware OIDC
-     ou cookie hub_api_key -> la cle n'est visible que pour l'user auth.
-     ════════════════════════════════════════════════════════════════════ #}
+  <p class="params-hint">Clé d'accès et configuration de l'assistant — aussi via le menu compte.</p>
+
   {% if hub_api_key %}
-  <details class="qs-encart qs-encart--attention qs-mb-4w"
-           style="padding:12px 16px;font-size:13px">
+  <details class="qs-encart qs-encart--attention qs-mb-3w" id="param-acces"
+           style="padding:10px 14px;font-size:13px">
     <summary style="cursor:pointer;font-weight:600;color:#845d29">
       <span class="ic-cadenas ic--sm" aria-hidden="true"></span> Ma clé d'accès personnelle
     </summary>
@@ -529,11 +480,6 @@
                     letter-spacing:.5px;margin-bottom:4px">Clé API</div>
         <div id="hub-api-key-value">{{ hub_api_key }}</div>
       </div>
-      {# Sprint Day 5 Phase 2-1 (2026-08-05) : bloc "lien magique" retire.
-         Le magic URL /login?key= etait une exposition de la cle dans l'URL
-         (leak logs nginx-ingress + historique navigateur + Referer header).
-         Remplace par : au 1er acces autre navigateur, l'user va sur /login
-         et colle sa cle API dans le form (POST body, zero URL). #}
       <div style="display:flex;gap:8px">
         <button type="button" class="qs-btn qs-btn--sm qs-btn--secondaire ic-presse-papier qs-btn--icone-gauche"
                 onclick="navigator.clipboard.writeText(document.getElementById('hub-api-key-value').textContent).then(()=>this.textContent='Clé copiée')">
@@ -552,19 +498,8 @@
   </details>
   {% endif %}
 
-  {# ═════════════════════════════════════════════════════════════════════
-     Sprint Day 5 Phase 1.7-C (2026-08-05) : bloc "Clé LLM agent IA".
-     Le user peut configurer sa cle LLM (SSPCloud llm.lab.sspcloud.fr
-     ou compatible OpenAI). POST /workspace/llm-key -> webhook agent
-     /api/reload-llm-key zero downtime (aucun restart pod). Ephemere :
-     survit tant que le pod agent tourne ; sur redeploy chart, retaper.
-     Persistance PVC prevue Phase 2+.
-     ════════════════════════════════════════════════════════════════════ #}
-  {# Correctif 2026-08-22 : alerte tant que la cle LLM manque. Sans elle,
-     l'assistant ne repond pas, et le bloc ci-dessous etant replie par
-     defaut, rien ne le signalait sur cette page. #}
-  <details class="qs-encart qs-encart--attention qs-mb-4w"
-           style="padding:12px 16px;font-size:13px"
+  <details class="qs-encart qs-encart--attention qs-mb-3w" id="param-assistant"
+           style="padding:10px 14px;font-size:13px"
            {% if llm_key_missing %}open{% endif %}>
     <summary style="cursor:pointer;font-weight:600;color:#845d29">
       <span class="ic-discussion ic--sm" aria-hidden="true"></span> Assistant IA — clé de connexion
@@ -606,14 +541,10 @@
     </div>
   </details>
 
-
-
 </div>
 </section>
 </main>
 
-{# Sprint UX-2 (2026-06-21) : footer DSFR harmonise avec chat.html agent.
-   Memes liens, meme structure -> service unifie. #}
 <footer class="qs-pied" role="contentinfo"><div class="qs-conteneur">
 <div class="qs-pied__corps">
   <div class="qs-pied__contenu">
@@ -651,6 +582,41 @@
   </li>
 </ul></div>
 </div></footer>
+
+<script>
+function fermerMenuCompte() {
+  const menu = document.getElementById('compte-menu');
+  const btn = document.getElementById('compte-btn');
+  if (!menu) return;
+  menu.hidden = true;
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+function basculerMenuCompte(e) {
+  e.stopPropagation();
+  const menu = document.getElementById('compte-menu');
+  const btn = document.getElementById('compte-btn');
+  const ouvert = menu.hidden;
+  menu.hidden = !ouvert;
+  btn.setAttribute('aria-expanded', String(ouvert));
+}
+
+function ouvrirParametre(id) {
+  fermerMenuCompte();
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.open = true;
+  el.scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.qs-compte')) fermerMenuCompte();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') fermerMenuCompte();
+});
+</script>
 
 </body>
 </html>
