@@ -1066,8 +1066,10 @@ async def chat(
             async for chunk in agent.chat_stream(
                 message, history=history_formatted, stop_signal=stop_signal,
             ):
-                # SSE format
-                yield f"data: {json.dumps({'text': chunk})}\n\n"
+                if isinstance(chunk, dict):
+                    yield f"data: {json.dumps(chunk)}\n\n"
+                else:
+                    yield f"data: {json.dumps({'text': chunk})}\n\n"
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
             # Fix consolidation 2026-06-20 : str(e) etait parfois vide

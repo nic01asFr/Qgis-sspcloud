@@ -22,6 +22,18 @@ from typing import AsyncGenerator
 
 import httpx
 
+
+def reasoning_details_html(text: str) -> str:
+    """Encapsule le raisonnement LLM (Qwen3 reasoning_content) pour l'UI chat."""
+    t = (text or "").strip()
+    if not t:
+        return ""
+    return (
+        '\n\n<details class="agent-reasoning">'
+        "<summary>Raisonnement</summary>\n\n"
+        f"{t}\n\n</details>\n\n"
+    )
+
 from agent import memory
 from agent import native_tools_v2
 from agent import briques_client
@@ -2309,7 +2321,7 @@ ne vient pas d'un outil cette session, la supprimer.
         user_message: str,
         history: list[dict] | None = None,
         stop_signal: "asyncio.Event | None" = None,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[str | dict, None]:
         """
         Génère une réponse en streaming avec appels d'outils MCP.
         Yield des chunks de texte + events d'outils.
@@ -2396,6 +2408,18 @@ ne vient pas d'un outil cette session, la supprimer.
                 _LLM_BASE_URL,
             )
             llm_t0 = asyncio.get_event_loop().time()
+            iter_start = len(full_response)
+            reasoning_buf = ""
+            reasoning_saved = False
+
+            def _flush_reasoning() -> None:
+                nonlocal reasoning_saved, full_response
+                if reasoning_buf.strip() and not reasoning_saved:
+                    block = reasoning_details_html(reasoning_buf)
+                    full_response = (
+                        full_response[:iter_start] + block + full_response[iter_start:]
+                    )
+                    reasoning_saved = True
 
             async with httpx.AsyncClient(timeout=120) as client:
                 async with client.stream(
@@ -2442,9 +2466,13 @@ ne vient pas d'un outil cette session, la supprimer.
                             delta = d["choices"][0].get("delta", {})
                             finish_reason = d["choices"][0].get("finish_reason")
 
-                            # Texte — ignorer reasoning_content (Qwen3 thinking séparé)
                             # Qwen3 : thinking dans delta.reasoning_content (champ séparé)
                             # Gemma4 : thinking dans delta.content (tokens <|channel>)
+                            if delta.get("reasoning_content"):
+                                rc = delta["reasoning_content"]
+                                reasoning_buf += rc
+                                yield {"reasoning": rc}
+
                             if delta.get("content"):
                                 raw = delta["content"]
                                 # Filtrer tokens thinking Gemma4 dans content
@@ -2461,10 +2489,10 @@ ne vient pas d'un outil cette session, la supprimer.
                                     '', clean, flags=_re.IGNORECASE,
                                 )
                                 if clean:
+                                    _flush_reasoning()
                                     chunk_text += clean
                                     full_response += clean
                                     yield clean
-                            # reasoning_content (Qwen3) → on l'ignore (pensées internes)
 
                             # Tool calls (accumulation)
                             for tc in delta.get("tool_calls", []):
@@ -2484,6 +2512,8 @@ ne vient pas d'un outil cette session, la supprimer.
                                     tool_call_data[idx]["function"]["arguments"] += fn["arguments"]
                         except Exception:
                             pass
+
+            _flush_reasoning()
 
             final_finish_reason = finish_reason
             # Pas de tool calls → fin du turn LLM.

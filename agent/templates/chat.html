@@ -74,6 +74,31 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
   font-size:14px;cursor:pointer;opacity:.4;color:var(--qs-encre-2);line-height:1}
 .insight-card button.del:hover{opacity:1;color:#c00}
 .memory-empty{font-size:12px;color:var(--qs-discret);text-align:center;padding:20px 10px}
+.mem-md-section{background:#fff;border:1px solid var(--qs-trait);border-radius:4px;
+  margin-bottom:8px;overflow:hidden}
+.mem-md-section.empty{background:var(--qs-surface-2)}
+.mem-md-head{padding:6px 8px;background:var(--qs-accent-pale);display:flex;
+  justify-content:space-between;align-items:center;border-bottom:1px solid var(--qs-trait);
+  cursor:pointer;font-size:11.5px;font-weight:600;color:var(--qs-accent)}
+.mem-md-body.collapsed{display:none}
+.mem-md-hint{font-size:10px;color:var(--qs-discret);padding:5px 8px;font-style:italic;
+  background:#fafafe;border-bottom:1px solid var(--qs-surface-2)}
+.mem-md-textarea{width:100%;border:none;padding:6px 8px;font-size:11.5px;
+  font-family:inherit;line-height:1.45;resize:vertical;min-height:40px;max-height:180px;
+  color:var(--qs-encre-2);background:#fff;box-sizing:border-box}
+.mem-md-textarea:focus{outline:none;background:#fffce8}
+.mem-md-actions{padding:4px 8px;background:var(--qs-surface-2);border-top:1px solid var(--qs-trait);
+  display:none;align-items:center;justify-content:space-between;font-size:10px}
+.mem-md-actions.dirty{display:flex}
+.mem-md-actions .save-btn{background:var(--qs-accent);color:#fff;border:none;
+  padding:2px 8px;border-radius:2px;cursor:pointer;font-size:10px;font-family:inherit}
+.mem-insights-label{font-size:10px;color:var(--qs-discret);text-transform:uppercase;
+  letter-spacing:.4px;font-weight:700;margin:10px 0 6px}
+.chat-toast{position:fixed;bottom:72px;left:50%;transform:translateX(-50%);
+  background:var(--qs-encre);color:#fff;padding:8px 14px;border-radius:4px;
+  font-size:12px;z-index:300;opacity:0;pointer-events:none;transition:opacity .2s}
+.chat-toast.visible{opacity:1}
+body.embed .chat-toast{bottom:16px}
 .chat-messages{flex:1;overflow-y:auto;padding:18px 22px;display:flex;flex-direction:column;gap:14px}
 .msg{display:flex;gap:10px;max-width:100%}
 .msg.user{justify-content:flex-end}
@@ -191,6 +216,26 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
   border-left-color:#b34000;
 }
 
+/* Raisonnement LLM (Qwen3 reasoning_content) — replié par défaut dans le HTML,
+   masquable via body.chat-hide-reasoning. */
+.msg .bubble details.agent-reasoning{
+  margin:0 0 10px;border:1px solid var(--qs-trait);border-radius:4px;
+  background:#fafafe;overflow:hidden}
+.msg .bubble details.agent-reasoning > summary{
+  font-size:10.5px;color:var(--qs-discret);cursor:pointer;padding:5px 10px;
+  background:var(--qs-surface-2);list-style:none;user-select:none;
+  font-weight:600;letter-spacing:.02em}
+.msg .bubble details.agent-reasoning > summary::-webkit-details-marker{display:none}
+.msg .bubble details.agent-reasoning > summary::before{content:"▸ ";font-size:10px}
+.msg .bubble details.agent-reasoning[open] > summary::before{content:"▾ "}
+.msg .bubble details.agent-reasoning .reasoning-body,
+.msg .bubble details.agent-reasoning:not(:has(.reasoning-body)){
+  font-size:11.5px;line-height:1.45;color:var(--qs-encre-2);
+  padding:8px 10px;white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace}
+body.chat-hide-reasoning .msg .bubble details.agent-reasoning{display:none !important}
+body.chat-hide-tools .msg .bubble blockquote,
+body.chat-hide-tools .msg .bubble details.tool-result{display:none !important}
+
 /* Images de tools (ex: get_screenshot) rendues inline dans la bulle.
    Mode STANDALONE (vue agent seul) : visible direct (max-width 100%).
    Sprint UX-3 fix (2026-06-21) : avant on wrappait en <details> avec
@@ -295,12 +340,8 @@ body.embed .qs-entete,
 body.embed .qs-pied,
 body.embed .chat-sidebar,
 body.embed .chat-toolbar a[href*="/"],
-/* En mode embed dans desk, le bouton Mémoire ET le drawer interne sont
-   redondants avec l'onglet Memoire de la navbar portail (déjà visible
-   au-dessus). On les masque pour éviter la duplication d'affordance et
-   le scroll horizontal causé par le drawer ouvert. */
-body.embed #btn-memory,
-body.embed .memory-drawer{display:none !important}
+/* En mode embed (desk), la mémoire s'ouvre via le drawer interne du chat
+   (bouton livre à côté de + et Historique), par-dessus la conversation. */
 body.embed .chat-app{grid-template-columns:1fr;overflow-x:hidden}
 body.embed .chat-toolbar{padding:6px 10px;font-size:11.5px}
 /* Cap dur sur la largeur des bulles en embed pour éviter qu'une longue
@@ -418,6 +459,11 @@ body.embed .msg .bubble pre{max-width:100%}
               title="Voir l'historique des conversations récentes">
         <span class="ic-horloge ic--sm" aria-hidden="true"></span> <span class="tool-btn-label">Historique</span>
       </button>
+      <button type="button" class="tool-btn" id="btn-tech-details"
+              onclick="toggleTechPopover(event)" aria-label="Détails techniques"
+              title="Afficher ou masquer le raisonnement et les appels d'outils">
+        <span class="ic-reglages ic--sm" aria-hidden="true"></span> <span class="tool-btn-label">Technique</span>
+      </button>
       <button type="button" class="tool-btn" id="btn-memory"
               onclick="toggleMemoryDrawer()" aria-label="Memoire de l'agent"
               title="Voir et éditer la mémoire de l'agent">
@@ -432,6 +478,23 @@ body.embed .msg .bubble pre{max-width:100%}
       {# Popover historique : liste des sessions recentes, click -> loadSession.
          Positionne en absolute par rapport a .chat-toolbar (position:relative).
          Cache par defaut, toggle via JS. Fermeture click outside. #}
+      <div id="tech-popover" class="tech-popover" aria-hidden="true">
+        <div class="tech-popover-header">
+          <span style="font-weight:700"><span class="ic-reglages ic--sm" aria-hidden="true"></span> Détails techniques</span>
+          <button type="button" class="close" onclick="toggleTechPopover(null,false)" aria-label="Fermer"><span class="ic-fermer ic--sm" aria-hidden="true"></span></button>
+        </div>
+        <div class="tech-popover-body">
+          <label class="tech-toggle-row">
+            <input type="checkbox" id="tech-show-reasoning" onchange="setTechPref('reasoning', this.checked)">
+            <span>Raisonnement de l'agent</span>
+          </label>
+          <label class="tech-toggle-row">
+            <input type="checkbox" id="tech-show-tools" onchange="setTechPref('tools', this.checked)">
+            <span>Appels d'outils et résultats</span>
+          </label>
+          <p class="tech-popover-hint">Masqué par défaut pour garder la conversation lisible. Réactivable à tout moment.</p>
+        </div>
+      </div>
       <div id="history-popover" class="history-popover" aria-hidden="true">
         <div class="history-popover-header">
           <span style="font-weight:700"><span class="ic-horloge ic--sm" aria-hidden="true"></span> Conversations récentes</span>
@@ -494,19 +557,80 @@ body.embed .msg .bubble pre{max-width:100%}
       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .history-empty{font-size:12px;color:var(--qs-discret);
       padding:14px 16px;margin:0;line-height:1.5}
+    .tech-popover{
+      position:absolute;top:calc(100% + 4px);right:8px;
+      width:280px;background:#fff;border:1px solid var(--qs-trait);
+      border-radius:6px;box-shadow:0 6px 24px rgba(0,0,0,.15);
+      z-index:200;display:none;overflow:hidden;flex-direction:column}
+    .tech-popover.open{display:flex}
+    .tech-popover-header{display:flex;align-items:center;justify-content:space-between;
+      padding:10px 14px;border-bottom:1px solid var(--qs-trait);
+      font-size:13px;background:var(--qs-surface-2);flex-shrink:0}
+    .tech-popover-header .close{background:transparent;border:none;
+      cursor:pointer;color:var(--qs-discret);font-size:16px;padding:0 4px;line-height:1}
+    .tech-popover-body{padding:10px 14px 12px;display:flex;flex-direction:column;gap:8px}
+    .tech-toggle-row{display:flex;align-items:center;gap:8px;font-size:12.5px;
+      color:var(--qs-encre-2);cursor:pointer}
+    .tech-toggle-row input{margin:0;accent-color:var(--qs-accent)}
+    .tech-popover-hint{font-size:11px;color:var(--qs-discret);margin:4px 0 0;line-height:1.45}
     </style>
     <script>
-    function startNewConversation() {
-      if (!confirm('Démarrer une nouvelle conversation ?\n\n' +
-                   'La session actuelle est sauvegardée et reste accessible depuis ' +
-                   '« Sessions récentes ». Tu repartiras sur un contexte propre.')) {
-        return;
+    function showChatToast(msg) {
+      let t = document.getElementById('chat-toast');
+      if (!t) {
+        t = document.createElement('div');
+        t.id = 'chat-toast';
+        t.className = 'chat-toast';
+        t.setAttribute('role', 'status');
+        document.body.appendChild(t);
       }
-      // En mode embed (iframe du desk), recharger l'iframe agent. Sinon, full page.
+      t.textContent = msg;
+      t.classList.add('visible');
+      clearTimeout(t._hideTimer);
+      t._hideTimer = setTimeout(() => t.classList.remove('visible'), 2800);
+    }
+
+    function startNewConversation() {
+      showChatToast('Nouvelle conversation — l\'ancienne reste dans Historique');
       const url = window.location.pathname + '?new=1' +
                   (window.location.search.includes('embed=') ? '&embed=1' : '');
-      window.location.href = url;
+      setTimeout(() => { window.location.href = url; }, 120);
     }
+
+    const TECH_PREFS_KEY = 'chat-tech-prefs';
+    function loadTechPrefs() {
+      const defaults = { tools: false, reasoning: false };
+      try {
+        return { ...defaults, ...JSON.parse(localStorage.getItem(TECH_PREFS_KEY) || '{}') };
+      } catch { return defaults; }
+    }
+    function applyTechPrefs() {
+      const prefs = loadTechPrefs();
+      document.body.classList.toggle('chat-hide-tools', !prefs.tools);
+      document.body.classList.toggle('chat-hide-reasoning', !prefs.reasoning);
+      const toolsCb = document.getElementById('tech-show-tools');
+      const reasoningCb = document.getElementById('tech-show-reasoning');
+      if (toolsCb) toolsCb.checked = !!prefs.tools;
+      if (reasoningCb) reasoningCb.checked = !!prefs.reasoning;
+    }
+    function setTechPref(key, value) {
+      const prefs = loadTechPrefs();
+      prefs[key] = !!value;
+      localStorage.setItem(TECH_PREFS_KEY, JSON.stringify(prefs));
+      applyTechPrefs();
+    }
+    function toggleTechPopover(event, force) {
+      if (event) event.stopPropagation();
+      const pop = document.getElementById('tech-popover');
+      if (!pop) return;
+      const willOpen = (force === true) ? true
+                     : (force === false) ? false
+                     : !pop.classList.contains('open');
+      pop.classList.toggle('open', willOpen);
+      pop.setAttribute('aria-hidden', willOpen ? 'false' : 'true');
+      if (willOpen) toggleHistoryPopover(null, false);
+    }
+    applyTechPrefs();
 
     // Sprint UX-3 fix (2026-06-22) : popover historique conversations
     // toggle. Force=true pour ouvrir, false pour fermer, null pour toggle.
@@ -520,18 +644,32 @@ body.embed .msg .bubble pre{max-width:100%}
                      : !pop.classList.contains('open');
       pop.classList.toggle('open', willOpen);
       pop.setAttribute('aria-hidden', willOpen ? 'false' : 'true');
+      if (willOpen) toggleTechPopover(null, false);
     }
     // Fermeture click outside
     document.addEventListener('click', (e) => {
       const pop = document.getElementById('history-popover');
       const btn = document.getElementById('btn-history');
-      if (!pop || !pop.classList.contains('open')) return;
-      if (pop.contains(e.target) || (btn && btn.contains(e.target))) return;
-      toggleHistoryPopover(null, false);
+      if (pop && pop.classList.contains('open')) {
+        if (!pop.contains(e.target) && !(btn && btn.contains(e.target))) {
+          toggleHistoryPopover(null, false);
+        }
+      }
+      const techPop = document.getElementById('tech-popover');
+      const techBtn = document.getElementById('btn-tech-details');
+      if (techPop && techPop.classList.contains('open')) {
+        if (!techPop.contains(e.target) && !(techBtn && techBtn.contains(e.target))) {
+          toggleTechPopover(null, false);
+        }
+      }
     });
     // Fermeture touche Echap
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') toggleHistoryPopover(null, false);
+      if (e.key === 'Escape') {
+        toggleHistoryPopover(null, false);
+        toggleTechPopover(null, false);
+        toggleMemoryDrawer(false);
+      }
     });
     </script>
 
@@ -545,8 +683,8 @@ body.embed .msg .bubble pre{max-width:100%}
         <div class="memory-empty">Chargement…</div>
       </div>
       <footer>
-        Édition complète des sections (identité, zones, préférences…) :
-        ouvre l'onglet <strong>Mémoire</strong> dans le bureau intégré.
+        Ces sections sont lues par l'agent à chaque message. Les faits auto-détectés
+        peuvent être recopiés dans une section ou supprimés.
       </footer>
     </aside>
 
@@ -1028,45 +1166,117 @@ if (document.readyState === 'loading') {
   updateContextChip();
 }
 
-// ── Mémoire drawer : liste, supprime, lien éditeur complet ────────────────
+// ── Mémoire drawer : sections éditables + faits auto-détectés ─────────────
 async function toggleMemoryDrawer(forceState) {
   const drawer = document.getElementById('memory-drawer');
   const willOpen = forceState !== undefined ? forceState : !drawer.classList.contains('open');
   drawer.classList.toggle('open', willOpen);
   drawer.setAttribute('aria-hidden', willOpen ? 'false' : 'true');
-  if (willOpen) await loadInsights();
+  if (willOpen) await loadMemoryPanel();
 }
 
-async function loadInsights() {
+function toggleMemSection(key) {
+  const body = document.querySelector(`.mem-md-section[data-key="${key}"] .mem-md-body`);
+  const tog = document.querySelector(`.mem-md-section[data-key="${key}"] .mem-md-toggle`);
+  if (!body || !tog) return;
+  body.classList.toggle('collapsed');
+  tog.textContent = body.classList.contains('collapsed') ? '▾' : '▴';
+  const state = JSON.parse(localStorage.getItem('chat-mem-collapsed') || '{}');
+  state[key] = body.classList.contains('collapsed');
+  localStorage.setItem('chat-mem-collapsed', JSON.stringify(state));
+}
+
+function markMemDirty(textarea) {
+  const actions = textarea.closest('.mem-md-section')?.querySelector('.mem-md-actions');
+  actions?.classList.add('dirty');
+}
+
+async function saveMemSection(key) {
+  const textarea = document.querySelector(`.mem-md-textarea[data-key="${key}"]`);
+  const actions = textarea?.closest('.mem-md-section')?.querySelector('.mem-md-actions');
+  if (!textarea) return;
+  try {
+    const r = await fetch('/user/memory', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({key, content: textarea.value}),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    actions?.classList.remove('dirty');
+    const section = textarea.closest('.mem-md-section');
+    section?.classList.toggle('empty', !textarea.value.trim());
+    const bullet = section?.querySelector('.mem-md-head span:first-child');
+    if (bullet) bullet.textContent = textarea.value.trim() ? '●' : '○';
+    showChatToast('Section enregistrée');
+  } catch (e) {
+    showChatToast('Erreur enregistrement : ' + e.message);
+  }
+}
+
+async function loadMemoryPanel() {
   const body = document.getElementById('memory-body');
   body.innerHTML = '<div class="memory-empty">Chargement…</div>';
   try {
-    const r = await fetch('/user/insights');
-    const insights = await r.json();
-    if (!Array.isArray(insights) || insights.length === 0) {
-      body.innerHTML = '<div class="memory-empty">Aucun insight pour l\'instant.<br>' +
-                       'L\'agent en extrait automatiquement tous les 6 messages.</div>';
-      return;
-    }
-    body.innerHTML = insights.map(ins => {
-      const conf = Math.round((ins.confidence || 0.7) * 100);
-      const src = ins.source === 'explicit' ? '✓ user' : '~ LLM';
-      return `<div class="insight-card" data-id="${ins.id}">
-        <button class="del" onclick="deleteInsight(${ins.id})" title="Supprimer">×</button>
-        <div class="key">${escapeHtml(ins.key)}</div>
-        <div class="val">${escapeHtml(ins.value)}</div>
-        <div class="meta"><span>${src}</span><span>conf. ${conf}%</span></div>
+    const [memR, insR] = await Promise.all([
+      fetch('/user/memory'),
+      fetch('/user/insights'),
+    ]);
+    if (!memR.ok) throw new Error('memory_' + memR.status);
+    const mem = await memR.json();
+    const insights = insR.ok ? await insR.json() : [];
+    const schema = mem.schema || [];
+    const sections = mem.sections || {};
+    const collapsed = JSON.parse(localStorage.getItem('chat-mem-collapsed') || '{}');
+    let html = schema.map(s => {
+      const content = sections[s.key] || '';
+      const isEmpty = !content.trim();
+      const isCollapsed = isEmpty || collapsed[s.key];
+      return `<div class="mem-md-section ${isEmpty ? 'empty' : ''}" data-key="${s.key}">
+        <div class="mem-md-head" onclick="toggleMemSection('${s.key}')">
+          <span>${isEmpty ? '○' : '●'} ${escapeHtml(s.title)}</span>
+          <button type="button" class="mem-md-toggle" style="background:none;border:0;cursor:pointer">${isCollapsed ? '▾' : '▴'}</button>
+        </div>
+        <div class="mem-md-body ${isCollapsed ? 'collapsed' : ''}">
+          <div class="mem-md-hint">${escapeHtml(s.hint || '')}</div>
+          <textarea class="mem-md-textarea" data-key="${s.key}"
+            placeholder="${escapeHtml(s.placeholder || '')}"
+            oninput="markMemDirty(this)">${escapeHtml(content)}</textarea>
+          <div class="mem-md-actions">
+            <span style="color:var(--qs-discret)">Modifications non enregistrées</span>
+            <button type="button" class="save-btn" onclick="saveMemSection('${s.key}')">Enregistrer</button>
+          </div>
+        </div>
       </div>`;
     }).join('');
+    html += `<div class="mem-insights-label">Faits auto-détectés (${Array.isArray(insights) ? insights.length : 0})</div>`;
+    if (!Array.isArray(insights) || !insights.length) {
+      html += '<div class="memory-empty">Rien pour l\'instant — l\'agent propose des faits via &lt;remember&gt;.</div>';
+    } else {
+      html += insights.map(ins => {
+        const conf = Math.round((ins.confidence || 0.7) * 100);
+        const src = ins.source === 'explicit' ? '✓ user' : '~ LLM';
+        return `<div class="insight-card" data-id="${ins.id}">
+          <button type="button" class="del" onclick="deleteInsight(${ins.id})" title="Oublier">×</button>
+          <div class="key">${escapeHtml(ins.key)}</div>
+          <div class="val">${escapeHtml(ins.value)}</div>
+          <div class="meta"><span>${src}</span><span>conf. ${conf}%</span></div>
+        </div>`;
+      }).join('');
+    }
+    body.innerHTML = html;
   } catch (e) {
-    body.innerHTML = `<div class="memory-empty">Erreur de chargement : ${e}</div>`;
+    body.innerHTML = `<div class="memory-empty">Erreur : ${escapeHtml(String(e))}</div>`;
   }
 }
 
 async function deleteInsight(id) {
-  if (!confirm('Supprimer cet insight ?')) return;
-  await fetch('/user/insights/' + id, { method: 'DELETE' });
-  await loadInsights();
+  try {
+    const r = await fetch('/user/insights/' + id, { method: 'DELETE' });
+    if (!r.ok && r.status !== 204) throw new Error('HTTP ' + r.status);
+    await loadMemoryPanel();
+  } catch (e) {
+    showChatToast('Suppression impossible : ' + e.message);
+  }
 }
 
 function escapeHtml(s) {
@@ -1243,6 +1453,17 @@ if (document.readyState === 'loading') {
   _onChatReady();
 }
 
+function renderAssistantHtml(reasoningText, markdownText) {
+  let html = '';
+  const reasoning = (reasoningText || '').trim();
+  if (reasoning) {
+    html += `<details class="agent-reasoning"><summary>Raisonnement</summary>`
+          + `<div class="reasoning-body">${escapeHtml(reasoning)}</div></details>`;
+  }
+  html += marked.parse(markdownText || '');
+  return html;
+}
+
 function foldToolResults(container) {
   if (!container) return;
   // Attache d'abord les boutons rollback (commentaires ckpt:ID → blockquotes)
@@ -1378,6 +1599,7 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
   appendMessage('assistant', '');
   const responseDiv = document.getElementById('current-response');
   let fullText = '';
+  let fullReasoning = '';
 
   const formData = new FormData();
   formData.append('message', message);
@@ -1423,6 +1645,9 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
               } catch {}
               break;
             }
+            if (data.reasoning) {
+              fullReasoning += data.reasoning;
+            }
             if (data.text) {
               fullText += data.text;
               // Si le chunk contient le marqueur de publish_artifact reussi,
@@ -1444,7 +1669,9 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
               if (tname) {
                 document.getElementById('status-text').textContent = `Outil : ${tname[1]}`;
               }
-              const rendered = marked.parse(fullText);
+            }
+            if (data.reasoning || data.text) {
+              const rendered = renderAssistantHtml(fullReasoning, fullText);
               // Ne pas écraser le placeholder "Analyse en cours…" tant que
               // le rendu est vide (chunks initiaux "\n\n" qui parsent en ""
               // — sinon la bulle redevient visuellement vide entre les
