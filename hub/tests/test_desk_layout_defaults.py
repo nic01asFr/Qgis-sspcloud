@@ -25,4 +25,5 @@ def test_update_layout_ne_gonfle_plus_le_chat() -> None:
 
 def test_layout_prefs_migrees_vers_v2() -> None:
     assert "desk-layout-v2" in _DESK
-    assert "if (prefs.chat && prefs.chat > 380) delete prefs.chat" in _DESK
+    assert "desk-layout-v3" in _DESK
+    assert "if (v2.chat && v2.chat > 380) delete v2.chat" in _DESK
