@@ -50,50 +50,50 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
 .context-chip .ctx-caret{font-size:9px;opacity:.6}
 
 /* Mémoire drawer : pan latéral droit par-dessus la zone messages, sans casser le layout */
-.memory-drawer{position:absolute;top:0;right:0;bottom:0;width:min(340px,100%);background:#fff;
-  border-left:1px solid var(--qs-trait);box-shadow:-4px 0 12px rgba(0,0,0,.06);
+.memory-drawer{position:absolute;top:0;right:0;bottom:0;width:min(300px,100%);background:#fff;
+  border-left:1px solid var(--qs-trait);box-shadow:-3px 0 10px rgba(0,0,0,.05);
   transform:translateX(100%);transition:transform .2s ease;z-index:250;
   display:flex;flex-direction:column}
 .memory-drawer.open{transform:translateX(0)}
-.memory-drawer header{padding:10px 14px;border-bottom:1px solid var(--qs-trait);
-  display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500}
+.memory-drawer header{padding:8px 12px;border-bottom:1px solid var(--qs-trait);
+  display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600}
 .memory-drawer header .close{margin-left:auto;background:transparent;border:0;
-  font-size:18px;cursor:pointer;color:var(--qs-discret);line-height:1}
-.memory-drawer .body{flex:1;overflow-y:auto;padding:10px 14px}
-.memory-drawer footer{padding:10px 14px;border-top:1px solid var(--qs-trait);
-  font-size:11.5px;color:var(--qs-discret)}
-.memory-drawer footer a{font-size:11.5px}
+  font-size:18px;cursor:pointer;color:var(--qs-discret);line-height:1;padding:2px 4px}
+.memory-drawer .body{flex:1;overflow-y:auto;padding:8px 10px}
+.memory-drawer footer{padding:8px 12px;border-top:1px solid var(--qs-trait);
+  font-size:10.5px;color:var(--qs-discret);line-height:1.4}
+.memory-drawer footer a{font-size:10.5px}
 .insight-card{background:var(--qs-surface-2);border:1px solid var(--qs-trait);
-  border-radius:4px;padding:8px 10px;margin-bottom:6px;font-size:12px;position:relative}
+  border-radius:3px;padding:6px 8px;margin-bottom:5px;font-size:11.5px;position:relative}
 .insight-card .key{font-weight:600;color:var(--qs-accent);font-family:Menlo,Monaco,Consolas,monospace;
-  font-size:11px}
-.insight-card .val{margin-top:3px;color:var(--qs-encre-2)}
-.insight-card .meta{margin-top:4px;font-size:10px;color:var(--qs-discret);
+  font-size:10.5px;padding-right:18px}
+.insight-card .val{margin-top:2px;color:var(--qs-encre-2);line-height:1.35}
+.insight-card .meta{margin-top:3px;font-size:10px;color:var(--qs-discret);
   display:flex;gap:8px;align-items:center}
-.insight-card button.del{position:absolute;top:6px;right:8px;background:transparent;border:0;
+.insight-card button.del{position:absolute;top:4px;right:6px;background:transparent;border:0;
   font-size:14px;cursor:pointer;opacity:.4;color:var(--qs-encre-2);line-height:1}
 .insight-card button.del:hover{opacity:1;color:#c00}
-.memory-empty{font-size:12px;color:var(--qs-discret);text-align:center;padding:20px 10px}
-.mem-md-section{background:#fff;border:1px solid var(--qs-trait);border-radius:4px;
-  margin-bottom:8px;overflow:hidden}
+.memory-empty{font-size:11.5px;color:var(--qs-discret);text-align:center;padding:14px 8px}
+.mem-md-section{background:#fff;border:1px solid var(--qs-trait);border-radius:3px;
+  margin-bottom:6px;overflow:hidden}
 .mem-md-section.empty{background:var(--qs-surface-2)}
-.mem-md-head{padding:6px 8px;background:var(--qs-accent-pale);display:flex;
+.mem-md-head{padding:5px 8px;background:var(--qs-accent-pale);display:flex;
   justify-content:space-between;align-items:center;border-bottom:1px solid var(--qs-trait);
-  cursor:pointer;font-size:11.5px;font-weight:600;color:var(--qs-accent)}
+  cursor:pointer;font-size:11px;font-weight:600;color:var(--qs-accent)}
 .mem-md-body.collapsed{display:none}
-.mem-md-hint{font-size:10px;color:var(--qs-discret);padding:5px 8px;font-style:italic;
+.mem-md-hint{font-size:10px;color:var(--qs-discret);padding:4px 8px;font-style:italic;
   background:#fafafe;border-bottom:1px solid var(--qs-surface-2)}
-.mem-md-textarea{width:100%;border:none;padding:6px 8px;font-size:11.5px;
-  font-family:inherit;line-height:1.45;resize:vertical;min-height:40px;max-height:180px;
+.mem-md-textarea{width:100%;border:none;padding:5px 8px;font-size:11.5px;
+  font-family:inherit;line-height:1.4;resize:vertical;min-height:36px;max-height:140px;
   color:var(--qs-encre-2);background:#fff;box-sizing:border-box}
 .mem-md-textarea:focus{outline:none;background:#fffce8}
-.mem-md-actions{padding:4px 8px;background:var(--qs-surface-2);border-top:1px solid var(--qs-trait);
+.mem-md-actions{padding:3px 8px;background:var(--qs-surface-2);border-top:1px solid var(--qs-trait);
   display:none;align-items:center;justify-content:space-between;font-size:10px}
 .mem-md-actions.dirty{display:flex}
 .mem-md-actions .save-btn{background:var(--qs-accent);color:#fff;border:none;
   padding:2px 8px;border-radius:2px;cursor:pointer;font-size:10px;font-family:inherit}
 .mem-insights-label{font-size:10px;color:var(--qs-discret);text-transform:uppercase;
-  letter-spacing:.4px;font-weight:700;margin:10px 0 6px}
+  letter-spacing:.4px;font-weight:700;margin:8px 0 4px}
 .chat-toast{position:fixed;bottom:72px;left:50%;transform:translateX(-50%);
   background:var(--qs-encre);color:#fff;padding:8px 14px;border-radius:4px;
   font-size:12px;z-index:300;opacity:0;pointer-events:none;transition:opacity .2s}
@@ -678,18 +678,17 @@ body.embed .msg .bubble pre{max-width:100%}
     });
     </script>
 
-    <!-- Mémoire drawer : liste des insights + lien vers édition complète -->
+    <!-- Mémoire drawer : sections + faits auto-détectés -->
     <aside id="memory-drawer" class="memory-drawer" aria-hidden="true">
       <header>
-        <span><span class="ic-livre ic--sm" aria-hidden="true"></span> Mémoire agentique</span>
+        <span><span class="ic-livre ic--sm" aria-hidden="true"></span> Mémoire</span>
         <button class="close" onclick="toggleMemoryDrawer(false)" aria-label="Fermer"><span class="ic-fermer ic--sm" aria-hidden="true"></span></button>
       </header>
       <div class="body" id="memory-body">
         <div class="memory-empty">Chargement…</div>
       </div>
       <footer>
-        Ces sections sont lues par l'agent à chaque message. Les faits auto-détectés
-        peuvent être recopiés dans une section ou supprimés.
+        Lu à chaque message. Les faits auto-détectés peuvent être repris ou oubliés.
       </footer>
     </aside>
 
@@ -1256,18 +1255,17 @@ async function loadMemoryPanel() {
         </div>
       </div>`;
     }).join('');
-    html += `<div class="mem-insights-label">Faits auto-détectés (${Array.isArray(insights) ? insights.length : 0})</div>`;
+    html += `<div class="mem-insights-label">Faits détectés (${Array.isArray(insights) ? insights.length : 0})</div>`;
     if (!Array.isArray(insights) || !insights.length) {
-      html += '<div class="memory-empty">Rien pour l\'instant — l\'agent propose des faits via &lt;remember&gt;.</div>';
+      html += '<div class="memory-empty">Aucun fait pour l\'instant.</div>';
     } else {
       html += insights.map(ins => {
-        const conf = Math.round((ins.confidence || 0.7) * 100);
-        const src = ins.source === 'explicit' ? '✓ user' : '~ LLM';
+        const src = ins.source === 'explicit' ? 'validé' : 'proposé';
         return `<div class="insight-card" data-id="${ins.id}">
           <button type="button" class="del" onclick="deleteInsight(${ins.id})" title="Oublier">×</button>
           <div class="key">${escapeHtml(ins.key)}</div>
           <div class="val">${escapeHtml(ins.value)}</div>
-          <div class="meta"><span>${src}</span><span>conf. ${conf}%</span></div>
+          <div class="meta"><span>${src}</span></div>
         </div>`;
       }).join('');
     }

@@ -52,6 +52,14 @@ def test_drawer_charge_memoire_et_insights() -> None:
     assert "async function loadMemoryPanel()" in _CHAT
 
 
+def test_drawer_memoire_copy_compact() -> None:
+    """Titre produit court ; pas de jargon « agentique » ni conf. % LLM."""
+    assert "> Mémoire</span>" in _CHAT or " Mémoire</span>" in _CHAT
+    assert "Mémoire agentique" not in _CHAT
+    assert "conf. ${conf}" not in _CHAT
+    assert "Faits détectés" in _CHAT
+
+
 def test_bouton_details_techniques() -> None:
     assert 'id="btn-tech-details"' in _CHAT
     assert 'id="tech-show-reasoning"' in _CHAT
