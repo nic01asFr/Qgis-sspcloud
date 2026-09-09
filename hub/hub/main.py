@@ -1101,7 +1101,8 @@ def _inject_vnc_desk_embed(html: str) -> str:
 <style id="qgis-desk-embed">
   #top_bar, #sendCtrlAltDelButton { display: none !important; height: 0 !important; }
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #fff; }
-  #screen { flex: 1 1 auto; overflow: hidden; touch-action: none; }
+  #screen { flex: 1 1 auto; overflow: hidden; touch-action: none; background: #fff; }
+  #screen canvas { background: #fff !important; }
 </style>
 """
     if "</head>" in html:

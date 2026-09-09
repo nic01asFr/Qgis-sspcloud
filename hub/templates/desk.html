@@ -352,9 +352,14 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
    CSS dans vnc_lite.html pour masquer top_bar et CtrlAltDel. QGIS est en
    showFullScreen() côté pod — pas de crop CSS sur l'iframe. */
 .desk-canvas{grid-area:canvas;background:#fff;overflow:hidden;position:relative;
-  min-width:0;min-height:0}
+  min-width:0;min-height:0;container-type:size;container-name:desk-canvas;
+  display:grid;place-items:center}
+/* Boîte 16:9 maximale dans le canvas — évite bandes noires noVNC hors ratio Xvfb */
 .desk-canvas .iframe-fit{
-  width:100%;height:100%;
+  aspect-ratio:16/9;
+  width:min(100cqw, calc(100cqh * 16 / 9));
+  height:min(100cqh, calc(100cqw * 9 / 16));
+  max-width:100%;max-height:100%;
   position:relative;overflow:hidden;background:#fff}
 .desk-canvas .iframe-fit iframe{
   position:absolute;inset:0;width:100%;height:100%;
@@ -2220,7 +2225,17 @@ function updateLayout() {
   clampLayoutToViewport(vw);
 }
 updateLayout();
-window.addEventListener('resize', updateLayout);
+let _etaitTelephone = surTelephone();
+window.addEventListener('resize', () => {
+  const tel = surTelephone();
+  if (tel && !_etaitTelephone) {
+    desk.classList.add('no-chat');
+    desk.classList.remove('show-publi');
+    syncToggles();
+  }
+  _etaitTelephone = tel;
+  updateLayout();
+});
 (function observeCanvasResize() {
   const canvas = document.querySelector('.desk-canvas');
   if (!canvas || typeof ResizeObserver === 'undefined') return;
