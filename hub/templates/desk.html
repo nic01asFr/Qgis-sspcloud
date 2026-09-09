@@ -346,34 +346,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .handle.h1{display:none}
 
 /* ── Canvas (QGIS noVNC iframe) ──────────────────────────────── */
-/* Ancrage QGIS = haut-gauche. Le JS updateLayout() ajuste --chat-w au resize
-   pour que la zone canvas soit exactement en 16:9 ; l'iframe-fit fill alors
-   100% × 100% sans aucune bande vide. En-dessous du breakpoint (canvas trop
-   étroite pour ratio), classe `qgis-scroll` est ajoutée : canvas overflow-y,
-   iframe-fit garde le 16:9 strict via aspect-ratio → l'user scroll en bas
-   pour voir le reste. */
-.desk-canvas{grid-area:canvas;background:#fff;overflow:hidden;position:relative}
+/* scaleViewport=true (noVNC) adapte le framebuffer Xvfb 1920×1080 au conteneur.
+   updateLayout() vise un canvas 16:9 sur desktop pour éviter les bandes ;
+   sur mobile le scale comble l'écart d'aspect ratio. Le proxy hub injecte du
+   CSS dans vnc_lite.html pour masquer top_bar et CtrlAltDel. QGIS est en
+   showFullScreen() côté pod — pas de crop CSS sur l'iframe. */
+.desk-canvas{grid-area:canvas;background:#fff;overflow:hidden;position:relative;
+  min-width:0;min-height:0}
 .desk-canvas .iframe-fit{
   width:100%;height:100%;
   position:relative;overflow:hidden;background:#fff}
 .desk-canvas .iframe-fit iframe{
-  /* L'iframe est étendue de 8% width et 8% height (conserve ratio 16:9 du
-     Xvfb), positionnée asymétriquement pour masquer :
-       - top:-6% → 6% crop haut (WM titlebar "QgisRemoteMCP Project — QGIS")
-       - reste 2% crop bas (Fluxbox taskbar "Workspace 1 / horloge")
-       - left:-2% → 2% crop gauche (préserve Layers panel) + 6% crop droite
-     Valeurs trouvées par itération DevTools — masque les barres parasites
-     Xvfb sans toucher au menubar QGIS ni à la status bar. */
-  position:absolute;left:-2%;top:-6%;width:108%;height:108%;
+  position:absolute;inset:0;width:100%;height:100%;
   border:none;display:block;background:#fff}
-
-/* Mode "scroll" : viewport trop étroit pour que QGIS pleine hauteur 16:9 +
-   chat nominal 340 rentrent. QGIS garde sa pleine hauteur en 16:9 (donc
-   width = height × 16/9 > canvas zone width) et déborde à droite ; la zone
-   canvas scrolle horizontalement. Ancrage haut-gauche. */
-.desk.qgis-scroll .desk-canvas{overflow-x:auto;overflow-y:hidden}
-.desk.qgis-scroll .desk-canvas .iframe-fit{
-  height:100%;width:auto;aspect-ratio:16/9}
 .canvas-empty{height:100%;display:flex;align-items:center;justify-content:center;
   flex-direction:column;gap:12px;color:var(--qs-discret);text-align:center;padding:30px;background:#fff}
 .canvas-empty .ic{font-size:3rem;opacity:.4}
@@ -1932,19 +1917,20 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   <!-- ── CANVAS QGIS ────────────────────────────────────────────── -->
   <section class="desk-canvas">
     {% if novnc_url and session_ready %}
-    <!-- wrapper iframe-fit : forcé en 16:9 via container queries (cf. CSS)
-         pour matcher exactement le ratio du Xvfb 1920x1080. scale=true active
-         le scaleViewport de vnc_lite.html (qui lit `scale`, pas `resize`) → fit
-         complet sans zone vide ni scrollbar. -->
-    <div class="iframe-fit">
+    <!-- wrapper iframe-fit : updateLayout() vise canvas 16:9 desktop.
+         scale=true → scaleViewport noVNC (fit intégral, pas de scrollbar).
+         Le proxy hub masque le chrome noVNC (top_bar) dans vnc_lite.html. -->
+    <div class="iframe-fit" id="qgis-vnc-wrap">
       {# Phase 0ter Steps 4-6 : iframe noVNC same-origin via reverse proxy hub
          /workspace/vnc/* (au lieu de l'ingress public qgis-workspace-X-novnc.*
          qui n'a pas de middleware OIDC). Le cookie OIDC du hub est partage
          via Domain=.user.lab.sspcloud.fr -> middleware hub protege l'acces.
          Le param `path=workspace/vnc/websockify` indique a noVNC client ou
          se connecter pour le WebSocket (relatif a la racine du browser). #}
-      <iframe src="/workspace/vnc/vnc_lite.html?path=workspace/vnc/websockify&autoconnect=1&reconnect=1&scale=true&quality=6&show_dot=false&logging=warn"
-              allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>
+      <iframe id="qgis-vnc-frame"
+              src="/workspace/vnc/vnc_lite.html?path=workspace/vnc/websockify&scale=true&show_dot=false"
+              allowfullscreen referrerpolicy="no-referrer-when-downgrade"
+              title="Bureau QGIS"></iframe>
     </div>
     {% else %}
     <div class="canvas-empty" id="canvas-empty-wake">
@@ -2167,11 +2153,15 @@ if (surTelephone()) {
 }
 syncToggles();
 
-// Ajuste --chat-w au resize pour garder QGIS toujours en 16:9 ancré haut-gauche.
-// Iframe = 100% canvas zone, donc pas de débordement à compenser.
-//   A (large) : QGIS pleine hauteur, chat s'étend pour combler.
-//   B (étroit): chat figé 340 ; QGIS scroll horizontal sous canvas zone.
+// Ajuste --chat-w au resize pour garder le canvas en 16:9 sur desktop.
+// noVNC scaleViewport=true adapte le framebuffer au conteneur : QGIS reste
+// toujours visible en entier (letterboxing si aspect ratio différent).
+//   A (large) : canvas 16:9 pleine hauteur, chat s'étend pour combler.
+//   B (étroit): chat réduit (clampLayoutToViewport) ou nominal 340.
 const CHAT_NOMINAL = 340;
+const CHAT_MIN = 240;
+const CANVAS_MIN_W = 280;
+const CANVAS_ASPECT = 16 / 9;
 const HANDLE = 6;
 const HEADER_H = 48, STATUS_H = 32;
 
@@ -2188,32 +2178,54 @@ const HEADER_H = 48, STATUS_H = 32;
 // automatique se limite au defilement horizontal du canvas.
 let largeurChatChoisie = Number(stored.chat) || null;
 
+function _publiColWidth() {
+  if (isNarrow()) return 0;
+  return desk.classList.contains('show-publi')
+    ? parseInt(getComputedStyle(desk).getPropertyValue('--publi-w') || '260', 10) : 0;
+}
+
+function clampLayoutToViewport(vw) {
+  if (surTelephone() || desk.classList.contains('no-chat')) return;
+  const chatW = parseInt(getComputedStyle(desk).getPropertyValue('--chat-w') || String(CHAT_NOMINAL), 10);
+  const handleW = HANDLE;
+  if (vw - chatW - handleW < CANVAS_MIN_W) {
+    desk.style.setProperty('--chat-w', Math.max(CHAT_MIN, vw - CANVAS_MIN_W - handleW) + 'px');
+  }
+}
+
 function updateLayout() {
-  // Sous 1100 px les panneaux passent en superposition et la grille change :
-  // poser une largeur en pixels n'y a plus de sens. `isNarrow` etait declare
-  // et cite en commentaire, mais aucune fonction ne l'appelait.
+  const vw = window.innerWidth;
+  const vh = window.innerHeight - HEADER_H - STATUS_H;
+  const publiW = _publiColWidth();
+  const handleW = desk.classList.contains('no-chat') ? 0 : HANDLE;
+
   if (isNarrow()) {
-    desk.classList.remove('qgis-scroll');
+    clampLayoutToViewport(vw);
     return;
   }
 
-  const vw = window.innerWidth;
-  const vh = window.innerHeight - HEADER_H - STATUS_H;
-  const qgisWAtFullH = vh * 16 / 9;
-  const tientEnPleineHauteur =
-    qgisWAtFullH + (largeurChatChoisie || CHAT_NOMINAL) + HANDLE <= vw;
+  const qgisWAtFullH = vh * CANVAS_ASPECT;
+  const chatBudget = desk.classList.contains('no-chat') ? 0 : (largeurChatChoisie || CHAT_NOMINAL);
+  const tientEnPleineHauteur = qgisWAtFullH + publiW + chatBudget + handleW <= vw;
 
-  if (largeurChatChoisie) {
+  if (desk.classList.contains('no-chat')) {
+    /* canvas plein */
+  } else if (largeurChatChoisie) {
     desk.style.setProperty('--chat-w', largeurChatChoisie + 'px');
   } else if (tientEnPleineHauteur) {
-    desk.style.setProperty('--chat-w', (vw - qgisWAtFullH - HANDLE) + 'px');
+    desk.style.setProperty('--chat-w', Math.max(CHAT_MIN, vw - publiW - qgisWAtFullH - handleW) + 'px');
   } else {
     desk.style.setProperty('--chat-w', CHAT_NOMINAL + 'px');
   }
-  desk.classList.toggle('qgis-scroll', !tientEnPleineHauteur);
+  clampLayoutToViewport(vw);
 }
 updateLayout();
 window.addEventListener('resize', updateLayout);
+(function observeCanvasResize() {
+  const canvas = document.querySelector('.desk-canvas');
+  if (!canvas || typeof ResizeObserver === 'undefined') return;
+  new ResizeObserver(() => updateLayout()).observe(canvas);
+})();
 
 // Save du projet QGIS de l'étude active lors de la fermeture / navigation.
 // sendBeacon survit à la fermeture du tab et garantit que le .qgz est écrit
@@ -2311,7 +2323,7 @@ function togglePanel(side) {
   } else {
     desk.classList.toggle('no-chat');
   }
-  syncToggles(); saveLayout();
+  syncToggles(); saveLayout(); updateLayout();
 }
 
 document.getElementById('toggle-publi').addEventListener('click', () => togglePanel('publi'));
@@ -2354,6 +2366,7 @@ document.querySelectorAll('.handle').forEach(h => {
           getComputedStyle(desk).getPropertyValue('--chat-w'), 10) || null;
       }
       saveLayout();
+      updateLayout();
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);

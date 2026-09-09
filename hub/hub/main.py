@@ -1089,6 +1089,33 @@ def _workspace_internal_host() -> str:
     return f"qgis-workspace-{user}.{ns}.svc.cluster.local"
 
 
+def _inject_vnc_desk_embed(html: str) -> str:
+    """Masque le chrome noVNC (top_bar, CtrlAltDel) pour l'embed /desk.
+
+    vnc_lite.html affiche par défaut une barre bleue « Connected to… » et un
+    bouton CtrlAltDel. Le desk ne doit montrer que le canvas QGIS.
+    """
+    if "qgis-desk-embed" in html:
+        return html
+    embed_css = """
+<style id="qgis-desk-embed">
+  #top_bar, #sendCtrlAltDelButton { display: none !important; height: 0 !important; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #fff; }
+  #screen { flex: 1 1 auto; overflow: hidden; touch-action: none; }
+</style>
+"""
+    if "</head>" in html:
+        html = html.replace("</head>", embed_css + "</head>", 1)
+    old_scale = "rfb.scaleViewport = readQueryVariable('scale', false);"
+    new_scale = (
+        "rfb.scaleViewport = (readQueryVariable('scale', 'true') + '').toLowerCase() !== 'false';"
+        "\n        rfb.clipViewport = false;"
+    )
+    if old_scale in html:
+        html = html.replace(old_scale, new_scale, 1)
+    return html
+
+
 @app.api_route(
     "/workspace/vnc/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
@@ -1119,8 +1146,17 @@ async def proxy_workspace_vnc_http(path: str, request: Request):
             k: v for k, v in proxied.headers.items()
             if k.lower() not in ("content-encoding", "transfer-encoding", "connection")
         }
+        body = proxied.content
+        ctype = proxied.headers.get("content-type", "")
+        if path.rstrip("/").endswith("vnc_lite.html") and "text/html" in ctype:
+            try:
+                body = _inject_vnc_desk_embed(body.decode("utf-8")).encode("utf-8")
+                resp_headers["content-length"] = str(len(body))
+                resp_headers["cache-control"] = "no-store"
+            except Exception as exc:
+                log.warning("inject vnc_desk_embed failed: %s", exc)
         return Response(
-            content=proxied.content,
+            content=body,
             status_code=proxied.status_code,
             headers=resp_headers,
             media_type=proxied.headers.get("content-type"),
