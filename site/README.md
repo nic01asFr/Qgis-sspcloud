@@ -3,6 +3,7 @@
 Page publique déployée sur <https://nic01asfr.github.io/Qgis-sspcloud/>.
 
 - `dist/index.html` — HTML auto-contenu (charte `--qs-*` alignée sur `hub/hub/static/produit.css`)
+- `dist/captures/` — captures produit (workspace, desk, agent) + `apercu.jpg` à la racine pour Open Graph
 - Workflow : `.github/workflows/pages.yml` (artifact `site/dist` → GitHub Pages)
 
 Ne pas confondre avec `docs/` (documentation technique du dépôt).

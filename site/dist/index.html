@@ -8,6 +8,12 @@
   <meta property="og:title" content="QGIS · Service" />
   <meta property="og:description" content="Bureau QGIS + agent IA + études/projets sur SSPCloud. Open source." />
   <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://nic01asfr.github.io/Qgis-sspcloud/" />
+  <meta property="og:image" content="https://nic01asfr.github.io/Qgis-sspcloud/apercu.jpg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="QGIS · Service" />
+  <meta name="twitter:description" content="Bureau QGIS + agent IA + études/projets sur SSPCloud. Open source." />
+  <meta name="twitter:image" content="https://nic01asfr.github.io/Qgis-sspcloud/apercu.jpg" />
   <link rel="canonical" href="https://nic01asfr.github.io/Qgis-sspcloud/" />
   <base href="/Qgis-sspcloud/" />
   <meta name="theme-color" content="#0E2433" />
@@ -58,8 +64,8 @@
     ::selection { background: rgba(65, 112, 31, 0.22); }
 
     .wrap { width: min(920px, calc(100% - 2.5rem)); margin: 0 auto; }
+    .wrap-wide { width: min(1080px, calc(100% - 2.5rem)); margin: 0 auto; }
 
-    /* Topbar — même densité que desk / workspace (48px, fond blanc, trait) */
     .topbar {
       display: flex;
       align-items: center;
@@ -111,7 +117,6 @@
       box-shadow: 0 0 0 3px rgba(65, 112, 31, 0.18);
     }
 
-    /* Hero — bandeau nuit comme surfaces sombres produit */
     header.hero {
       background: var(--qs-nuit);
       color: var(--qs-nuit-encre);
@@ -161,7 +166,6 @@
     }
     .cta { display: flex; flex-wrap: wrap; gap: 0.65rem; }
 
-    /* Boutons — .qs-btn produit */
     .btn {
       display: inline-flex;
       align-items: center;
@@ -231,10 +235,10 @@
       border: none;
     }
     h3 {
-      font-size: 14px;
+      font-size: 1.05rem;
       font-weight: 650;
-      margin: 0 0 0.4rem;
-      color: var(--qs-accent);
+      margin: 0 0 0.45rem;
+      color: var(--qs-encre);
     }
     .accroche {
       font-size: 1.05rem;
@@ -242,6 +246,52 @@
       color: var(--qs-encre-2);
       margin: 0;
       line-height: 1.6;
+    }
+
+    /* Aperçu — cadre type Atlas */
+    .apercu { margin-top: 0.4rem; }
+    .cadre {
+      position: relative;
+      border: 1px solid var(--qs-trait);
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--qs-surface);
+      box-shadow: var(--qs-ombre);
+      aspect-ratio: 16 / 9;
+    }
+    .cadre img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: top center;
+    }
+    .mention {
+      font-size: 0.85rem;
+      color: var(--qs-discret);
+      margin: 0.7rem 0 0;
+    }
+
+    .chiffres {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+      padding: 1.4rem 0;
+      border-top: 1px solid var(--qs-trait);
+      border-bottom: 1px solid var(--qs-trait);
+      margin: 2rem 0 !important;
+    }
+    .chiffres b {
+      display: block;
+      font-size: 1.85rem;
+      line-height: 1;
+      color: var(--qs-accent);
+      font-weight: 650;
+      letter-spacing: -0.02em;
+    }
+    .chiffres span {
+      font-size: 0.88rem;
+      color: var(--qs-discret);
     }
 
     .points { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
@@ -259,21 +309,6 @@
       color: var(--qs-encre);
       font-weight: 650;
       font-size: 13.5px;
-    }
-
-    .feat-list { display: grid; gap: 10px; }
-    .feat-list article {
-      padding: 14px 15px;
-      background: var(--qs-surface);
-      border: 1px solid var(--qs-trait);
-      border-radius: 6px;
-      box-shadow: var(--qs-ombre);
-    }
-    .feat-list p { margin: 0; color: var(--qs-encre-2); font-size: 13.5px; }
-    .pour-qui {
-      margin-top: 0.65rem !important;
-      font-size: 12px !important;
-      color: var(--qs-discret) !important;
     }
 
     .sequence ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
@@ -296,22 +331,45 @@
     .sequence b { font-size: 13.5px; color: var(--qs-encre); }
     .sequence p { margin: 0.25rem 0 0; color: var(--qs-discret); font-size: 13px; }
 
-    .ctx-grid {
+    /* Contextes — texte + captures (structure Atlas) */
+    .contexte {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 10px;
+      gap: 1.4rem;
+      margin-bottom: 2.6rem;
+      grid-template-columns: minmax(0, 1fr);
     }
-    .ctx-grid article {
-      padding: 14px 15px;
-      background: var(--qs-surface);
+    @media (min-width: 52rem) {
+      .contexte {
+        grid-template-columns: 17rem minmax(0, 1fr);
+        gap: 2rem;
+        align-items: start;
+      }
+    }
+    .contexte p {
+      font-size: 0.94rem;
+      margin: 0 0 0.7rem;
+      color: var(--qs-encre-2);
+    }
+    .contexte .pourquoi {
+      font-size: 0.88rem;
+      padding-left: 0.85rem;
+      border-left: 2px solid var(--qs-accent);
+      margin-bottom: 0;
+      color: var(--qs-discret);
+    }
+    .contexte figure { margin: 0 0 1rem; }
+    .contexte .large img {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 10px;
       border: 1px solid var(--qs-trait);
-      border-radius: 6px;
+      box-shadow: var(--qs-ombre);
     }
-    .ctx-grid p { color: var(--qs-encre-2); margin: 0; font-size: 13.5px; }
-    .pourquoi {
-      color: var(--qs-discret) !important;
-      font-size: 12px !important;
-      margin-top: 0.6rem !important;
+    .contexte figcaption {
+      font-size: 0.85rem;
+      color: var(--qs-discret);
+      margin-top: 0.55rem;
     }
 
     .encart {
@@ -355,6 +413,10 @@
     }
     .journal p { margin: 0.2rem 0 0; color: var(--qs-discret); font-size: 13px; }
 
+    .reveler { opacity: 0; transform: translateY(12px);
+      transition: opacity .5s ease, transform .5s ease; }
+    .reveler.vu { opacity: 1; transform: none; }
+
     footer {
       margin: 3rem 0 0;
       padding: 20px 0 2rem;
@@ -377,6 +439,7 @@
     }
     @media (prefers-reduced-motion: reduce) {
       * { animation: none !important; transition: none !important; }
+      .reveler { opacity: 1; transform: none; }
     }
   </style>
 </head>
@@ -422,6 +485,28 @@
       </p>
     </section>
 
+    <section class="apercu" id="apercu" aria-label="Aperçu du produit">
+      <div class="cadre">
+        <img
+          src="captures/apercu.jpg"
+          alt="Bureau QGIS avec la carte Saint-Martin et le panneau agent à droite"
+          width="1600"
+          height="900"
+          fetchpriority="high"
+        />
+      </div>
+      <p class="mention">
+        Capture réelle du desk : QGIS Desktop (noVNC) et chat agent côte à côte —
+        étude « Saint-Martin — potentiel éolien ».
+      </p>
+    </section>
+
+    <section class="chiffres reveler" aria-label="En un coup d’œil">
+      <div><b>1</b><span>écran : carte + agent, pas un onglet à côté</span></div>
+      <div><b>0</b><span>client QGIS à installer sur ta machine</span></div>
+      <div><b>3</b><span>pièces : workspace, desk, agent</span></div>
+    </section>
+
     <section id="promesse">
       <h2><span class="sec-label">Promesse</span> Ce que ça change</h2>
       <ul class="points">
@@ -453,45 +538,93 @@
       </ul>
     </section>
 
-    <section class="features" id="fonctionnalites">
-      <h2><span class="sec-label">Capacités</span> Ce que tu peux faire</h2>
-      <div class="feat-list">
-        <article>
-          <h3>Workspace — Mon espace</h3>
+    <section class="contextes reveler" id="usages">
+      <h2><span class="sec-label">Usages</span> Espace, bureau, agent</h2>
+
+      <article class="contexte">
+        <div class="dit">
+          <h3>Mon espace — les études</h3>
           <p>
-            Vue d’accueil des études : ouvrir un projet, voir l’état du bureau,
-            revenir au cockpit. Même densité visuelle que le desk (navbar 48&nbsp;px,
-            accent vert, fond clair).
+            Point d’entrée après login : liste des études, CTA pour reprendre le bureau actif,
+            livrables et mémoire agent. Même densité que le desk (navbar 48&nbsp;px, accent vert).
           </p>
-          <p class="pour-qui">Point d’entrée après login.</p>
-        </article>
-        <article>
-          <h3>Desk — bureau de travail</h3>
+          <p class="pourquoi">
+            Tu ne cherches pas un dossier sur un disque distant : tu ouvres une étude et tu continues.
+          </p>
+        </div>
+        <div class="montre">
+          <figure class="large">
+            <img
+              src="captures/workspace.jpg"
+              alt="Workspace : études à gauche, continuer le bureau et livrables à droite"
+              width="1400"
+              height="900"
+              loading="lazy"
+            />
+            <figcaption>Workspace — études en cours, reprise du bureau, livrables publiés.</figcaption>
+          </figure>
+        </div>
+      </article>
+
+      <article class="contexte">
+        <div class="dit">
+          <h3>Desk — la carte au centre</h3>
           <p>
-            Canvas QGIS au centre, chat agent en panneau, ressources en calque.
-            Tu analyses, tu demandes à l’agent, tu gardes la main sur la carte.
+            Canvas QGIS au centre, ressources en calque, barre d’état avec outils récents.
+            Un vrai projet QGIS (couches, traitements) dans le navigateur.
           </p>
-          <p class="pour-qui">Le quotidien d’une étude géospatiale.</p>
-        </article>
-        <article>
-          <h3>Agent IA</h3>
+          <p class="pourquoi">
+            Ce n’est pas une carte web allégée : c’est le desktop SIG, démarré quand tu en as besoin.
+          </p>
+        </div>
+        <div class="montre">
+          <figure class="large">
+            <img
+              src="captures/desk.jpg"
+              alt="Desk plein cadre : QGIS avec couches et carte Saint-Martin"
+              width="1600"
+              height="900"
+              loading="lazy"
+            />
+            <figcaption>Desk — QGIS Desktop intégré, étude et projet dans la navbar.</figcaption>
+          </figure>
+        </div>
+      </article>
+
+      <article class="contexte">
+        <div class="dit">
+          <h3>Agent — copilote SIG</h3>
           <p>
-            Conversation SSE, tool-calling vers QGIS et catalogues (IGN, OSM,
-            Géorisques…), mémoire à plusieurs couches. Pas d’URL inventée :
-            les endpoints passent par un catalogue déclaré.
+            Conversation SSE, tool-calling vers QGIS et catalogues (IGN, OSM, Géorisques…).
+            Page agent seule ou panneau collé au desk : même moteur.
           </p>
-          <p class="pour-qui">Quand la tâche mérite un copilote SIG.</p>
-        </article>
-        <article>
-          <h3>Ressources &amp; livrables</h3>
-          <p>
-            Fichiers d’étude, éditeur block-based, publications (storymap, PDF,
-            GeoJSON). Le hub expose aussi un connecteur MCP pour Claude Desktop,
-            Cursor ou équivalent.
+          <p class="pourquoi">
+            Sinon tu jongles entre un chat générique et un SIG déconnecté.
           </p>
-          <p class="pour-qui">Pour sortir du canvas vers un livrable partageable.</p>
-        </article>
-      </div>
+        </div>
+        <div class="montre">
+          <figure class="large">
+            <img
+              src="captures/agent.jpg"
+              alt="Page agent : conversation structurée et suggestions d’analyses"
+              width="1400"
+              height="900"
+              loading="lazy"
+            />
+            <figcaption>Agent seul — suggestions, historique, lien vers le bureau.</figcaption>
+          </figure>
+          <figure class="large">
+            <img
+              src="captures/apercu.jpg"
+              alt="Même agent en panneau à droite de la carte QGIS"
+              width="1600"
+              height="900"
+              loading="lazy"
+            />
+            <figcaption>Même agent en panneau : la carte se décale, le fil reste lisible.</figcaption>
+          </figure>
+        </div>
+      </article>
     </section>
 
     <section class="sequence" id="parcours">
@@ -528,27 +661,6 @@
       </ol>
     </section>
 
-    <section class="contextes" id="usages">
-      <h2><span class="sec-label">Usages</span> Quand ça compte</h2>
-      <div class="ctx-grid">
-        <article>
-          <h3>Analyse sans poste SIG local</h3>
-          <p>Machine légère, réseau d’entreprise, ou travail depuis SSPCloud : le desktop est dans le lab.</p>
-          <p class="pourquoi">Sinon tu dépends d’une install QGIS et de licences machine.</p>
-        </article>
-        <article>
-          <h3>Étude guidée par l’agent</h3>
-          <p>Tu poses l’intention ; l’agent enchaîne tools et te laisse valider la carte et les sorties.</p>
-          <p class="pourquoi">Sinon tu jongles entre chat générique et SIG déconnecté.</p>
-        </article>
-        <article>
-          <h3>Livrable à partager vite</h3>
-          <p>Storymap ou dataset publié depuis le même espace que l’analyse — sans pipeline externe opaque.</p>
-          <p class="pourquoi">Sinon le « dernier kilomètre » se perd dans des exports manuels.</p>
-        </article>
-      </div>
-    </section>
-
     <aside class="encart" id="stack">
       <h2>Stack ouverte · SSPCloud</h2>
       <p>
@@ -570,7 +682,7 @@
       <h2>Journal</h2>
       <div>
         <b>vitrine</b>
-        <p>Première page produit publique — structure type Nic01asFr (promesse, parcours, journal), charte reprise de l’app.</p>
+        <p>Captures réelles (workspace, desk, agent) — structure type Atlas : aperçu, chiffres, contextes illustrés.</p>
       </div>
       <div>
         <b>style</b>
@@ -589,5 +701,22 @@
       <p>Même langage visuel que le desk et le workspace du service. Doc technique dans le dépôt.</p>
     </div>
   </footer>
+  <script>
+    (function () {
+      if (!('IntersectionObserver' in window)) {
+        document.querySelectorAll('.reveler').forEach(function (el) { el.classList.add('vu'); });
+        return;
+      }
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) {
+            e.target.classList.add('vu');
+            io.unobserve(e.target);
+          }
+        });
+      }, { threshold: 0.12 });
+      document.querySelectorAll('.reveler').forEach(function (el) { io.observe(el); });
+    })();
+  </script>
 </body>
 </html>
