@@ -339,40 +339,38 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .handle.h1{display:none}
 
 /* ── Canvas (QGIS noVNC iframe) ──────────────────────────────── */
-/* scaleViewport=true (noVNC) adapte le framebuffer au conteneur plein ecran.
-   Le proxy hub injecte du CSS dans vnc_lite.html pour masquer top_bar.
-   Chat ouvert (panel) : cadre en relief + trame de lignes croisées derrière
-   (plus de noir plat) — la trame est ancrée au conteneur pour que le
-   resize du chat donne une sensation de profondeur. */
+/* Chat ouvert : trame derrière + cadre UNIQUEMENT autour de QGIS.
+   Pas de fond noir sur le wrap (évite les bandes letterbox noires) :
+   le remote resizeSession remplit le cadre ; la trame reste visible
+   dans le padding autour. */
 .desk-canvas{grid-area:canvas;background:#fff;overflow:hidden;position:relative;
   min-width:0;min-height:0;display:flex;flex-direction:column;
   transition:padding .2s ease,background-color .2s ease}
 .desk-canvas .iframe-fit{
   flex:1;min-height:0;width:100%;height:100%;
-  position:relative;overflow:hidden;background:#fff;
+  position:relative;overflow:hidden;background:transparent;
   transition:box-shadow .2s ease,border-radius .2s ease}
 .desk-canvas .iframe-fit iframe{
   position:absolute;inset:0;width:100%;height:100%;
-  border:none;display:block;background:#fff}
-/* Relief quand le chat décale la carte */
+  border:none;display:block;background:transparent}
+/* Relief quand le chat décale la carte — cadre sur QGIS seulement */
 .desk[data-chat="panel"] .desk-canvas{
   padding:10px 10px 10px 12px;
-  background-color:#dfe3ea;
+  background-color:#e8ebf0;
   background-image:
-    linear-gradient(135deg,rgba(255,255,255,.55) 1px,transparent 1px),
-    linear-gradient(45deg,rgba(20,30,50,.07) 1px,transparent 1px),
-    linear-gradient(135deg,transparent 48%,rgba(0,0,145,.04) 49%,rgba(0,0,145,.04) 51%,transparent 52%),
-    linear-gradient(45deg,transparent 48%,rgba(0,0,0,.03) 49%,rgba(0,0,0,.03) 51%,transparent 52%);
+    linear-gradient(135deg,rgba(255,255,255,.65) 1px,transparent 1px),
+    linear-gradient(45deg,rgba(20,30,50,.06) 1px,transparent 1px),
+    linear-gradient(135deg,transparent 48%,rgba(0,0,145,.035) 49%,rgba(0,0,145,.035) 51%,transparent 52%),
+    linear-gradient(45deg,transparent 48%,rgba(0,0,0,.025) 49%,rgba(0,0,0,.025) 51%,transparent 52%);
   background-size:28px 28px,28px 28px,56px 56px,56px 56px;
   background-position:0 0,0 0,0 0,14px 14px}
 .desk[data-chat="panel"] .desk-canvas .iframe-fit{
   border-radius:8px;
+  background:#fff;
   box-shadow:
-    0 1px 0 rgba(255,255,255,.7) inset,
     0 0 0 1px rgba(15,23,42,.1),
     0 10px 28px rgba(15,23,42,.14),
-    0 2px 6px rgba(15,23,42,.08);
-  background:#0b1220}
+    0 2px 6px rgba(15,23,42,.08)}
 .canvas-empty{height:100%;display:flex;align-items:center;justify-content:center;
   flex-direction:column;gap:12px;color:var(--qs-discret);text-align:center;padding:30px;background:#fff}
 .canvas-empty .ic{font-size:3rem;opacity:.4}
@@ -2022,7 +2020,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
          Le param `path=workspace/vnc/websockify` indique a noVNC client ou
          se connecter pour le WebSocket (relatif a la racine du browser). #}
       <iframe id="qgis-vnc-frame"
-              src="/workspace/vnc/vnc_lite.html?path=workspace/vnc/websockify&scale=true&show_dot=false"
+              src="/workspace/vnc/vnc_lite.html?path=workspace/vnc/websockify&scale=true&resize=true&show_dot=false"
               allowfullscreen referrerpolicy="no-referrer-when-downgrade"
               title="Bureau QGIS"></iframe>
     </div>

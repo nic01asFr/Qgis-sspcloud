@@ -17,6 +17,7 @@ def test_inject_vnc_desk_embed_masque_top_bar():
     assert "qgis-desk-embed" in out
     assert "#top_bar" in out
     assert "clipViewport = false" in out
+    assert "resizeSession" in out
     assert "readQueryVariable('scale', false)" not in out
 
 

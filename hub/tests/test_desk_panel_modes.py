@@ -31,6 +31,9 @@ def test_ressources_ne_decalent_pas_la_carte() -> None:
     assert "var(--publi-w,240px) 1fr 6px" not in _DESK
     assert '[data-chat="panel"] .desk-canvas' in _DESK
     assert "background-size:28px 28px" in _DESK
+    # Pas de fond noir letterbox autour de QGIS
+    assert "background:#0b1220" not in _DESK
+    assert "resize=true" in _DESK
 
 
 def test_layout_v3_persiste() -> None:

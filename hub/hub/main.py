@@ -1107,10 +1107,13 @@ def _inject_vnc_desk_embed(html: str) -> str:
 """
     if "</head>" in html:
         html = html.replace("</head>", embed_css + "</head>", 1)
+    # Remplit le cadre sans bandes : resizeSession adapte le bureau distant
+    # au conteneur ; scaleViewport garde un fallback fluide pendant le resize.
     old_scale = "rfb.scaleViewport = readQueryVariable('scale', false);"
     new_scale = (
         "rfb.scaleViewport = (readQueryVariable('scale', 'true') + '').toLowerCase() !== 'false';"
         "\n        rfb.clipViewport = false;"
+        "\n        rfb.resizeSession = (readQueryVariable('resize', 'true') + '').toLowerCase() !== 'false';"
     )
     if old_scale in html:
         html = html.replace(old_scale, new_scale, 1)
