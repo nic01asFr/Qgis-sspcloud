@@ -109,6 +109,10 @@ body.embed .chat-toast{bottom:16px}
   color:var(--qs-encre-2)}
 .msg.user .bubble{background:var(--qs-accent);color:#fff;border-color:transparent;
   max-width:560px}
+.msg .bubble a{color:var(--qs-accent);text-decoration:underline;text-underline-offset:2px;
+  word-break:break-word}
+.msg.user .bubble a{color:#fff;text-decoration:underline}
+.msg .bubble .bubble-err{color:#b34000;font-weight:500}
 .msg .bubble :last-child{margin-bottom:0}
 /* Placeholder "Analyse en cours…" affiché dans la bulle assistant entre
    l'envoi du message user et le 1er chunk SSE — évite le rectangle blanc
@@ -131,13 +135,12 @@ body.embed .chat-toast{bottom:16px}
   margin:2px 0 10px;border-left:2px solid var(--qs-trait);
   font-size:11.5px;line-height:1.4}
 /* Tool calls = badges feedback visibles. Format utilisé par l'agent :
-   "> **`tool_name`** — `arg=val`". On garde un feedback visuel CLAIR
-   (l'user doit voir l'agent travailler) tout en restant ordonné. Accent
-   bleu DSFR sur la border + icone de reglages ajoutee via CSS pour identifier
-   immédiatement les actions. */
+   "> **`tool_name`** — `arg=val`". Feedback clair (l'user voit l'agent
+   travailler) + icône réglages pour identifier les actions. Accent produit
+   (--qs-accent vert), pas Marianne/DSFR. */
 .msg .bubble blockquote{
   position:relative;
-  border-left:3px solid var(--qs-trait);
+  border-left:3px solid var(--qs-accent);
   background:var(--qs-accent-pale);
   padding:5px 10px 5px 30px;margin:10px 0 2px;
   font-size:12px;line-height:1.5;
@@ -172,8 +175,8 @@ body.embed .chat-toast{bottom:16px}
   animation:tool-pulse 1.6s ease-in-out infinite;
 }
 @keyframes tool-pulse{
-  0%,100%{box-shadow:0 0 0 0 rgba(0,0,145,.15)}
-  50%{box-shadow:0 0 0 4px rgba(0,0,145,.05)}
+  0%,100%{box-shadow:0 0 0 0 rgba(65,112,31,.22)}
+  50%{box-shadow:0 0 0 4px rgba(65,112,31,.08)}
 }
 /* Quand un <pre> suit (= résultat arrivé), on désactive le pulse en le
    ciblant via :has() (supporté Chrome 105+ / Safari 15.4+ / Firefox 121+). */
@@ -251,7 +254,7 @@ body.chat-hide-tools .msg .bubble details.tool-result{display:none !important}
    La conversation reste fluide texte uniquement. */
 body.embed .msg .bubble img{display:none}
 body.embed .msg .bubble details.embed-screenshot{display:none !important}
-.chat-input{padding:10px 16px 0;background:#fff;border-top:1px solid var(--qs-trait);
+.chat-input{padding:10px 16px 12px;background:#fff;border-top:1px solid var(--qs-trait);
   flex-shrink:0}
 .status-bar{font-size:11.5px;color:var(--qs-accent);margin-bottom:6px;
   display:none;align-items:center;gap:6px}
@@ -347,6 +350,20 @@ body.embed .chat-toolbar{padding:6px 8px;font-size:11.5px;gap:6px;flex-wrap:nowr
 body.embed .chat-toolbar .tool-btn-label{display:none}
 body.embed .chat-toolbar .tool-btn{padding:4px 6px;min-width:28px}
 body.embed .chat-input .hint{display:none}
+body.embed .chat-input{padding:8px 10px 10px}
+body.embed .chat-messages{padding:10px 10px;gap:10px}
+body.embed .msg{gap:8px}
+body.embed .msg .avatar{width:24px;height:24px;font-size:12px}
+body.embed .msg .bubble{padding:8px 10px;font-size:13px;line-height:1.45;
+  border-radius:5px}
+body.embed .welcome{padding:10px 12px}
+body.embed .welcome h3{font-size:13px;margin-bottom:4px}
+body.embed .welcome p{margin:0 0 4px;font-size:12.5px}
+body.embed .welcome-example{font-size:12px;padding:3px 6px}
+body.embed .chat-form textarea{min-height:40px;font-size:13px;padding:7px 36px 7px 10px}
+body.embed .chat-form .send-btn,
+body.embed .chat-form .stop-btn{height:40px;font-size:12.5px}
+body.embed .status-bar{font-size:11px;margin-bottom:4px}
 /* Cap dur sur la largeur des bulles en embed pour éviter qu'une longue
    URL/tool result ne pousse l'iframe en horizontal scroll. */
 body.embed .msg .bubble{max-width:100%;overflow-wrap:anywhere}
@@ -587,6 +604,7 @@ body.embed .msg .bubble pre{max-width:100%}
         t.id = 'chat-toast';
         t.className = 'chat-toast';
         t.setAttribute('role', 'status');
+        t.setAttribute('aria-live', 'polite');
         document.body.appendChild(t);
       }
       t.textContent = msg;
@@ -696,7 +714,7 @@ body.embed .msg .bubble pre{max-width:100%}
       <div class="msg">
         <div class="avatar"><span class="ic-carte ic--md" aria-hidden="true"></span></div>
         <div class="bubble welcome">
-          <h3>QGIS Agent prêt</h3>
+          <h3>Assistant prêt</h3>
           <p>Décris ton analyse géospatiale. J'ai accès aux outils QGIS, aux données IGN,
              Géorisques, OSM et DVF.</p>
           <ul class="welcome-examples">
@@ -755,7 +773,7 @@ body.embed .msg .bubble pre{max-width:100%}
         <input type="hidden" name="profile_id" id="profile-id" value="{{ profile_id }}">
         <div class="input-wrap">
           <textarea id="message-input" name="message" rows="2"
-            placeholder="écrit ton message ici…"></textarea>
+            placeholder="Écris ton message…"></textarea>
           <button type="button" id="mic-btn" class="mic-btn" title="Dicter (cliquer pour démarrer/arrêter)">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
@@ -764,7 +782,7 @@ body.embed .msg .bubble pre{max-width:100%}
         </div>
         <button type="submit" id="send-btn" class="send-btn">Envoyer ↑</button>
         <button type="button" id="stop-btn" class="stop-btn" style="display:none"
-                title="Interrompre l'agent à la fin du tool en cours">⏸ Arrêter</button>
+                title="Interrompre l'agent à la fin du tool en cours">Arrêter</button>
       </form>
       <p class="hint">Entrée pour envoyer · Maj+Entrée pour nouvelle ligne</p>
     </div>
@@ -876,7 +894,7 @@ if (typeof marked !== 'undefined' && marked.use) {
     if (msgInput) {
       msgInput.placeholder = visible
         ? "Configure d'abord ta clé LLM SSPCloud (bandeau ci-dessus)"
-        : "écrit ton message ici…";
+        : "Écris ton message…";
     }
   }
 
@@ -1560,7 +1578,7 @@ function appendMessage(role, content) {
   return div;
 }
 
-// AbortController du fetch SSE en cours — partagé avec le bouton ⏸ Arrêter
+// AbortController du fetch SSE en cours — partagé avec le bouton Arrêter
 // pour permettre une coupure propre côté client (la coupure côté serveur est
 // signalée via POST /chat/{sid}/stop qui pose un asyncio.Event).
 let _currentAbort = null;
@@ -1569,7 +1587,7 @@ document.getElementById('stop-btn').addEventListener('click', async () => {
   const sid = document.getElementById('session-id').value;
   const btn = document.getElementById('stop-btn');
   btn.disabled = true;
-  btn.textContent = '⏸ Arrêt…';
+  btn.textContent = 'Arrêt…';
   try {
     // Signal côté serveur : la boucle agent break après le tool en cours
     await fetch(`/chat/${encodeURIComponent(sid)}/stop`, {method: 'POST'});
@@ -1597,7 +1615,7 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
   document.getElementById('send-btn').style.display = 'none';
   document.getElementById('stop-btn').style.display = '';
   document.getElementById('stop-btn').disabled = false;
-  document.getElementById('stop-btn').textContent = '⏸ Arrêter';
+  document.getElementById('stop-btn').textContent = 'Arrêter';
   document.getElementById('status-bar').classList.add('visible');
   document.getElementById('status-text').textContent = 'Analyse en cours…';
 
@@ -1633,7 +1651,10 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
           if (!line.startsWith('data: ')) continue;
           try {
             const data = JSON.parse(line.slice(6));
-            if (data.error) { responseDiv.innerHTML = `<span style="color:#ce0500">Erreur : ${data.error}</span>`; break; }
+            if (data.error) {
+              responseDiv.innerHTML = `<span class="bubble-err">Erreur : ${escapeHtml(data.error)}</span>`;
+              break;
+            }
             if (data.done) {
               // Signaler au desk parent que le turn agent est termine.
               // Le desk peut refetcher /desk/catalog pour mettre a jour
@@ -1701,10 +1722,10 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
       // Coupure user via stop-btn — message déjà affiché par le serveur si
       // SSE a délivré son dernier chunk. Sinon on l'écrit ici.
       if (responseDiv && !responseDiv.textContent.includes('Arrêté')) {
-        responseDiv.innerHTML += '<p style="color:#b34000">Arrêté par l\'utilisateur.</p>';
+        responseDiv.innerHTML += '<p class="bubble-err">Arrêté par l\'utilisateur.</p>';
       }
     } else if (responseDiv) {
-      responseDiv.innerHTML = `<span style="color:#ce0500">Erreur réseau : ${err.message}</span>`;
+      responseDiv.innerHTML = `<span class="bubble-err">Erreur réseau : ${escapeHtml(err.message)}</span>`;
     }
   } finally {
     document.getElementById('send-btn').disabled = false;

@@ -69,3 +69,43 @@ def test_bouton_details_techniques() -> None:
     assert "function applyTechPrefs()" in _CHAT
     assert "data.reasoning" in _CHAT
     assert 'details class="agent-reasoning"' in _CHAT
+
+
+def test_embed_densite_conversation() -> None:
+    """Colonne chat desk étroite : padding/gap réduits, pas de chrome large."""
+    assert "body.embed .chat-messages{padding:10px 10px;gap:10px}" in _CHAT
+    assert "body.embed .msg .bubble{padding:8px 10px" in _CHAT
+    assert "body.embed .chat-input{padding:8px 10px 10px}" in _CHAT
+
+
+def test_copy_fr_composer_et_welcome() -> None:
+    assert 'placeholder="Écris ton message…"' in _CHAT
+    assert "écrit ton message ici" not in _CHAT
+    assert ">Assistant prêt</h3>" in _CHAT
+    assert "QGIS Agent prêt" not in _CHAT
+
+
+def test_erreurs_classe_bubble_err() -> None:
+    assert "bubble-err" in _CHAT
+    assert 'class="bubble-err"' in _CHAT or "class=\\\"bubble-err\\\"" in _CHAT
+    # Plus d'inline Marianne/rouge DSFR pour les erreurs streaming
+    assert 'style="color:#ce0500"' not in _CHAT
+
+
+def test_tool_pulse_accent_produit() -> None:
+    """Pulse outils = vert produit, pas bleu Marianne."""
+    assert "rgba(65,112,31" in _CHAT
+    assert "rgba(0,0,145" not in _CHAT
+    assert "border-left:3px solid var(--qs-accent)" in _CHAT
+
+
+def test_toast_aria_live() -> None:
+    assert "aria-live" in _CHAT
+    chunk = _CHAT.split("function showChatToast")[1].split("function startNewConversation")[0]
+    assert "aria-live" in chunk
+
+
+def test_stop_btn_sans_emoji() -> None:
+    assert 'id="stop-btn"' in _CHAT
+    assert ">Arrêter</button>" in _CHAT
+    assert "⏸" not in _CHAT
