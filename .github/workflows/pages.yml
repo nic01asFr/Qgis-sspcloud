@@ -1,0 +1,50 @@
+name: Deploy product site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Smoke test vitrine
+        run: |
+          set -euo pipefail
+          f=site/dist/index.html
+          test -f "$f"
+          grep -q "QGIS · Service" "$f"
+          grep -q 'id="promesse"' "$f"
+          grep -q 'id="parcours"' "$f"
+          grep -q 'id="journal"' "$f"
+          grep -q 'id="stack"' "$f"
+          grep -q -- "--qs-accent" "$f"
+          grep -q "nic01asFr/Qgis-sspcloud" "$f"
+          echo "smoke OK"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
