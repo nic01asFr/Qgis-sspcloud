@@ -2215,6 +2215,11 @@ function _loadLayoutState() {
     // Migration : ressources ne sont plus une colonne — panel → deck.
     if (rawV3.resources.mode === 'panel') rawV3.resources.mode = 'deck';
     if (rawV3.resources.lastOpenMode === 'panel') rawV3.resources.lastOpenMode = 'deck';
+    // Desktop : le chat ouvert doit décaler la carte (panel), pas overlay.
+    if (!surTelephone() && !isNarrow()) {
+      if (rawV3.chat.mode === 'deck') rawV3.chat.mode = 'panel';
+      if (rawV3.chat.lastOpenMode === 'deck') rawV3.chat.lastOpenMode = 'panel';
+    }
     return rawV3;
   }
 
