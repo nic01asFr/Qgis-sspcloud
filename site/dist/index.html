@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QGIS · Service — bureau QGIS, agent IA et études sur SSPCloud</title>
+  <meta name="description" content="QGIS Service sur SSPCloud : un bureau QGIS dans le navigateur, un agent IA qui agit sur le projet, des études et des livrables — installable en quelques minutes." />
+  <meta property="og:title" content="QGIS · Service" />
+  <meta property="og:description" content="Bureau QGIS + agent IA + études/projets sur SSPCloud. Open source." />
+  <meta property="og:type" content="website" />
+  <link rel="canonical" href="https://nic01asfr.github.io/Qgis-sspcloud/" />
+  <base href="/Qgis-sspcloud/" />
+  <meta name="theme-color" content="#0E2433" />
+  <style>
+    /* Jetons alignés sur hub/hub/static/produit.css (--qs-*) */
+    :root {
+      --qs-encre: #13212C;
+      --qs-encre-2: #3B4C58;
+      --qs-discret: #697987;
+      --qs-fond: #F4F6F7;
+      --qs-surface: #FFFFFF;
+      --qs-surface-2: #E9EDEF;
+      --qs-trait: #D1D9DE;
+      --qs-trait-2: #E4E9EC;
+      --qs-nuit: #0E2433;
+      --qs-nuit-2: #16324A;
+      --qs-nuit-encre: #FFFFFF;
+      --qs-nuit-discret: #9FB3C0;
+      --qs-marque: #589632;
+      --qs-accent: #41701F;
+      --qs-accent-fonce: #33591A;
+      --qs-accent-clair: #6FAE45;
+      --qs-accent-pale: #EDF4E6;
+      --qs-accent-encre: #FFFFFF;
+      --qs-orange: #EE7913;
+      --qs-succes: #41701F;
+      --qs-police: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --qs-police-mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, "Liberation Mono", monospace;
+      --qs-rayon: 4px;
+      --qs-ombre: 0 1px 2px rgba(20, 32, 43, .06), 0 6px 20px -14px rgba(20, 32, 43, .30);
+      --qs-w: 8px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--qs-police);
+      font-size: 15px;
+      line-height: 1.55;
+      color: var(--qs-encre);
+      background: var(--qs-fond);
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+    }
+    a { color: var(--qs-accent); text-decoration: none; text-underline-offset: 2px; }
+    a:hover { color: var(--qs-accent-fonce); text-decoration: underline; }
+    ::selection { background: rgba(65, 112, 31, 0.22); }
+
+    .wrap { width: min(920px, calc(100% - 2.5rem)); margin: 0 auto; }
+
+    /* Topbar — même densité que desk / workspace (48px, fond blanc, trait) */
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      min-height: 48px;
+      padding: 8px 20px;
+      background: var(--qs-surface);
+      border-bottom: 1px solid var(--qs-trait);
+    }
+    .mark {
+      width: 22px;
+      height: 22px;
+      border-radius: var(--qs-rayon);
+      background: var(--qs-marque);
+      color: var(--qs-accent-encre);
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: -0.02em;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .crumb {
+      font-family: var(--qs-police-mono);
+      font-size: 12px;
+      color: var(--qs-discret);
+    }
+    .crumb b {
+      color: var(--qs-accent);
+      font-weight: 700;
+      font-family: var(--qs-police);
+      letter-spacing: 0.4px;
+    }
+    .crumb .sep { color: var(--qs-trait); margin: 0 0.35em; }
+    .status {
+      margin-left: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12.5px;
+      color: var(--qs-discret);
+    }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--qs-succes);
+      box-shadow: 0 0 0 3px rgba(65, 112, 31, 0.18);
+    }
+
+    /* Hero — bandeau nuit comme surfaces sombres produit */
+    header.hero {
+      background: var(--qs-nuit);
+      color: var(--qs-nuit-encre);
+      padding: clamp(2.6rem, 7vw, 4.2rem) 0 2.2rem;
+    }
+    .eyebrow {
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 1.4px;
+      color: var(--qs-nuit-discret);
+      text-transform: uppercase;
+      margin: 0 0 12px;
+    }
+    .brand {
+      font-weight: 700;
+      font-size: clamp(2.1rem, 6.5vw, 3.2rem);
+      letter-spacing: -0.03em;
+      line-height: 1.08;
+      margin: 0 0 0.85rem;
+    }
+    .brand .op { color: var(--qs-accent-clair); }
+    .brand .sub {
+      font-weight: 500;
+      color: var(--qs-nuit-discret);
+      font-size: 0.42em;
+      letter-spacing: 0.04em;
+      display: block;
+      margin-top: 0.35rem;
+    }
+    .pitch {
+      font-size: clamp(1rem, 2.2vw, 1.12rem);
+      max-width: 40rem;
+      color: var(--qs-nuit-discret);
+      margin: 0 0 1.35rem;
+      line-height: 1.6;
+    }
+    .tags { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-bottom: 1.5rem; }
+    .tag {
+      font-family: var(--qs-police-mono);
+      font-size: 10.5px;
+      font-weight: 500;
+      padding: 3px 8px;
+      border-radius: var(--qs-rayon);
+      background: var(--qs-nuit-2);
+      color: var(--qs-nuit-discret);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .cta { display: flex; flex-wrap: wrap; gap: 0.65rem; }
+
+    /* Boutons — .qs-btn produit */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border: 1px solid var(--qs-accent);
+      border-radius: var(--qs-rayon);
+      font: inherit;
+      font-size: 0.9375rem;
+      font-weight: 500;
+      line-height: 1.35;
+      text-decoration: none;
+      cursor: pointer;
+      transition: background-color .12s ease, border-color .12s ease, color .12s ease;
+    }
+    .btn.primary {
+      background: var(--qs-marque);
+      border-color: var(--qs-marque);
+      color: var(--qs-accent-encre);
+    }
+    .btn.primary:hover {
+      background: var(--qs-accent-clair);
+      border-color: var(--qs-accent-clair);
+      color: var(--qs-nuit);
+      text-decoration: none;
+    }
+    .btn.ghost {
+      background: transparent;
+      color: var(--qs-nuit-encre);
+      border-color: rgba(255, 255, 255, 0.28);
+    }
+    .btn.ghost:hover {
+      background: rgba(255, 255, 255, 0.09);
+      border-color: var(--qs-accent-clair);
+      color: var(--qs-nuit-encre);
+      text-decoration: none;
+    }
+    .btn.ghost.ink {
+      color: var(--qs-accent);
+      border-color: var(--qs-trait);
+    }
+    .btn.ghost.ink:hover {
+      background: var(--qs-accent-pale);
+      border-color: var(--qs-accent-fonce);
+      color: var(--qs-accent-fonce);
+    }
+
+    main section, main aside { margin: 2.4rem 0; }
+    h2 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin: 0 0 1rem;
+      color: var(--qs-accent);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding-bottom: 6px;
+      border-bottom: 2px solid var(--qs-accent);
+    }
+    h2 .sec-label {
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 1.3px;
+      color: var(--qs-discret);
+      text-transform: uppercase;
+      border: none;
+    }
+    h3 {
+      font-size: 14px;
+      font-weight: 650;
+      margin: 0 0 0.4rem;
+      color: var(--qs-accent);
+    }
+    .accroche {
+      font-size: 1.05rem;
+      max-width: 42rem;
+      color: var(--qs-encre-2);
+      margin: 0;
+      line-height: 1.6;
+    }
+
+    .points { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+    .points li {
+      padding: 12px 13px;
+      background: var(--qs-surface);
+      border: 1px solid var(--qs-trait);
+      border-radius: 6px;
+      color: var(--qs-encre-2);
+      box-shadow: var(--qs-ombre);
+    }
+    .points b {
+      display: block;
+      margin-bottom: 0.2rem;
+      color: var(--qs-encre);
+      font-weight: 650;
+      font-size: 13.5px;
+    }
+
+    .feat-list { display: grid; gap: 10px; }
+    .feat-list article {
+      padding: 14px 15px;
+      background: var(--qs-surface);
+      border: 1px solid var(--qs-trait);
+      border-radius: 6px;
+      box-shadow: var(--qs-ombre);
+    }
+    .feat-list p { margin: 0; color: var(--qs-encre-2); font-size: 13.5px; }
+    .pour-qui {
+      margin-top: 0.65rem !important;
+      font-size: 12px !important;
+      color: var(--qs-discret) !important;
+    }
+
+    .sequence ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+    .sequence li {
+      display: grid;
+      grid-template-columns: 2rem 1fr;
+      gap: 0.85rem;
+      align-items: start;
+      padding: 12px 13px;
+      background: var(--qs-surface);
+      border: 1px solid var(--qs-trait);
+      border-radius: 6px;
+    }
+    .sequence .n {
+      font-family: var(--qs-police-mono);
+      font-weight: 600;
+      color: var(--qs-accent);
+      font-size: 14px;
+    }
+    .sequence b { font-size: 13.5px; color: var(--qs-encre); }
+    .sequence p { margin: 0.25rem 0 0; color: var(--qs-discret); font-size: 13px; }
+
+    .ctx-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 10px;
+    }
+    .ctx-grid article {
+      padding: 14px 15px;
+      background: var(--qs-surface);
+      border: 1px solid var(--qs-trait);
+      border-radius: 6px;
+    }
+    .ctx-grid p { color: var(--qs-encre-2); margin: 0; font-size: 13.5px; }
+    .pourquoi {
+      color: var(--qs-discret) !important;
+      font-size: 12px !important;
+      margin-top: 0.6rem !important;
+    }
+
+    .encart {
+      padding: 16px 18px;
+      background: var(--qs-surface);
+      border: 1px solid var(--qs-trait);
+      border-radius: 6px;
+      border-left: 3px solid var(--qs-accent);
+      box-shadow: var(--qs-ombre);
+    }
+    .encart h2 {
+      margin-bottom: 0.5rem;
+      border-bottom: none;
+      padding-bottom: 0;
+      font-size: 1rem;
+    }
+    .encart p { color: var(--qs-encre-2); margin: 0 0 0.85rem; }
+    .stack-list {
+      margin: 0 0 0.85rem;
+      padding-left: 1.2rem;
+      color: var(--qs-encre-2);
+      font-size: 13.5px;
+    }
+    .stack-list li { margin-bottom: 0.35rem; }
+    .stack-list code {
+      font-family: var(--qs-police-mono);
+      font-size: 0.85em;
+      background: var(--qs-surface-2);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    .journal { border-left: 2px solid var(--qs-trait); padding-left: 1.1rem; }
+    .journal > h2 { border-bottom: none; padding-bottom: 0; margin-bottom: 1rem; }
+    .journal div { margin-bottom: 1rem; }
+    .journal b {
+      font-family: var(--qs-police-mono);
+      font-size: 11.5px;
+      color: var(--qs-accent);
+      font-weight: 600;
+    }
+    .journal p { margin: 0.2rem 0 0; color: var(--qs-discret); font-size: 13px; }
+
+    footer {
+      margin: 3rem 0 0;
+      padding: 20px 0 2rem;
+      border-top: 1px solid var(--qs-trait);
+      color: var(--qs-discret);
+      font-size: 12.5px;
+      background: var(--qs-surface);
+    }
+    footer .wrap p { margin: 0 0 0.4rem; }
+    footer a { color: var(--qs-accent); }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .hero .brand { animation: rise 0.55s ease both; }
+      .hero .pitch { animation: rise 0.55s 0.06s ease both; }
+      .hero .tags, .hero .cta { animation: rise 0.55s 0.12s ease both; }
+      @keyframes rise {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: none; }
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <span class="mark" aria-hidden="true">Q</span>
+    <span class="crumb"><b>QGIS</b><span class="sep">·</span>Service</span>
+    <span class="status"><span class="dot" aria-hidden="true"></span> SSPCloud · open source</span>
+  </div>
+
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow">Produit</p>
+      <h1 class="brand">
+        <span class="op">QGIS</span> · Service
+        <span class="sub">SSPCloud</span>
+      </h1>
+      <p class="pitch">
+        Un bureau QGIS dans le navigateur, un agent IA qui agit sur le projet,
+        des études et des livrables — sur SSPCloud, installable en quelques minutes.
+      </p>
+      <div class="tags">
+        <span class="tag">Bureau QGIS</span>
+        <span class="tag">Agent IA</span>
+        <span class="tag">Études</span>
+        <span class="tag">Livrables</span>
+        <span class="tag">SSPCloud</span>
+        <span class="tag">MCP</span>
+      </div>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/nic01asFr/Qgis-sspcloud">Code source</a>
+        <a class="btn ghost" href="https://github.com/nic01asFr/Qgis-sspcloud/blob/main/QUICKSTART.md">Installer</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section id="produit">
+      <p class="accroche">
+        QGIS Service réunit trois pièces : un hub web (desk + workspace), un agent
+        conversationnel branché sur les outils QGIS, et un desktop QGIS à la demande.
+        Tu travailles dans le navigateur ; les données et les études restent dans ton espace SSPCloud.
+      </p>
+    </section>
+
+    <section id="promesse">
+      <h2><span class="sec-label">Promesse</span> Ce que ça change</h2>
+      <ul class="points">
+        <li>
+          <b>Bureau QGIS, pas une démo</b>
+          Un vrai QGIS Desktop (noVNC) démarré à la demande, intégré au desk —
+          couches, outils, canvas — sans installer de client lourd.
+        </li>
+        <li>
+          <b>Agent dans le même écran</b>
+          Le chat décale la carte, pas un onglet à côté. L’agent appelle les tools
+          QGIS / MCP, garde une mémoire par session, étude et utilisateur.
+        </li>
+        <li>
+          <b>Études et ressources au même endroit</b>
+          Projets, fichiers, publications : le workspace et le panneau ressources
+          collent au flux métier, pas à un dump de dossiers.
+        </li>
+        <li>
+          <b>Livrables publiables</b>
+          Storymaps, PDF, jeux de données — URL stable depuis le hub,
+          avec chaîne d’audit quand les traitements sont tracés.
+        </li>
+        <li>
+          <b>Un credential, same-origin</b>
+          Une clé hub (cookie 90&nbsp;j) ; agent et desktop passent par le proxy hub —
+          pas de cookies croisés entre sous-domaines.
+        </li>
+      </ul>
+    </section>
+
+    <section class="features" id="fonctionnalites">
+      <h2><span class="sec-label">Capacités</span> Ce que tu peux faire</h2>
+      <div class="feat-list">
+        <article>
+          <h3>Workspace — Mon espace</h3>
+          <p>
+            Vue d’accueil des études : ouvrir un projet, voir l’état du bureau,
+            revenir au cockpit. Même densité visuelle que le desk (navbar 48&nbsp;px,
+            accent vert, fond clair).
+          </p>
+          <p class="pour-qui">Point d’entrée après login.</p>
+        </article>
+        <article>
+          <h3>Desk — bureau de travail</h3>
+          <p>
+            Canvas QGIS au centre, chat agent en panneau, ressources en calque.
+            Tu analyses, tu demandes à l’agent, tu gardes la main sur la carte.
+          </p>
+          <p class="pour-qui">Le quotidien d’une étude géospatiale.</p>
+        </article>
+        <article>
+          <h3>Agent IA</h3>
+          <p>
+            Conversation SSE, tool-calling vers QGIS et catalogues (IGN, OSM,
+            Géorisques…), mémoire à plusieurs couches. Pas d’URL inventée :
+            les endpoints passent par un catalogue déclaré.
+          </p>
+          <p class="pour-qui">Quand la tâche mérite un copilote SIG.</p>
+        </article>
+        <article>
+          <h3>Ressources &amp; livrables</h3>
+          <p>
+            Fichiers d’étude, éditeur block-based, publications (storymap, PDF,
+            GeoJSON). Le hub expose aussi un connecteur MCP pour Claude Desktop,
+            Cursor ou équivalent.
+          </p>
+          <p class="pour-qui">Pour sortir du canvas vers un livrable partageable.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="sequence" id="parcours">
+      <h2><span class="sec-label">Parcours</span> Le parcours</h2>
+      <ol>
+        <li>
+          <span class="n">1</span>
+          <div>
+            <b>Tu ouvres ton espace SSPCloud</b>
+            <p>Service Jupyter avec rôle edit, puis le script d’install du dépôt — ou le chart Helm déjà publié.</p>
+          </div>
+        </li>
+        <li>
+          <span class="n">2</span>
+          <div>
+            <b>Tu arrives sur le bureau</b>
+            <p>Login avec la clé hub ; workspace puis desk. QGIS se réveille quand tu en as besoin.</p>
+          </div>
+        </li>
+        <li>
+          <span class="n">3</span>
+          <div>
+            <b>Tu travailles avec l’agent</b>
+            <p>Chat à côté de la carte : charger des couches, transformer, documenter — l’agent agit via les tools.</p>
+          </div>
+        </li>
+        <li>
+          <span class="n">4</span>
+          <div>
+            <b>Tu publies</b>
+            <p>Assembler un livrable, le rendre public depuis le hub, le partager avec une URL stable.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="contextes" id="usages">
+      <h2><span class="sec-label">Usages</span> Quand ça compte</h2>
+      <div class="ctx-grid">
+        <article>
+          <h3>Analyse sans poste SIG local</h3>
+          <p>Machine légère, réseau d’entreprise, ou travail depuis SSPCloud : le desktop est dans le lab.</p>
+          <p class="pourquoi">Sinon tu dépends d’une install QGIS et de licences machine.</p>
+        </article>
+        <article>
+          <h3>Étude guidée par l’agent</h3>
+          <p>Tu poses l’intention ; l’agent enchaîne tools et te laisse valider la carte et les sorties.</p>
+          <p class="pourquoi">Sinon tu jongles entre chat générique et SIG déconnecté.</p>
+        </article>
+        <article>
+          <h3>Livrable à partager vite</h3>
+          <p>Storymap ou dataset publié depuis le même espace que l’analyse — sans pipeline externe opaque.</p>
+          <p class="pourquoi">Sinon le « dernier kilomètre » se perd dans des exports manuels.</p>
+        </article>
+      </div>
+    </section>
+
+    <aside class="encart" id="stack">
+      <h2>Stack ouverte · SSPCloud</h2>
+      <p>
+        Service conçu pour <a href="https://datalab.sspcloud.fr">SSPCloud / Onyxia</a>.
+        Code ouvert, chart Helm versionné, images sur GHCR. Pas une « recette officielle »
+        institutionnelle — un dépôt libre que tu peux forker, auditer et déployer.
+      </p>
+      <ul class="stack-list">
+        <li><code>qgis-hub</code> — API + desk web + proxy agent / desktop</li>
+        <li><code>qgis-agent</code> — chat SSE, mémoire, tool-runner</li>
+        <li><code>qgis-workspace</code> — QGIS Desktop noVNC (image QgisRemoteMCP)</li>
+      </ul>
+      <p class="cta-line">
+        <a class="btn ghost ink" href="https://github.com/nic01asFr/Qgis-sspcloud/blob/main/QUICKSTART.md">Voir le démarrage rapide</a>
+      </p>
+    </aside>
+
+    <section class="journal" id="journal">
+      <h2>Journal</h2>
+      <div>
+        <b>vitrine</b>
+        <p>Première page produit publique — structure type Nic01asFr (promesse, parcours, journal), charte reprise de l’app.</p>
+      </div>
+      <div>
+        <b>style</b>
+        <p>Jetons <code>--qs-*</code> de produit.css : vert accent, fond clair desk, bandeau nuit, boutons et rayons 4&nbsp;px.</p>
+      </div>
+      <div>
+        <b>produit</b>
+        <p>Message centré bureau + agent + études/livrables sur SSPCloud — distinct du README technique.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p>QGIS · Service — Licence Ouverte 2.0 · <a href="https://github.com/nic01asFr/Qgis-sspcloud">github.com/nic01asFr/Qgis-sspcloud</a></p>
+      <p>Même langage visuel que le desk et le workspace du service. Doc technique dans le dépôt.</p>
+    </div>
+  </footer>
+</body>
+</html>

@@ -13,6 +13,9 @@ venv/
 # Node (blocknote-editor)
 node_modules/
 dist/
+# Exception : vitrine GitHub Pages (HTML auto-contenu)
+!site/dist/
+!site/dist/**
 
 # Outillage local, propre a la machine
 .wikichat/
