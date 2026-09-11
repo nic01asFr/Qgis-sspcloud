@@ -47,7 +47,7 @@ async def _fetch_pending(db: aiosqlite.Connection, limit: int) -> list[dict]:
 
     # 1) messages user/assistant non-vides
     q_msgs = """
-        SELECT m.id, m.session_id, m.role, m.content, s.username
+        SELECT m.id, m.session_id, m.role, m.content, s.username, s.study_id
         FROM messages m
         LEFT JOIN sessions s ON s.id = m.session_id
         LEFT JOIN embed_chunks c
@@ -65,6 +65,9 @@ async def _fetch_pending(db: aiosqlite.Connection, limit: int) -> list[dict]:
                 "source_id": str(r[0]),
                 "text": r[3],
                 "username": r[4] or "user",
+                # Périmètre : le message appartient à l'étude de sa conversation.
+                # Une session sans étude (study_id NULL) reste transverse.
+                "study_id": r[5],
                 "metadata": {"session_id": r[1], "role": r[2]},
             })
     if len(items) >= limit:
@@ -141,13 +144,14 @@ async def _insert_batch(db: aiosqlite.Connection, items: list[dict],
     for item, vec in zip(items, vectors):
         blob = struct.pack(f"{vs.EMBED_DIM}f", *vec)
         cur = await db.execute(
-            "INSERT INTO embed_chunks (text, source_type, source_id, username, created_at, metadata) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO embed_chunks (text, source_type, source_id, username, study_id, created_at, metadata) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 item["text"][:8000],  # cap raisonnable, on n'archive pas tout
                 item["source_type"],
                 item["source_id"],
                 item["username"],
+                item.get("study_id"),  # None pour insights, sections, astuces
                 now,
                 json.dumps(item["metadata"]) if item.get("metadata") else None,
             ),

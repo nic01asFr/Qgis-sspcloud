@@ -62,7 +62,11 @@ async def init_vector_store() -> None:
         # `sqlite_vec.load()` attend une sqlite3.Connection synchrone, inutilisable ici.
         await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
 
-        # Table de métadonnées (texte + tags + JSON)
+        # Table de métadonnées (texte + tags + JSON).
+        # `study_id` porte le périmètre : renseigné pour un message (l'étude de
+        # sa conversation), NULL pour ce qui est transverse à l'utilisateur
+        # (faits, sections de mémoire) ou au système (astuces). Sans lui, le
+        # rappel sémantique injectait des messages d'autres études.
         await db.execute("""
             CREATE TABLE IF NOT EXISTS embed_chunks (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,15 +74,24 @@ async def init_vector_store() -> None:
                 source_type TEXT NOT NULL,
                 source_id   TEXT,
                 username    TEXT,
+                study_id    TEXT,
                 created_at  INTEGER NOT NULL,
                 metadata    TEXT
             )
         """)
+        # Migration idempotente : ajoute study_id aux bases antérieures.
+        cols = [r[1] for r in await (await db.execute(
+            "PRAGMA table_info(embed_chunks)")).fetchall()]
+        if "study_id" not in cols:
+            await db.execute("ALTER TABLE embed_chunks ADD COLUMN study_id TEXT")
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_embed_source ON embed_chunks(source_type, source_id)"
         )
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_embed_user ON embed_chunks(username)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_embed_study ON embed_chunks(study_id)"
         )
 
         # Virtual table vec0 pour la recherche par similarité
@@ -154,18 +167,21 @@ async def add(
     source_id: str | None = None,
     username: str | None = None,
     metadata: dict | None = None,
+    study_id: str | None = None,
 ) -> int:
     """Embed + insère dans embed_chunks + vec_chunks. Retourne le rowid."""
     if not text or not text.strip():
         return -1
     vec = await embed(text)
-    return await _add_with_vec(text, vec, source_type, source_id, username, metadata)
+    return await _add_with_vec(text, vec, source_type, source_id, username,
+                               metadata, study_id)
 
 
 async def _add_with_vec(
     text: str, vec: list[float],
     source_type: str, source_id: str | None,
     username: str | None, metadata: dict | None,
+    study_id: str | None = None,
 ) -> int:
     import struct
     blob = struct.pack(f"{EMBED_DIM}f", *vec)
@@ -173,9 +189,9 @@ async def _add_with_vec(
         await db.enable_load_extension(True)
         await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
         cur = await db.execute(
-            "INSERT INTO embed_chunks (text, source_type, source_id, username, created_at, metadata) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (text, source_type, source_id, username, int(time.time()),
+            "INSERT INTO embed_chunks (text, source_type, source_id, username, study_id, created_at, metadata) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (text, source_type, source_id, username, study_id, int(time.time()),
              json.dumps(metadata) if metadata else None),
         )
         rowid = cur.lastrowid
@@ -193,30 +209,50 @@ async def search(
     query: str, top_k: int = 5,
     source_type: str | None = None,
     username: str | None = None,
+    study_id: str | None = None,
+    include_global: bool = True,
 ) -> list[dict]:
     """Recherche les top-k chunks les plus proches sémantiquement.
 
     Filtres optionnels : source_type (message/insight/recipe), username.
+
+    Périmètre d'étude (`study_id`) : ne renvoie que les chunks de cette étude
+    et, si `include_global`, ceux sans étude (faits et sections de mémoire,
+    transverses à l'utilisateur). Sans `study_id`, aucun filtre d'étude
+    (comportement d'origine).
+
+    vec0 applique le KNN (`k`) AVANT le filtre SQL : un filtre strict pourrait
+    donc ne rien renvoyer si les k plus proches sont hors périmètre. On élargit
+    le KNN quand un filtre est actif, puis on garde les `top_k` meilleurs.
     """
     import struct
     qvec = await embed(query)
     qblob = struct.pack(f"{EMBED_DIM}f", *qvec)
 
+    # Filtres SQL dynamiques (sur la table jointe, appliqués après le KNN).
+    where = []
+    filt_params: list = []
+    if source_type:
+        where.append("c.source_type = ?")
+        filt_params.append(source_type)
+    if username:
+        where.append("c.username = ?")
+        filt_params.append(username)
+    if study_id:
+        if include_global:
+            where.append("(c.study_id = ? OR c.study_id IS NULL)")
+        else:
+            where.append("c.study_id = ?")
+        filt_params.append(study_id)
+    where_sql = (" AND " + " AND ".join(where)) if where else ""
+
+    # KNN élargi si un filtre risque d'écarter les plus proches voisins.
+    k_knn = top_k if not where else max(top_k * 8, 64)
+
     async with aiosqlite.connect(_DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         await db.enable_load_extension(True)
         await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
-
-        # Filtres SQL dynamiques
-        where = []
-        params: list = [qblob, top_k]
-        if source_type:
-            where.append("c.source_type = ?")
-            params.append(source_type)
-        if username:
-            where.append("c.username = ?")
-            params.append(username)
-        where_sql = (" AND " + " AND ".join(where)) if where else ""
 
         sql = f"""
             SELECT c.id, c.text, c.source_type, c.source_id, c.username,
@@ -226,8 +262,9 @@ async def search(
             WHERE v.embedding MATCH ? AND k = ?
             {where_sql}
             ORDER BY v.distance ASC
+            LIMIT ?
         """
-        cur = await db.execute(sql, params)
+        cur = await db.execute(sql, [qblob, k_knn, *filt_params, top_k])
         rows = await cur.fetchall()
 
     results = []

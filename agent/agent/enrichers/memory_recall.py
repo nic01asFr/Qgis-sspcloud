@@ -42,7 +42,12 @@ async def enrich(user_message: str, state: dict) -> EnrichmentResult | None:
 
     try:
         # Recherche large (top 8), on filtrera après par similarité + type.
-        hits = await vector_store.search(user_message, top_k=8)
+        # Périmètre d'étude : on ne rappelle que les messages de l'étude
+        # active ; les faits et sections de mémoire (sans étude) restent
+        # transverses. Sans étude active connue, comportement d'origine.
+        hits = await vector_store.search(
+            user_message, top_k=8, study_id=state.get("study_id"),
+        )
     except Exception:
         return None
     if not hits:

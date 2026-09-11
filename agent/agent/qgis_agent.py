@@ -789,9 +789,12 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
             else:
                 src_type = arguments.get("source_type")
             uname    = username
+            # Même périmètre que le rappel automatique : messages de l'étude
+            # active seulement ; faits et sections (sans étude) transverses.
+            _sid = await _resolve_active_sid(username)
             results  = await vector_store.search(
                 query=query, top_k=top_k,
-                source_type=src_type, username=uname,
+                source_type=src_type, username=uname, study_id=_sid,
             )
             # Présentation compacte pour le LLM
             return json.dumps({
@@ -2298,7 +2301,13 @@ ne vient pas d'un outil cette session, la supprimer.
             recent_ids = [m.get("id") for m in recent if m.get("id")]
         except Exception:
             pass
-        enrich_state = {"recent_message_ids": recent_ids}
+        # Étude active, pour que le rappel sémantique ne remonte que les
+        # messages de cette étude (les faits et sections restent transverses).
+        try:
+            _sid_actif = await _resolve_active_sid(self.username)
+        except Exception:
+            _sid_actif = None
+        enrich_state = {"recent_message_ids": recent_ids, "study_id": _sid_actif}
         enrich_task = (
             asyncio.create_task(enrichers.run_all(user_message, enrich_state))
             if user_message else None
