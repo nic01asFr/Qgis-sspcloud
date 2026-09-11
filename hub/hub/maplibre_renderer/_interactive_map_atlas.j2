@@ -1,0 +1,90 @@
+{# Une carte servie par Atlas, montee en iframe.
+
+   Point de bascule pose par docs/impact-bascule-atlas.md : `interactive_map`
+   reste `interactive_map`, seul le gabarit change. L'editeur, la page publiee
+   et le widget Grist consomment tous le rendu du hub -- aucun ne change.
+
+   Atlas est une page autonome, parametree par URL. Elle sait lire une scene
+   servie par `?scene=<url>` (https exige, http admis sur localhost seulement).
+   On ne lui passe donc pas la donnee : on lui passe ou la prendre.
+
+   L'adresse complete est assemblee cote Python (`_url_visionneuse_atlas`) :
+   une URL construite a coups de concatenations Jinja se relit mal, s'echappe
+   mal, et ne se teste pas.
+
+   Ce gabarit ne decide donc plus des parametres. Pour memoire, `mode=view` et
+   `vitrine=1` y sont imposes -- un livrable montre une carte sans l'editer, et
+   n'est pas un document Grist.
+#}
+<figure class="qs-media atlas-carte" id="atlas-{{ map_id }}">
+  {% if title %}
+  <figcaption class="atlas-carte__entete">
+    <span class="atlas-carte__titre">{{ title | e }}</span>
+    {% if subtitle %}<span class="atlas-carte__soustitre">{{ subtitle | e }}</span>{% endif %}
+  </figcaption>
+  {% endif %}
+
+  {% if description %}
+  <p class="atlas-carte__intro">{{ description | e }}</p>
+  {% endif %}
+
+  <div class="atlas-carte__cadre" style="height:{{ height | default(480) }}px">
+    <iframe
+      src="{{ iframe_src | e }}"
+      title="{{ title | default('Carte interactive') | e }}"
+      loading="lazy"
+      referrerpolicy="no-referrer"
+      {# Atlas a besoin de scripts et du plein ecran ; il n'a besoin de rien
+         d'autre. Sans cet attribut, une iframe herite de tout. #}
+      sandbox="allow-scripts allow-same-origin allow-popups"
+      allow="fullscreen"
+      allowfullscreen></iframe>
+  </div>
+
+  {% if legend_items %}
+  <ul class="atlas-carte__legende">
+    {% for item in legend_items %}
+    <li><span class="atlas-carte__puce" style="background:{{ item.color | e }}"></span>
+      {{ item.label | e }}{% if item.count %} <span class="atlas-carte__compte">{{ item.count }}</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if source_text or bbox_text or caveat %}
+  <div class="atlas-carte__pied">
+    {% if source_text %}<span class="atlas-carte__source">{{ source_text | e }}</span>{% endif %}
+    {% if bbox_text %}<span class="atlas-carte__emprise">{{ bbox_text | e }}</span>{% endif %}
+    {% if caveat %}<span class="atlas-carte__reserve">{{ caveat | e }}</span>{% endif %}
+  </div>
+  {% endif %}
+</figure>
+
+<style>
+.atlas-carte { margin: 0 0 1.5rem; }
+.atlas-carte__entete { display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: .6rem; margin-bottom: .35rem; }
+.atlas-carte__titre { font-weight: 600; font-size: 1.05rem; }
+.atlas-carte__soustitre { font-size: .85rem; color: var(--qs-discret, #697987); }
+.atlas-carte__intro { margin: 0 0 .6rem; font-size: .92rem;
+  color: var(--qs-encre-2, #3B4C58); max-width: 60ch; }
+.atlas-carte__cadre { position: relative; width: 100%;
+  border: 1px solid var(--qs-trait, #D1D9DE); border-radius: 4px;
+  overflow: hidden; background: var(--qs-surface-2, #E9EDEF); }
+.atlas-carte__cadre iframe { position: absolute; inset: 0;
+  width: 100%; height: 100%; border: 0; display: block; }
+.atlas-carte__legende { display: flex; flex-wrap: wrap; gap: .4rem 1rem;
+  margin: .6rem 0 0; padding: 0; list-style: none; font-size: .85rem; }
+.atlas-carte__legende li { display: flex; align-items: center; gap: .4rem; }
+.atlas-carte__puce { width: 11px; height: 11px; border-radius: 2px;
+  flex: 0 0 auto; }
+.atlas-carte__compte { color: var(--qs-discret, #697987);
+  font-variant-numeric: tabular-nums; }
+.atlas-carte__pied { display: flex; flex-wrap: wrap; gap: .3rem 1rem;
+  margin-top: .5rem; font-size: .78rem; color: var(--qs-discret, #697987); }
+/* La reserve n'est pas une note de bas de page comme les autres : elle dit ce
+   que la carte ne montre pas. */
+.atlas-carte__reserve { color: var(--qs-alerte, #B0560B); }
+@media (max-width: 700px) {
+  .atlas-carte__cadre { height: 320px !important; }
+}
+</style>

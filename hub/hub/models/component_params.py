@@ -281,6 +281,48 @@ class AtlasConfig(BaseModel):
     )
 
 
+class VisionneuseOptions(BaseModel):
+    """Options d'URL de la visionneuse Atlas.
+
+    A NE PAS confondre avec `AtlasConfig` juste au-dessus. Les deux portent le
+    mot « atlas » et ne designent pas la meme chose :
+
+    - `AtlasConfig` = le mode atlas CARTOGRAPHIQUE, au sens de QGIS : une carte
+      par entite, un gabarit repete sur N features.
+    - cette classe = les reglages de la VISIONNEUSE Atlas, la page qui affiche
+      une scene.
+
+    L'homonymie est complete et piegeuse ; d'ou le nom francais, qui ne peut
+    pas etre pris pour l'autre.
+
+    Ces reglages deviennent des parametres d'URL de l'iframe. Ce qui n'est pas
+    ici est deliberement non expose :
+
+    - `mode` est force a `view`. Un livrable montre une carte, il ne l'edite
+      pas ; laisser ce choix a l'auteur du composant n'ouvrirait qu'un moyen de
+      publier une carte editable par ses lecteurs.
+    - `readonly` et `access` appartiennent a Grist, qui les ecrit pour
+      transmettre les droits reels d'une personne sur un document. Les poser
+      nous-memes reviendrait a nous faire passer pour lui.
+    - `vitrine` est toujours a 1 : nous ne sommes pas un document Grist, et
+      c'est ce qui indique a la visionneuse de prendre le transport HTTP plutot
+      que de chercher une API qui n'existe pas ici.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    no3d: bool = Field(
+        False,
+        description="Desactive la 3D. Une carte thematique plate n'a rien a "
+                    "gagner au relief, et le rendu demarre plus vite.",
+    )
+    models_base: str | None = Field(
+        None,
+        description="Base d'URL du catalogue de modeles 3D. Laisser vide : la "
+                    "visionneuse sonde le catalogue servi a cote d'elle.",
+    )
+
+
 # ============================================================================
 # Schema principal : InteractiveMapParams V1.13
 # ============================================================================
@@ -353,6 +395,12 @@ class InteractiveMapParams(BaseModel):
 
     # ── Atlas (V2.1 V2b, inerte en V1.13) ───────────────────────────────
     atlas: AtlasConfig = Field(default_factory=AtlasConfig)
+
+    # ── Visionneuse Atlas : reglages d'affichage de la scene ────────
+    # Distinct du champ `atlas` juste au-dessus, qui est le mode atlas
+    # cartographique. Voir la docstring de VisionneuseOptions.
+    visionneuse: VisionneuseOptions = Field(
+        default_factory=VisionneuseOptions)
 
     # ── Champs LEGACY V1.12 plats (back-compat, deprecate progressif) ───
     center_lat: float | None = Field(None, ge=-90, le=90)

@@ -143,7 +143,7 @@ async def create_component(
                - kind (ex: 'interactive_map')
                - title
                - source (ex: {scope: 'project', sid, pid, scene_hash})
-               - rendering (ex: {runtime: 'maplibre', container_size: 'responsive'})
+               - rendering (ex: {runtime: 'atlas', container_size: 'responsive'})
 
     Recommandation : appeler validate_manifest() AVANT pour éviter les
     erreurs tardives.

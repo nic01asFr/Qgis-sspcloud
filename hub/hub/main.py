@@ -1291,6 +1291,58 @@ _HUB_URL = (
     or (f"https://user-{_ONYXIA_USER}-qgis.user.lab.sspcloud.fr"
         if _ONYXIA_USER else "")
 )
+# ATLAS_URL : la page Atlas qui rend les cartes des livrables.
+#
+# Atlas n'est pas heberge par le hub -- c'est une page autonome, servie
+# ailleurs, qu'on monte en iframe avec `?scene=<url>`. Sans cette valeur, le
+# rendu se replie sur le gabarit MapLibre : mieux vaut une carte a l'ancienne
+# qu'une iframe vide.
+#
+# Pas de valeur par defaut devinee : une URL fausse produirait un cadre gris
+# sans erreur, sur chaque livrable publie. Tant qu'elle n'est pas posee, la
+# bascule ne s'active pas.
+_ATLAS_URL_PAR_DEFAUT = "https://nic01asfr.github.io/Widgets-Grist/atlas/"
+# Le slash final est conserve. Sans lui, l'hebergeur repond une redirection
+# avant de servir la page -- un aller-retour de plus sur CHAQUE carte d'un
+# livrable, pour rien.
+_ATLAS_URL = (os.getenv("ATLAS_URL") or _ATLAS_URL_PAR_DEFAUT).strip()
+if _ATLAS_URL and not _ATLAS_URL.endswith("/"):
+    _ATLAS_URL += "/"
+
+
+def _url_visionneuse_atlas(scene_url: str, options: dict | None = None) -> str:
+    """L'adresse de l'iframe Atlas pour une scene donnee.
+
+    Construite ici plutot que dans le gabarit : une URL assemblee a coups de
+    concatenations Jinja se relit mal, s'echappe mal, et ne se teste pas.
+
+    Trois parametres sont IMPOSES, et ne sont pas des reglages :
+
+    - `mode=view` -- un livrable montre une carte, il ne l'edite pas. C'est le
+      parametre juste pour nous : cote Atlas, `?mode=` decrit ce qu'on MONTRE
+      et ne peut que restreindre. On ne pose surtout pas `readonly` ni
+      `access`, qui appartiennent a Grist : il les ecrit pour transmettre les
+      droits reels d'une personne sur un document, et les poser nous-memes
+      reviendrait a nous faire passer pour lui.
+    - `vitrine=1` -- nous ne sommes pas un document Grist. C'est ce qui dit a
+      la visionneuse de prendre le transport HTTP au lieu de chercher une API
+      qui n'existe pas ici.
+
+    Le reste vient de `VisionneuseOptions`, cote composant.
+    """
+    from urllib.parse import urlencode
+
+    params = [("scene", scene_url), ("mode", "view"), ("vitrine", "1")]
+    o = options or {}
+    if o.get("no3d"):
+        params.append(("no3d", "1"))
+    base_modeles = (o.get("models_base") or "").strip()
+    if base_modeles:
+        # Laisser vide est le cas normal : la visionneuse sonde le catalogue
+        # servi a cote d'elle. On ne pose ce parametre que pour en designer
+        # un autre.
+        params.append(("models", base_modeles))
+    return "%s?%s" % (_ATLAS_URL, urlencode(params))
 # AGENT_URL : URL publique du pod agent IA (bootstrappé par le hub au démarrage)
 _AGENT_URL = (
     os.getenv("AGENT_URL")
@@ -7439,6 +7491,28 @@ async def _pre_render_component_html(
             # USE_GEO_COMPONENTS=0 reste un fallback explicite pour rollback
             # rapide en cas d'incident lib front (single point de restauration
             # sans redeploy).
+            # Bascule vers Atlas (docs/impact-bascule-atlas.md, point 2 de
+            # « l'ordre qui s'impose »).
+            #
+            # Le kind ne change pas : `interactive_map` reste
+            # `interactive_map`. Ce qui change est le gabarit, et il ne prend
+            # la main qu'a deux conditions -- le composant demande ce runtime,
+            # ET on sait ou trouver la scene. Atlas ne recoit pas la donnee, il
+            # recoit son adresse ; sans adresse il n'y a rien a monter.
+            #
+            # Le repli n'est donc pas une precaution de style : un composant
+            # publie avant la bascule n'a pas de scene servie, et doit
+            # continuer de s'afficher comme au jour ou il a ete produit.
+            _scene_url = ctx.get("scene_url") or params.get("scene_url")
+            _runtime = ((comp_manifest.get("rendering") or {}).get("runtime")
+                        or "").strip().lower()
+            if _runtime == "atlas" and _scene_url and _ATLAS_URL:
+                tpl = _maplibre_jinja.get_template("_interactive_map_atlas.j2")
+                return tpl.render(
+                    iframe_src=_url_visionneuse_atlas(
+                        _scene_url, params.get("visionneuse")),
+                    **{k: v for k, v in ctx.items() if k != "scene_url"})
+
             _use_gc = os.getenv("USE_GEO_COMPONENTS", "1").strip() in ("1", "true", "yes")
             partial_name = (
                 "_interactive_map_partial_v2.j2"

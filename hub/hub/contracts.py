@@ -39,6 +39,13 @@ BASE_PUBLIQUE = "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas"
 # fichiers restent figés dans `schemas/` et ne sont plus régénérés.
 CONTRATS: dict[str, dict[str, Any]] = {
     "component": {
+        # 0.4 (2026-09-08) : `rendering.runtime` accepte `atlas`. Ajout
+        # rétrocompatible en écriture — un composant existant garde
+        # `maplibre` ou `maplibre_three`, qui restent admis tant que des
+        # livrables publiés les portent. Mais un lecteur de 0.3 qui valide
+        # strictement rejettera la nouvelle valeur : c'est bien une version,
+        # pas une correction en place.
+        #
         # 0.3 (2026-09-04) : `auto` change de sens. Il ne veut plus dire « le
         # hub décide selon la taille » mais « la meilleure forme disponible » —
         # des tuiles dès qu'une couche peut être encodée, l'inline en dernier
@@ -53,8 +60,8 @@ CONTRATS: dict[str, dict[str, Any]] = {
         # 0.1 et 0.2 restent servis : leurs adresses ont été communiquées,
         # elles doivent répondre — et elles continuent de décrire fidèlement ce
         # que ces versions-là voulaient dire.
-        "version": "0.3",
-        "anciennes": ["0.1", "0.2"],
+        "version": "0.4",
+        "anciennes": ["0.1", "0.2", "0.3"],
         "module": "hub.models.component",
         "classe": "Component",
         "resume": "Une brique de livrable : carte, graphique, tableau, "

@@ -140,19 +140,19 @@ PATTERNS: dict[str, dict[str, Any]] = {
                     "scene_hash": "{scene_hash}",
                 },
                 "params": {"caveat": "{caveat}"},  # rendu inline si present
-                "rendering": {"runtime": "maplibre", "container_size": "full"},
+                "rendering": {"runtime": "atlas", "container_size": "full"},
                 "classification": "cerema_internal",
             },
-            {
-                "kind": "legend",
-                "title": "Legende",
-                "params": {
-                    "items": "{legend_items}",
-                    "source": "{source}",
-                },
-                "rendering": {"runtime": "html", "container_size": "full"},
-                "classification": "cerema_internal",
-            },
+            # Le composant `legend` separe a ete retire de ce patron.
+            #
+            # La legende vit maintenant DANS la scene Atlas, ou elle suit ce
+            # que le lecteur affiche. Une legende posee a cote resterait figee
+            # sur l'etat de production : des la premiere couche basculee, elle
+            # decrirait une carte differente de celle qu'on regarde.
+            #
+            # Le gabarit de carte accepte `legend_items` pour les cas ou une
+            # legende editoriale reste voulue -- elle est alors DANS la figure,
+            # et non un bloc autonome qui peut s'en detacher.
         ],
         "section_template": {
             "kind": "section",
@@ -205,7 +205,7 @@ PATTERNS: dict[str, dict[str, Any]] = {
                     "scope": "project", "sid": "{sid}", "pid": "{pid}",
                     "scene_hash": "{scene_hash}",
                 },
-                "rendering": {"runtime": "maplibre", "container_size": "full"},
+                "rendering": {"runtime": "atlas", "container_size": "full"},
                 "classification": "cerema_internal",
             },
             {

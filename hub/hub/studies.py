@@ -2685,6 +2685,51 @@ try:
             _src = _origine(layer)
             if _src:
                 layer_entry["source"] = _src
+            # Les controles que la couche PEUT offrir au lecteur.
+            #
+            # Prealable a la bascule vers Atlas (cf. docs/impact-bascule-atlas.md,
+            # « l'ordre qui s'impose », point 1) : le kind `timeline` y est
+            # absorbe et devient `layer.controls[]`. Sans cette declaration, la
+            # bascule ferait perdre une fonction au lieu d'en deplacer une --
+            # les scenes n'auraient plus aucun controle.
+            #
+            # On declare le minimum : le champ et son type. Atlas complete le
+            # reste lui-meme (`applyControlDeclarativesToLayer` calcule les
+            # bornes, `controlUniqueValues` remplit les listes). Emettre des
+            # bornes ici les figerait au moment de la production, alors que la
+            # donnee affichee peut avoir ete filtree depuis.
+            #
+            # `active: false` : on offre, on n'impose pas. Un controle actif
+            # d'emblee filtrerait la carte sans que personne l'ait demande.
+            try:
+                from qgis.core import QgsField as _QF  # noqa: F401
+                _NUM = ("int", "double", "longlong", "qlonglong", "float")
+                _TPS = ("date", "datetime", "qdate", "qdatetime")
+                _ctrls = []
+                for _f in (layer.fields() if hasattr(layer, "fields") else []):
+                    _tn = (_f.typeName() or "").lower()
+                    if _tn in _TPS:
+                        _type = "range"
+                    elif _tn in _NUM:
+                        _type = "range"
+                    else:
+                        continue
+                    _ctrls.append({{
+                        "field": _f.name(),
+                        "type": _type,
+                        "label": _f.alias() or _f.name(),
+                        "active": False,
+                    }})
+                    # Une couche qui expose trente champs numeriques
+                    # produirait trente controles : illisible, et personne ne
+                    # les parcourt. Les premiers suffisent a montrer qu'il y a
+                    # matiere ; le lecteur en ajoute depuis Atlas.
+                    if len(_ctrls) >= 6:
+                        break
+                if _ctrls:
+                    layer_entry["controls"] = _ctrls
+            except Exception as _ctrl_exc:
+                print(f"SCENE_MANIFEST_CONTROLS_ERR layer={{name}} err={{_ctrl_exc}}")
             # L'emprise, en WGS84. Un client qui ne detient pas les entites --
             # parce qu'elles sont derriere une URL, des tuiles ou un flux --
             # ne peut pas la calculer : sans elle, il ne sait pas ou regarder

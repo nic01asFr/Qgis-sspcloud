@@ -138,10 +138,10 @@ def _kind_descriptions(entity_type: str) -> dict[str, str]:
     if entity_type == "component":
         return {
             "interactive_map":  "Carte 2D + pitch 3D MapLibre — scope project/study/external/geomind",
-            "scene_3d":         "Atlas 3D MapLibre + Three.js custom layer (pattern atlas_bati) — GLTF par feature",
+            "scene_3d":         "DEPRECIE — absorbe par la visionneuse Atlas, qui fait deja la 3D. Utiliser interactive_map avec runtime atlas.",
             "chart":            "Graphique Chart.js depuis CSV ou Grist table",
             "kpi_badge":        "Indicateur clé HTML statique (valeur + label + source)",
-            "legend":           "Légende HTML SVG depuis Scene Manifest subset",
+            "legend":           "DEPRECIE — la legende vit desormais DANS la scene Atlas. Un composant separe afficherait une legende figee a cote d'une carte dont le lecteur bascule les couches : les deux divergeraient.",
             "narrative_text":   "Paragraphes narratifs Markdown via Marked.js",
             "data_table":       "Tableau filtrable datatables.net depuis CSV / Grist",
             "media_embed":      "URL média HTML5 (image, vidéo, PDF)",
@@ -151,7 +151,7 @@ def _kind_descriptions(entity_type: str) -> dict[str, str]:
             "heading":          "Titre H1-H4 standalone DSFR — remplace la concatenation dans narrative_text",
             "quote":            "Citation / pull-quote DSFR — sources expertes, temoignages, extraits reglementaires",
             "separator":        "Separateur horizontal entre blocks — respire visuellement les storymaps longs",
-            "timeline":         "Slider temporel controller (Web Component <geo-timeline>) — pilote une carte via binding declaratif CustomEvent 'geo:bind' {prop:'time'}",
+            "timeline":         "DEPRECIE — absorbe par la visionneuse Atlas : le curseur temporel est devenu layer.controls[] dans la scene, ou il agit sur la carte au lieu de lui parler par un bus d'evenements.",
         }
     if entity_type == "assembly":
         return {
@@ -269,7 +269,8 @@ def _build_example(
                 },
                 "params": canonical,
                 "rendering": {
-                    "runtime": "maplibre",
+                    # Voir la note sur le runtime, plus bas dans ce module.
+                    "runtime": "atlas",
                     "container_size": "responsive",
                     "theme": "dsfr",
                 },
@@ -295,7 +296,16 @@ def _build_example(
                 "basemap": "ign-plan", "bbox": [5.38, 43.29, 5.43, 43.33],
             },
             "rendering": {
-                "runtime": "maplibre" if k.startswith("interactive_") else "html",
+                # `atlas` plutot que `maplibre` : c'est desormais le runtime
+                # propose pour une carte (docs/impact-bascule-atlas.md). Sans
+                # risque, parce que le rendu se replie sur MapLibre quand Atlas
+                # n'est pas joignable ou qu'aucune scene n'est servie -- le
+                # runtime declare une intention, le hub decide du rendu.
+                #
+                # L'agent, lui, n'avait rien a changer : la valeur lui etait
+                # deja visible par le schema. Ce sont ces exemples qui
+                # continuaient de l'orienter ailleurs.
+                "runtime": "atlas" if k.startswith("interactive_") else "html",
                 "container_size": "responsive",
                 "theme": "dsfr",
             },

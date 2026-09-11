@@ -4,11 +4,11 @@
   "contracts": [
     {
       "name": "component",
-      "version": "0.3",
+      "version": "0.4",
       "description": "Une brique de livrable : carte, graphique, tableau, indicateur, texte, frise. Déclare d'où viennent ses données, comment elle se rend, et par quoi elle est paramétrée.",
-      "url": "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas/component-0.3.schema.json",
-      "empreinte": "sha256:556dd05d6dff84af",
-      "octets": 11743,
+      "url": "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas/component-0.4.schema.json",
+      "empreinte": "sha256:2306ffdac0e48b68",
+      "octets": 11380,
       "previous": [
         {
           "version": "0.1",
@@ -17,6 +17,10 @@
         {
           "version": "0.2",
           "url": "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas/component-0.2.schema.json"
+        },
+        {
+          "version": "0.3",
+          "url": "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas/component-0.3.schema.json"
         }
       ]
     },
@@ -25,8 +29,8 @@
       "version": "0.1",
       "description": "Un livrable : une mise en page de composants, avec sa chaîne d'audit.",
       "url": "https://user-nic01asfr-qgis.user.lab.sspcloud.fr/schemas/assembly-0.1.schema.json",
-      "empreinte": "sha256:b1f8248b34859140",
-      "octets": 19713
+      "empreinte": "sha256:5b5d5aba3d0e9b5e",
+      "octets": 19069
     }
   ],
   "related": [

@@ -124,6 +124,7 @@ class ComponentSource(BaseModel):
 class ComponentRendering(BaseModel):
     """Indications de rendu côté browser. Le hub décide le template Jinja2."""
     runtime: Literal[
+        "atlas",           # interactive_map servi par Atlas en iframe
         "maplibre",        # interactive_map (cf. maplibre-threejs-pattern-axis §3)
         "maplibre_three",  # scene_3d (MapLibre + Three.js custom layer §1)
         "chartjs",         # chart
@@ -132,6 +133,16 @@ class ComponentRendering(BaseModel):
         "html",            # kpi_badge, legend
         "iframe",          # iframe_grist, media_embed (PDF)
     ]
+    # `atlas` remplace a terme `maplibre` et `maplibre_three` : Atlas fait deja
+    # la 3D, et absorbe `timeline` et `legend` en controles de scene (cf.
+    # docs/impact-bascule-atlas.md). Le kind ne change pas -- `interactive_map`
+    # reste `interactive_map` -- seuls changent cette valeur et le gabarit qui
+    # monte l'iframe. L'editeur, la page publiee et le widget Grist consomment
+    # tous le rendu du hub : aucun ne change.
+    #
+    # Les deux anciennes valeurs restent admises tant que des composants
+    # publies les portent. Les retirer avant serait casser des livrables
+    # existants pour une coherence de nommage.
     container_size: str = Field(
         "responsive",
         description="ex. 'responsive', 'fixed_400x400', 'aspect-16-9'",
