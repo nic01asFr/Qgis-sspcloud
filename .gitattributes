@@ -1,0 +1,8 @@
+# Les contrats publies sont verifies par empreinte : le sha256 des octets servis.
+#
+# Sans fin de ligne fixee, un poste Windows (core.autocrlf=true) extrait ces
+# fichiers en CRLF. L'empreinte calculee sur le disque ne correspond alors plus
+# au fichier que sert l'image, construite depuis git en LF -- et le test qui
+# compare notre copie du contrat de scene a l'original echoue sur tout clone
+# frais sous Windows.
+hub/hub/schemas/*.json text eol=lf

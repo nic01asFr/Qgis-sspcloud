@@ -281,17 +281,22 @@ def ecrire_tout() -> list[Path]:
     quand on a décidé qu'un contrat changeait."""
     _DOSSIER.mkdir(parents=True, exist_ok=True)
     ecrits = []
+    # `newline="\n"` : sans lui, `write_text` ecrit du CRLF sous Windows. Or
+    # `_empreinte` hache les octets du disque, et l'image sert ceux de git, en
+    # LF. Un contrat regenere sur un poste Windows annoncait donc une empreinte
+    # que le fichier servi ne verifiait pas -- 385 octets d'ecart sur le 0.4,
+    # un par ligne.
     for nom in CONTRATS:
         p = chemin(nom)
         p.write_text(
             json.dumps(generer(nom), ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
+            encoding="utf-8", newline="\n",
         )
         ecrits.append(p)
     idx = _DOSSIER / "index.json"
     idx.write_text(
         json.dumps(index(), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="\n",
     )
     ecrits.append(idx)
     return ecrits
