@@ -12461,6 +12461,12 @@ async def _proxy_request(
 
 # ── Bureau de travail (desk) + workspace ──────────────────────────────────────
 
+# Le bureau pilote QGIS et l'agent au nom de l'utilisateur : il ne s'incruste
+# dans aucune page tierce (detournement de clic). Le chat qu'il embarque pose
+# la meme regle, relayee telle quelle par le proxy /agent/.
+_ENTETES_BUREAU = {"Content-Security-Policy": "frame-ancestors 'self'"}
+
+
 @app.get("/desk", response_class=HTMLResponse)
 async def desk_page(request: Request):
     """Bureau de travail unifié : sidebar études | canvas QGIS noVNC | chat agent.
@@ -12501,7 +12507,7 @@ async def desk_page(request: Request):
     # Le bouton de compte signale une cle d'assistant manquante : sans cette
     # valeur, l'indication ne s'afficherait jamais dans le bureau.
     ctx["llm_key_missing"] = await _cle_assistant_manquante()
-    return _jinja.TemplateResponse(request, "desk.html", ctx)
+    return _jinja.TemplateResponse(request, "desk.html", ctx, headers=_ENTETES_BUREAU)
 
 
 @app.get("/workspace", response_class=HTMLResponse)

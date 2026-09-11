@@ -2678,7 +2678,7 @@ function setActiveRender(kind, id, title) {
       kind:  kind,
       id:    id,
       title: title,
-    }, '*');
+    }, location.origin);
   } catch {}
 }
 
@@ -2718,7 +2718,7 @@ function _handleRecipeDeepLink() {
         recipe_id:  recipeId,
         sid:        sid,
         mode:       'polished',
-      }, '*');
+      }, location.origin);
       // Nettoie l'URL apres l'envoi (evite double-trigger sur reload).
       url.searchParams.delete('session');
       window.history.replaceState({}, '', url.toString());
@@ -4130,10 +4130,20 @@ async function refreshCatalogPanel() {
 }
 
 window.addEventListener('message', (e) => {
+  // Seul le chat du bureau parle ici : il est servi en meme origine par le
+  // proxy /agent/. Sans ce controle, n'importe quelle page capable d'ouvrir
+  // le bureau pouvait declencher ces rafraichissements.
+  if (e.origin !== location.origin) return;
   const d = e.data;
   if (!d || typeof d !== 'object') return;
   if (d.type === 'qgis_publish_done' || d.type === 'qgis_agent_turn_done') {
     refreshCatalogPanel();
+  }
+  // Un tour peut avoir ajoute ou retire des couches, exporte des fichiers,
+  // enregistre une recette : le panneau de gauche affichait l'etat d'avant
+  // le tour jusqu'au prochain rechargement.
+  if (d.type === 'qgis_agent_turn_done') {
+    refreshSourcesSummaries();
   }
 });
 

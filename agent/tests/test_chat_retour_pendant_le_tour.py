@@ -121,3 +121,24 @@ def test_un_tableau_n_elargit_pas_la_colonne() -> None:
     """
     assert "min-width:0" in _regle_css(".chat-main")
     assert "min-width:0" in _regle_css(".msg .bubble")
+
+
+# ── Messages entre le chat et le bureau ──────────────────────────────────
+
+
+def test_le_chat_n_obeit_qu_au_bureau_qui_l_embarque() -> None:
+    """Un message `recipe_run_request` soumet un message a l'agent au nom de
+    l'utilisateur : n'importe quelle page qui incrustait le chat pouvait
+    l'envoyer."""
+    garde = _CHAT.split("function _messageDuBureau(e) {")[1].split("}")[0]
+    assert "e.origin === location.origin" in garde
+    assert "e.source === window.parent" in garde
+    for type_message in ("recipe_run_request", "qgis_set_render"):
+        avant = _CHAT.split("data.type !== '%s'" % type_message)[0]
+        ecouteur = avant.rsplit("window.addEventListener('message'", 1)[1]
+        assert "if (!_messageDuBureau(e)) return;" in ecouteur, type_message
+
+
+def test_le_chat_n_ecrit_qu_a_sa_propre_origine() -> None:
+    assert "}, '*');" not in _CHAT
+    assert _CHAT.count("}, location.origin);") >= 2

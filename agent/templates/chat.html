@@ -1153,7 +1153,17 @@ function toggleProfileMenu() {
 // circuite le LLM classique pour appeler stream_recipe_execution
 // (recipe_executor_mute -> hub /api/recipes-web/execute -> assembly_bridge
 // -> publish_hint {sid, aid} -> bouton Publier via recipe_stream.js).
+// Seul le bureau qui embarque ce chat peut le piloter. Il le sert en meme
+// origine (proxy /agent/ du hub) : on exige cette origine ET la fenetre
+// parente. Sans ce controle, toute page capable d'incruster le chat pouvait
+// lui faire lancer une recette -- ce qui soumet un message a l'agent au nom
+// de l'utilisateur.
+function _messageDuBureau(e) {
+  return e.origin === location.origin && window.parent !== window && e.source === window.parent;
+}
+
 window.addEventListener('message', (e) => {
+  if (!_messageDuBureau(e)) return;
   const data = e.data;
   if (!data || data.type !== 'recipe_run_request') return;
   const recipeId = String(data.recipe_id || '').trim();
@@ -1174,6 +1184,7 @@ window.addEventListener('message', (e) => {
 });
 
 window.addEventListener('message', async (e) => {
+  if (!_messageDuBureau(e)) return;
   const data = e.data;
   if (!data || data.type !== 'qgis_set_render') return;
   const sid = document.getElementById('session-id').value;
@@ -1749,7 +1760,7 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
                   window.parent.postMessage({
                     type: 'qgis_agent_turn_done',
                     has_publish: fullText.includes('Livrable publie'),
-                  }, '*');
+                  }, location.origin);
                 }
               } catch {}
               break;
@@ -1767,7 +1778,7 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
                   if (window.parent && window.parent !== window) {
                     window.parent.postMessage({
                       type: 'qgis_publish_done',
-                    }, '*');
+                    }, location.origin);
                   }
                 } catch {}
               }

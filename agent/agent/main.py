@@ -850,6 +850,14 @@ async def _fetch_active_study_id() -> str | None:
     return None
 
 
+# La page du chat ne s'incruste que dans une page de meme origine : le bureau,
+# qui la sert par le proxy /agent/ du hub. Incrustee ailleurs, elle exposait
+# un chat authentifie -- donc des actions au nom de l'utilisateur -- a une
+# page tierce (detournement de clic). Le partage d'un agent passera par sa
+# propre route, avec sa propre politique.
+_ENTETES_PAGE_CHAT = {"Content-Security-Policy": "frame-ancestors 'self'"}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Interface chat principale.
@@ -899,7 +907,7 @@ async def index(request: Request):
         "session_id":      session_id,
         "session_resumed": session_resumed,
         "embed":           embed,
-    })
+    }, headers=_ENTETES_PAGE_CHAT)
 
 
 # ── Chat streaming SSE ─────────────────────────────────────────────────────────
