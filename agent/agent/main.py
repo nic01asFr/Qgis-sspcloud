@@ -951,6 +951,42 @@ async def _resolve_active_profile(form_profile: str, session_id: str = "") -> st
     return form_profile
 
 
+_BATTEMENT = object()
+_PERIODE_BATTEMENT = 15.0
+
+
+async def _avec_battement(source, periode: float = _PERIODE_BATTEMENT):
+    """Relaie `source`, en intercalant un battement a chaque silence.
+
+    Pendant qu'un outil tourne ou que le modele reflechit sans rien emettre,
+    aucun octet ne partait vers le navigateur. Deux consequences : le chat ne
+    pouvait pas distinguer un agent qui travaille d'un agent mort, et la
+    passerelle coupe une connexion muette au bout de 600 s -- la reponse etait
+    alors tronquee sans que personne le sache.
+
+    L'element en attente n'est jamais annule par le battement : on attend le
+    MEME `__anext__` au tour suivant. L'annuler interromprait l'appel au
+    modele ou l'outil en cours.
+    """
+    iterateur = source.__aiter__()
+    suivant = asyncio.ensure_future(iterateur.__anext__())
+    try:
+        while True:
+            fini, _ = await asyncio.wait({suivant}, timeout=periode)
+            if not fini:
+                yield _BATTEMENT
+                continue
+            try:
+                element = suivant.result()
+            except StopAsyncIteration:
+                return
+            yield element
+            suivant = asyncio.ensure_future(iterateur.__anext__())
+    finally:
+        if not suivant.done():
+            suivant.cancel()
+
+
 @app.post("/chat")
 async def chat(
     request:        Request,
@@ -1065,9 +1101,12 @@ async def chat(
 
     async def event_stream() -> AsyncGenerator[str, None]:
         try:
-            async for chunk in agent.chat_stream(
+            async for chunk in _avec_battement(agent.chat_stream(
                 message, history=history_formatted, stop_signal=stop_signal,
-            ):
+            )):
+                if chunk is _BATTEMENT:
+                    yield f"data: {json.dumps({'battement': True})}\n\n"
+                    continue
                 if isinstance(chunk, dict):
                     yield f"data: {json.dumps(chunk)}\n\n"
                 else:

@@ -1443,6 +1443,49 @@ def _compose_prompt_sections(
 
 # ── Agent principal ────────────────────────────────────────────────────────────
 
+# Ce que l'utilisateur lit pendant qu'un outil tourne.
+#
+# Le chat affichait le nom technique (« Outil : get_project_info »). Pour qui
+# ne connait pas l'API, cela ne dit rien de ce qui se passe. Les outils absents
+# de la table gardent un libelle generique -- mieux vaut un libelle vague qu'un
+# nom de fonction.
+_LIBELLES_OUTILS = {
+    "get_project_info":     "Lecture du projet QGIS…",
+    "get_features":         "Lecture des entités…",
+    "list_datasources":     "Consultation du catalogue de sources…",
+    "add_from_catalog":     "Chargement d'une source du catalogue…",
+    "smart_load":           "Chargement des données…",
+    "add_layer":            "Ajout d'une couche…",
+    "remove_layer":         "Retrait d'une couche…",
+    "execute_python":       "Calcul en cours dans QGIS…",
+    "execute_async":        "Calcul long lancé dans QGIS…",
+    "poll_job":             "Suivi du calcul en cours…",
+    "run_processing":       "Traitement QGIS en cours…",
+    "search_algorithms":    "Recherche d'un traitement QGIS…",
+    "run_recipe":           "Exécution d'une recette…",
+    "set_layer_style":      "Mise en forme d'une couche…",
+    "set_layer_visibility": "Affichage des couches…",
+    "zoom_to":              "Cadrage de la carte…",
+    "set_study_zone":       "Définition de la zone d'étude…",
+    "get_study_zone":       "Lecture de la zone d'étude…",
+    "get_screenshot":       "Capture de la carte…",
+    "export_layer":         "Export d'une couche…",
+    "export_pdf":           "Export PDF…",
+    "export_web_map":       "Préparation d'une carte web…",
+    "publish_artifact":     "Publication du livrable…",
+    "save_project":         "Enregistrement du projet…",
+    "memory_search":        "Recherche dans la mémoire…",
+    "create_component":     "Création d'une brique de livrable…",
+    "create_assembly":      "Assemblage du livrable…",
+    "describe_entity_schema": "Lecture du format attendu…",
+    "validate_manifest":    "Vérification du livrable…",
+}
+
+
+def _libelle_outil(nom: str) -> str:
+    return _LIBELLES_OUTILS.get(nom, "Action en cours dans QGIS…")
+
+
 class QGISAgent:
     """
     Agent QGIS spécialisé.
@@ -2427,6 +2470,9 @@ ne vient pas d'un outil cette session, la supprimer.
                 iteration, model, len(messages), len(tools) if tools else 0,
                 _LLM_BASE_URL,
             )
+            # Phase explicite, pour que le chat puisse dire ce qui se passe
+            # au lieu de deviner l'outil en analysant le Markdown.
+            yield {"phase": "reflexion"}
             llm_t0 = asyncio.get_event_loop().time()
             iter_start = len(full_response)
             reasoning_buf = ""
@@ -2516,6 +2562,18 @@ ne vient pas d'un outil cette session, la supprimer.
                                 )
                                 if clean:
                                     _flush_reasoning()
+                                    if not chunk_text:
+                                        yield {"phase": "redaction"}
+                                        # Apres un outil, la reponse doit ouvrir un
+                                        # paragraphe. Collee a la ligne precedente,
+                                        # elle devient en Markdown la SUITE de la
+                                        # citation qui annonce l'outil -- citation
+                                        # masquee avec les details techniques : la
+                                        # premiere phrase disparaissait avec elle.
+                                        if tool_calls_made and not full_response.endswith("\n\n"):
+                                            _sep = "\n\n" if not full_response.endswith("\n") else "\n"
+                                            full_response += _sep
+                                            yield _sep
                                     chunk_text += clean
                                     full_response += clean
                                     texte_emis = True
@@ -2740,6 +2798,8 @@ ne vient pas d'un outil cette session, la supprimer.
                 # côté UI) ET accumulé dans full_response (persisté en DB pour
                 # que le rendu au reload soit cohérent + matching des
                 # checkpoints aux tools possible côté reattachRollbackButtons).
+                yield {"phase": "outil", "outil": fn_name,
+                       "label": _libelle_outil(fn_name)}
                 _bq_header = f"\n\n> **`{fn_name}`**"
                 full_response += _bq_header
                 yield _bq_header

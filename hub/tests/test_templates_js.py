@@ -32,6 +32,10 @@ import pytest
 
 _RACINE = Path(__file__).resolve().parents[1]
 _GABARITS = _RACINE / "templates"
+# Le chat de l'agent porte toute la logique du flux -- phases, erreurs,
+# coupures. Il n'etait pas couvert : une erreur de syntaxe y aurait
+# desactive le chat entier sans qu'aucun test ne bronche.
+_GABARITS_AGENT = _RACINE.parent / "agent" / "templates"
 
 # Contexte de rendu : les valeurs que le serveur fournit reellement. Le but
 # n'est pas de simuler l'application mais d'obtenir un rendu representatif ---
@@ -77,7 +81,7 @@ def _rendre(chemin: Path) -> str:
     import jinja2
 
     env = jinja2.Environment(
-        loader=jinja2.FileSystemLoader(str(_GABARITS)),
+        loader=jinja2.FileSystemLoader(str(chemin.parent)),
         undefined=jinja2.ChainableUndefined,
         autoescape=True,
     )
@@ -112,7 +116,7 @@ def _compile(code: str) -> tuple[bool, int, str]:
 
 
 def _fichiers() -> list[Path]:
-    return sorted(_GABARITS.glob("*.html"))
+    return sorted(_GABARITS.glob("*.html")) + sorted(_GABARITS_AGENT.glob("*.html"))
 
 
 @pytest.mark.skipif(_NODE is None, reason="node absent (installe en CI)")

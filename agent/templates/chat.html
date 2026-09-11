@@ -55,6 +55,28 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
   transform:translateX(100%);transition:transform .2s ease;z-index:250;
   display:flex;flex-direction:column}
 .memory-drawer.open{transform:translateX(0)}
+/* Ferme, le tiroir est translate hors de .chat-main. Le mode embarque rognait
+   deja ce debordement ; la page autonome, non : elle defilait de 300 px vers
+   la droite. `clip` rogne sans creer de conteneur de defilement.
+   `min-width:0` : la colonne de grille `1fr` ne descend pas, par defaut, sous
+   la largeur minimale de son contenu. Un tableau aux cellules insecables
+   elargissait donc toute la colonne (464 px dans une fenetre de 300). */
+.chat-main{overflow-x:clip;min-width:0}
+/* Un tableau dans une bulle defile au lieu de s'ecraser. Dans la colonne de
+   299 px du bureau, « EPSG:5490 » se cassait sur trois lignes et « Vector
+   (16 151 polygones) » sur quatre. */
+/* `min-width:0` : une bulle est un element flexible, qui par defaut ne se
+   retrecit pas sous la largeur de son contenu. Un tableau aux cellules
+   insecables l'elargissait donc au-dela de la colonne -- et `clip` rognait
+   le texte sans permettre de le faire defiler. */
+.msg .bubble{min-width:0}
+.msg .bubble table{display:block;max-width:100%;overflow-x:auto}
+.msg .bubble table th,.msg .bubble table td{white-space:nowrap}
+/* Duree d'attente, dans la bulle et la barre d'etat. */
+.bubble-thinking .duree{color:var(--qs-discret);font-variant-numeric:tabular-nums}
+/* Reponse interrompue : dit qu'il manque la fin, et quoi faire. */
+.msg .bubble .bubble-coupure{margin:10px 0 0;padding:8px 10px;border-left:3px solid var(--qs-alerte);
+  background:var(--qs-alerte-pale);color:var(--qs-encre-2);font-size:.92em;border-radius:0 3px 3px 0}
 .memory-drawer header{padding:8px 12px;border-bottom:1px solid var(--qs-trait);
   display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600}
 .memory-drawer header .close{margin-left:auto;background:transparent;border:0;
@@ -1583,6 +1605,24 @@ function appendMessage(role, content) {
 // signalée via POST /chat/{sid}/stop qui pose un asyncio.Event).
 let _currentAbort = null;
 
+// Le message a afficher quand le service repond une erreur au lieu d'un flux.
+//
+// Sans ce controle, le corps d'erreur (souvent une page HTML) etait lu comme un
+// flux vide : la bulle restait sur « Analyse en cours… » indefiniment, alors
+// que le bouton d'envoi etait deja reactive. Constate en simulant un 502, le
+// cas d'un agent qui redemarre.
+function _messageErreurHttp(statut) {
+  if (statut === 401 || statut === 403) {
+    return 'Ta session a expiré. Recharge la page pour te reconnecter, puis relance ta demande.';
+  }
+  if (statut === 502 || statut === 503 || statut === 504) {
+    return "L'agent ne répond pas pour le moment (" + statut + ") : il redémarre peut-être. "
+      + 'Réessaie dans quelques secondes.';
+  }
+  return "L'agent a renvoyé une erreur (" + statut + '). Réessaie ; si cela persiste, '
+    + 'signale-le.';
+}
+
 document.getElementById('stop-btn').addEventListener('click', async () => {
   const sid = document.getElementById('session-id').value;
   const btn = document.getElementById('stop-btn');
@@ -1624,6 +1664,28 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
   const responseDiv = document.getElementById('current-response');
   let fullText = '';
   let fullReasoning = '';
+  // Etat visible du tour. `recuFin` distingue une reponse complete d'un flux
+  // coupe en route : sans lui, une reponse tronquee s'affichait comme si elle
+  // etait entiere. `phasesVues` : le serveur annonce ses phases, on ne devine
+  // plus l'outil en cours dans le Markdown.
+  let recuFin = false;
+  let phasesVues = false;
+  let libellePhase = 'Analyse en cours…';
+  const debutTour = Date.now();
+  const majAttente = () => {
+    const secondes = Math.round((Date.now() - debutTour) / 1000);
+    const duree = secondes >= 2 ? ' · ' + secondes + ' s' : '';
+    document.getElementById('status-text').textContent = libellePhase + duree;
+    // Tant que rien de visible n'est arrive, la bulle garde son repere : il
+    // suit la phase et le temps ecoule au lieu de disparaitre.
+    const repere = responseDiv && responseDiv.querySelector('.bubble-thinking');
+    if (repere) {
+      repere.innerHTML = '<span class="bubble-spinner"></span>'
+        + '<span>' + escapeHtml(libellePhase) + '</span>'
+        + (duree ? '<span class="duree">' + escapeHtml(duree.replace(' · ', '')) + '</span>' : '');
+    }
+  };
+  const minuteur = setInterval(majAttente, 1000);
 
   const formData = new FormData();
   formData.append('message', message);
@@ -1633,6 +1695,11 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
   _currentAbort = new AbortController();
   try {
     const resp = await fetch('/chat', { method: 'POST', body: formData, signal: _currentAbort.signal });
+    if (!resp.ok || !resp.body) {
+      recuFin = true;
+      responseDiv.innerHTML = `<span class="bubble-err">${escapeHtml(_messageErreurHttp(resp.status))}</span>`;
+      return;
+    }
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     // Buffer accumulant les chunks jusqu'à un événement SSE complet
@@ -1651,11 +1718,26 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
           if (!line.startsWith('data: ')) continue;
           try {
             const data = JSON.parse(line.slice(6));
+            if (data.battement) {
+              // Le serveur est vivant, meme s'il n'a rien a dire : un outil
+              // tourne. Rien a afficher, la duree continue d'avancer.
+              continue;
+            }
+            if (data.phase) {
+              phasesVues = true;
+              if (data.phase === 'reflexion') libellePhase = 'Réflexion…';
+              else if (data.phase === 'redaction') libellePhase = 'Rédaction de la réponse…';
+              else libellePhase = data.label || 'Action en cours…';
+              majAttente();
+              continue;
+            }
             if (data.error) {
+              recuFin = true;
               responseDiv.innerHTML = `<span class="bubble-err">Erreur : ${escapeHtml(data.error)}</span>`;
               break;
             }
             if (data.done) {
+              recuFin = true;
               // Signaler au desk parent que le turn agent est termine.
               // Le desk peut refetcher /desk/catalog pour mettre a jour
               // le compteur publications et le drawer si publish_artifact
@@ -1693,8 +1775,11 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
               // ("`key=value`"). Le pattern strong+code en début de ligne
               // (apres `> **`) marque le nom du tool.
               const tname = data.text.match(/>\s*\*\*`([^`]+)`\*\*/);
-              if (tname) {
-                document.getElementById('status-text').textContent = `Outil : ${tname[1]}`;
+              // Repli pour un serveur qui n'annonce pas ses phases : sinon le
+              // nom technique ecraserait le libelle lisible qu'il vient d'envoyer.
+              if (tname && !phasesVues) {
+                libellePhase = `Outil : ${tname[1]}`;
+                majAttente();
               }
             }
             if (data.reasoning || data.text) {
@@ -1709,6 +1794,17 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
                 // pour que le user voie le dernier blockquote (tool en cours)
                 // et le texte final sans devoir scroller à travers les JSON bruts.
                 foldToolResults(responseDiv);
+                // Le rendu peut ne rien montrer : le raisonnement et les blocs
+                // d'outil sont masques par defaut avec les details techniques.
+                // Le remplacer tel quel effacait le repere d'attente et laissait
+                // une bulle vide -- 24 s mesurees dans le bureau, precisement
+                // pendant que le modele travaillait. `innerText` ignore ce que
+                // le CSS masque : c'est lui qui dit si l'utilisateur voit quelque
+                // chose. Sinon, on remet le repere, qui suit la phase en cours.
+                if (!responseDiv.innerText.trim()) {
+                  responseDiv.insertAdjacentHTML('beforeend', '<div class="bubble-thinking"></div>');
+                  majAttente();
+                }
               }
               const msgs = document.getElementById('messages');
               msgs.scrollTop = msgs.scrollHeight;
@@ -1716,6 +1812,14 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
           } catch {}
         }
       }
+    }
+    if (!recuFin && responseDiv) {
+      // Le flux s'est ferme sans que le serveur annonce la fin : connexion
+      // coupee, passerelle, agent redemarre. La reponse est incomplete, et il
+      // faut le dire -- sans quoi elle passait pour entiere.
+      responseDiv.insertAdjacentHTML('beforeend',
+        '<p class="bubble-coupure">Réponse interrompue : la connexion s’est coupée avant la fin. '
+        + 'Relance ta demande pour la compléter.</p>');
     }
   } catch (err) {
     if (err && err.name === 'AbortError') {
@@ -1728,6 +1832,7 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
       responseDiv.innerHTML = `<span class="bubble-err">Erreur réseau : ${escapeHtml(err.message)}</span>`;
     }
   } finally {
+    clearInterval(minuteur);
     document.getElementById('send-btn').disabled = false;
     document.getElementById('send-btn').style.display = '';
     document.getElementById('stop-btn').style.display = 'none';

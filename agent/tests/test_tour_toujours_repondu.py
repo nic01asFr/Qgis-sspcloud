@@ -256,8 +256,85 @@ def test_un_paquet_final_sans_motif_n_efface_pas_le_budget_epuise(agent):
 def test_une_reponse_normale_ne_declenche_rien(agent):
     morceaux = _derouler(agent, _paquets(texte="Dix-neuf couches.", motif="stop"))
     assert len(_ClientModele.appels) == 1
-    assert _phases(morceaux) == []
+    assert "relance" not in _phases(morceaux)
     assert "Je n'ai pas" not in _visible(morceaux)
+
+
+# ── Ce que le chat peut dire pendant que l'agent travaille ───────────────
+
+def test_une_reponse_annonce_la_reflexion_puis_la_redaction(agent):
+    """Le chat devinait l'etat de l'agent en analysant le Markdown. Les phases
+    le lui disent : il peut afficher « Reflexion… » puis « Redaction… »."""
+    morceaux = _derouler(agent, _paquets(reflexion="…", texte="Voici.", motif="stop"))
+    assert _phases(morceaux) == ["reflexion", "redaction"]
+
+
+def test_la_redaction_n_est_annoncee_qu_une_fois_par_iteration(agent):
+    lignes = _paquets(texte="Premier morceau. ", motif="stop")
+    # Plusieurs paquets de texte dans le meme appel.
+    lignes.insert(1, "data: " + json.dumps(
+        {"choices": [{"delta": {"content": "Deuxieme. "}, "finish_reason": None}]}))
+    morceaux = _derouler(agent, lignes)
+    assert _phases(morceaux).count("redaction") == 1
+
+
+def test_un_outil_a_un_libelle_lisible():
+    assert qa._libelle_outil("get_project_info") == "Lecture du projet QGIS…"
+    assert qa._libelle_outil("run_processing") == "Traitement QGIS en cours…"
+
+
+def test_un_outil_inconnu_garde_un_libelle_generique_plutot_que_son_nom():
+    libelle = qa._libelle_outil("outil_jamais_vu")
+    assert "outil_jamais_vu" not in libelle
+    assert libelle.strip()
+
+
+# ── Le battement de coeur ────────────────────────────────────────────────
+
+def _relayer(source, periode):
+    from agent import main as agent_main
+
+    async def _tout():
+        return [x async for x in agent_main._avec_battement(source, periode=periode)]
+    return _run(_tout()), agent_main._BATTEMENT
+
+
+def test_un_silence_produit_des_battements():
+    """Sans eux, rien ne partait vers le navigateur pendant un outil long, et
+    la passerelle coupait la connexion au bout de 600 s."""
+    async def _lent():
+        await asyncio.sleep(0.12)
+        yield "fin"
+
+    elements, battement = _relayer(_lent(), periode=0.03)
+    assert elements.count(battement) >= 2
+    assert elements[-1] == "fin"
+
+
+def test_le_battement_n_interrompt_pas_le_travail_en_cours():
+    """Annuler l'element attendu a chaque battement couperait l'appel au
+    modele ou l'outil en cours : il doit arriver quand meme, et en entier."""
+    etapes = []
+
+    async def _travail():
+        etapes.append("debut")
+        await asyncio.sleep(0.1)
+        etapes.append("fin")
+        yield "resultat"
+
+    elements, battement = _relayer(_travail(), periode=0.02)
+    assert etapes == ["debut", "fin"]
+    assert [e for e in elements if e is not battement] == ["resultat"]
+
+
+def test_sans_silence_aucun_battement():
+    async def _rapide():
+        for i in range(3):
+            yield i
+
+    elements, battement = _relayer(_rapide(), periode=5)
+    assert battement not in elements
+    assert elements == [0, 1, 2]
 
 
 def test_une_reponse_coupee_par_le_budget_n_est_pas_relancee(agent):
