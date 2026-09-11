@@ -75,6 +75,7 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
 /* Duree d'attente, dans la bulle et la barre d'etat. */
 .bubble-thinking .duree{color:var(--qs-discret);font-variant-numeric:tabular-nums}
 /* Reponse interrompue : dit qu'il manque la fin, et quoi faire. */
+.msg .bubble .bubble-vide{margin:0;color:var(--qs-discret);font-style:italic}
 .msg .bubble .bubble-coupure{margin:10px 0 0;padding:8px 10px;border-left:3px solid var(--qs-alerte);
   background:var(--qs-alerte-pale);color:var(--qs-encre-2);font-size:.92em;border-radius:0 3px 3px 0}
 .memory-drawer header{padding:8px 12px;border-bottom:1px solid var(--qs-trait);
@@ -87,14 +88,16 @@ body{display:flex;flex-direction:column;background:#f6f6f6}
 .memory-drawer footer a{font-size:10.5px}
 .insight-card{background:var(--qs-surface-2);border:1px solid var(--qs-trait);
   border-radius:3px;padding:6px 8px;margin-bottom:5px;font-size:11.5px;position:relative}
-.insight-card .key{font-weight:600;color:var(--qs-accent);font-family:Menlo,Monaco,Consolas,monospace;
-  font-size:10.5px;padding-right:18px}
+.insight-card .key{font-weight:600;color:var(--qs-accent);font-size:11px;padding-right:18px}
 .insight-card .val{margin-top:2px;color:var(--qs-encre-2);line-height:1.35}
 .insight-card .meta{margin-top:3px;font-size:10px;color:var(--qs-discret);
   display:flex;gap:8px;align-items:center}
 .insight-card button.del{position:absolute;top:4px;right:6px;background:transparent;border:0;
   font-size:14px;cursor:pointer;opacity:.4;color:var(--qs-encre-2);line-height:1}
 .insight-card button.del:hover{opacity:1;color:#c00}
+.insight-card button.keep{margin-left:auto;background:#fff;border:1px solid var(--qs-trait);
+  border-radius:3px;padding:1px 8px;font:inherit;font-size:10.5px;color:var(--qs-accent);cursor:pointer}
+.insight-card button.keep:hover{background:var(--qs-accent-pale)}
 .memory-empty{font-size:11.5px;color:var(--qs-discret);text-align:center;padding:14px 8px}
 .mem-md-section{background:#fff;border:1px solid var(--qs-trait);border-radius:3px;
   margin-bottom:6px;overflow:hidden}
@@ -435,8 +438,8 @@ body.embed .msg .bubble pre{max-width:100%}
   <!-- Sidebar -->
   <aside class="chat-sidebar">
     <div class="sidebar-section">
-      <button onclick="newSession()" class="qs-btn qs-btn--sm" style="width:100%">
-        + Nouvelle analyse
+      <button type="button" onclick="startNewConversation()" class="qs-btn qs-btn--sm" style="width:100%">
+        + Nouvelle conversation
       </button>
     </div>
 
@@ -458,13 +461,15 @@ body.embed .msg .bubble pre{max-width:100%}
 
     {% if sessions %}
     <div class="sidebar-section" style="flex:1;overflow-y:auto;border-bottom:none">
-      <div class="sidebar-label">Sessions récentes</div>
+      <div class="sidebar-label">{{ "Conversations de l'étude" if historique_etude else "Conversations récentes" }}</div>
       {% for s in sessions[:8] %}
-      <div class="sidebar-item" onclick="loadSession('{{ s.id }}')"
-           title="{{ s.summary or '' }}">
+      <button type="button" class="sidebar-item conv-lien" data-session="{{ s.id }}"
+              onclick="loadSession('{{ s.id }}')"
+              title="{{ s.summary or 'Conversation sans titre' }}">
         <span class="ic ic-discussion" aria-hidden="true"></span>
-        <span>{{ s.summary[:30] if s.summary else 'Session ' + s.id[:8] }}</span>
-      </div>
+        <span class="lbl">{{ s.summary or 'Conversation sans titre' }}</span>
+        <span class="quand" data-debut="{{ s.started_at or '' }}"></span>
+      </button>
       {% endfor %}
     </div>
     {% endif %}
@@ -541,23 +546,24 @@ body.embed .msg .bubble pre{max-width:100%}
       </div>
       <div id="history-popover" class="history-popover" aria-hidden="true">
         <div class="history-popover-header">
-          <span style="font-weight:700"><span class="ic-horloge ic--sm" aria-hidden="true"></span> Conversations récentes</span>
+          <span style="font-weight:700"><span class="ic-horloge ic--sm" aria-hidden="true"></span> {{ "Conversations de l'étude" if historique_etude else "Conversations récentes" }}</span>
           <button type="button" class="close" onclick="toggleHistoryPopover(null,false)" aria-label="Fermer"><span class="ic-fermer ic--sm" aria-hidden="true"></span></button>
         </div>
         <div class="history-popover-body">
           {% if sessions %}
           {% for s in sessions[:20] %}
-          <button type="button" class="history-item"
+          <button type="button" class="history-item conv-lien" data-session="{{ s.id }}"
                   onclick="loadSession('{{ s.id }}');toggleHistoryPopover(null,false)"
-                  title="{{ s.summary or 'Session ' + s.id[:8] }}">
+                  title="{{ s.summary or 'Conversation sans titre' }}">
             <span class="ic ic-discussion" aria-hidden="true"></span>
-            <span class="lbl">{{ s.summary[:50] if s.summary else 'Session ' + s.id[:8] }}</span>
+            <span class="lbl">{{ s.summary or 'Conversation sans titre' }}</span>
+            <span class="quand" data-debut="{{ s.started_at or '' }}"></span>
           </button>
           {% endfor %}
           {% else %}
           <p class="history-empty">
-            Aucune conversation pour l'instant. Démarre une analyse pour
-            que tes sessions apparaissent ici.
+            {{ "Aucune conversation sur cette étude pour l'instant." if historique_etude else "Aucune conversation pour l'instant." }}
+            Elles apparaissent ici dès ton premier message.
           </p>
           {% endif %}
         </div>
@@ -575,9 +581,11 @@ body.embed .msg .bubble pre{max-width:100%}
        position:relative -> ajoute via inline style sur l'element parent
        OU via la rule .chat-toolbar deja position:relative). */
     .chat-toolbar{position:relative}
+    /* `min()` : dans la colonne de 299 px du bureau, 320 px debordaient de
+       29 px a gauche -- le debut de chaque titre etait coupe. */
     .history-popover{
       position:absolute;top:calc(100% + 4px);right:8px;
-      width:320px;max-height:60vh;
+      width:min(320px, calc(100% - 16px));max-height:60vh;
       background:#fff;border:1px solid var(--qs-trait);
       border-radius:6px;box-shadow:0 6px 24px rgba(0,0,0,.15);
       z-index:200;display:none;overflow:hidden;
@@ -597,8 +605,29 @@ body.embed .msg .bubble pre{max-width:100%}
       color:var(--qs-encre-2);transition:background .12s}
     .history-item:hover{background:var(--qs-surface-2)}
     .history-item .ic{font-size:13px;opacity:.7;flex-shrink:0}
-    .history-item .lbl{flex:1;min-width:0;
+    .history-item .lbl,.conv-lien .lbl{flex:1;min-width:0;
       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    /* Deux conversations ouvertes par la meme phrase etaient indiscernables :
+       la date les separe. */
+    .conv-lien .quand{flex-shrink:0;font-size:11px;color:var(--qs-discret);
+      font-variant-numeric:tabular-nums}
+    /* Barre laterale de 240 px : la date sous le titre, sinon elle ne laissait
+       au titre qu'une quinzaine de caracteres. */
+    .sidebar-item.conv-lien{display:grid;grid-template-columns:auto minmax(0,1fr);
+      column-gap:6px;align-items:center;width:100%;
+      border:none;background:transparent;text-align:left;font-family:inherit;color:inherit}
+    .sidebar-item.conv-lien .ic{grid-row:span 2}
+    .sidebar-item.conv-lien .quand{grid-column:2;font-size:10.5px}
+    /* Meme disposition dans le menu, en colonne etroite du bureau. */
+    body.embed .history-item.conv-lien{display:grid;grid-template-columns:auto minmax(0,1fr);
+      column-gap:8px;row-gap:1px}
+    body.embed .history-item.conv-lien .ic{grid-row:span 2}
+    body.embed .history-item.conv-lien .quand{grid-column:2;font-size:10.5px}
+    .sidebar-item.conv-lien:hover{background:var(--qs-surface-2)}
+    /* Apres les regles de base : a specificite egale, la derniere l'emporte. */
+    .conv-lien[aria-current="true"],
+    .sidebar-item.conv-lien[aria-current="true"]{background:var(--qs-accent-pale);color:var(--qs-accent)}
+    .conv-lien[aria-current="true"] .quand{color:inherit}
     .history-empty{font-size:12px;color:var(--qs-discret);
       padding:14px 16px;margin:0;line-height:1.5}
     .tech-popover{
@@ -673,6 +702,7 @@ body.embed .msg .bubble pre{max-width:100%}
                      : !pop.classList.contains('open');
       pop.classList.toggle('open', willOpen);
       pop.setAttribute('aria-hidden', willOpen ? 'false' : 'true');
+      document.getElementById('btn-tech-details')?.setAttribute('aria-expanded', String(willOpen));
       if (willOpen) toggleHistoryPopover(null, false);
     }
     applyTechPrefs();
@@ -689,6 +719,7 @@ body.embed .msg .bubble pre{max-width:100%}
                      : !pop.classList.contains('open');
       pop.classList.toggle('open', willOpen);
       pop.setAttribute('aria-hidden', willOpen ? 'false' : 'true');
+      document.getElementById('btn-history')?.setAttribute('aria-expanded', String(willOpen));
       if (willOpen) toggleTechPopover(null, false);
     }
     // Fermeture click outside
@@ -708,12 +739,31 @@ body.embed .msg .bubble pre{max-width:100%}
         }
       }
     });
-    // Fermeture touche Echap
+    // Fermeture touche Echap. Le focus revient au bouton du menu ferme : il
+    // partait sur la page, et le clavier perdait sa place dans la barre.
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        toggleHistoryPopover(null, false);
-        toggleTechPopover(null, false);
+      if (e.key !== 'Escape') return;
+      const ouverts = [
+        ['history-popover', 'btn-history', () => toggleHistoryPopover(null, false)],
+        ['tech-popover', 'btn-tech-details', () => toggleTechPopover(null, false)],
+      ];
+      for (const [id, bouton, fermer] of ouverts) {
+        const el = document.getElementById(id);
+        if (el && el.classList.contains('open')) {
+          fermer();
+          document.getElementById(bouton)?.focus();
+        }
+      }
+      const tiroir = document.getElementById('memory-drawer');
+      if (tiroir && tiroir.classList.contains('open')) {
+        // Une section modifiee et non enregistree etait perdue sans un mot :
+        // la reouverture relit la memoire enregistree.
+        if (tiroir.querySelector('.mem-md-actions.dirty')) {
+          showChatToast('Modifications non enregistrées : enregistre-les ou ferme avec la croix.');
+          return;
+        }
         toggleMemoryDrawer(false);
+        document.getElementById('btn-memory')?.focus();
       }
     });
     </script>
@@ -728,7 +778,7 @@ body.embed .msg .bubble pre{max-width:100%}
         <div class="memory-empty">Chargement…</div>
       </div>
       <footer>
-        Lu à chaque message. Les faits auto-détectés peuvent être repris ou oubliés.
+        Lu à chaque message. Garde les faits utiles, oublie les autres.
       </footer>
     </aside>
 
@@ -1226,6 +1276,7 @@ async function toggleMemoryDrawer(forceState) {
   const willOpen = forceState !== undefined ? forceState : !drawer.classList.contains('open');
   drawer.classList.toggle('open', willOpen);
   drawer.setAttribute('aria-hidden', willOpen ? 'false' : 'true');
+  document.getElementById('btn-memory')?.setAttribute('aria-expanded', String(willOpen));
   if (willOpen) {
     toggleHistoryPopover(null, false);
     toggleTechPopover(null, false);
@@ -1311,18 +1362,58 @@ async function loadMemoryPanel() {
       html += '<div class="memory-empty">Aucun fait pour l\'instant.</div>';
     } else {
       html += insights.map(ins => {
-        const src = ins.source === 'explicit' ? 'validé' : 'proposé';
+        const confirme = ins.source === 'explicit';
+        // La cle est un identifiant technique (« profil_metier ») : on
+        // l'affiche comme un libelle.
+        const libelle = _libelleFait(ins.key);
+        const garder = confirme ? '<span>confirmé</span>'
+          : `<span>proposé par l'agent</span>
+             <button type="button" class="keep" data-key="${escapeHtml(ins.key)}"
+                     data-value="${escapeHtml(ins.value)}" onclick="confirmInsight(this)">Garder</button>`;
         return `<div class="insight-card" data-id="${ins.id}">
-          <button type="button" class="del" onclick="deleteInsight(${ins.id})" title="Oublier">×</button>
-          <div class="key">${escapeHtml(ins.key)}</div>
+          <button type="button" class="del" onclick="deleteInsight(${ins.id})" title="Oublier" aria-label="Oublier ce fait">×</button>
+          <div class="key">${escapeHtml(libelle)}</div>
           <div class="val">${escapeHtml(ins.value)}</div>
-          <div class="meta"><span>${src}</span></div>
+          <div class="meta">${garder}</div>
         </div>`;
       }).join('');
     }
     body.innerHTML = html;
   } catch (e) {
     body.innerHTML = `<div class="memory-empty">Erreur : ${escapeHtml(String(e))}</div>`;
+  }
+}
+
+// Les cles des faits sont en snake_case sans accents (« profil_metier ») :
+// on en fait un libelle lisible, accents compris pour les mots frequents.
+const _ACCENTS_FAITS = {
+  etude: 'étude', etudes: 'études', metier: 'métier', donnees: 'données',
+  methode: 'méthode', methodes: 'méthodes', recurrente: 'récurrente',
+  competence: 'compétence', pref: 'préférée', preferee: 'préférée',
+  preferees: 'préférées', habituee: 'habituée', echelle: 'échelle',
+  thematique: 'thématique', perimetre: 'périmètre', precision: 'précision',
+};
+function _libelleFait(cle) {
+  const mots = String(cle || '').split('_').filter(Boolean)
+    .map(m => _ACCENTS_FAITS[m] || m).join(' ');
+  return mots.replace(/^./, c => c.toUpperCase());
+}
+
+// Un fait propose par l'agent devient un fait confirme : il n'est plus
+// presente au modele comme une hypothese a verifier.
+async function confirmInsight(btn) {
+  btn.disabled = true;
+  try {
+    const r = await fetch('/user/insights', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({key: btn.dataset.key, value: btn.dataset.value}),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    await loadMemoryPanel();
+  } catch (e) {
+    btn.disabled = false;
+    showChatToast('Impossible de garder ce fait : ' + e.message);
   }
 }
 
@@ -1343,28 +1434,54 @@ function escapeHtml(s) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-function newSession() {
-  const newId = crypto.randomUUID();
-  document.getElementById('session-id').value = newId;
-  document.getElementById('messages').innerHTML = `
-    <div class="msg">
-      <div class="avatar"><span class="ic-carte ic--md" aria-hidden="true"></span></div>
-      <div class="bubble">Nouvelle analyse. Décris ce que tu veux faire.</div>
-    </div>`;
+// Marque la conversation affichee dans l'historique (barre laterale et menu).
+function marquerConversationCourante(sid) {
+  document.querySelectorAll('.conv-lien[data-session]').forEach(el => {
+    if (el.dataset.session === sid) el.setAttribute('aria-current', 'true');
+    else el.removeAttribute('aria-current');
+  });
+}
+
+// Dates de l'historique, dans le fuseau du navigateur : le serveur tourne en
+// UTC, loin de l'heure de l'utilisateur.
+function afficherDatesConversations() {
+  const fmt = new Intl.DateTimeFormat('fr', {day: 'numeric', month: 'short',
+                                               hour: '2-digit', minute: '2-digit'});
+  document.querySelectorAll('.conv-lien .quand[data-debut]').forEach(el => {
+    const s = parseInt(el.dataset.debut, 10);
+    if (s) el.textContent = fmt.format(new Date(s * 1000));
+  });
 }
 
 function loadSession(sid) {
-  document.getElementById('session-id').value = sid;
-  fetch('/sessions/' + sid + '/messages')
-    .then(r => r.json())
+  // Un tour en cours ecrit dans la conversation affichee : en changer au
+  // milieu melangerait les deux.
+  if (document.getElementById('send-btn').disabled && document.getElementById('stop-btn').style.display !== 'none') {
+    showChatToast('Attends la fin de la réponse en cours, ou arrête-la.');
+    return;
+  }
+  fetch('/sessions/' + encodeURIComponent(sid) + '/messages')
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
     .then(msgs => {
+      // On ne bascule qu'une fois la conversation lue : en cas d'echec,
+      // l'ecran garde l'ancienne, et le prochain message doit y aller aussi.
+      document.getElementById('session-id').value = sid;
+      marquerConversationCourante(sid);
       const c = document.getElementById('messages');
       c.innerHTML = '';
       msgs.forEach(m => {
         const role = m.role === 'user' ? 'user' : 'assistant';
+        // Une reponse vide a pu etre enregistree avant que le tour ne soit
+        // garanti : sans ce repli, l'historique montrait une bulle blanche.
+        const corps = (m.content || '').trim()
+          ? marked.parse(m.content)
+          : '<p class="bubble-vide">Aucune réponse n’a été enregistrée pour ce message.</p>';
         const html = role === 'user'
           ? `<div class="msg user"><div class="bubble">${escapeHtml(m.content)}</div></div>`
-          : `<div class="msg"><div class="avatar"><span class="ic-carte ic--md" aria-hidden="true"></span></div><div class="bubble">${marked.parse(m.content || '')}</div></div>`;
+          : `<div class="msg"><div class="avatar"><span class="ic-carte ic--md" aria-hidden="true"></span></div><div class="bubble">${corps}</div></div>`;
         c.insertAdjacentHTML('beforeend', html);
       });
       // Replie tous les blocs résultat-tool dans les messages history
@@ -1373,11 +1490,10 @@ function loadSession(sid) {
       // Re-attache les boutons "↶ Revenir avant" depuis la DB
       // (les marqueurs SSE n'existent pas dans l'historique re-rendu).
       reattachRollbackButtonsFromHistory();
+    })
+    .catch(() => {
+      showChatToast('Impossible d’ouvrir cette conversation. Réessaie.');
     });
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
 }
 
 // Replie les <pre> (payloads JSON des tools) dans <details> fermés.
@@ -1493,6 +1609,8 @@ async function reattachRollbackButtonsFromHistory() {
 // active au lieu de generer une uuid fraiche). Sans ce hook, le session_id
 // est bien dans le DOM mais l'iframe affiche les suggestions par defaut.
 function _onChatReady() {
+  afficherDatesConversations();
+  marquerConversationCourante(document.getElementById('session-id').value);
   reattachRollbackButtonsFromHistory();
   const sessionResumed = {{ 'true' if session_resumed else 'false' }};
   if (sessionResumed) {

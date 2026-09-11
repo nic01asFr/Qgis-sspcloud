@@ -54,6 +54,9 @@ methode_recurrente, source_donnees_pref, profil_metier, ...).
 - Pas de doublons avec les insights existants (passés en input).
 - Si rien de stable et durable à retenir, renvoie {"insights": []}.
 - Ignore les éléments éphémères (un message ponctuel sans pattern).
+- N'extrais RIEN qui décrive l'étude ou le projet en cours (sa zone, son sujet, \
+ses couches, son avancement) : l'étude a son propre contexte, et ces faits \
+suivraient l'utilisateur dans toutes ses autres études.
 - Pas d'invention : on extrait, on ne complète pas.
 """
 
@@ -82,6 +85,21 @@ def _build_user_prompt(messages: list[dict], existing: list[dict]) -> str:
         char_count += len(line)
     parts.append("\nRenvoie le JSON {\"insights\": [...]}.")
     return "\n".join(parts)
+
+
+# Cles qui decrivent l'etude du moment, pas l'utilisateur. Constate sur le
+# service : « zone_etude_actuelle = Saint-Martin » et « sujet_etude_actuel »
+# etaient enregistres comme faits permanents, puis injectes dans chaque
+# conversation -- y compris sur une autre etude. La consigne du prompt ne
+# suffit pas a elle seule : le modele a produit ces cles malgre « durables ».
+_CLE_ETUDE_EN_COURS = re.compile(
+    r"(^|_)(actuel|actuelle|actuels|actuelles|courant|courante|en_cours)(_|$)"
+    r"|(^|_)(zone|sujet|projet|theme)_(etude|du_projet)(_|$)"
+)
+
+
+def _decrit_l_etude_en_cours(key: str) -> bool:
+    return bool(_CLE_ETUDE_EN_COURS.search(key))
 
 
 def _parse_json(raw: str) -> dict | None:
@@ -167,6 +185,9 @@ async def extract_for_session(
         key = re.sub(r"[^a-z0-9_]+", "_", key.lower()).strip("_")
         if len(key) < 2 or len(value) > 280:
             skipped.append({"reason": "format", "key": key, "value": value[:60]})
+            continue
+        if _decrit_l_etude_en_cours(key):
+            skipped.append({"reason": "etude_en_cours", "key": key, "value": value[:60]})
             continue
         conf = ins.get("confidence", 0.7)
         try:

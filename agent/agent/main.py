@@ -877,23 +877,27 @@ async def index(request: Request):
         return Response(content="ok", media_type="text/plain", status_code=200)
 
     profile_id = request.cookies.get("profile_id", _DEFAULT_PROFILE)
-    sessions   = await memory.get_recent_sessions("user", limit=5)
     projects   = await memory.list_projects(profile_id)
 
+    # L'etude active decide de ce que la page propose : la conversation
+    # reprise ET l'historique. L'historique melangeait les conversations de
+    # toutes les etudes -- et n'en listait que 5, alors que le menu en prevoit
+    # 20. Hub injoignable : pas d'etude connue, toutes les conversations.
+    active_study_id = await _fetch_active_study_id()
+    sessions = await memory.get_recent_sessions(
+        "user", limit=20, study_id=active_study_id,
+    )
+
     # Reprise de la derniere session liee a l'etude active (Fix Bug B).
-    # Le query param ?new=1 force une nouvelle session (pour "Nouvelle
-    # conversation" futur). Sinon, si etude active + session anterieure
-    # rattachee, on la reprend.
+    # Le query param ?new=1 force une nouvelle session.
     session_id: str | None = None
     session_resumed: bool = False
-    if request.query_params.get("new") != "1":
-        active_study_id = await _fetch_active_study_id()
-        if active_study_id:
-            session_id = await memory.get_latest_session_for_study(
-                "user", active_study_id,
-            )
-            if session_id:
-                session_resumed = True
+    if request.query_params.get("new") != "1" and active_study_id:
+        session_id = await memory.get_latest_session_for_study(
+            "user", active_study_id,
+        )
+        if session_id:
+            session_resumed = True
     if not session_id:
         session_id = str(uuid.uuid4())
 
@@ -903,6 +907,7 @@ async def index(request: Request):
         "hub_url":         _HUB_URL,
         "portal_url":      "",  # Phase 2-2 (2026-08-05) : PORTAL_URL retire (obsolete)
         "sessions":        sessions,
+        "historique_etude": bool(active_study_id),
         "projects":        projects[:5],
         "session_id":      session_id,
         "session_resumed": session_resumed,
