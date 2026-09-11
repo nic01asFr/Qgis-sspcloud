@@ -10951,11 +10951,7 @@ async def resolve_effective_active_sid(
     if x_session_id:
         sid_a1 = _extract_expected_sid(x_session_id)
         if sid_a1:
-            try:
-                pid_db = await studies.get_active_project_id(username)
-            except Exception:
-                pid_db = None
-            return sid_a1, pid_db
+            return sid_a1, await _projet_de_cette_etude(username, sid_a1)
     # 3. Fallback DB user (UI desk / mono-session non-instrumentee)
     try:
         sid_db = await studies.get_active_study_id(username)
@@ -10964,12 +10960,53 @@ async def resolve_effective_active_sid(
                     username, exc)
         return None, None
     if sid_db:
-        try:
-            pid_db = await studies.get_active_project_id(username)
-        except Exception:
-            pid_db = None
-        return sid_db, pid_db
+        return sid_db, await _projet_de_cette_etude(username, sid_db)
     return None, None
+
+
+async def _projet_de_cette_etude(username: str, sid: str) -> str | None:
+    """Le projet actif de l'utilisateur, mais seulement s'il est dans `sid`.
+
+    Aux deux niveaux de repli, le couple etait recompose a partir de deux
+    sources independantes : le sid venait de la session, le pid de
+    `active_project` -- une table `(owner, pid)` qui ne dit pas de quelle etude
+    vient le projet. Rien ne verifiait donc qu'ils allaient ensemble.
+
+    Le cas n'a rien d'une limite : il suffit qu'un agent travaille sur une
+    etude pendant que le bureau en a une autre d'ouverte, ce qui est le
+    fonctionnement normal du service. La resolution rendait alors un couple qui
+    n'existe dans aucune etude -- et c'est ce couple qui sert ensuite a nommer
+    les fichiers ecrits.
+
+    Quand le projet actif appartient ailleurs, on prend le projet principal de
+    l'etude visee. Rendre None serait plus prudent en apparence, mais un pid
+    absent a son propre cout, deja paye : le dual-write n'ecrit jamais le
+    `projects/{pid}/project.qgz` que la base annonce, et le bureau affiche
+    « aucun projet actif » sans que rien ne le repare.
+    """
+    try:
+        pid = await studies.get_active_project_id(username)
+    except Exception:
+        return None
+    if not pid:
+        return None
+    try:
+        projet = await studies.get_project(pid)
+    except Exception:
+        # Sans moyen de verifier, on garde le comportement anterieur plutot
+        # que de priver l'appelant d'un projet peut-etre correct.
+        return pid
+    if projet and projet.get("sid") == sid:
+        return pid
+    try:
+        defaut = await studies.get_default_project(sid)
+    except Exception:
+        defaut = None
+    log.info(
+        "resolve_effective: projet actif %s hors de l'etude %s, repli sur %s",
+        pid, sid, (defaut or {}).get("pid") if defaut else None,
+    )
+    return (defaut or {}).get("pid") if defaut else None
 
 
 def _record_switch(

@@ -23,6 +23,16 @@ async def reset_state():
     await sas._reset_for_tests()
 
 
+
+# Depuis la garde d'appartenance : le projet actif n'est rendu que s'il est
+# DANS l'etude resolue. Ces tests fournissent donc aussi `get_project`, sans
+# quoi la fonction ne peut pas verifier et se replie sur le projet principal.
+# L'invariant verifie n'a pas change -- le pid vient bien de la base -- mais il
+# est desormais conditionne.
+def _projet_dans(sid, pid="pid-db"):
+    """Un projet appartenant a `sid`, pour satisfaire la verification."""
+    return AsyncMock(return_value={"pid": pid, "sid": sid, "label": "Principal"})
+
 # ── Priorite 1 : session_active_state (MCP moderne) ─────────────────────────
 
 async def test_priorite_1_session_state_gagne():
@@ -49,7 +59,7 @@ async def test_priorite_1_session_state_expired_fallback_a1():
         sas._state["mcp-abc"] = e._replace(expires_at=time.time() - 1)
 
     with patch("hub.studies.get_active_project_id",
-               new=AsyncMock(return_value="pid-db")):
+               new=AsyncMock(return_value="pid-db")),          patch("hub.studies.get_project", new=_projet_dans("sid-a1")):
         sid, pid = await resolve_effective_active_sid(
             "user", mcp_session_id="mcp-abc", x_session_id="study:sid-a1",
         )
@@ -62,7 +72,7 @@ async def test_priorite_1_session_state_expired_fallback_a1():
 async def test_priorite_2_a1_gagne_si_pas_de_session_state():
     """Session_state vide + A1 valide -> A1 gagne, DB non consultee pour sid."""
     with patch("hub.studies.get_active_project_id",
-               new=AsyncMock(return_value="pid-db")):
+               new=AsyncMock(return_value="pid-db")),          patch("hub.studies.get_project", new=_projet_dans("sid-a1")):
         sid, pid = await resolve_effective_active_sid(
             "user", mcp_session_id=None, x_session_id="study:sid-a1",
         )
@@ -86,7 +96,7 @@ async def test_priorite_2_a1_invalide_fallback_db():
     with patch("hub.studies.get_active_study_id",
                new=AsyncMock(return_value="sid-db")), \
          patch("hub.studies.get_active_project_id",
-               new=AsyncMock(return_value="pid-db")):
+               new=AsyncMock(return_value="pid-db")),          patch("hub.studies.get_project", new=_projet_dans("sid-db")):
         sid, pid = await resolve_effective_active_sid(
             "user", mcp_session_id=None, x_session_id="legacy-uuid-not-parseable",
         )
@@ -101,7 +111,7 @@ async def test_priorite_3_db_seul_si_rien_d_autre():
     with patch("hub.studies.get_active_study_id",
                new=AsyncMock(return_value="sid-db")), \
          patch("hub.studies.get_active_project_id",
-               new=AsyncMock(return_value="pid-db")):
+               new=AsyncMock(return_value="pid-db")),          patch("hub.studies.get_project", new=_projet_dans("sid-db")):
         sid, pid = await resolve_effective_active_sid(
             "user", mcp_session_id=None, x_session_id=None,
         )
