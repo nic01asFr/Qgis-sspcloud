@@ -529,6 +529,14 @@ hr { border: 0; border-top: 1px solid var(--qs-trait); margin: 1.5em 0; }
   color: var(--qs-discret);
 }
 
+/* Un livrable dont l'en-tete redit le titre du hero. Sur un ecran large les
+   deux se lisent comme une barre de navigation puis une couverture ; sur un
+   telephone ils se suivent, et la meme phrase occupe deux fois la hauteur
+   d'un ecran avant que le contenu commence. */
+@media (max-width: 700px) {
+  .qs-entete--repete { display: none; }
+}
+
 /* Marque du produit : un carre aux couleurs de QGIS, pas un bloc
    institutionnel. C'est le seul endroit ou la teinte de marque est employee
    telle quelle -- un aplat, jamais du texte. */

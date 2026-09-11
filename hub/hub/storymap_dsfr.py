@@ -477,6 +477,16 @@ class StorymapBuilder:
 
     def _render_header(self) -> str:
         svc_title = self.service_title or self.title
+        # Quand aucun titre de service n'est fourni, l'en-tete redit mot pour
+        # mot ce que le hero annonce deux lignes plus bas. Sur un ecran large
+        # cela passe pour une barre de navigation ; sur un telephone, les deux
+        # blocs se suivent et consomment un ecran entier pour une seule
+        # information. La classe permet de n'en garder qu'un.
+        redondant = " qs-entete--repete" if not self.service_title else ""
+        accroche = (
+            f'<p class="qs-entete__service-accroche">{self.subtitle}</p>'
+            if self.service_title and self.subtitle else ""
+        )
         # Pas de bloc « République Française », et pas d'opérateur par défaut.
         # Un livrable produit ici part chez ses destinataires avec une URL
         # stable : il ne peut pas porter l'identité de l'État ni le nom d'un
@@ -494,12 +504,11 @@ class StorymapBuilder:
                 f'{sous_titre}'
                 '\n    </div>'
             )
-        return f"""<header role="banner" class="qs-entete">
+        return f"""<header role="banner" class="qs-entete{redondant}">
 <div class="qs-entete__corps"><div class="qs-conteneur"><div class="qs-entete__ligne">
   <div class="qs-entete__marque qs-lien-etendu"><div class="qs-entete__marque-haut">{bloc_operateur}
   </div>
-  <div class="qs-entete__service"><a href="#"><p class="qs-entete__service-titre">{svc_title}</p></a>
-    <p class="qs-entete__service-accroche">{self.subtitle}</p>
+  <div class="qs-entete__service"><a href="#"><p class="qs-entete__service-titre">{svc_title}</p></a>{accroche}
   </div></div>
 </div></div></div>
 </header>"""
