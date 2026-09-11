@@ -1845,6 +1845,13 @@ class QGISAgent:
      OU propose 2-3 alternatives **présentes dans le catalogue**
    - ❌ NE JAMAIS inventer une URL externe (overpass.foo.bar, etc.).
      Les LLM hallucinent des mirrors qui n'existent pas → boucle d'erreurs.
+   - NE JAMAIS citer ni recommander un IDENTIFIANT de source qui ne figure
+     pas mot pour mot dans la réponse de `list_datasources()`. Si la source
+     voulue n'existe pas au catalogue, dis-le : « absente du catalogue ». Un
+     identifiant inventé (ign_rte, ign_bathymetrie…) paraît aussi fiable
+     qu'un vrai et envoie l'utilisateur vers une impasse.
+   - Avant d'affirmer qu'une couche est ABSENTE du projet, vérifie-le avec
+     `get_project_info()`. Ne te fie pas à ta mémoire de la conversation.
 
    Endpoints externes autorisés (en dernier recours, si vraiment nécessaire) :
    - `https://overpass-api.de/api/interpreter` (Overpass officiel)
@@ -2360,6 +2367,19 @@ ne vient pas d'un outil cette session, la supprimer.
 
         full_response = ""
         tool_calls_made = []
+        # Le texte VISIBLE reellement envoye a l'utilisateur pendant ce tour.
+        #
+        # `full_response` ne peut pas servir a le savoir : `_flush_reasoning`
+        # y insere le bloc de raisonnement -- masque par defaut dans le chat --
+        # pour l'historique. Apres un tour de pure reflexion, la « reponse »
+        # n'etait donc jamais vide, et le garde-fou cense prevenir l'utilisateur
+        # ne se declenchait pas, precisement dans le cas pour lequel il existe.
+        # Constate le 2026-09-11 dans le bureau : 24 s de reflexion, aucun mot
+        # envoye, une bulle vide, et la fin du tour.
+        texte_emis = False
+        # Une seule relance quand la reflexion epuise le budget du tour : au
+        # dela, on previent l'utilisateur plutot que de le faire attendre encore.
+        relance_budget_faite = False
         # On capte le hub_url du dernier publish_artifact reussi pour pouvoir
         # patcher en fin de turn les liens fantomes [undefined](undefined)
         # que le LLM genere parfois (cf. hotfix infra ci-dessous).
@@ -2464,7 +2484,13 @@ ne vient pas d'un outil cette session, la supprimer.
                         try:
                             d = json.loads(data)
                             delta = d["choices"][0].get("delta", {})
-                            finish_reason = d["choices"][0].get("finish_reason")
+                            # On garde la derniere valeur NON nulle : un paquet
+                            # final sans motif ecraserait sinon le « length » qui
+                            # signale un budget epuise, et la relance ne se
+                            # declencherait jamais.
+                            _fr = d["choices"][0].get("finish_reason")
+                            if _fr:
+                                finish_reason = _fr
 
                             # Qwen3 : thinking dans delta.reasoning_content (champ séparé)
                             # Gemma4 : thinking dans delta.content (tokens <|channel>)
@@ -2492,6 +2518,7 @@ ne vient pas d'un outil cette session, la supprimer.
                                     _flush_reasoning()
                                     chunk_text += clean
                                     full_response += clean
+                                    texte_emis = True
                                     yield clean
 
                             # Tool calls (accumulation)
@@ -2521,6 +2548,33 @@ ne vient pas d'un outil cette session, la supprimer.
             # renvoie souvent "stop" même quand des tool_calls sont présents.
             # Seule la présence/absence de tool_call_data détermine la suite.
             if not tool_call_data:
+                # Budget du tour epuise par la reflexion, avant toute reponse.
+                #
+                # Les jetons de raisonnement comptent dans `max_tokens`. Un
+                # modele a raisonnement peut donc consommer tout le budget a
+                # reflechir et s'arreter sur `finish_reason == "length"` sans
+                # avoir ecrit un mot -- mesure : 4 095 paquets de reflexion
+                # pour un plafond de 4 096. Rien ne traitait ce cas. On relance
+                # une fois en demandant une reponse directe ; si la relance
+                # echoue aussi, le garde-fou ci-dessous previent l'utilisateur.
+                if (not chunk_text.strip() and final_finish_reason == "length"
+                        and not relance_budget_faite):
+                    relance_budget_faite = True
+                    log.warning(
+                        "Budget epuise par la reflexion (iter=%d, session=%s) : relance",
+                        iteration, self.session_id,
+                    )
+                    yield {"phase": "relance",
+                           "label": "Réflexion trop longue, je reformule plus directement…"}
+                    messages.append({"role": "system", "content": (
+                        "Ta réflexion précédente a épuisé tout le budget du tour "
+                        "sans produire la moindre réponse visible. Réponds "
+                        "MAINTENANT à l'utilisateur : directement, brièvement, "
+                        "sans longue réflexion préalable. S'il te manque une "
+                        "donnée pour répondre, appelle l'outil qui la fournit "
+                        "au lieu de raisonner à son sujet."
+                    )})
+                    continue
                 # Garde-fou : si le LLM termine SANS message narratif final
                 # (chunk_text vide à ce dernier tour), forcer un récap court
                 # pour ne JAMAIS laisser l'user devant un turn qui se termine
@@ -2577,13 +2631,25 @@ ne vient pas d'un outil cette session, la supprimer.
                             )
                             full_response += fb
                             yield fb
-                    elif not full_response.strip():
-                        # Aucun tool ni message — bulle vide totale
-                        fb = (
-                            "_Je n'ai pas généré de réponse. Reformule ta "
-                            "demande et je m'en occupe._"
-                        )
+                    elif not texte_emis:
+                        # Aucun outil et aucun mot visible. On teste `texte_emis`
+                        # et non `full_response`, qui contient le raisonnement
+                        # masque et n'est donc jamais vide apres une reflexion.
+                        if final_finish_reason == "length":
+                            fb = (
+                                "_Je n'ai pas réussi à formuler de réponse : ma "
+                                "réflexion a dépassé le temps qui lui est alloué, "
+                                "même après une relance. Reformule ta demande plus "
+                                "précisément, ou découpe-la en étapes, et je m'y "
+                                "remets._"
+                            )
+                        else:
+                            fb = (
+                                "_Je n'ai pas généré de réponse. Reformule ta "
+                                "demande et je m'en occupe._"
+                            )
                         full_response += fb
+                        texte_emis = True
                         yield fb
                 break
             # Tool calls présents → les exécuter et boucler pour la suite

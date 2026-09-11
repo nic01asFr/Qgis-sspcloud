@@ -556,14 +556,28 @@ async def get_session_messages(session_id: str, limit: int = 50) -> list[dict]:
     return [dict(r) for r in reversed(rows)]
 
 
-async def get_recent_sessions(username: str, limit: int = 10) -> list[dict]:
+async def get_recent_sessions(
+    username: str, limit: int = 10, study_id: str | None = None,
+) -> list[dict]:
+    """Les dernieres conversations, eventuellement limitees a une etude.
+
+    `study_id` est optionnel pour que la barre laterale et `/sessions`
+    gardent leur comportement : toutes les conversations de l'utilisateur.
+    """
     async with aiosqlite.connect(_DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        rows = await (await db.execute("""
-            SELECT id, profile_id, started_at, ended_at, zone, summary
-            FROM sessions WHERE username = ?
-            ORDER BY started_at DESC LIMIT ?
-        """, (username, limit))).fetchall()
+        if study_id:
+            rows = await (await db.execute("""
+                SELECT id, profile_id, started_at, ended_at, zone, summary
+                FROM sessions WHERE username = ? AND study_id = ?
+                ORDER BY started_at DESC LIMIT ?
+            """, (username, study_id, limit))).fetchall()
+        else:
+            rows = await (await db.execute("""
+                SELECT id, profile_id, started_at, ended_at, zone, summary
+                FROM sessions WHERE username = ?
+                ORDER BY started_at DESC LIMIT ?
+            """, (username, limit))).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -1190,7 +1204,18 @@ async def build_context_summary(
     memory_md = await get_memory_doc_markdown(username)
     profile = await get_full_profile()
     insights = await list_insights(username, limit=15)
-    recent_sessions = await get_recent_sessions(username, limit=5)
+    # Conversations passees : celles de l'etude ACTIVE seulement.
+    #
+    # Toutes etudes confondues, elles faisaient entrer dans une conversation
+    # neuve les titres de conversations sans rapport. Constate le 2026-09-11 :
+    # interroge sur Saint-Martin, l'agent a pris pour la demande en cours une
+    # ancienne conversation (« tu peux retravailler la symbologie… »). Sans
+    # etude active, on n'en injecte aucune.
+    _sid_actif = (active_study or {}).get("id")
+    recent_sessions = (
+        await get_recent_sessions(username, limit=5, study_id=_sid_actif)
+        if _sid_actif else []
+    )
     projects = await list_projects()
     recipes = await list_recipes()
 
@@ -1230,7 +1255,13 @@ async def build_context_summary(
     ][:3]
     if completed:
         hist = " | ".join(s["summary"][:80] for s in completed)
-        layer3.append(f"Sessions passées : {hist}")
+        # Le libelle dit explicitement que ce sont des conversations CLOSES :
+        # sous la seule etiquette « Sessions passees », le modele les lisait
+        # comme des demandes encore ouvertes.
+        layer3.append(
+            "Conversations précédentes sur cette étude (terminées, pour mémoire "
+            f"seulement — ce n'est PAS la demande en cours) : {hist}"
+        )
 
     # Recettes capitalisées
     if recipes:
