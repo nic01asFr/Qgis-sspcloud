@@ -411,37 +411,19 @@ spec:
 """
 
 
-def _novnc_ingress_manifest(owner: str) -> str:
-    """Ingress K8s pour accès noVNC direct depuis le navigateur."""
-    ws = _workspace_name(owner)
-    host = f"{ws}-novnc.user.lab.sspcloud.fr"
-    return f"""apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: {ws}-novnc
-  namespace: {_NAMESPACE}
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
-    nginx.ingress.kubernetes.io/proxy-body-size: "0"
-spec:
-  ingressClassName: onyxia
-  rules:
-  - host: {host}
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: {ws}
-            port:
-              number: {_VNC_PORT}
-  tls:
-  - hosts:
-    - {host}
-"""
+# L'Ingress noVNC public a ete RETIRE (faille de securite, 2026-09-11).
+#
+# `{ws}-novnc.user.lab.sspcloud.fr` routait `/` -> service:6080 (websockify ->
+# x11vnc lance avec `-nopw`) SANS aucune authentification : n'importe qui
+# connaissant le motif d'URL (nom d'utilisateur + « -novnc ») pouvait voir ET
+# piloter le bureau QGIS. Handshake WebSocket verifie : 101 + banniere RFB
+# servie sans clef ni mot de passe, sur les deux comptes.
+#
+# Le desk sert desormais le bureau UNIQUEMENT via le reverse-proxy hub
+# `/workspace/vnc/*`, protege par le middleware OIDC (meme origine, cookie du
+# hub). Le service reste ClusterIP : le port 6080 n'est plus joignable de
+# l'exterieur une fois cet Ingress supprime. On ne recree donc plus jamais cet
+# Ingress, et `_remove_public_novnc_ingress` ferme ceux qui existent encore.
 
 
 # ── Kubectl helpers ────────────────────────────────────────────────────────────
@@ -536,18 +518,16 @@ def _pod_failed(pod_name: str) -> bool:
     return any(s in output for s in ("Failed", "OOMKilled", "Evicted"))
 
 
-def _ingress_exists(ws_name: str) -> bool:
-    r = subprocess.run(
-        ["kubectl", "get", "ingress", f"{ws_name}-novnc",
-         "-n", _NAMESPACE, "--ignore-not-found", "-o", "name"],
-        capture_output=True, text=True, timeout=10,
-    )
-    return bool(r.stdout.strip())
+def _remove_public_novnc_ingress(owner: str) -> None:
+    """Ferme la porte publique : supprime l'Ingress noVNC s'il existe.
 
-
-def _ensure_novnc_ingress(owner: str) -> None:
-    if not _ingress_exists(_workspace_name(owner)):
-        _kubectl_apply(_novnc_ingress_manifest(owner))
+    Idempotent (`kubectl delete --ignore-not-found`). Appele a chaque
+    creation, reveil et rafraichissement d'etat, de sorte qu'un Ingress
+    laisse par une version anterieure du hub soit ferme automatiquement au
+    prochain passage, sans intervention ni perte de donnees (un Ingress est
+    une simple regle de routage). Voir le commentaire de securite plus haut.
+    """
+    _kubectl_delete("ingress", f"{_workspace_name(owner)}-novnc")
 
 
 # ── Interface publique ─────────────────────────────────────────────────────────
@@ -597,7 +577,10 @@ async def create_session(owner: str, extra_env: dict | None = None) -> dict:
         # Création complète : Service d'abord, puis StatefulSet, puis Ingress
         ok_svc, err_svc = _kubectl_apply(_service_manifest(owner))
         ok_ss, err_ss  = _kubectl_apply(_statefulset_manifest(owner, extra_env=extra_env or {}))
-        _kubectl_apply(_novnc_ingress_manifest(owner))
+        # Plus d'Ingress noVNC public : on s'assure au contraire qu'aucun ne
+        # subsiste (cas d'un StatefulSet recree sur un namespace qui en gardait
+        # un). Le bureau passe par le proxy hub /workspace/vnc/* (OIDC).
+        _remove_public_novnc_ingress(owner)
         if not (ok_svc and ok_ss):
             status = SESSION_ERROR
             print(f"[sessions] erreur création workspace {owner}: svc={err_svc} ss={err_ss}")
@@ -620,8 +603,9 @@ async def create_session(owner: str, extra_env: dict | None = None) -> dict:
         # la cle ACTUELLE, donc le publish_artifact du workspace reussit
         # tant que la cle inline correspond a la cle courante.
         _kubectl_set_env(ws, {"HUB_URL": extra_env["HUB_URL"]} if "HUB_URL" in extra_env else {})
-        # Toujours s'assurer que l'ingress existe (sessions créées avant déploiement feature)
-        _ensure_novnc_ingress(owner)
+        # Toujours s'assurer que la porte publique reste fermee, y compris
+        # sur un workspace cree par une version anterieure du hub.
+        _remove_public_novnc_ingress(owner)
 
     session = {
         "id": session_id,
@@ -673,7 +657,7 @@ async def get_session(session_id: str, owner: str | None = None) -> dict | None:
         if s["status"] != SESSION_READY:
             s["status"] = SESSION_READY
             await _save(s)
-        _ensure_novnc_ingress(s["owner"])
+        _remove_public_novnc_ingress(s["owner"])
     elif s["status"] != SESSION_STARTING:
         s["status"] = SESSION_STARTING
         await _save(s)
@@ -691,10 +675,22 @@ async def touch_session(session_id: str) -> None:
         await db.commit()
 
 
+# Chemin same-origin du bureau, servi par le reverse-proxy hub protege par
+# OIDC. Remplace l'ancienne URL d'Ingress public sans authentification.
+_NOVNC_PROXY_PATH = (
+    "/workspace/vnc/vnc_lite.html"
+    "?path=workspace/vnc/websockify&scale=true&resize=true&show_dot=false"
+)
+
+
 def novnc_url(session_id: str) -> str:
-    """URL publique noVNC. session_id est dérivé de l'owner."""
-    # On a besoin de retrouver l'owner depuis l'id pour construire l'URL.
-    # Lecture sync depuis DB pour rester compatible avec l'appel non-async existant.
+    """Chemin du bureau noVNC, servi same-origin par le proxy hub (OIDC).
+
+    Renvoie un chemin relatif non vide tant qu'une session existe (la
+    condition d'affichage du desk reste vraie). Ne renvoie JAMAIS l'ancienne
+    URL d'Ingress public `*-novnc.user.lab.sspcloud.fr`, qui exposait le
+    bureau sans authentification.
+    """
     import sqlite3
     try:
         con = sqlite3.connect(_DB_PATH)
@@ -702,7 +698,7 @@ def novnc_url(session_id: str) -> str:
         row = cur.fetchone()
         con.close()
         if row:
-            return f"https://{_workspace_name(row[0])}-novnc.user.lab.sspcloud.fr"
+            return _NOVNC_PROXY_PATH
     except Exception:
         pass
     return ""
