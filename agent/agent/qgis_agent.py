@@ -1612,18 +1612,21 @@ class QGISAgent:
 
     _REMEMBER_INSTRUCTIONS = (
         "\n\n— MÉMOIRE LONG TERME —\n"
-        "Quand l'user te révèle une préférence durable, un fait stable sur lui, "
-        "son métier, sa zone d'étude habituelle, ou un style cartographique "
-        "récurrent, tu peux le mémoriser pour les conversations futures. "
+        "Quand l'user te révèle une préférence durable ou un fait stable sur "
+        "LUI — son métier, ses territoires habituels, un style cartographique "
+        "récurrent — tu peux le mémoriser pour les conversations futures. "
         "Inclus dans ta réponse (caché à l'user) :\n"
         "<remember>clé:valeur</remember>\n"
         "Exemples :\n"
-        "  <remember>preferred_zone:Le Lavandou</remember>\n"
-        "  <remember>metier:chargé d'études risques inondations</remember>\n"
+        "  <remember>zone_habituelle:Var (83), surtout le littoral</remember>\n"
+        "  <remember>metier:chargé d'études risques inondations au Cerema</remember>\n"
         "  <remember>style_pref:palette YlOrRd pour les chiffres clés</remember>\n"
+        "NE MÉMORISE JAMAIS ce qui décrit l'ÉTUDE ou le PROJET en cours (sa "
+        "zone, son sujet, son avancement) : ces faits appartiennent à l'étude, "
+        "pas à l'utilisateur, et te suivraient à tort dans ses autres études. "
         "À utiliser parcimonieusement : seulement quand l'info est explicitement "
-        "ou très clairement durable. L'user pourra voir/effacer ces insights "
-        "via le portail."
+        "ou très clairement durable. L'user peut voir et effacer ces faits dans "
+        "le tiroir Mémoire."
     )
 
     async def _fetch_active_study_context(self):
@@ -3162,21 +3165,32 @@ ne vient pas d'un outil cette session, la supprimer.
             full_response, flags=_re_end.IGNORECASE,
         )
         if remember_matches:
+            from agent.insight_extractor import _decrit_l_etude_en_cours
+            _memorises = 0
             for key, value in remember_matches:
                 key_clean = key.strip()[:80]
                 value_clean = value.strip()[:300]
-                if key_clean and value_clean:
-                    try:
-                        await memory.add_insight(
-                            key=key_clean, value=value_clean,
-                            source="implicit", confidence=0.8,
-                            username=self.username,
-                        )
-                        log.info("Insight enregistré: %s = %s", key_clean, value_clean)
-                    except Exception as exc:
-                        log.warning("Add insight err: %s", exc)
-            # Signal discret
-            yield f"\n\n*🧠 Mémorisé : {len(remember_matches)} insight(s).*"
+                if not (key_clean and value_clean):
+                    continue
+                # Même garde que l'extracteur automatique : un fait qui décrit
+                # l'étude du moment (« zone_etude_actuelle », « sujet_etude… »)
+                # deviendrait un fait permanent injecté dans TOUTES les études.
+                if _decrit_l_etude_en_cours(key_clean):
+                    log.info("Insight <remember> ignoré (décrit l'étude) : %s", key_clean)
+                    continue
+                try:
+                    await memory.add_insight(
+                        key=key_clean, value=value_clean,
+                        source="implicit", confidence=0.8,
+                        username=self.username,
+                    )
+                    _memorises += 1
+                    log.info("Insight enregistré: %s = %s", key_clean, value_clean)
+                except Exception as exc:
+                    log.warning("Add insight err: %s", exc)
+            # Signal discret, seulement si au moins un fait a été retenu.
+            if _memorises:
+                yield f"\n\n*🧠 Mémorisé : {_memorises} insight(s).*"
             # Nettoyer du full_response avant save
             full_response = _re_end.sub(
                 r'<remember>[^<]*</remember>\s*',

@@ -271,6 +271,21 @@ async def get_latest_session_for_study(
 
 # ── Phase 4 : Insights agentiques (couche 3) ──────────────────────────────────
 
+async def _purge_index_semantique(**kwargs) -> None:
+    """Retire du rappel sémantique un élément supprimé ou modifié.
+
+    Best-effort : l'index vectoriel est facultatif (clé LLM absente,
+    extension non chargée…). Sans cet appel, un fait « oublié » ou une
+    section réécrite ressortaient dans le rappel automatique, car le
+    worker d'indexation n'efface jamais un chunk de lui-même.
+    """
+    try:
+        from agent import vector_store
+        await vector_store.purge(**kwargs)
+    except Exception as exc:  # pragma: no cover - dépend de l'infra
+        log.debug("purge index sémantique ignorée (%s) : %s", kwargs, exc)
+
+
 async def add_insight(
     key: str,
     value: str,
@@ -296,6 +311,11 @@ async def add_insight(
                 (value, source, confidence, now, existing[0]),
             )
             await db.commit()
+            # La valeur a changé : on retire l'ancien vecteur (indexé sous le
+            # même id) pour que le worker réindexe la nouvelle. Sans cela,
+            # l'index garde l'ancienne valeur indéfiniment.
+            await _purge_index_semantique(source_type="insight",
+                                          source_id=str(existing[0]))
             return existing[0]
         cur = await db.execute(
             "INSERT INTO agent_insights "
@@ -326,6 +346,9 @@ async def delete_insight(insight_id: int) -> None:
             "DELETE FROM agent_insights WHERE id = ?", (insight_id,),
         )
         await db.commit()
+    # Oublier un fait doit aussi le retirer du rappel sémantique.
+    await _purge_index_semantique(source_type="insight",
+                                  source_id=str(insight_id))
 
 
 async def clear_insights(username: str = "user") -> int:
@@ -334,7 +357,10 @@ async def clear_insights(username: str = "user") -> int:
             "DELETE FROM agent_insights WHERE username = ?", (username,),
         )
         await db.commit()
-        return cur.rowcount
+        n = cur.rowcount
+    # Mono-utilisateur par pod : on retire tous les vecteurs d'insights.
+    await _purge_index_semantique(source_type="insight")
+    return n
 
 
 # ── Phase 4b : Mémoire markdown structurée principale (édition user directe) ──
@@ -450,6 +476,13 @@ async def set_memory_section(key: str, content: str, username: str = "user") -> 
             (username, json.dumps(sections, ensure_ascii=False), int(time.time())),
         )
         await db.commit()
+    # Le worker réindexe TOUT le document mémoire dès qu'une section change
+    # (il ne sait pas laquelle a bougé). On retire donc tous les vecteurs du
+    # document avant : il les recrée à partir des sections non vides. Sans
+    # cela, chaque modification accumulait des doublons pour les sections
+    # inchangées, et une section effacée restait retrouvable dans le rappel.
+    # Mono-utilisateur par pod : `memory_doc` ne concerne que cet utilisateur.
+    await _purge_index_semantique(source_type="memory_doc")
 
 
 async def get_memory_doc_markdown(username: str = "user") -> str:
@@ -548,8 +581,12 @@ async def add_message(session_id: str, role: str, content: str,
 async def get_session_messages(session_id: str, limit: int = 50) -> list[dict]:
     async with aiosqlite.connect(_DB_PATH) as db:
         db.row_factory = aiosqlite.Row
+        # `id` est nécessaire au rappel sémantique : il exclut les messages
+        # déjà visibles dans l'historique (recent_message_ids). Sans lui, le
+        # filtre restait vide et le rappel resservait des messages déjà à
+        # l'écran.
         rows = await (await db.execute("""
-            SELECT role, content, tool_calls, created_at
+            SELECT id, role, content, tool_calls, created_at
             FROM messages WHERE session_id = ?
             ORDER BY created_at DESC LIMIT ?
         """, (session_id, limit))).fetchall()

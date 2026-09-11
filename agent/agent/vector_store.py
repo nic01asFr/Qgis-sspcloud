@@ -250,8 +250,17 @@ async def search(
 
 # ── Maintenance ───────────────────────────────────────────────────────────────
 
-async def purge(source_type: str | None = None, before_ts: int | None = None) -> int:
-    """Supprime des chunks. Retourne le count supprimé."""
+async def purge(
+    source_type: str | None = None,
+    before_ts: int | None = None,
+    source_id: str | None = None,
+) -> int:
+    """Supprime des chunks (métadonnées + vecteurs). Retourne le count supprimé.
+
+    `source_id` permet de retirer un élément précis (un insight oublié, une
+    section de mémoire modifiée ou effacée) : sans lui, le rappel sémantique
+    resservait ce que l'utilisateur croyait supprimé.
+    """
     async with aiosqlite.connect(_DB_PATH) as db:
         await db.enable_load_extension(True)
         await db.execute(f"SELECT load_extension('{sqlite_vec.loadable_path()}')")
@@ -261,6 +270,9 @@ async def purge(source_type: str | None = None, before_ts: int | None = None) ->
         if source_type:
             conditions.append("source_type = ?")
             params.append(source_type)
+        if source_id:
+            conditions.append("source_id = ?")
+            params.append(source_id)
         if before_ts:
             conditions.append("created_at < ?")
             params.append(before_ts)

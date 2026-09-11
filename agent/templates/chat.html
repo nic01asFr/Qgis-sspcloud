@@ -1816,9 +1816,16 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
   };
   const minuteur = setInterval(majAttente, 1000);
 
+  // Une exécution de recette utilise un session_id `study:{sid}:recipe:{rid}`
+  // qui court-circuite l'agent côté serveur. Il ne vaut que pour ce tour :
+  // on le note pour rendre la main à une conversation normale ensuite, sinon
+  // le message libre suivant relançait la recette au lieu de parler à l'agent.
+  const sessionAuSubmit = document.getElementById('session-id').value;
+  const etaitUneRecette = /:recipe:/.test(sessionAuSubmit);
+
   const formData = new FormData();
   formData.append('message', message);
-  formData.append('session_id', document.getElementById('session-id').value);
+  formData.append('session_id', sessionAuSubmit);
   formData.append('profile_id', document.getElementById('profile-id').value);
 
   _currentAbort = new AbortController();
@@ -1968,6 +1975,14 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
     document.getElementById('status-bar').classList.remove('visible');
     if (responseDiv) responseDiv.removeAttribute('id');
     _currentAbort = null;
+    // Après une recette, on repart sur une conversation neuve pour que le
+    // prochain message aille bien à l'agent.
+    if (etaitUneRecette
+        && document.getElementById('session-id').value === sessionAuSubmit) {
+      document.getElementById('session-id').value =
+        (crypto.randomUUID && crypto.randomUUID())
+        || ('c' + Date.now() + Math.random().toString(36).slice(2));
+    }
   }
 });
 
