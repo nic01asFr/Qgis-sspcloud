@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import html
 import json
 import logging
 import os
@@ -1638,23 +1639,44 @@ async def oauth_register(request: Request):
     distant de claude.ai / Claude Desktop. Sans ce endpoint, claude.ai echoue
     avec `registration_endpoint_missing`.
 
-    Enregistrement permissif : l'authentification reelle repose sur PKCE +
-    l'api_key hub (cf. /oauth/token), pas sur un client_secret enregistre.
-    On accepte donc toute demande et on renvoie un client_id genere. Les
-    redirect_uris sont echoes tels quels (claude.ai verifie la coherence)."""
+    L'enregistrement reste ouvert (claude.ai ne peut pas s'authentifier pour
+    s'inscrire), mais les `redirect_uris` sont desormais PERSISTEES : c'est
+    contre elles que /authorize valide la redirection demandee. Un client qui
+    n'en declare aucune est refuse — sans elles, /authorize ne pourrait rien
+    verifier et redirigerait le code vers l'URI de la requete, donc n'importe ou.
+    """
     try:
         body = await request.json()
     except Exception:
         body = {}
+    uris = body.get("redirect_uris") or []
+    if not isinstance(uris, list) or not uris:
+        return JSONResponse({
+            "error": "invalid_redirect_uri",
+            "error_description": "redirect_uris est requis.",
+        }, status_code=400)
+    refusees = [u for u in uris if not auth.oauth_redirect_uri_acceptable(u)]
+    if refusees:
+        return JSONResponse({
+            "error": "invalid_redirect_uri",
+            "error_description": (
+                "Seules les redirections HTTPS, ou HTTP en loopback, sont "
+                "acceptees."
+            ),
+        }, status_code=400)
     client_id = f"mcp-{secrets.token_hex(8)}"
+    client_name = str(body.get("client_name") or "Claude MCP")[:200]
+    await auth.register_oauth_client(client_id, uris, client_name)
+    log.info("OAuth client enregistre : %s (%s) redirections=%d",
+             client_id, client_name, len(uris))
     return JSONResponse({
         "client_id":                  client_id,
         "client_id_issued_at":        int(time.time()),
-        "redirect_uris":              body.get("redirect_uris", []),
+        "redirect_uris":              uris,
         "token_endpoint_auth_method": "none",
         "grant_types":                ["authorization_code"],
         "response_types":             ["code"],
-        "client_name":                body.get("client_name", "Claude MCP"),
+        "client_name":                client_name,
     }, status_code=201)
 
 
@@ -1671,6 +1693,62 @@ async def oauth_protected_resource():
     })
 
 
+def _oauth_refus_html(titre: str, detail: str) -> HTMLResponse:
+    """Refus rendu EN PAGE, jamais par redirection.
+
+    Rediriger un refus vers l'URI demandee serait renseigner l'attaquant, et
+    surtout emettre un aller vers une destination qu'on vient de juger non
+    valable.
+    """
+    return HTMLResponse(
+        f"""<!DOCTYPE html><html lang="fr">
+<head><meta charset="UTF-8"><title>Autorisation refusée — QGIS Service</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/static/produit.css"></head>
+<body class="qs-conteneur" style="display:flex;align-items:center;justify-content:center;min-height:100vh">
+<main class="qs-encart" style="max-width:30rem;width:100%">
+  <h1>{titre}</h1>
+  <p class="qs-texte-discret">{detail}</p>
+</main></body></html>""",
+        status_code=400,
+    )
+
+
+async def _oauth_verifie_demande(
+    client_id: str, redirect_uri: str, code_challenge: str,
+    code_challenge_method: str,
+) -> HTMLResponse | None:
+    """Controles communs a /authorize et /authorize/confirm.
+
+    Retourne une page de refus, ou None si la demande est recevable. Les trois
+    controles ferment autant de chemins par lesquels la cle maitre a pu fuir :
+    un client inconnu, une redirection non declaree, un PKCE absent.
+    """
+    client = await auth.get_oauth_client(client_id)
+    if not client:
+        return _oauth_refus_html(
+            "Client inconnu",
+            "Ce client n'est pas enregistré auprès de ce service. "
+            "Retire le connecteur puis rajoute-le : il s'enregistrera seul.",
+        )
+    if not await auth.oauth_redirect_uri_allowed(client_id, redirect_uri):
+        log.warning(
+            "OAuth redirection refusee client=%s uri=%s", client_id, redirect_uri,
+        )
+        return _oauth_refus_html(
+            "Redirection refusée",
+            "L'adresse de retour demandée n'est pas celle que ce client a "
+            "déclarée. Aucun code n'a été émis.",
+        )
+    if not code_challenge or code_challenge_method != "S256":
+        return _oauth_refus_html(
+            "Preuve PKCE requise",
+            "Ce service exige un <code>code_challenge</code> en S256. "
+            "Mets à jour le client qui a formé cette demande.",
+        )
+    return None
+
+
 @app.get("/authorize", response_class=HTMLResponse)
 async def oauth_authorize(
     request: Request,
@@ -1682,43 +1760,75 @@ async def oauth_authorize(
     code_challenge_method: str = "S256",
     error: str = "",
 ):
-    """
-    Endpoint d'autorisation OAuth — Claude Desktop redirige ici.
-    Si le cookie hub_api_key est valide → autorisation automatique.
-    Sinon → formulaire de saisie de la clé API.
+    """Endpoint d'autorisation OAuth — claude.ai / Claude Desktop redirigent ici.
+
+    Trois portes, dans cet ordre : la demande est-elle recevable (client connu,
+    redirection declaree, PKCE present) ; l'humain est-il la (cookie ou cle) ;
+    a-t-il deja consenti a CE couple client/redirection.
+
+    Ce qui a change le 2026-09-14 : un cookie valide ne suffit plus a emettre un
+    code. Avant, un lien piege `?redirect_uri=https://attaquant/cb` ouvert par un
+    utilisateur connecte faisait emettre un code vers le site de l'attaquant, qui
+    l'echangeait contre... la cle maitre elle-meme. Desormais la redirection doit
+    etre declaree par le client, et un couple jamais vu passe par un ecran de
+    consentement.
     """
     # Nettoyer les codes expirés
     now = time.time()
     for k in [k for k, v in _pending_codes.items() if v["expires"] < now]:
         del _pending_codes[k]
 
-    # Vérifier si déjà connecté via cookie
+    refus = await _oauth_verifie_demande(
+        client_id, redirect_uri, code_challenge, code_challenge_method,
+    )
+    if refus:
+        return refus
+
+    client = await auth.get_oauth_client(client_id)
     cookie_key = request.cookies.get("hub_api_key", "")
     user = await auth._validate_api_key(cookie_key) if cookie_key else None
 
-    if user:
-        return _issue_auth_code(user, cookie_key, code_challenge, redirect_uri, state)
-
-    # Pas de cookie → formulaire de saisie
     params = urllib.parse.urlencode({
         "response_type": response_type, "client_id": client_id,
         "redirect_uri": redirect_uri, "state": state,
-        "code_challenge": code_challenge, "code_challenge_method": code_challenge_method,
+        "code_challenge": code_challenge,
+        "code_challenge_method": code_challenge_method,
     })
+
+    # Consentement deja donne a ce couple exact -> on ne le redemande pas.
+    # Sans danger : la redirection est declaree par le client, donc le code part
+    # chez lui, pas chez qui a forme le lien.
+    if user and await auth.oauth_grant_exists(client_id, redirect_uri):
+        return _issue_auth_code(
+            user["username"], client_id, code_challenge, redirect_uri, state,
+        )
+
+    nom = html.escape(client.get("client_name") or client_id)
+    cible = html.escape(redirect_uri)
     err_html = ""
     if error == "invalid_key":
         err_html = _auth_alert_html(
             "Clé refusée. Elle commence par <code>qgis_</code> — "
             "vérifie que tu l'as copiée en entier depuis l'installation ou Mes services."
         )
-    return HTMLResponse(f"""<!DOCTYPE html><html lang="fr">
-<head><meta charset="UTF-8"><title>Autoriser Claude — QGIS Service</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="stylesheet" href="/static/produit.css"></head>
-<body class="qs-conteneur" style="display:flex;align-items:center;justify-content:center;min-height:100vh">
-<main class="qs-encart" style="max-width:28rem;width:100%">
-  <h1>Autoriser Claude</h1>
-  <p class="qs-texte-discret">Colle ta clé d'accès hub pour connecter Claude Desktop ou claude.ai à QGIS.</p>
+
+    if user:
+        # L'humain est reconnu : un bouton suffit, pas une cle a recoller.
+        corps = f"""
+  <p>Autoriser <strong>{nom}</strong> à utiliser ton service QGIS ?</p>
+  <p class="qs-texte-discret">Le jeton remis sera limité à ce client, expirera
+  dans 90 jours, et pourra être révoqué seul sans changer ta clé d'accès.</p>
+  <p class="qs-texte-discret">Retour vers <code>{cible}</code></p>
+  {err_html}
+  <form action="/authorize/confirm?{params}" method="POST">
+    <button type="submit" class="qs-btn qs-btn--primaire">Autoriser</button>
+  </form>"""
+    else:
+        corps = f"""
+  <p>Autoriser <strong>{nom}</strong> à utiliser ton service QGIS ?</p>
+  <p class="qs-texte-discret">Colle ta clé d'accès pour confirmer que c'est
+  bien toi. Le jeton remis au client sera distinct de cette clé.</p>
+  <p class="qs-texte-discret">Retour vers <code>{cible}</code></p>
   {err_html}
   <form action="/authorize/confirm?{params}" method="POST">
     <label for="oauth_api_key">Clé d'accès</label>
@@ -1727,14 +1837,22 @@ async def oauth_authorize(
     <p class="qs-texte-discret">Disponible dans le terminal d'installation ou
     <a href="https://datalab.sspcloud.fr/my-services" target="_blank" rel="noopener">Mes services → QGIS Hub</a>.</p>
     <button type="submit" class="qs-btn qs-btn--primaire">Autoriser</button>
-  </form>
+  </form>"""
+
+    return HTMLResponse(f"""<!DOCTYPE html><html lang="fr">
+<head><meta charset="UTF-8"><title>Autoriser un client — QGIS Service</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/static/produit.css"></head>
+<body class="qs-conteneur" style="display:flex;align-items:center;justify-content:center;min-height:100vh">
+<main class="qs-encart" style="max-width:30rem;width:100%">
+  <h1>Autoriser Claude</h1>{corps}
 </main></body></html>""")
 
 
 @app.post("/authorize/confirm", response_class=HTMLResponse)
 async def oauth_authorize_confirm(
     request: Request,
-    api_key: str = Form(...),
+    api_key: str = Form(""),
     response_type: str = "code",
     client_id: str = "",
     redirect_uri: str = "",
@@ -1742,9 +1860,23 @@ async def oauth_authorize_confirm(
     code_challenge: str = "",
     code_challenge_method: str = "S256",
 ):
-    """Traite la saisie de la clé API et émet le code d'autorisation."""
-    key = api_key.strip()
-    user = await auth._validate_api_key(key)
+    """Consentement explicite : memorise le couple et emet le code.
+
+    La cle peut venir du formulaire ou du cookie ; dans les deux cas c'est un
+    geste de l'humain sur CETTE page, pas une navigation qu'on lui a fait faire.
+    """
+    refus = await _oauth_verifie_demande(
+        client_id, redirect_uri, code_challenge, code_challenge_method,
+    )
+    if refus:
+        return refus
+
+    key = (api_key or "").strip()
+    user = await auth._validate_api_key(key) if key else None
+    if not user:
+        cookie_key = request.cookies.get("hub_api_key", "")
+        user = await auth._validate_api_key(cookie_key) if cookie_key else None
+        key = cookie_key if user else ""
     if not user:
         q = urllib.parse.urlencode({
             "response_type": response_type, "client_id": client_id,
@@ -1755,19 +1887,29 @@ async def oauth_authorize_confirm(
         })
         return RedirectResponse(f"/authorize?{q}", status_code=302)
 
-    resp = _issue_auth_code(user, key, code_challenge, redirect_uri, state)
+    await auth.remember_oauth_grant(client_id, redirect_uri)
+    resp = _issue_auth_code(
+        user["username"], client_id, code_challenge, redirect_uri, state,
+    )
     # Poser le cookie pour éviter la saisie la prochaine fois
-    resp.set_cookie("hub_api_key", key, httponly=True, secure=True,
-                    max_age=90 * 24 * 3600, samesite="lax")
+    if key:
+        resp.set_cookie("hub_api_key", key, httponly=True, secure=True,
+                        max_age=90 * 24 * 3600, samesite="lax")
     return resp
 
 
-def _issue_auth_code(user: dict, api_key: str, code_challenge: str,
+def _issue_auth_code(username: str, client_id: str, code_challenge: str,
                      redirect_uri: str, state: str) -> RedirectResponse:
-    """Génère un code d'autorisation et redirige vers Claude.ai."""
+    """Génère un code d'autorisation et redirige vers le client.
+
+    Le code ne porte PLUS la clé maître : il retient l'utilisateur et le client,
+    et c'est /oauth/token qui émettra un jeton dérivé. Ainsi, même intercepté,
+    un code ne livre pas la clé du service.
+    """
     code = secrets.token_urlsafe(32)
     _pending_codes[code] = {
-        "api_key":        api_key,
+        "username":       username,
+        "client_id":      client_id,
         "code_challenge": code_challenge,
         "redirect_uri":   redirect_uri,
         "expires":        time.time() + 600,
@@ -1792,34 +1934,61 @@ async def oauth_token(
     if grant_type == "authorization_code":
         if not code or code not in _pending_codes:
             raise HTTPException(400, "Code invalide ou expiré")
-        pending = _pending_codes.pop(code)
+        pending = _pending_codes.pop(code)   # usage unique
         if time.time() > pending["expires"]:
             raise HTTPException(400, "Code expiré")
 
-        # Valider PKCE
-        if code_verifier and pending.get("code_challenge"):
-            challenge = base64.urlsafe_b64encode(
-                hashlib.sha256(code_verifier.encode()).digest()
-            ).rstrip(b"=").decode()
-            if challenge != pending["code_challenge"]:
-                raise HTTPException(400, "PKCE invalide")
+        # PKCE OBLIGATOIRE. Avant, la verification etait conditionnee a la
+        # presence d'un verifier : l'omettre suffisait a la sauter.
+        if not code_verifier:
+            raise HTTPException(400, "code_verifier requis (PKCE S256)")
+        challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(code_verifier.encode()).digest()
+        ).rstrip(b"=").decode()
+        if not secrets.compare_digest(challenge, pending.get("code_challenge", "")):
+            raise HTTPException(400, "PKCE invalide")
 
+        # Le code est lie au client et a la redirection qui l'ont obtenu.
+        if redirect_uri and not secrets.compare_digest(
+            redirect_uri, pending.get("redirect_uri", "")
+        ):
+            raise HTTPException(400, "redirect_uri ne correspond pas au code")
+        if client_id and not secrets.compare_digest(
+            client_id, pending.get("client_id", "")
+        ):
+            raise HTTPException(400, "client_id ne correspond pas au code")
+
+        client = await auth.get_oauth_client(pending.get("client_id", ""))
+        jeton, ttl = await auth.create_oauth_token(
+            username=pending["username"],
+            client_id=pending.get("client_id", ""),
+            client_name=(client or {}).get("client_name", ""),
+        )
+        log.info("OAuth jeton derive emis pour client=%s user=%s",
+                 pending.get("client_id"), pending["username"])
         return JSONResponse({
-            "access_token": pending["api_key"],
+            "access_token": jeton,
             "token_type":   "bearer",
-            "expires_in":   90 * 24 * 3600,
+            "expires_in":   ttl,
         })
 
     elif grant_type == "client_credentials":
+        # Voie historique (Claude Desktop beta) : la cle maitre sert de secret
+        # client, mais n'est PLUS renvoyee — on emet un jeton derive.
         if not client_secret:
             raise HTTPException(400, "client_secret requis")
         user = await auth._validate_api_key(client_secret)
         if not user:
             raise HTTPException(401, "client_secret invalide")
+        jeton, ttl = await auth.create_oauth_token(
+            username=user["username"],
+            client_id=client_id or "client_credentials",
+            client_name="Client credentials",
+        )
         return JSONResponse({
-            "access_token": client_secret,
+            "access_token": jeton,
             "token_type":   "bearer",
-            "expires_in":   90 * 24 * 3600,
+            "expires_in":   ttl,
         })
 
     raise HTTPException(400, f"grant_type non supporté: {grant_type}")
@@ -4977,6 +5146,16 @@ async def mint_scoped_key_endpoint(
     """
     if not _STUDIES_AVAILABLE:
         raise HTTPException(503, "Module studies indisponible")
+    # Emettre une cle est un geste de PROPRIETAIRE, pas de delegue. Sans ce
+    # controle, une cle scopee (ou un jeton OAuth, qui en est une) pouvait
+    # s'en forger une autre avec `tools: "all"` : la restriction devenait
+    # facultative pour qui la subissait.
+    if user.get("source") == "scoped":
+        raise HTTPException(
+            403,
+            "Un jeton délégué ne peut pas émettre de clé. Utilise ta clé "
+            "d'accès personnelle.",
+        )
     # Verifier que l'étude appartient au user
     study = await studies.get_study(sid, user["username"])
     if not study:

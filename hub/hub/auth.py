@@ -23,6 +23,7 @@ import os
 import secrets
 import ssl
 import time
+import urllib.parse
 from pathlib import Path
 
 import aiosqlite
@@ -363,6 +364,30 @@ async def init_apikeys_db() -> None:
                 "ON scoped_keys(username, published_at DESC) "
                 "WHERE published_url IS NOT NULL AND revoked_at IS NULL"
             )
+            # ── OAuth : clients enregistres et consentements memorises ────────
+            # Sans redirect_uris enregistrees, /authorize ne peut RIEN valider :
+            # il redirigeait le code d'autorisation vers l'URI fournie dans la
+            # requete, donc vers n'importe ou. C'est la table qui ferme ce
+            # chemin (cf. hub/tests/test_oauth_jeton_derive.py).
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS oauth_clients (
+                    client_id         TEXT PRIMARY KEY,
+                    redirect_uris_json TEXT NOT NULL DEFAULT '[]',
+                    client_name       TEXT NOT NULL DEFAULT '',
+                    created_at        INTEGER NOT NULL
+                )
+            """)
+            # Un consentement memorise par couple (client, redirection) : il
+            # evite de redemander a chaque reconnexion d'un client deja autorise,
+            # sans jamais autoriser un couple inconnu.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS oauth_grants (
+                    client_id    TEXT NOT NULL,
+                    redirect_uri TEXT NOT NULL,
+                    granted_at   INTEGER NOT NULL,
+                    PRIMARY KEY (client_id, redirect_uri)
+                )
+            """)
             await db.commit()
     except Exception as exc:
         log.error(
@@ -656,6 +681,140 @@ async def _validate_scoped_key(key: str) -> dict | None:
             "actor":   actor,        # owner | delegate
         },
     }
+
+
+# ── OAuth : clients, consentements, jeton derive ─────────────────────────────
+#
+# Ces helpers existent pour une raison precise : avant eux, /oauth/token
+# renvoyait la cle maitre elle-meme comme access_token. Un lien piege suffisait
+# donc a la voler, et rien ne permettait de revoquer un client sans changer la
+# cle de tout le service. Un jeton derive se revoque seul et expire.
+
+_OAUTH_TOKEN_TTL_S = 90 * 24 * 3600
+
+
+def oauth_redirect_uri_acceptable(uri: str) -> bool:
+    """Une redirection n'est recevable qu'en HTTPS, ou en loopback HTTP.
+
+    Filtre pose a l'ENREGISTREMENT : un `javascript:` ou un `http://` distant
+    n'entre jamais en base, donc /authorize n'a pas a s'en defendre.
+    """
+    if not uri or len(uri) > 2048:
+        return False
+    try:
+        p = urllib.parse.urlparse(uri)
+    except Exception:
+        return False
+    if p.scheme == "https":
+        return bool(p.netloc)
+    if p.scheme == "http":
+        return (p.hostname or "") in ("localhost", "127.0.0.1", "::1")
+    return False
+
+
+async def register_oauth_client(
+    client_id: str, redirect_uris: list[str], client_name: str = "",
+) -> None:
+    """Enregistre un client OAuth et ses redirections (RFC 7591)."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO oauth_clients "
+            "(client_id, redirect_uris_json, client_name, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (client_id, json.dumps(redirect_uris, ensure_ascii=False),
+             client_name, int(time.time())),
+        )
+        await db.commit()
+
+
+async def get_oauth_client(client_id: str) -> dict | None:
+    """Retourne {client_id, redirect_uris, client_name} ou None si inconnu."""
+    if not client_id or not _DB_PATH.exists():
+        return None
+    try:
+        async with aiosqlite.connect(_DB_PATH) as db:
+            row = await (await db.execute(
+                "SELECT client_id, redirect_uris_json, client_name "
+                "FROM oauth_clients WHERE client_id = ?", (client_id,),
+            )).fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    try:
+        uris = json.loads(row[1]) or []
+    except Exception:
+        uris = []
+    return {"client_id": row[0], "redirect_uris": uris, "client_name": row[2]}
+
+
+async def oauth_redirect_uri_allowed(client_id: str, redirect_uri: str) -> bool:
+    """La redirection est-elle declaree par CE client ? Comparaison exacte.
+
+    Pas de prefixe, pas de normalisation : une comparaison laxiste ici rouvre
+    exactement le trou qu'on ferme.
+    """
+    client = await get_oauth_client(client_id)
+    if not client or not redirect_uri:
+        return False
+    return any(
+        secrets.compare_digest(redirect_uri, declaree)
+        for declaree in client["redirect_uris"]
+    )
+
+
+async def remember_oauth_grant(client_id: str, redirect_uri: str) -> None:
+    """Memorise un consentement pour ce couple (client, redirection)."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO oauth_grants "
+            "(client_id, redirect_uri, granted_at) VALUES (?, ?, ?)",
+            (client_id, redirect_uri, int(time.time())),
+        )
+        await db.commit()
+
+
+async def oauth_grant_exists(client_id: str, redirect_uri: str) -> bool:
+    """Ce couple a-t-il deja ete consenti par l'humain ?"""
+    if not client_id or not redirect_uri or not _DB_PATH.exists():
+        return False
+    try:
+        async with aiosqlite.connect(_DB_PATH) as db:
+            row = await (await db.execute(
+                "SELECT 1 FROM oauth_grants "
+                "WHERE client_id = ? AND redirect_uri = ?",
+                (client_id, redirect_uri),
+            )).fetchone()
+    except Exception:
+        return False
+    return bool(row)
+
+
+async def create_oauth_token(
+    username: str,
+    client_id: str,
+    client_name: str = "",
+    ttl_s: int = _OAUTH_TOKEN_TTL_S,
+) -> tuple[str, int]:
+    """Emet le jeton remis a un client OAuth. Retourne (jeton, duree_s).
+
+    C'est une cle scopee, donc revocable seule et expirante, et son champ
+    `actor` retient QUEL client l'a obtenue — ce que la cle maitre ne savait
+    pas dire. `mode="supervisor"` dit franchement que le perimetre d'outils
+    n'est pas restreint aujourd'hui : c'est la phase 1 du trousseau qui
+    apportera les portees, et mentir ici serait pire que de le dire.
+    """
+    expires_at = int(time.time()) + int(ttl_s)
+    key = await create_scoped_key(
+        username=username,
+        study_id="",                 # aucune etude : jeton d'acces, pas d'agent publie
+        tools=_SCOPED_TOOLS_ALL,
+        mode="supervisor",
+        actor=client_id or "oauth",
+        label=f"OAuth {client_name or client_id or 'client'}",
+        expires_at=expires_at,
+    )
+    return key, int(ttl_s)
 
 
 async def revoke_scoped_key(key: str) -> None:
