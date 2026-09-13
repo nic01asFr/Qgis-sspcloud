@@ -248,6 +248,15 @@ async def set_session_study(session_id: str, study_id: str | None) -> None:
         log.exception("auto_tag on set_session_study failed for %s", session_id)
 
 
+async def get_session_study(session_id: str) -> str | None:
+    """Étude à laquelle la session est rattachée, ou None si aucune."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        row = await (await db.execute(
+            "SELECT study_id FROM sessions WHERE id = ?", (session_id,),
+        )).fetchone()
+    return row[0] if row and row[0] else None
+
+
 async def get_latest_session_for_study(
     username: str, study_id: str
 ) -> str | None:
@@ -1178,6 +1187,36 @@ async def list_recipes(profile_id: str | None = None) -> list[dict]:
 
 # ── Résumé contexte pour le LLM ───────────────────────────────────────────────
 
+class _NormalisateurValeurs:
+    """Repère les valeurs déjà injectées pour ne pas les répéter.
+
+    La même préférence (« zone habituelle », métier…) existait dans jusqu'à
+    quatre sources injectées côte à côte. On compare des formes normalisées —
+    minuscules, ponctuation aplatie, espaces réduits — pour écarter une valeur
+    déjà couverte, quelle que soit la clé sous laquelle elle est stockée. Un
+    seuil de longueur évite les faux positifs sur des valeurs très courtes.
+    """
+
+    _MIN = 5
+
+    def __init__(self) -> None:
+        self._vu = " "
+
+    @staticmethod
+    def _norm(texte: str) -> str:
+        import re
+        return " " + re.sub(r"[^a-z0-9]+", " ", (texte or "").lower()).strip() + " "
+
+    def ajouter(self, texte: str) -> None:
+        self._vu += self._norm(texte) + " "
+
+    def contient(self, valeur: str) -> bool:
+        n = self._norm(valeur).strip()
+        if len(n) < self._MIN:
+            return False
+        return (" " + n + " ") in self._vu
+
+
 async def build_context_summary(
     username: str, session_id: str,
     profile_id: str = "standard",
@@ -1258,11 +1297,20 @@ async def build_context_summary(
 
     layer3 = []
 
+    # « Zone habituelle » pouvait apparaître quatre fois dans le même prompt :
+    # section de mémoire, préférence héritée, et deux clés d'insight. On tient
+    # donc la trace de ce qui est DÉJÀ dit et on ne le répète pas. Le markdown
+    # édité par l'utilisateur est le pilier : ce qui y figure prime, les
+    # préférences héritées et les faits auto-détectés ne font que compléter.
+    _deja_dit = _NormalisateurValeurs()
+
     # Document markdown structuré (principal, géré directement par l'user)
     if memory_md:
         layer3.append("--- À PROPOS DE MOI (édité par moi-même) ---\n" + memory_md)
+        _deja_dit.ajouter(memory_md)
 
-    # Préférences explicites héritées (rétro-compat couche legacy)
+    # Préférences explicites héritées (rétro-compat couche legacy), sauf ce que
+    # l'utilisateur a déjà écrit dans son markdown.
     legacy_prefs = []
     for k, label in (
         ("preferred_zone", "Zone habituelle"),
@@ -1273,17 +1321,25 @@ async def build_context_summary(
         ("langue", "Langue de rendu préférée"),
     ):
         v = profile.get(k)
-        if v:
+        if v and not _deja_dit.contient(v):
             legacy_prefs.append(f"{label} : {v}")
+            _deja_dit.ajouter(v)
     if legacy_prefs:
         layer3.append("Autres préférences :\n" + "\n".join(f"- {p}" for p in legacy_prefs))
 
-    # Insights agentiques (mémoire long terme apprise auto, complément markdown)
+    # Insights agentiques (mémoire long terme apprise auto, complément markdown).
+    # On écarte ceux dont la valeur est déjà couverte plus haut.
     if insights:
-        layer3.append("Faits auto-détectés sur l'user (à confirmer/promouvoir) :")
+        _lignes_ins = []
         for ins in insights[:10]:
+            if _deja_dit.contient(ins["value"]):
+                continue
             src = "📌" if ins["source"] == "explicit" else "🧠"
-            layer3.append(f"  {src} {ins['key']} = {ins['value']}")
+            _lignes_ins.append(f"  {src} {ins['key']} = {ins['value']}")
+            _deja_dit.ajouter(ins["value"])
+        if _lignes_ins:
+            layer3.append("Faits auto-détectés sur l'user (à confirmer/promouvoir) :")
+            layer3.extend(_lignes_ins)
 
     # Sessions passées (résumés)
     completed = [

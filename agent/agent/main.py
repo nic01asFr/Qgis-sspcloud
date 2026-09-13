@@ -1082,6 +1082,13 @@ async def chat(
         title = (message or "").strip().replace("\n", " ")[:80]
         if title:
             await memory.set_session_summary(session_id, title)
+    # Rattachement à l'étude active. On le tente tant que la session n'est
+    # rattachée à AUCUNE étude — pas seulement au premier message : si le hub
+    # était injoignable alors, la session restait orpheline pour toujours
+    # (jamais reprise, absente de l'historique filtré). On ne réécrit jamais
+    # un rattachement existant : changer d'étude en cours de conversation ne
+    # doit pas reclasser silencieusement les échanges déjà tenus.
+    if not await memory.get_session_study(session_id):
         active_study_id = await _fetch_active_study_id()
         if active_study_id:
             await memory.set_session_study(session_id, active_study_id)
