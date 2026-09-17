@@ -2877,6 +2877,12 @@ ne vient pas d'un outil cette session, la supprimer.
                                 yield f"\n\n<!--ckpt:{ckpt_id}-->\n"
                                 log.info("Checkpoint %s pris avant %s",
                                          ckpt_id, fn_name)
+                            elif ck_resp.status_code == 503:
+                                # QGIS occupe : pas de point de retour pour ce
+                                # tool, mais rien d'anormal cote service. On
+                                # poursuit, comme pour tout echec de snapshot.
+                                log.info("Pas de point de retour avant %s : "
+                                         "QGIS occupé", fn_name)
                             else:
                                 log.warning("Checkpoint refusé par hub (%d)",
                                             ck_resp.status_code)

@@ -9768,6 +9768,15 @@ async def session_checkpoint(
             studies.snapshot_active_pod_code(active_sid, ckpt_id, tool_name),
             timeout=15,
         )
+    except (httpx.TimeoutException, asyncio.TimeoutError) as exc:
+        # QGIS occupe par un traitement long : le snapshot n'a pas pu etre
+        # pris a temps. Ce n'est pas une panne du hub, et l'agent poursuit
+        # sans point de retour. Un 500 faisait chercher un bug ici alors que
+        # la cause est ailleurs -- mesure du 2026-09-17, ou chaque gel de
+        # QGIS produisait « Checkpoint refusé par hub (500) ».
+        log.info("Snapshot pré-%s pour ckpt %s : QGIS occupé (%s)",
+                 tool_name, ckpt_id, type(exc).__name__)
+        raise HTTPException(503, "QGIS occupé : snapshot non pris")
     except Exception as exc:
         log.warning("Snapshot pré-%s pour ckpt %s : %s", tool_name, ckpt_id, exc)
         raise HTTPException(500, f"Snapshot échec: {exc}")
