@@ -454,6 +454,22 @@ def _kubectl_patch_replicas(ss_name: str, replicas: int) -> bool:
     return r.returncode == 0
 
 
+def kubectl_rollout_restart(ss_name: str) -> tuple[bool, str]:
+    """Redemarre un StatefulSet pour qu'il reparte sur l'image publiee.
+
+    Les trois briques du service tournent en `imagePullPolicy: Always` sur un
+    tag mobile : recreer le pod suffit a tirer la derniere image. Les donnees
+    vivent sur le PVC, que cette operation ne touche pas -- c'est le meme
+    contrat que la mise en veille, pratiquee tous les jours.
+    """
+    r = subprocess.run(
+        ["kubectl", "rollout", "restart", f"statefulset/{ss_name}",
+         "-n", _NAMESPACE],
+        capture_output=True, text=True, timeout=20,
+    )
+    return r.returncode == 0, (r.stderr or r.stdout)[:300]
+
+
 def _kubectl_set_env(ss_name: str, env: dict) -> bool:
     """Patch des env vars sur un StatefulSet existant (kubectl set env).
 
