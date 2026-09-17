@@ -2117,14 +2117,18 @@ async def get_profile_full_internal(
     """
     if not _PROFILES_AVAILABLE:
         raise HTTPException(404, "Système de profils non disponible")
-    # Whitelist profils internes exposables (V2 : étendre liste si nouveau meta-agent)
-    _INTERNAL_PROFILES = {"recipe_analyzer", "agent_config_analyzer"}
-    if profile_id not in _INTERNAL_PROFILES:
-        raise HTTPException(
-            403,
-            f"Profil '{profile_id}' non exposable en /internal "
-            f"(whitelist : {sorted(_INTERNAL_PROFILES)})",
-        )
+    # Cette route sert TOUS les profils, et non plus deux seulement.
+    #
+    # L'agent charge ses profils par `/profiles/{id}`, qui retire
+    # `agent_system_prompt` pour ne pas l'exposer publiquement. Il tournait donc
+    # depuis toujours avec un prompt generique de secours : guided_tour,
+    # storymap_creator et les autres n'ont JAMAIS agi (verifie en production le
+    # 2026-09-11 ; le correctif « profils inertes » du 30 mai n'avait pas pris,
+    # puisqu'il lisait justement la route qui filtre).
+    #
+    # La restriction n'a plus lieu d'etre : ces prompts vivent dans des YAML
+    # d'un depot public. Ce qui les protege ici, c'est l'acces inter-pod
+    # (prefixe /internal, Bearer HUB_API_KEY), pas une liste de noms.
     p = profile_manager.get_profile(profile_id)
     if p.get("id") != profile_id:
         raise HTTPException(404, f"Profil '{profile_id}' introuvable")

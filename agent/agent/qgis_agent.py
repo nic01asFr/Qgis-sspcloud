@@ -241,11 +241,24 @@ async def fetch_profiles_from_hub() -> int:
             new_cache: dict[str, dict] = {}
             for pid in profile_ids:
                 try:
-                    r = await client.get(f"{_HUB_URL}/profiles/{pid}", headers=headers)
+                    # `/profiles/{id}` retire `agent_system_prompt` : c'est la
+                    # route publique. On passe donc par la route inter-pod, qui
+                    # rend le profil COMPLET. Sans cela, l'agent tournait avec
+                    # un prompt generique et AUCUN profil n'agissait -- verifie
+                    # en production le 2026-09-11.
+                    data = None
+                    r = await client.get(
+                        f"{_HUB_URL}/internal/profiles/{pid}/full", headers=headers)
                     if r.status_code == 200:
                         data = r.json()
-                        if isinstance(data, dict):
-                            new_cache[pid] = data
+                    else:
+                        # Hub plus ancien : on retombe sur la route publique,
+                        # sans prompt, plutot que de perdre le profil entier.
+                        r = await client.get(f"{_HUB_URL}/profiles/{pid}", headers=headers)
+                        if r.status_code == 200:
+                            data = r.json()
+                    if isinstance(data, dict):
+                        new_cache[pid] = data
                 except Exception as exc:
                     log.warning("fetch_profiles : %s indispo : %s", pid, exc)
             _PROFILES_CACHE = new_cache
@@ -257,6 +270,18 @@ async def fetch_profiles_from_hub() -> int:
         return 0
 
 
+# Quels profils ont le droit d'appliquer LEUR prompt.
+#
+# Ces prompts n'ont jamais tourne en production : le transport etait casse
+# depuis toujours. Les activer tous d'un coup ferait entrer sans filet des
+# consignes de 9 000 a 16 000 caracteres jamais eprouvees avec le modele. On
+# ouvre donc profil par profil, apres essai reel. `*` active tout.
+_PROFILS_AVEC_PROMPT = {
+    p.strip() for p in os.getenv(
+        "PROFILS_AVEC_PROMPT", "standard,guided_tour").split(",") if p.strip()
+}
+
+
 def _load_profile_prompt(profile_id: str) -> str:
     """Charge le system prompt d'un profil depuis le cache module-level.
 
@@ -264,6 +289,9 @@ def _load_profile_prompt(profile_id: str) -> str:
     fetch initial a echoue). Le code amont (qgis_agent._build_prompt)
     detecte la chaine vide et applique un prompt generique de secours.
     """
+    if "*" not in _PROFILS_AVEC_PROMPT and profile_id not in _PROFILS_AVEC_PROMPT:
+        # Le profil garde ses outils ; seul son prompt reste en attente d'essai.
+        return ""
     profile = _PROFILES_CACHE.get(profile_id, {})
     return profile.get("agent_system_prompt", "")
 
