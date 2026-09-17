@@ -72,11 +72,17 @@ class TestCeQuiEstRendu:
         conclure que le composant n'est pas deploye."""
         from hub import version as v
         monkeypatch.setattr(v, "_cache", {"t": 0.0, "data": None})
-        monkeypatch.setattr(v, "_empreintes_en_cours",
-                            lambda ns: {"hub": "sha256:abc", "agent": "sha256:def"})
+        monkeypatch.setattr(v, "_empreintes_en_cours", lambda ns: {
+            "hub": {"digest": "sha256:abc", "reference": "ghcr.io/o/qgis-hub:latest"},
+            "agent": {"digest": "sha256:def", "reference": "ghcr.io/o/qgis-agent:latest"},
+        })
+        monkeypatch.setattr(v, "_digest_publie", lambda depot, tag: None)
         etat = v.etat()
         assert etat["images"]["workspace"] is None
         assert "veille" in etat["notes"]["workspace"]
+        # Et la question « est-elle a jour ? » reste sans reponse, plutot que
+        # de recevoir un « oui » par defaut.
+        assert etat["briques"]["workspace"]["a_jour"] is None
 
     def test_on_rend_l_empreinte_pas_le_tag(self, monkeypatch):
         """`image` porte le tag demande, `imageID` l'empreinte tiree. Un tag
@@ -87,7 +93,10 @@ class TestCeQuiEstRendu:
         from hub import version as v
         src = inspect.getsource(v._empreintes_en_cours)
         assert "imageID" in src
-        assert 'etat.get("image")' not in src
+        # Le tag est rendu a cote, sous son propre nom, jamais a la place de
+        # l'empreinte : c'est `digest` qui dit ce qui s'execute.
+        assert '"digest": "sha256:" + ref.split("sha256:")[-1]' in src
+        assert '"reference": etat.get("image"' in src
 
     def test_un_cluster_injoignable_ne_fait_pas_echouer(self, monkeypatch):
         """Un service qui refuse de dire sa version parce qu'il n'a pas pu

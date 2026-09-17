@@ -499,6 +499,27 @@ async def health():
     }
 
 
+@app.get("/api/version")
+async def api_version():
+    """De quel commit cet agent a ete construit.
+
+    La route figurait dans la liste des chemins publics depuis longtemps,
+    mais n'existait pas : la verification « l'agent est-il a jour ? » etait
+    donc irrealisable, et une verification qu'on ne peut pas faire ne rate
+    jamais. Le hub, lui, releve l'empreinte de l'image aupres de Kubernetes ;
+    ceci repond a la question complementaire, « de quelle source ».
+
+    Publique a dessein, comme cote hub : un numero de commit ne revele rien,
+    et un etat de version qui demande une authentification n'est pas
+    consultable par ce qui en aurait besoin.
+    """
+    commit = os.getenv("AGENT_GIT_SHA") or None
+    etat = {"service": "qgis-agent", "commit": commit}
+    if not commit:
+        etat["note"] = "inconnu — image construite sans l'argument GIT_SHA"
+    return etat
+
+
 @app.get("/api/status")
 async def api_status():
     """État de l'agent côté UI (polling) — sert au bandeau d'avertissement

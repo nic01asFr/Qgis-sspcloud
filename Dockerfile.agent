@@ -14,8 +14,13 @@ COPY hub/hub/static/produit.css agent/static/produit.css
 
 RUN pip install -e . --quiet --no-cache-dir
 
+# Sans cet argument, `/api/version` ne peut pas dire de quel commit
+# l'image provient -- meme raison que cote hub.
+ARG GIT_SHA=""
+
 ENV SERVICE_NAME=qgis-agent \
     SERVER_MODULE=agent.main:app \
-    SERVER_PORT=8888
+    SERVER_PORT=8888 \
+    AGENT_GIT_SHA=${GIT_SHA}
 
 USER 1000
