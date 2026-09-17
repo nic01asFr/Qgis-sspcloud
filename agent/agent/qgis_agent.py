@@ -3071,13 +3071,30 @@ ne vient pas d'un outil cette session, la supprimer.
 
                 result_clean = result.strip()
                 if result_clean and result_clean not in ("{}", "null", "[]"):
-                    if "![" in result_clean and "](data:" in result_clean:
-                        yield f"\n{result_clean}\n"
-                    else:
-                        result_preview = result_clean[:300] + (
-                            "..." if len(result_clean) > 300 else ""
+                    # Le pont melange trois choses dans un meme retour : du
+                    # JSON, un bloc de contexte redige POUR LE MODELE
+                    # (« --- Context: phase=... Hint: ... ») et, souvent, la
+                    # capture de la carte. Tout yielder tel quel exposait le
+                    # JSON et les consignes internes en clair dans la reponse,
+                    # hors du bloc technique que le chat sait replier : mesure
+                    # le 2026-09-17, un simple recadrage de la carte affichait
+                    # deux paragraphes de bruit avant la phrase utile.
+                    #
+                    # On separe donc : la capture reste visible, le reste part
+                    # dans le bloc de code, que le chat enveloppe en
+                    # `details.tool-result` et masque selon la preference
+                    # « afficher les outils ».
+                    _MOTIF_IMAGE = r"!\[[^\]]*\]\(data:[^)]+\)"
+                    images = re.findall(_MOTIF_IMAGE, result_clean)
+                    reste = re.sub(_MOTIF_IMAGE, "", result_clean).strip()
+
+                    if reste:
+                        result_preview = reste[:300] + (
+                            "..." if len(reste) > 300 else ""
                         )
                         yield f"\n```\n{result_preview}\n```\n"
+                    for image in images:
+                        yield f"\n{image}\n"
 
                 # Yield direct du lien livrable AVANT la synthese LLM : garantit
                 # qu'on voit toujours la bonne URL meme si le LLM hallucine
