@@ -47,6 +47,26 @@ _ARTIFACT_MUTATING_TOOLS: frozenset[str] = native_tools_v2.NATIVE_TOOLS_V2_MUTAT
 # ── Config SSPCloud LLM ────────────────────────────────────────────────────────
 _LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://llm.lab.sspcloud.fr/api")
 
+# Silence maximal tolere du modele pendant qu'il stream, en secondes.
+#
+# Le read timeout de httpx ne protege pas de ce cas : il se rearme au moindre
+# octet recu, y compris les lignes de service que le serveur intercale entre
+# deux paquets. Un modele qui cesse d'emettre sans fermer la connexion faisait
+# donc pendre le tour indefiniment. Mesure le 2026-09-17 sur l'etude
+# « saint martin » : deux tours sur cinq figes plus de sept minutes sur
+# « Analyse en cours… », sans message ni issue pour l'utilisateur.
+_SILENCE_LLM_MAX = float(os.getenv("LLM_SILENCE_MAX_S", "90"))
+
+# Message rendu a l'utilisateur quand la garde ci-dessus se declenche. Il dit
+# ce qui s'est passe et ce qu'il peut faire, plutot que de laisser un spinner
+# tourner sans fin.
+_MESSAGE_SILENCE_LLM = (
+    "Le modele « {modele} » a cesse de repondre pendant {secondes} s. "
+    "Le tour a ete interrompu pour ne pas rester bloque. "
+    "Relancez votre demande : si cela se reproduit, le service de modeles "
+    "est probablement indisponible."
+)
+
 
 def _llm_api_key() -> str:
     """Lecture dynamique de la cle LLM (cf. Option alpha 2026-06-02).
@@ -2561,7 +2581,37 @@ ne vient pas d'un outil cette session, la supprimer.
                     tool_call_data: dict[int, dict] = {}
                     finish_reason  = None
 
-                    async for line in resp.aiter_lines():
+                    # Garde de silence : on borne le temps ecoule depuis le
+                    # dernier paquet PORTEUR (reflexion, texte, appel d'outil
+                    # ou motif de fin). Les lignes de service n'y suffisent
+                    # pas, sinon un flux qui ne porte plus rien repousserait la
+                    # limite a l'infini -- c'est exactement ce que faisait le
+                    # read timeout de httpx. Cf. _SILENCE_LLM_MAX.
+                    _lignes = resp.aiter_lines().__aiter__()
+                    _horloge = asyncio.get_event_loop()
+                    _limite = _horloge.time() + _SILENCE_LLM_MAX
+
+                    while True:
+                        _reste = _limite - _horloge.time()
+                        if _reste <= 0:
+                            raise RuntimeError(_MESSAGE_SILENCE_LLM.format(
+                                modele=model, secondes=int(_SILENCE_LLM_MAX),
+                            ))
+                        try:
+                            line = await asyncio.wait_for(
+                                _lignes.__anext__(), timeout=_reste,
+                            )
+                        except StopAsyncIteration:
+                            break
+                        except asyncio.TimeoutError:
+                            log.error(
+                                "LLM muet %ds (model=%s, iter=%d) : tour abandonne",
+                                int(_SILENCE_LLM_MAX), model, iteration,
+                            )
+                            raise RuntimeError(_MESSAGE_SILENCE_LLM.format(
+                                modele=model, secondes=int(_SILENCE_LLM_MAX),
+                            )) from None
+
                         if not line.startswith("data: "):
                             continue
                         data = line[6:]
@@ -2577,6 +2627,11 @@ ne vient pas d'un outil cette session, la supprimer.
                             _fr = d["choices"][0].get("finish_reason")
                             if _fr:
                                 finish_reason = _fr
+
+                            # Paquet porteur : le modele travaille encore, on
+                            # lui redonne le delai plein.
+                            if delta or _fr:
+                                _limite = _horloge.time() + _SILENCE_LLM_MAX
 
                             # Qwen3 : thinking dans delta.reasoning_content (champ séparé)
                             # Gemma4 : thinking dans delta.content (tokens <|channel>)
