@@ -964,6 +964,68 @@ async def _resolve_active_profile(form_profile: str, session_id: str = "") -> st
     return form_profile
 
 
+# ── Compactage de l'historique envoye au modele ─────────────────────────────
+#
+# La fenetre de qwen3-6-35b-moe fait 131 072 jetons (mesure le 2026-09-17 :
+# au-dela, le service repond 400 ContextWindowExceededError). L'historique
+# n'etait borne QU'EN NOMBRE (20 messages), jamais en taille. Or une reponse
+# de l'assistant embarque la capture de la carte en base64 : un seul message
+# mesure en production pesait 229 234 caracteres, soit 87 % de la fenetre a
+# lui tout seul.
+#
+# Consequence deja realisee : la session ab627799 envoyait ~168 500 jetons.
+# Elle etait donc DEFINITIVEMENT cassee -- chaque nouveau message repartait
+# avec le meme historique trop gros, et recevait la meme erreur.
+#
+# On ne touche pas a ce qui est persiste (le chat relit la base pour
+# afficher) : on borne seulement ce qui part au modele.
+
+# ~2 caracteres par jeton (mesure : 200 000 caracteres = 100 010 jetons).
+# 120 000 caracteres ~ 60 000 jetons, ce qui laisse la place au prompt
+# systeme, aux 86 definitions d'outils, a la question et a la reponse.
+_BUDGET_HISTORIQUE = int(os.getenv("HISTORIQUE_MAX_CARACTERES", "120000"))
+_MESSAGE_MAX = int(os.getenv("HISTORIQUE_MESSAGE_MAX", "12000"))
+
+# Une image encodee dans le texte : le modele n'en tire rien ici, il a vu le
+# resultat au tour ou il l'a produit. C'est la source principale d'obesite.
+_IMAGE_ENCODEE = re.compile(r"!\[[^\]]*\]\(data:[^)]+\)")
+
+
+def _alleger_message(contenu: str) -> str:
+    """Retire les images encodees, puis borne la longueur."""
+    allege = _IMAGE_ENCODEE.sub("[capture de la carte]", contenu or "")
+    if len(allege) > _MESSAGE_MAX:
+        garde = _MESSAGE_MAX // 2
+        allege = (allege[:garde] + "\n[…partie centrale omise…]\n"
+                  + allege[-garde:])
+    return allege
+
+
+def _historique_pour_le_modele(messages: list[dict]) -> list[dict]:
+    """Les echanges recents qui tiennent dans le budget, du plus ancien au plus recent.
+
+    On garde les plus recents : ce sont eux qui portent le fil en cours. Un
+    message qui, meme allege, ne tient pas dans ce qui reste arrete la
+    remontee -- inutile d'aller chercher plus vieux, on ne ferait que sauter
+    des trous dans la conversation.
+    """
+    retenus: list[dict] = []
+    total = 0
+    for m in reversed(messages):
+        contenu = _alleger_message(m.get("content", ""))
+        if not contenu.strip():
+            continue
+        if total + len(contenu) > _BUDGET_HISTORIQUE and retenus:
+            break
+        retenus.append({"role": m["role"], "content": contenu})
+        total += len(contenu)
+    retenus.reverse()
+    if len(retenus) < len([m for m in messages if (m.get("content") or "").strip()]):
+        log.info("historique compacte : %d messages sur %d, %d caracteres",
+                 len(retenus), len(messages), total)
+    return retenus
+
+
 _BATTEMENT = object()
 _PERIODE_BATTEMENT = 15.0
 
@@ -1092,10 +1154,7 @@ async def chat(
         active_study_id = await _fetch_active_study_id()
         if active_study_id:
             await memory.set_session_study(session_id, active_study_id)
-    history_formatted = [
-        {"role": m["role"], "content": m["content"]}
-        for m in history
-    ]
+    history_formatted = _historique_pour_le_modele(history)
 
     agent = QGISAgent(
         username       = "user",
