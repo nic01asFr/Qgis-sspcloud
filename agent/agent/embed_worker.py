@@ -37,6 +37,9 @@ _DB_PATH  = _DATA_DIR / "memory.db"
 _BATCH    = int(os.getenv("EMBED_BATCH", "8"))
 _IDLE_SEC = int(os.getenv("EMBED_IDLE_SEC", "30"))
 _MIN_LEN  = 12  # on ignore les messages trop courts ("ok", "merci", "go")
+# Longueur envoyee a l'API, alignee sur ce qu'on archive : le texte etait
+# tronque a 8000 a l'insertion, mais expedie ENTIER a l'embedding.
+_TEXTE_MAX = int(os.getenv("EMBED_TEXTE_MAX", "8000"))
 
 
 # ── Lecture des sources non-indexées ────────────────────────────────────────
@@ -147,7 +150,7 @@ async def _insert_batch(db: aiosqlite.Connection, items: list[dict],
             "INSERT INTO embed_chunks (text, source_type, source_id, username, study_id, created_at, metadata) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
-                item["text"][:8000],  # cap raisonnable, on n'archive pas tout
+                item["text"][:_TEXTE_MAX],  # meme cap qu'a l'embedding
                 item["source_type"],
                 item["source_id"],
                 item["username"],
@@ -166,6 +169,48 @@ async def _insert_batch(db: aiosqlite.Connection, items: list[dict],
 
 # ── Boucle principale ───────────────────────────────────────────────
 
+async def _indexer(db: aiosqlite.Connection, items: list[dict]) -> int:
+    """Indexe un lot, en isolant par dichotomie l'item que l'API refuse.
+
+    Un seul item empoisonne suffisait a bloquer TOUTE la file, pour toujours :
+    l'echec faisait `return 0` sans rien marquer, donc le tick suivant
+    reprenait le meme lot. Mesure du 2026-09-17 : un message de 80 896
+    caracteres (une reponse contenant une capture en base64) bloquait 139
+    items depuis des jours, avec « embed_batch fail (8 items): 400 Bad
+    Request » toutes les 90 s dans les journaux.
+
+    On coupe le lot en deux jusqu'a isoler le fautif, qui est alors indexe
+    avec un vecteur nul : il cesse de barrer la route, et reste eloigne de
+    toute recherche. Trois dedoublements suffisent pour un lot de huit.
+    """
+    if not items:
+        return 0
+
+    textes = [it["text"][:_TEXTE_MAX] for it in items]
+    try:
+        vecteurs = await vs.embed_batch(textes)
+    except Exception as exc:
+        if len(items) == 1:
+            item = items[0]
+            log.warning(
+                "item ecarte de l'indexation (%s %s, %d caracteres) : %s",
+                item["source_type"], item["source_id"], len(item["text"]), exc,
+            )
+            await _insert_batch(db, items, [[0.0] * vs.EMBED_DIM])
+            return 1
+        milieu = len(items) // 2
+        return (await _indexer(db, items[:milieu])
+                + await _indexer(db, items[milieu:]))
+
+    if len(vecteurs) != len(items):
+        log.warning("embed_batch a rendu %d vecteurs pour %d items",
+                    len(vecteurs), len(items))
+        return 0
+
+    await _insert_batch(db, items, vecteurs)
+    return len(items)
+
+
 async def _tick() -> int:
     """Un cycle : fetch pending, embed batch, insert. Renvoie le count traité."""
     async with aiosqlite.connect(_DB_PATH) as db:
@@ -176,21 +221,11 @@ async def _tick() -> int:
         if not items:
             return 0
 
-        texts = [it["text"] for it in items]
-        try:
-            vectors = await vs.embed_batch(texts)
-        except Exception as e:
-            log.warning("embed_batch fail (%d items): %s", len(items), e)
-            return 0
-        if len(vectors) != len(items):
-            log.warning("embed_batch size mismatch: %d items → %d vecs",
-                        len(items), len(vectors))
-            return 0
-
-        await _insert_batch(db, items, vectors)
-        log.info("indexed %d chunks (sources: %s)", len(items),
-                 ",".join(sorted({it["source_type"] for it in items})))
-        return len(items)
+        traites = await _indexer(db, items)
+        if traites:
+            log.info("indexed %d chunks (sources: %s)", traites,
+                     ",".join(sorted({it["source_type"] for it in items})))
+        return traites
 
 
 async def run_forever(stop_event: asyncio.Event | None = None) -> None:
