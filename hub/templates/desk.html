@@ -607,8 +607,6 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 </head>
 <body>
 
-<div class="desk" id="desk" data-resources="collapsed" data-chat="collapsed">
-
   <!-- ── BANDEAU : une mise a jour est disponible ──────────────────
        Le service est fait de trois briques qui evoluent chacune de leur
        cote. Rien ne le disait a l'utilisateur : une correction pouvait
@@ -625,6 +623,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       Plus tard
     </button>
   </div>
+
+<div class="desk" id="desk" data-resources="collapsed" data-chat="collapsed">
 
   {# Sprint UX-3 (2026-06-21) : navbar globale retiree (cf. workspace.html
      et chat.html). Le brand 'CEREMA · QGIS' dans le desk-header reste
@@ -1353,9 +1353,15 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     /* ── Bandeau de mise a jour ────────────────────────────────────
        Discret mais pas invisible : il annonce une action que
        l'utilisateur declenche lui-meme, jamais une urgence. */
-    .bandeau-maj{display:flex;align-items:center;gap:10px;
+    /* Hors de la grille du bureau, qui occupe 100vh et repartit ses enfants
+       dans des colonnes nommees -- dont deux de largeur nulle. Un bandeau
+       laisse a l'interieur y atterrissait et s'affichait un mot par ligne.
+       Il se pose donc sous l'en-tete, sur toute la largeur. */
+    .bandeau-maj{position:fixed;top:48px;left:0;right:0;z-index:40;
+      display:flex;align-items:center;gap:10px;
       padding:8px 16px;background:var(--qs-accent-pale);
       border-bottom:1px solid var(--qs-trait);
+      box-shadow:0 2px 6px rgba(19,33,44,.12);
       font-size:13px;color:var(--qs-encre);flex-wrap:wrap}
     .bandeau-maj .ic{color:var(--qs-accent);flex:none}
     .bandeau-maj__texte{margin:0;flex:1 1 240px;min-width:0}

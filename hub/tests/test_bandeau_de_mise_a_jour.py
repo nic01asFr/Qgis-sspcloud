@@ -132,3 +132,23 @@ def test_le_redemarrage_ne_touche_pas_au_volume():
 def test_les_trois_briques_sont_traitees(brique):
     bloc = _bloc_endpoint()
     assert f'"{brique}"' in bloc
+
+
+def test_le_bandeau_n_est_pas_pris_dans_la_grille_du_bureau():
+    """`.desk` est une grille 100vh dont deux colonnes ont une largeur nulle.
+
+    Un bandeau laisse a l'interieur y atterrissait et s'affichait un mot par
+    ligne, sous la page. Constate en production le 2026-09-18, a la premiere
+    apparition reelle du bandeau.
+    """
+    avant_desk = _DESK.split('<div class="desk" id="desk"')[0]
+    assert 'id="bandeau-maj"' in avant_desk, (
+        "le bandeau doit etre declare AVANT la grille, donc hors d'elle"
+    )
+
+
+def test_le_bandeau_se_pose_de_lui_meme():
+    """Hors flux : sa place ne depend donc d'aucune mise en page voisine."""
+    regle = _DESK.split(".bandeau-maj{")[1].split("}")[0]
+    assert "position:fixed" in regle
+    assert "left:0" in regle and "right:0" in regle
