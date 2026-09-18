@@ -1403,6 +1403,7 @@ async def oidc_auth_middleware(request: "Request", call_next):
     #   4. Cookie OIDC (fallback, bootstrap initial ou perte cle API)
     _cookie_key = request.cookies.get("hub_api_key", "")
     if _cookie_key.startswith("qgis_"):
+        _cookie_valide = False
         try:
             _user_from_cookie = await _validate_api_key(_cookie_key)
             if _user_from_cookie:
@@ -1424,13 +1425,21 @@ async def oidc_auth_middleware(request: "Request", call_next):
                     )
                 # Injecte dans state pour downstream (compat get_current_user)
                 request.state.oidc_user = _cookie_user
-                return await call_next(request)
+                _cookie_valide = True
         except Exception as exc:
             import traceback as _tb
             log.warning(
                 "middleware: hub_api_key cookie validation failed : %s\n%s",
                 exc, _tb.format_exc(),
             )
+        else:
+            # La suite est appelee HORS du try : une erreur applicative
+            # n'a rien a voir avec la validite du cookie, et l'attraper
+            # ici la deguisait en « Auth requise ». Mesure le 2026-09-18 :
+            # un NameError dans un endpoint ressortait en 401, et seule la
+            # lecture des journaux du pod donnait la vraie cause.
+            if _cookie_valide:
+                return await call_next(request)
 
     # 4. Routes UI : cookie OIDC obligatoire (fallback si pas de hub_api_key)
     token = request.cookies.get("oidc_token") or ""

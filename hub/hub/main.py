@@ -2128,6 +2128,8 @@ async def mettre_a_jour_les_briques(request: Request):
     `/version` signale en retard -- et si aucune ne l'est, on ne redemarre
     rien plutot que de couper le travail de quelqu'un pour rien.
     """
+    from hub import version as _version   # importe localement, comme /version
+
     try:
         corps = await request.json()
     except Exception:
