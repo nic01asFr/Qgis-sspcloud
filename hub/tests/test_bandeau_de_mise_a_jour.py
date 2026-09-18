@@ -62,10 +62,19 @@ def test_les_briques_portent_des_noms_reconnaissables():
         assert attendu in _DESK, attendu
 
 
-def test_le_hub_laisse_le_temps_de_repartir_avant_de_recharger():
-    """Recharger tout de suite tomberait sur un service qui s'arrete."""
-    bloc = _DESK.split("async function appliquer")[1].split("verifier();")[0]
-    assert "bilan.hub_differe" in bloc
+def test_un_service_momentanement_injoignable_ne_conclut_a_rien():
+    """Pendant que le hub repart, `/version` ne repond pas.
+
+    Le prendre pour un echec ferait annoncer une panne a chaque mise a jour
+    du hub, alors qu'il s'agit du deroulement normal. On patiente.
+    """
+    bloc = _DESK.split("async function resteEnRetard")[1].split(
+        "async function suivreLeRedemarrage")[0]
+    assert "return null" in bloc
+    suivi = _DESK.split("async function suivreLeRedemarrage")[1].split(
+        "async function appliquer")[0]
+    # Seul un « non, plus en retard » MESURE met fin a l'attente.
+    assert "retard === false" in suivi
 
 
 def test_un_echec_laisse_reessayer():
@@ -152,3 +161,59 @@ def test_le_bandeau_se_pose_de_lui_meme():
     regle = _DESK.split(".bandeau-maj{")[1].split("}")[0]
     assert "position:fixed" in regle
     assert "left:0" in regle and "right:0" in regle
+
+
+# ── Ce que la premiere mise a jour reelle a revele (2026-09-18) ──────────
+
+
+def test_poser_hidden_masque_vraiment_le_bandeau():
+    """`display:flex` sur la classe bat le `display:none` de [hidden].
+
+    Une classe l'emporte sur un attribut : sans regle explicite, poser
+    `hidden` ne masquait rien. « Plus tard » laissait donc le bandeau en
+    place, et celui-ci restait visible avant meme d'avoir quelque chose a
+    annoncer.
+    """
+    assert ".bandeau-maj[hidden]{display:none}" in _DESK
+
+
+def test_le_redemarrage_est_suivi_au_lieu_d_etre_suppose_fini():
+    """Un bureau QGIS met une a deux minutes a repartir.
+
+    Recharger la page a l'aveugle apres quelques secondes ramenait un etat
+    d'AVANT, et le bandeau reproposait la mise a jour qui venait d'etre
+    faite.
+    """
+    bloc = _DESK.split("async function appliquer")[1].split("verifier();")[0]
+    assert "suivreLeRedemarrage" in bloc
+    assert "setTimeout(() => window.location.reload(), 6000)" not in bloc
+
+
+def test_l_attente_est_bornee_et_le_dit():
+    bloc = _DESK.split("async function suivreLeRedemarrage")[1].split(
+        "async function appliquer")[0]
+    assert "ATTENTE_MAX_MS" in bloc
+    fin = _DESK.split("async function appliquer")[1].split("verifier();")[0]
+    assert "prend plus de temps que prévu" in fin
+
+
+def test_on_ne_repropose_pas_une_mise_a_jour_deja_lancee():
+    """Elle a bien ete lancee : reproposer ferait douter de ce qui s'est passe."""
+    bloc = _DESK.split("async function appliquer")[1].split("verifier();")[0]
+    apres_echeance = bloc.split("prend plus de temps que prévu")[1]
+    assert "Mettre à jour" not in apres_echeance
+
+
+def test_le_service_oublie_son_releve_apres_un_redemarrage():
+    """Sinon /version rend l'etat d'avant pendant une minute."""
+    bloc = _bloc_endpoint()
+    assert "_version.oublier_le_releve()" in bloc
+    version = (_RACINE / "hub" / "version.py").read_text(encoding="utf-8")
+    assert "def oublier_le_releve()" in version
+
+
+def test_l_oubli_ne_jette_pas_ce_qui_est_publie():
+    """Le registre n'a pas bouge : le re-interroger serait du gaspillage."""
+    version = (_RACINE / "hub" / "version.py").read_text(encoding="utf-8")
+    bloc = version.split("def oublier_le_releve()")[1].split("\ndef ")[0]
+    assert "_cache_publie" not in bloc

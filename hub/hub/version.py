@@ -216,6 +216,18 @@ def _etat_des_briques(pods: dict[str, dict]) -> dict[str, Any]:
     return briques
 
 
+def oublier_le_releve() -> None:
+    """Oublie ce qu'on savait de l'etat des briques.
+
+    Le releve est garde une minute pour ne pas interroger le cluster en
+    boucle. Apres un redemarrage, cette minute ferait rendre l'etat d'AVANT :
+    l'application rappellerait « une mise a jour est disponible » alors
+    qu'elle vient d'etre appliquee. Ce qui est publie, en revanche, n'a pas
+    bouge -- ce cache-la reste.
+    """
+    _cache["data"], _cache["t"] = None, 0.0
+
+
 def etat() -> dict[str, Any]:
     """Version du hub, du chart, et empreintes des images en cours.
 

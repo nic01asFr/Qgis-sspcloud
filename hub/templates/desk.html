@@ -1363,6 +1363,12 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       border-bottom:1px solid var(--qs-trait);
       box-shadow:0 2px 6px rgba(19,33,44,.12);
       font-size:13px;color:var(--qs-encre);flex-wrap:wrap}
+    /* `display:flex` ci-dessus l'emporte sur le `display:none` que le
+       navigateur applique a [hidden] : une classe bat un attribut. Sans
+       cette regle, poser `hidden` ne masque rien -- « Plus tard » laissait
+       le bandeau en place, et il restait visible avant meme d'avoir
+       quelque chose a annoncer. Constate en production le 2026-09-18. */
+    .bandeau-maj[hidden]{display:none}
     .bandeau-maj .ic{color:var(--qs-accent);flex:none}
     .bandeau-maj__texte{margin:0;flex:1 1 240px;min-width:0}
     .bandeau-maj__detail{color:var(--qs-encre-2)}
@@ -4353,11 +4359,44 @@ setInterval(refreshGpuChip, 20000);
       bandeau.hidden = false;
     }
 
+    // Le redemarrage n'est pas instantane : un bureau QGIS met une a deux
+    // minutes a repartir. Recharger la page a l'aveugle apres quelques
+    // secondes ramenait un etat d'AVANT, et le bandeau reproposait la mise a
+    // jour qui venait d'etre faite -- observe en production le 2026-09-18,
+    // a la premiere mise a jour reelle. On suit donc le redemarrage au lieu
+    // de le supposer fini.
+    const ATTENTE_MAX_MS = 300000;   // cinq minutes : au-dela, on le dit
+
+    async function resteEnRetard(briques) {
+      try {
+        const r = await fetch('/version', { cache: 'no-store' });
+        if (!r.ok) return null;                 // hub en train de repartir
+        const etat = await r.json();
+        const enRetard = etat.mise_a_jour_disponible || [];
+        return briques.some((b) => enRetard.indexOf(b) !== -1);
+      } catch (e) {
+        return null;                            // service injoignable : on patiente
+      }
+    }
+
+    async function suivreLeRedemarrage(briques) {
+      const debut = Date.now();
+      while (Date.now() - debut < ATTENTE_MAX_MS) {
+        await new Promise((r) => setTimeout(r, 5000));
+        const secondes = Math.round((Date.now() - debut) / 1000);
+        texte.textContent = 'Redémarrage en cours… ' + enumerer(briques)
+          + ' repart (' + secondes + ' s). Vos données sont conservées.';
+        const retard = await resteEnRetard(briques);
+        if (retard === false) return true;      // c'est fait, et mesure
+      }
+      return false;
+    }
+
     async function appliquer(briques) {
       lancer.disabled = true;
       plusTard.hidden = true;
-      texte.textContent = 'Mise à jour en cours… ' + enumerer(briques)
-        + ' redémarre. Cela prend une minute environ.';
+      texte.textContent = 'Mise à jour lancée… ' + enumerer(briques)
+        + ' redémarre.';
       try {
         const r = await fetch('/api/mise-a-jour', {
           method: 'POST',
@@ -4365,13 +4404,20 @@ setInterval(refreshGpuChip, 20000);
           body: JSON.stringify({ briques: briques }),
         });
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        const bilan = await r.json();
-        // Le hub se redemarre juste apres avoir repondu : recharger tout de
-        // suite tomberait sur un service qui s'arrete. On laisse le temps.
-        const delai = bilan.hub_differe ? 12000 : 6000;
-        texte.textContent = 'Mise à jour appliquée. La page se recharge…';
+        await r.json();
         try { localStorage.removeItem(REPORT); } catch (e) {}
-        setTimeout(() => window.location.reload(), delai);
+
+        const abouti = await suivreLeRedemarrage(briques);
+        if (abouti) {
+          texte.textContent = 'Mise à jour appliquée. La page se recharge…';
+          setTimeout(() => window.location.reload(), 2000);
+        } else {
+          // Ne pas reproposer la mise a jour : elle a bien ete lancee. Dire
+          // ou on en est, et laisser la main.
+          texte.textContent = 'Le redémarrage prend plus de temps que prévu. '
+            + 'Vos données sont intactes ; rechargez la page dans un moment.';
+          bandeau.hidden = false;
+        }
       } catch (e) {
         // Dire ce qui s'est passe et laisser reessayer, plutot que de
         // laisser un bouton inerte.

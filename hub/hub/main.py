@@ -2167,6 +2167,14 @@ async def mettre_a_jour_les_briques(
                       "detail": "redemarrage juste apres cette reponse — "
                                 "la page se rechargera d'elle-meme"})
 
+    # Le releve de `/version` est garde une minute pour ne pas interroger le
+    # cluster en boucle. Apres un redemarrage, cette minute ferait rendre
+    # l'etat d'AVANT : l'application rappellerait « une mise a jour est
+    # disponible » alors qu'elle vient d'etre appliquee. Constate en
+    # production le 2026-09-18, a la premiere mise a jour reelle. On oublie
+    # donc ce qu'on savait.
+    _version.oublier_le_releve()
+
     return {"redemarre": faits, "hub_differe": hub_differe}
 
 
