@@ -230,3 +230,17 @@ def test_l_oubli_ne_jette_pas_ce_qui_est_publie():
     version = (_RACINE / "hub" / "version.py").read_text(encoding="utf-8")
     bloc = version.split("def oublier_le_releve()")[1].split("\ndef ")[0]
     assert "_cache_publie" not in bloc
+
+
+def test_un_hub_qui_se_coupe_n_est_pas_un_echec():
+    """Quand le service fait partie de la mise a jour, il se coupe pour
+    repartir : la reponse n'arrive jamais. Mesure le 2026-09-18 -- « La mise
+    à jour n'a pas abouti (HTTP 401) » s'affichait pendant que les trois
+    briques redemarraient effectivement sur les bonnes images."""
+    bloc = _DESK.split("async function appliquer")[1].split("verifier();")[0]
+    # Le rattrapage vit dans le dernier `catch`, celui de la requete.
+    rattrapage = bloc.rsplit("} catch (e) {", 1)[1]
+    assert "briques.indexOf('hub') !== -1" in rattrapage
+    assert "suivreLeRedemarrage(briques)" in rattrapage
+    # L'aveu d'echec ne vient qu'APRES avoir verifie.
+    assert rattrapage.index("suivreLeRedemarrage") < rattrapage.index("n’a pas abouti")

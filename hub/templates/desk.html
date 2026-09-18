@@ -907,6 +907,14 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         color:var(--qs-accent);cursor:pointer;text-align:center;text-decoration:none;
         font-family:inherit}
       .src-actions-row a:hover,.src-actions-row button:hover{background:var(--qs-accent-pale)}
+      /* Le paquet complet est ce que l'utilisateur veut emporter : c'est lui
+         qui porte l'accent. Le .qgz seul reste accessible, en retrait, parce
+         qu'il ne s'ouvre correctement qu'ici -- ses couches sont relatives. */
+      .src-actions-row--projet{padding-bottom:2px}
+      .src-action-principale{background:var(--qs-accent)!important;
+        color:var(--qs-accent-encre)!important;border-color:var(--qs-accent)!important}
+      .src-action-principale:hover{background:var(--qs-accent-fonce)!important}
+      .src-action-discrete{font-weight:500!important;color:var(--qs-encre-2)!important}
       .src-upload{display:flex;flex-direction:column;align-items:center;gap:6px;
         border:1px dashed var(--qs-trait);border-radius:4px;padding:10px 8px;
         margin-bottom:4px;text-align:center;font-size:10.5px;line-height:1.35;
@@ -939,13 +947,27 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <div class="src-section-header">Projet QGIS</div>
         <div class="src-section-content" id="src-project-content">
           {% if active_study_id %}
+          {# Le .qgz ne porte QUE des references aux couches : mesure sur
+             l'etude « Saint-Martin », 19 de ses 20 couches pointent vers
+             `./data/...`. Telecharge seul, il arrive donc chez l'utilisateur
+             avec ses couches introuvables. Le paquet complet -- projet ET
+             donnees -- est la seule chose qui s'ouvre ailleurs : c'est lui
+             qu'on met en avant. #}
+          <div class="src-actions-row src-actions-row--projet">
+            <a class="src-action-principale"
+               href="/studies/{{ active_study_id }}/export"
+               title="Projet et données, prêt à ouvrir sur votre poste">
+              <span class="ic-telecharger ic--sm" aria-hidden="true"></span>
+              Télécharger (projet + données)</a>
+          </div>
           <div class="src-actions-row">
-            <a href="/studies/{{ active_study_id }}/project/download"
-               title="Télécharger le project.qgz (save préalable)">
-              <span class="ic-telecharger ic--sm" aria-hidden="true"></span> .qgz</a>
+            <a class="src-action-discrete"
+               href="/studies/{{ active_study_id }}/project/download"
+               title="Le projet seul, sans les couches — pour un ré-import ici">
+              .qgz seul</a>
             <button type="button" id="src-upload-qgz-btn"
                     title="Remplacer le projet actif par un fichier .qgz">
-              <span class="ic-editer ic--sm" aria-hidden="true"></span> .qgz</button>
+              <span class="ic-editer ic--sm" aria-hidden="true"></span> Remplacer</button>
             <input type="file" id="src-upload-qgz-input" accept=".qgz,.qgs" hidden>
           </div>
           {% else %}
@@ -4419,6 +4441,24 @@ setInterval(refreshGpuChip, 20000);
           bandeau.hidden = false;
         }
       } catch (e) {
+        // Quand le service lui-meme fait partie de la mise a jour, il se
+        // coupe pour repartir : la reponse n'arrive jamais, et l'echange
+        // echoue alors que TOUT s'est bien passe. Mesure le 2026-09-18 :
+        // « La mise à jour n'a pas abouti (HTTP 401) » affiche pendant que
+        // les trois briques redemarraient effectivement sur les bonnes
+        // images. On ne conclut donc pas a l'echec : on va verifier.
+        if (briques.indexOf('hub') !== -1) {
+          const abouti = await suivreLeRedemarrage(briques);
+          if (abouti) {
+            texte.textContent = 'Mise à jour appliquée. La page se recharge…';
+            try { localStorage.removeItem(REPORT); } catch (e2) {}
+            setTimeout(() => window.location.reload(), 2000);
+            return;
+          }
+          texte.textContent = 'Le redémarrage prend plus de temps que prévu. '
+            + 'Vos données sont intactes ; rechargez la page dans un moment.';
+          return;
+        }
         // Dire ce qui s'est passe et laisser reessayer, plutot que de
         // laisser un bouton inerte.
         texte.textContent = 'La mise à jour n’a pas abouti (' + e.message
