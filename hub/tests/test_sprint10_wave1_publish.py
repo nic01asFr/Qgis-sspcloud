@@ -36,9 +36,9 @@ def isolated_db(monkeypatch, tmp_path):
     db_path = tmp_path / "studies.db"
     from hub import studies as _s
     monkeypatch.setattr(_s, "_DB_PATH", db_path)
-    # Reload publications module pour picker up le nouveau _DB_PATH
-    from hub import publications as _p
-    monkeypatch.setattr(_p, "_DB_PATH", db_path)
+    # `publications` lit desormais ce chemin a l'usage : il suit celui des
+    # etudes sans qu'on ait a le rediriger lui aussi. La rustine qui vivait
+    # ici ne servait qu'a contourner un chemin fige a l'import.
     return db_path
 
 

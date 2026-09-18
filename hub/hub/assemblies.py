@@ -32,7 +32,21 @@ import aiosqlite
 import hub.studies as studies
 from hub.models import Assembly, AuditChain
 
-_DB_PATH = studies._DB_PATH
+# Le chemin de la base est lu A L'USAGE, pas fige a l'import.
+#
+# `_DB_PATH = studies._DB_PATH` capturait la valeur au moment ou ce module
+# etait importe. Quiconque reassignait ensuite `studies._DB_PATH` -- ce que
+# font les tests pour s'isoler -- deplacait la base de `studies` sans deplacer
+# celle-ci : les tables etaient creees d'un cote et cherchees de l'autre.
+# L'isolation avait l'air de marcher et ne marchait pas, selon l'ordre des
+# imports. Mesure le 2026-09-18 : quatre tests d'assemblages tombaient en
+# integration continue (« no such table: components_index ») alors qu'ils
+# passaient en local, pour cette seule raison.
+
+
+def _db_path():
+    """Base des etudes, telle qu'elle est configuree maintenant."""
+    return studies._DB_PATH
 
 
 # ── CRUD assemblies_index ─────────────────────────────────────────────────────
@@ -86,7 +100,7 @@ async def insert_assembly(
         assembly.provenance.model_dump(mode="json"), ensure_ascii=False,
     )
 
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         cur = await db.execute(
             """INSERT INTO assemblies_index
                (aid, sid, owner, kind, title, content_hash, previous_hash,
@@ -141,7 +155,7 @@ async def list_assemblies(
     )
     params.append(limit)
 
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(sql, params)
         rows = await cur.fetchall()
@@ -150,7 +164,7 @@ async def list_assemblies(
 
 async def get_assembly_latest(aid: str) -> dict[str, Any] | None:
     """Latest version d'un assemblage par aid."""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             """SELECT * FROM assemblies_index
@@ -164,7 +178,7 @@ async def get_assembly_latest(aid: str) -> dict[str, Any] | None:
 
 async def get_assembly_history(aid: str) -> list[dict[str, Any]]:
     """Toutes les versions (audit trail INSERT-only)."""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             """SELECT * FROM assemblies_index
@@ -182,7 +196,7 @@ async def update_published_info(aid: str, published_url: str) -> int:
     forcerait à dupliquer la row entière juste pour ajouter l'URL).
     L'audit reste préservé : version_num/content_hash inchangés.
     """
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         cur = await db.execute(
             """UPDATE assemblies_index
                SET published_url = ?, published_at = ?
@@ -202,7 +216,7 @@ async def archive_assembly(aid: str, owner: str) -> int:
     latest = await get_assembly_latest(aid)
     if not latest or latest["owner"] != owner:
         return 0
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         cur = await db.execute(
             """INSERT INTO assemblies_index
                (aid, sid, owner, kind, title, content_hash, previous_hash,
@@ -450,7 +464,7 @@ async def compact_assembly_deltas(
     latest = await get_assembly_latest(aid)
     latest_version = int(latest["version_num"]) if latest else 0
 
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             """SELECT rowid, aid, version_num, content_hash, provenance_json,
@@ -497,7 +511,7 @@ async def compact_assembly_deltas(
         integrity_payload.encode()
     ).hexdigest()
 
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         # ON CONFLICT DO NOTHING pour idempotence (re-run compact meme fenetre)
         await db.execute(
             """INSERT OR IGNORE INTO assemblies_deltas_compact
@@ -516,7 +530,7 @@ async def compact_assembly_deltas(
 
 async def list_assembly_deltas_compact(aid: str) -> list[dict[str, Any]]:
     """Liste les snapshots compact pour un assemblage (audit / debug)."""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             """SELECT * FROM assemblies_deltas_compact

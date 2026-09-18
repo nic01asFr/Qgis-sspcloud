@@ -30,7 +30,21 @@ import aiosqlite
 import hub.studies as studies
 from hub.models import Component
 
-_DB_PATH = studies._DB_PATH
+# Le chemin de la base est lu A L'USAGE, pas fige a l'import.
+#
+# `_DB_PATH = studies._DB_PATH` capturait la valeur au moment ou ce module
+# etait importe. Quiconque reassignait ensuite `studies._DB_PATH` -- ce que
+# font les tests pour s'isoler -- deplacait la base de `studies` sans deplacer
+# celle-ci : les tables etaient creees d'un cote et cherchees de l'autre.
+# L'isolation avait l'air de marcher et ne marchait pas, selon l'ordre des
+# imports. Mesure le 2026-09-18 : quatre tests d'assemblages tombaient en
+# integration continue (« no such table: components_index ») alors qu'ils
+# passaient en local, pour cette seule raison.
+
+
+def _db_path():
+    """Base des etudes, telle qu'elle est configuree maintenant."""
+    return studies._DB_PATH
 
 
 # ── CRUD components_index ─────────────────────────────────────────────────────
@@ -75,7 +89,7 @@ async def insert_component(
         ensure_ascii=False,
     )
 
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         cur = await db.execute(
             """INSERT INTO components_index
                (cid, sid, owner, kind, title, content_hash, previous_hash,
@@ -135,7 +149,7 @@ async def list_components(
     params.append(limit)
     params.append(offset)
 
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(sql, params)
         rows = await cur.fetchall()
@@ -144,7 +158,7 @@ async def list_components(
 
 async def get_component_latest(cid: str) -> dict[str, Any] | None:
     """Latest version d'un composant par cid (lookup MAX(version_num))."""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             """SELECT * FROM components_index
@@ -158,7 +172,7 @@ async def get_component_latest(cid: str) -> dict[str, Any] | None:
 
 async def get_component_history(cid: str) -> list[dict[str, Any]]:
     """Toutes les versions d'un composant (audit trail INSERT-only)."""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             """SELECT * FROM components_index
@@ -175,7 +189,7 @@ async def archive_component(cid: str, owner: str) -> int:
     latest = await get_component_latest(cid)
     if not latest or latest["owner"] != owner:
         return 0
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         cur = await db.execute(
             """INSERT INTO components_index
                (cid, sid, owner, kind, title, content_hash, previous_hash,

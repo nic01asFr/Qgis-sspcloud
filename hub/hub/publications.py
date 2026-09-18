@@ -31,14 +31,28 @@ import aiosqlite
 
 import hub.studies as studies
 
-_DB_PATH = studies._DB_PATH
+# Le chemin de la base est lu A L'USAGE, pas fige a l'import.
+#
+# `_DB_PATH = studies._DB_PATH` capturait la valeur au moment ou ce module
+# etait importe. Quiconque reassignait ensuite `studies._DB_PATH` -- ce que
+# font les tests pour s'isoler -- deplacait la base de `studies` sans deplacer
+# celle-ci : les tables etaient creees d'un cote et cherchees de l'autre.
+# L'isolation avait l'air de marcher et ne marchait pas, selon l'ordre des
+# imports. Mesure le 2026-09-18 : quatre tests d'assemblages tombaient en
+# integration continue (« no such table: components_index ») alors qu'ils
+# passaient en local, pour cette seule raison.
+
+
+def _db_path():
+    """Base des etudes, telle qu'elle est configuree maintenant."""
+    return studies._DB_PATH
 
 
 # ── DB init (idempotent) ──────────────────────────────────────────────────────
 
 async def init_db() -> None:
     """Cree la table publications si absente. Idempotent."""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS publications (
                 rowid           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,7 +100,7 @@ async def register_publication(
       `superseded_by = new_version` (banniere obsolescence).
     - INSERT-only : jamais d'UPDATE sur la row nouvellement creee.
     """
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         # 1. Determine next version num pour ce slug
         cur = await db.execute(
@@ -135,7 +149,7 @@ async def register_publication(
 
 async def get_latest(slug: str) -> dict[str, Any] | None:
     """Latest version d'un slug (celle avec superseded_by IS NULL)."""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             """SELECT * FROM publications
@@ -149,7 +163,7 @@ async def get_latest(slug: str) -> dict[str, Any] | None:
 
 async def get_version(slug: str, version: int) -> dict[str, Any] | None:
     """Version immutable N d'un slug (peut etre superseded)."""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             "SELECT * FROM publications WHERE slug = ? AND version = ?",
@@ -161,7 +175,7 @@ async def get_version(slug: str, version: int) -> dict[str, Any] | None:
 
 async def list_versions(slug: str) -> list[dict[str, Any]]:
     """Historique complet d'un slug (toutes les versions)."""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             "SELECT * FROM publications WHERE slug = ? ORDER BY version DESC",
@@ -173,7 +187,7 @@ async def list_versions(slug: str) -> list[dict[str, Any]]:
 
 async def list_by_owner(owner: str, limit: int = 100) -> list[dict[str, Any]]:
     """Toutes les publications d'un owner (latest par slug)."""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             """SELECT * FROM publications
