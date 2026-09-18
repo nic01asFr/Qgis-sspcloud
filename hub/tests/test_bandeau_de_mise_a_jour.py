@@ -244,3 +244,21 @@ def test_un_hub_qui_se_coupe_n_est_pas_un_echec():
     assert "suivreLeRedemarrage(briques)" in rattrapage
     # L'aveu d'echec ne vient qu'APRES avoir verifie.
     assert rattrapage.index("suivreLeRedemarrage") < rattrapage.index("n’a pas abouti")
+
+
+def test_le_bandeau_veille_au_lieu_de_ne_regarder_qu_une_fois():
+    """Le bureau reste ouvert des heures.
+
+    Ne regarder qu'au chargement, c'est ne prevenir que ceux qui rechargent.
+    Constate le 2026-09-18 : deux briques en retard, page ouverte, bandeau
+    masque -- il ne l'aurait jamais annonce.
+    """
+    bloc = _DESK.split("(function bandeauDeMiseAJour")[1]
+    assert "INTERVALLE_VEILLE_MS" in bloc
+    assert "setInterval(veiller" in bloc
+    assert "visibilitychange" in bloc
+
+
+def test_la_veille_n_insiste_pas_sur_un_bandeau_deja_affiche():
+    bloc = _DESK.split("async function veiller")[1].split("verifier();")[0]
+    assert "if (!bandeau.hidden) return;" in bloc

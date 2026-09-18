@@ -4468,7 +4468,27 @@ setInterval(refreshGpuChip, 20000);
       }
     }
 
+    // Le bureau reste ouvert des heures. Ne regarder qu'au chargement, c'est
+    // ne prevenir que ceux qui rechargent : une correction publiee dans la
+    // journee ne serait jamais annoncee a celui qui travaille. Constate le
+    // 2026-09-18 -- deux briques en retard, bandeau masque, page ouverte.
+    //
+    // On repasse donc regulierement, sans insister : rien ne se produit tant
+    // qu'aucun ecart n'est mesure, et un bandeau deja affiche est laisse en
+    // place.
+    const INTERVALLE_VEILLE_MS = 600000;   // dix minutes
+
+    async function veiller() {
+      if (!bandeau.hidden) return;          // deja annonce, on n'y revient pas
+      await verifier();
+    }
+
     verifier();
+    setInterval(veiller, INTERVALLE_VEILLE_MS);
+    // Au retour sur l'onglet, la question se repose naturellement.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') veiller();
+    });
   })();
 </script>
 
