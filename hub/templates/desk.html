@@ -4398,7 +4398,7 @@ setInterval(refreshGpuChip, 20000);
       texte.textContent = 'Mise à jour lancée… ' + enumerer(briques)
         + ' redémarre.';
       try {
-        const r = await fetch('/api/mise-a-jour', {
+        const r = await fetch('/desk/mise-a-jour', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ briques: briques }),

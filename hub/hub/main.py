@@ -2114,12 +2114,15 @@ async def _mettre_a_jour_le_workspace(owner: str) -> dict:
     return {"brique": "workspace", "redemarre": True, "detail": detail}
 
 
-@app.post("/api/mise-a-jour")
-async def mettre_a_jour_les_briques(
-    request: Request,
-    user: dict = Depends(auth.get_current_user),
-):
+@app.post("/desk/mise-a-jour")
+async def mettre_a_jour_les_briques(request: Request):
     """Remet a niveau les briques demandees, sans toucher aux donnees.
+
+    Sous `/desk/`, comme les autres actions du bureau : le middleware y
+    exige une identite et ecarte les etrangers, la ou une route `/api/`
+    attend un jeton porteur que le navigateur n'a pas. Mesure en production
+    le 2026-09-18 : le bouton repondait « HTTP 401 » a chaque clic. Meme
+    motif que `/desk/study/{sid}/save` et `/desk/memory/insights`.
 
     Corps : {"briques": ["agent", ...]}. Sans corps, on met a jour celles que
     `/version` signale en retard -- et si aucune ne l'est, on ne redemarre
@@ -2140,7 +2143,7 @@ async def mettre_a_jour_les_briques(
     if not demandees:
         return {"redemarre": [], "message": "tout est deja a jour"}
 
-    owner = user.get("username") or _ONYXIA_USER
+    owner = _ONYXIA_USER
     faits: list[dict] = []
 
     # Le workspace d'abord : c'est lui qui porte un travail en cours.

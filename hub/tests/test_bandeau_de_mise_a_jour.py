@@ -88,10 +88,23 @@ def test_un_echec_laisse_reessayer():
 
 def test_la_route_n_est_pas_publique():
     """Redemarrer le service de quelqu'un n'est pas une action anonyme."""
-    bloc = _MAIN.split('@app.post("/api/mise-a-jour")')[1][:400]
-    assert "Depends(auth.get_current_user)" in bloc
     from hub.auth import _OIDC_MIDDLEWARE_PUBLIC
-    assert "/api/mise-a-jour" not in _OIDC_MIDDLEWARE_PUBLIC
+    assert "/desk/mise-a-jour" not in _OIDC_MIDDLEWARE_PUBLIC
+
+
+def test_la_route_vit_la_ou_le_navigateur_est_reconnu():
+    """Sous `/desk/`, le middleware exige une identite et ecarte les
+    etrangers. Sous `/api/`, il attend un jeton porteur que le navigateur
+    n'a pas : le bouton repondait « HTTP 401 » a chaque clic, mesure en
+    production le 2026-09-18. Meme motif que les autres actions du bureau.
+    """
+    assert '@app.post("/desk/mise-a-jour")' in _MAIN
+    assert '@app.post("/api/mise-a-jour")' not in _MAIN
+    assert "'/desk/mise-a-jour'" in _DESK, "le client doit appeler la meme route"
+    bloc = _MAIN.split('@app.post("/desk/mise-a-jour")')[1][:300]
+    assert "Depends(auth.get_current_user)" not in bloc, (
+        "les actions du bureau ne passent pas par le jeton porteur"
+    )
 
 
 def test_le_projet_est_sauvegarde_avant_de_couper_le_poste():
