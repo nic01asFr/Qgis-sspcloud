@@ -61,6 +61,10 @@ jobs:
           context: .
           file: Dockerfile.agent
           push: true
+          # Sans cet argument, `/api/version` cote agent ne peut pas dire
+          # de quel commit l'image provient.
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           # Sprint V0.2 (2026-07-10) : ajout tag :main mobile en parallele
           # de :latest. Sur certains nodes K8s SSPCloud, le cache local du
           # tag :latest ne se met pas a jour malgre pullPolicy=Always. Le

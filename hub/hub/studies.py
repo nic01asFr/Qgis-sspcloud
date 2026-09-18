@@ -1864,6 +1864,11 @@ except Exception:
 try:
     from qgis.core import QgsProject as _QP, QgsExpressionContextUtils as _ECU
     _ECU.setProjectVariable(_QP.instance(), "hub_sid", sid)
+    # Ce chemin active une ETUDE sans designer de projet : on efface le
+    # marqueur de projet. Le laisser en place laisserait le pid du projet
+    # precedemment charge, et la garde de sauvegarde se fierait a une
+    # appartenance perimee -- plus dangereux que pas de marque du tout.
+    _ECU.setProjectVariable(_QP.instance(), "hub_pid", "")
     print(f"STUDY_STAMP sid={{sid}}")
 except Exception as _exc_stamp:
     print(f"STUDY_STAMP_ERR {{_exc_stamp}}")
@@ -1943,6 +1948,22 @@ try:
         _proprio = _ECU.projectScope(proj).variable("hub_sid") or ""
     except Exception:
         _proprio = ""
+    # Meme raisonnement au niveau du PROJET. Les projets d'une meme etude
+    # partagent le dossier de l'etude : `hub_sid` ne les distingue pas. Sans
+    # cette seconde verification, basculer de projet dans un onglet pendant
+    # qu'un autre garde l'ancien pid en memoire faisait ecrire le contenu de
+    # P2 dans `projects/P1/project.qgz`, en silence.
+    try:
+        _proprio_pid = _ECU.projectScope(proj).variable("hub_pid") or ""
+    except Exception:
+        _proprio_pid = ""
+    if pid and _proprio_pid and str(_proprio_pid) != str(pid):
+        _refuse = True
+        print(
+            f"STUDY_SAVE_REFUSED_PID pid={{pid}} owner_pid={{_proprio_pid}} "
+            f"sid={{sid}} n_layers={{n_layers}}"
+        )
+
     if _proprio and str(_proprio) != sid:
         _refuse = True
         print(

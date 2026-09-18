@@ -609,6 +609,23 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 
 <div class="desk" id="desk" data-resources="collapsed" data-chat="collapsed">
 
+  <!-- ── BANDEAU : une mise a jour est disponible ──────────────────
+       Le service est fait de trois briques qui evoluent chacune de leur
+       cote. Rien ne le disait a l'utilisateur : une correction pouvait
+       attendre des semaines dans le registre pendant que son poste
+       tournait sur l'ancienne image. Le bandeau ne parait que lorsqu'un
+       ecart est MESURE (cf. /version), jamais par precaution. -->
+  <div class="bandeau-maj" id="bandeau-maj" hidden>
+    <span class="ic ic-telecharger ic--sm" aria-hidden="true"></span>
+    <p class="bandeau-maj__texte" id="bandeau-maj-texte"></p>
+    <button type="button" class="bandeau-maj__action" id="bandeau-maj-lancer">
+      Mettre à jour
+    </button>
+    <button type="button" class="bandeau-maj__plus-tard" id="bandeau-maj-plus-tard">
+      Plus tard
+    </button>
+  </div>
+
   {# Sprint UX-3 (2026-06-21) : navbar globale retiree (cf. workspace.html
      et chat.html). Le brand 'CEREMA · QGIS' dans le desk-header reste
      clickable -> /workspace. #}
@@ -1333,6 +1350,26 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     .quick-action-btn:active{background:#e0eaf8}
     .quick-action-btn.copied{background:#d1f0d8;border-color:var(--qs-succes)}
     /* Toast confirm copy */
+    /* ── Bandeau de mise a jour ────────────────────────────────────
+       Discret mais pas invisible : il annonce une action que
+       l'utilisateur declenche lui-meme, jamais une urgence. */
+    .bandeau-maj{display:flex;align-items:center;gap:10px;
+      padding:8px 16px;background:var(--qs-accent-pale);
+      border-bottom:1px solid var(--qs-trait);
+      font-size:13px;color:var(--qs-encre);flex-wrap:wrap}
+    .bandeau-maj .ic{color:var(--qs-accent);flex:none}
+    .bandeau-maj__texte{margin:0;flex:1 1 240px;min-width:0}
+    .bandeau-maj__detail{color:var(--qs-encre-2)}
+    .bandeau-maj__action,.bandeau-maj__plus-tard{
+      font:inherit;border-radius:3px;padding:4px 12px;cursor:pointer;flex:none}
+    .bandeau-maj__action{background:var(--qs-accent);color:var(--qs-accent-encre);
+      border:1px solid var(--qs-accent)}
+    .bandeau-maj__action:hover{background:var(--qs-accent-fonce)}
+    .bandeau-maj__action[disabled]{opacity:.6;cursor:progress}
+    .bandeau-maj__plus-tard{background:transparent;color:var(--qs-encre-2);
+      border:1px solid var(--qs-trait)}
+    .bandeau-maj__plus-tard:hover{background:var(--qs-surface-2)}
+
     .quick-action-toast{position:fixed;bottom:24px;left:50%;
       transform:translateX(-50%);padding:9px 16px;background:var(--qs-succes);
       color:#fff;border-radius:4px;font-size:12px;
@@ -4242,6 +4279,105 @@ async function wakeGpu() {
 
 refreshGpuChip();
 setInterval(refreshGpuChip, 20000);
+
+  /* ── Bandeau de mise a jour ──────────────────────────────────────
+     Le service est fait de trois briques qui evoluent chacune de leur
+     cote, et rien ne le disait a l'utilisateur : une correction pouvait
+     attendre des semaines dans le registre pendant que son poste tournait
+     sur l'ancienne image. Mesure du 2026-09-17 : un pont tournait depuis
+     un mois sur une image qui n'etait plus celle de personne.
+
+     Le bandeau ne parait que sur un ecart MESURE (/version compare
+     l'empreinte qui tourne a celle publiee), jamais par precaution. Et il
+     dit ce qui compte avant de demander quoi que ce soit : les donnees
+     sont conservees. */
+  (function bandeauDeMiseAJour() {
+    const bandeau = document.getElementById('bandeau-maj');
+    const texte = document.getElementById('bandeau-maj-texte');
+    const lancer = document.getElementById('bandeau-maj-lancer');
+    const plusTard = document.getElementById('bandeau-maj-plus-tard');
+    if (!bandeau || !texte || !lancer || !plusTard) return;
+
+    // Chaque brique porte un nom que l'utilisateur reconnait : il sait ce
+    // qu'est son bureau QGIS, pas ce qu'est « le workspace ».
+    const NOMS = {
+      workspace: 'le bureau QGIS',
+      agent: "l'assistant",
+      hub: 'le service',
+    };
+    const REPORT = 'majReportee';
+
+    function enumerer(briques) {
+      const noms = briques.map((b) => NOMS[b] || b);
+      if (noms.length === 1) return noms[0];
+      return noms.slice(0, -1).join(', ') + ' et ' + noms[noms.length - 1];
+    }
+
+    // Un report vaut pour CES briques-la. Si une autre passe en retard
+    // ensuite, le bandeau reparait : on ne veut pas qu'un « plus tard »
+    // d'aujourd'hui masque une correction de demain.
+    function dejaReporte(briques) {
+      try {
+        return localStorage.getItem(REPORT) === briques.join(',');
+      } catch (e) { return false; }
+    }
+
+    function reporter(briques) {
+      try { localStorage.setItem(REPORT, briques.join(',')); } catch (e) {}
+      bandeau.hidden = true;
+    }
+
+    async function verifier() {
+      let etat;
+      try {
+        const r = await fetch('/version', { cache: 'no-store' });
+        if (!r.ok) return;
+        etat = await r.json();
+      } catch (e) { return; }
+
+      const briques = etat.mise_a_jour_disponible || [];
+      if (!briques.length || dejaReporte(briques)) return;
+
+      texte.innerHTML = 'Une mise à jour est disponible pour '
+        + enumerer(briques)
+        + '. <span class="bandeau-maj__detail">Vos études et vos données '
+        + 'sont conservées.</span>';
+      lancer.onclick = () => appliquer(briques);
+      plusTard.onclick = () => reporter(briques);
+      bandeau.hidden = false;
+    }
+
+    async function appliquer(briques) {
+      lancer.disabled = true;
+      plusTard.hidden = true;
+      texte.textContent = 'Mise à jour en cours… ' + enumerer(briques)
+        + ' redémarre. Cela prend une minute environ.';
+      try {
+        const r = await fetch('/api/mise-a-jour', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ briques: briques }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const bilan = await r.json();
+        // Le hub se redemarre juste apres avoir repondu : recharger tout de
+        // suite tomberait sur un service qui s'arrete. On laisse le temps.
+        const delai = bilan.hub_differe ? 12000 : 6000;
+        texte.textContent = 'Mise à jour appliquée. La page se recharge…';
+        try { localStorage.removeItem(REPORT); } catch (e) {}
+        setTimeout(() => window.location.reload(), delai);
+      } catch (e) {
+        // Dire ce qui s'est passe et laisser reessayer, plutot que de
+        // laisser un bouton inerte.
+        texte.textContent = 'La mise à jour n’a pas abouti (' + e.message
+          + '). Vos données sont intactes ; vous pouvez réessayer.';
+        lancer.disabled = false;
+        plusTard.hidden = false;
+      }
+    }
+
+    verifier();
+  })();
 </script>
 
 <!-- Chantier G4-b-3d : bouton « Publier » sur event SSE recipe_done -->

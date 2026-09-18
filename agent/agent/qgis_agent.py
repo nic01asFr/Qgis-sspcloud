@@ -47,6 +47,26 @@ _ARTIFACT_MUTATING_TOOLS: frozenset[str] = native_tools_v2.NATIVE_TOOLS_V2_MUTAT
 # ── Config SSPCloud LLM ────────────────────────────────────────────────────────
 _LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://llm.lab.sspcloud.fr/api")
 
+# Silence maximal tolere du modele pendant qu'il stream, en secondes.
+#
+# Le read timeout de httpx ne protege pas de ce cas : il se rearme au moindre
+# octet recu, y compris les lignes de service que le serveur intercale entre
+# deux paquets. Un modele qui cesse d'emettre sans fermer la connexion faisait
+# donc pendre le tour indefiniment. Mesure le 2026-09-17 sur l'etude
+# « saint martin » : deux tours sur cinq figes plus de sept minutes sur
+# « Analyse en cours… », sans message ni issue pour l'utilisateur.
+_SILENCE_LLM_MAX = float(os.getenv("LLM_SILENCE_MAX_S", "90"))
+
+# Message rendu a l'utilisateur quand la garde ci-dessus se declenche. Il dit
+# ce qui s'est passe et ce qu'il peut faire, plutot que de laisser un spinner
+# tourner sans fin.
+_MESSAGE_SILENCE_LLM = (
+    "Le modele « {modele} » a cesse de repondre pendant {secondes} s. "
+    "Le tour a ete interrompu pour ne pas rester bloque. "
+    "Relancez votre demande : si cela se reproduit, le service de modeles "
+    "est probablement indisponible."
+)
+
 
 def _llm_api_key() -> str:
     """Lecture dynamique de la cle LLM (cf. Option alpha 2026-06-02).
@@ -241,11 +261,24 @@ async def fetch_profiles_from_hub() -> int:
             new_cache: dict[str, dict] = {}
             for pid in profile_ids:
                 try:
-                    r = await client.get(f"{_HUB_URL}/profiles/{pid}", headers=headers)
+                    # `/profiles/{id}` retire `agent_system_prompt` : c'est la
+                    # route publique. On passe donc par la route inter-pod, qui
+                    # rend le profil COMPLET. Sans cela, l'agent tournait avec
+                    # un prompt generique et AUCUN profil n'agissait -- verifie
+                    # en production le 2026-09-11.
+                    data = None
+                    r = await client.get(
+                        f"{_HUB_URL}/internal/profiles/{pid}/full", headers=headers)
                     if r.status_code == 200:
                         data = r.json()
-                        if isinstance(data, dict):
-                            new_cache[pid] = data
+                    else:
+                        # Hub plus ancien : on retombe sur la route publique,
+                        # sans prompt, plutot que de perdre le profil entier.
+                        r = await client.get(f"{_HUB_URL}/profiles/{pid}", headers=headers)
+                        if r.status_code == 200:
+                            data = r.json()
+                    if isinstance(data, dict):
+                        new_cache[pid] = data
                 except Exception as exc:
                     log.warning("fetch_profiles : %s indispo : %s", pid, exc)
             _PROFILES_CACHE = new_cache
@@ -257,6 +290,18 @@ async def fetch_profiles_from_hub() -> int:
         return 0
 
 
+# Quels profils ont le droit d'appliquer LEUR prompt.
+#
+# Ces prompts n'ont jamais tourne en production : le transport etait casse
+# depuis toujours. Les activer tous d'un coup ferait entrer sans filet des
+# consignes de 9 000 a 16 000 caracteres jamais eprouvees avec le modele. On
+# ouvre donc profil par profil, apres essai reel. `*` active tout.
+_PROFILS_AVEC_PROMPT = {
+    p.strip() for p in os.getenv(
+        "PROFILS_AVEC_PROMPT", "standard,guided_tour").split(",") if p.strip()
+}
+
+
 def _load_profile_prompt(profile_id: str) -> str:
     """Charge le system prompt d'un profil depuis le cache module-level.
 
@@ -264,6 +309,9 @@ def _load_profile_prompt(profile_id: str) -> str:
     fetch initial a echoue). Le code amont (qgis_agent._build_prompt)
     detecte la chaine vide et applique un prompt generique de secours.
     """
+    if "*" not in _PROFILS_AVEC_PROMPT and profile_id not in _PROFILS_AVEC_PROMPT:
+        # Le profil garde ses outils ; seul son prompt reste en attente d'essai.
+        return ""
     profile = _PROFILES_CACHE.get(profile_id, {})
     return profile.get("agent_system_prompt", "")
 
@@ -2533,7 +2581,37 @@ ne vient pas d'un outil cette session, la supprimer.
                     tool_call_data: dict[int, dict] = {}
                     finish_reason  = None
 
-                    async for line in resp.aiter_lines():
+                    # Garde de silence : on borne le temps ecoule depuis le
+                    # dernier paquet PORTEUR (reflexion, texte, appel d'outil
+                    # ou motif de fin). Les lignes de service n'y suffisent
+                    # pas, sinon un flux qui ne porte plus rien repousserait la
+                    # limite a l'infini -- c'est exactement ce que faisait le
+                    # read timeout de httpx. Cf. _SILENCE_LLM_MAX.
+                    _lignes = resp.aiter_lines().__aiter__()
+                    _horloge = asyncio.get_event_loop()
+                    _limite = _horloge.time() + _SILENCE_LLM_MAX
+
+                    while True:
+                        _reste = _limite - _horloge.time()
+                        if _reste <= 0:
+                            raise RuntimeError(_MESSAGE_SILENCE_LLM.format(
+                                modele=model, secondes=int(_SILENCE_LLM_MAX),
+                            ))
+                        try:
+                            line = await asyncio.wait_for(
+                                _lignes.__anext__(), timeout=_reste,
+                            )
+                        except StopAsyncIteration:
+                            break
+                        except asyncio.TimeoutError:
+                            log.error(
+                                "LLM muet %ds (model=%s, iter=%d) : tour abandonne",
+                                int(_SILENCE_LLM_MAX), model, iteration,
+                            )
+                            raise RuntimeError(_MESSAGE_SILENCE_LLM.format(
+                                modele=model, secondes=int(_SILENCE_LLM_MAX),
+                            )) from None
+
                         if not line.startswith("data: "):
                             continue
                         data = line[6:]
@@ -2549,6 +2627,11 @@ ne vient pas d'un outil cette session, la supprimer.
                             _fr = d["choices"][0].get("finish_reason")
                             if _fr:
                                 finish_reason = _fr
+
+                            # Paquet porteur : le modele travaille encore, on
+                            # lui redonne le delai plein.
+                            if delta or _fr:
+                                _limite = _horloge.time() + _SILENCE_LLM_MAX
 
                             # Qwen3 : thinking dans delta.reasoning_content (champ séparé)
                             # Gemma4 : thinking dans delta.content (tokens <|channel>)
@@ -2794,6 +2877,12 @@ ne vient pas d'un outil cette session, la supprimer.
                                 yield f"\n\n<!--ckpt:{ckpt_id}-->\n"
                                 log.info("Checkpoint %s pris avant %s",
                                          ckpt_id, fn_name)
+                            elif ck_resp.status_code == 503:
+                                # QGIS occupe : pas de point de retour pour ce
+                                # tool, mais rien d'anormal cote service. On
+                                # poursuit, comme pour tout echec de snapshot.
+                                log.info("Pas de point de retour avant %s : "
+                                         "QGIS occupé", fn_name)
                             else:
                                 log.warning("Checkpoint refusé par hub (%d)",
                                             ck_resp.status_code)
@@ -2988,13 +3077,30 @@ ne vient pas d'un outil cette session, la supprimer.
 
                 result_clean = result.strip()
                 if result_clean and result_clean not in ("{}", "null", "[]"):
-                    if "![" in result_clean and "](data:" in result_clean:
-                        yield f"\n{result_clean}\n"
-                    else:
-                        result_preview = result_clean[:300] + (
-                            "..." if len(result_clean) > 300 else ""
+                    # Le pont melange trois choses dans un meme retour : du
+                    # JSON, un bloc de contexte redige POUR LE MODELE
+                    # (« --- Context: phase=... Hint: ... ») et, souvent, la
+                    # capture de la carte. Tout yielder tel quel exposait le
+                    # JSON et les consignes internes en clair dans la reponse,
+                    # hors du bloc technique que le chat sait replier : mesure
+                    # le 2026-09-17, un simple recadrage de la carte affichait
+                    # deux paragraphes de bruit avant la phrase utile.
+                    #
+                    # On separe donc : la capture reste visible, le reste part
+                    # dans le bloc de code, que le chat enveloppe en
+                    # `details.tool-result` et masque selon la preference
+                    # « afficher les outils ».
+                    _MOTIF_IMAGE = r"!\[[^\]]*\]\(data:[^)]+\)"
+                    images = re.findall(_MOTIF_IMAGE, result_clean)
+                    reste = re.sub(_MOTIF_IMAGE, "", result_clean).strip()
+
+                    if reste:
+                        result_preview = reste[:300] + (
+                            "..." if len(reste) > 300 else ""
                         )
                         yield f"\n```\n{result_preview}\n```\n"
+                    for image in images:
+                        yield f"\n{image}\n"
 
                 # Yield direct du lien livrable AVANT la synthese LLM : garantit
                 # qu'on voit toujours la bonne URL meme si le LLM hallucine

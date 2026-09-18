@@ -2068,6 +2068,108 @@ async def version():
     return _version.etat()
 
 
+# ── Mise a jour des briques, a la demande de l'utilisateur ──────────────────
+#
+# `/version` sait dire quelle brique est en retard. Ceci la remet a niveau.
+#
+# Rien d'exotique : les trois briques tournent en `imagePullPolicy: Always`
+# sur un tag mobile, donc recreer leur pod suffit a tirer l'image publiee. Les
+# donnees vivent sur le PVC, auquel on ne touche pas -- c'est exactement le
+# contrat de la mise en veille, pratiquee tous les jours sur le workspace.
+#
+# Deux precautions, parce qu'un redemarrage interrompt un travail en cours :
+#   * le projet QGIS de l'etude active est sauvegarde AVANT de couper le
+#     workspace, sinon on perdrait ce qui n'a pas encore ete ecrit ;
+#   * le hub se redemarre en DERNIER et en tache de fond : il ne peut pas
+#     redemarrer et repondre a la fois, donc la reponse part d'abord.
+
+_BRIQUES_CONNUES = ("workspace", "agent", "hub")
+
+
+async def _sauver_le_projet_avant_de_couper(owner: str) -> str:
+    """Ecrit le projet de l'etude active sur le PVC. Rend ce qui s'est passe."""
+    if not _STUDIES_AVAILABLE:
+        return "aucune etude active"
+    try:
+        sid = await studies.get_active_study_id(owner)
+        if not sid:
+            return "aucune etude active"
+        await _execute_python_in_workspace(
+            owner, studies.save_active_project_pod_code(sid), timeout=30,
+        )
+        return f"projet de l'etude {sid} sauvegarde"
+    except Exception as exc:
+        # On le dit, on ne le cache pas : l'utilisateur doit pouvoir decider
+        # d'annuler plutot que de perdre son travail.
+        log.warning("Sauvegarde avant mise a jour impossible : %s", exc)
+        return f"sauvegarde impossible ({type(exc).__name__})"
+
+
+async def _mettre_a_jour_le_workspace(owner: str) -> dict:
+    """Endort puis reveille le poste QGIS : il repart sur l'image publiee."""
+    detail = await _sauver_le_projet_avant_de_couper(owner)
+    sid = sessions._session_id_for(owner)
+    await sessions.delete_session(sid, purge=False)   # scale 0, PVC conserve
+    await sessions.create_session(owner)              # scale 1, image retiree
+    return {"brique": "workspace", "redemarre": True, "detail": detail}
+
+
+@app.post("/api/mise-a-jour")
+async def mettre_a_jour_les_briques(
+    request: Request,
+    user: dict = Depends(auth.get_current_user),
+):
+    """Remet a niveau les briques demandees, sans toucher aux donnees.
+
+    Corps : {"briques": ["agent", ...]}. Sans corps, on met a jour celles que
+    `/version` signale en retard -- et si aucune ne l'est, on ne redemarre
+    rien plutot que de couper le travail de quelqu'un pour rien.
+    """
+    try:
+        corps = await request.json()
+    except Exception:
+        corps = {}
+
+    demandees = corps.get("briques")
+    if demandees is None:
+        demandees = _version.etat().get("mise_a_jour_disponible", [])
+    inconnues = [b for b in demandees if b not in _BRIQUES_CONNUES]
+    if inconnues:
+        raise HTTPException(400, f"Briques inconnues : {', '.join(inconnues)}")
+
+    if not demandees:
+        return {"redemarre": [], "message": "tout est deja a jour"}
+
+    owner = user.get("username") or _ONYXIA_USER
+    faits: list[dict] = []
+
+    # Le workspace d'abord : c'est lui qui porte un travail en cours.
+    if "workspace" in demandees:
+        faits.append(await _mettre_a_jour_le_workspace(owner))
+
+    if "agent" in demandees:
+        ok, erreur = sessions.kubectl_rollout_restart("qgis-agent")
+        faits.append({"brique": "agent", "redemarre": ok,
+                      "detail": "" if ok else erreur})
+
+    # Le hub en dernier, et apres avoir repondu : il ne peut pas se redemarrer
+    # et rendre sa reponse a la fois.
+    hub_differe = "hub" in demandees
+    if hub_differe:
+        async def _redemarrer_le_hub():
+            await asyncio.sleep(2)
+            ok, erreur = sessions.kubectl_rollout_restart("qgis-hub")
+            if not ok:
+                log.warning("Redemarrage du hub refuse : %s", erreur)
+
+        asyncio.create_task(_redemarrer_le_hub())
+        faits.append({"brique": "hub", "redemarre": True,
+                      "detail": "redemarrage juste apres cette reponse — "
+                                "la page se rechargera d'elle-meme"})
+
+    return {"redemarre": faits, "hub_differe": hub_differe}
+
+
 @app.get("/health")
 async def health():
     return {
@@ -2117,14 +2219,18 @@ async def get_profile_full_internal(
     """
     if not _PROFILES_AVAILABLE:
         raise HTTPException(404, "Système de profils non disponible")
-    # Whitelist profils internes exposables (V2 : étendre liste si nouveau meta-agent)
-    _INTERNAL_PROFILES = {"recipe_analyzer", "agent_config_analyzer"}
-    if profile_id not in _INTERNAL_PROFILES:
-        raise HTTPException(
-            403,
-            f"Profil '{profile_id}' non exposable en /internal "
-            f"(whitelist : {sorted(_INTERNAL_PROFILES)})",
-        )
+    # Cette route sert TOUS les profils, et non plus deux seulement.
+    #
+    # L'agent charge ses profils par `/profiles/{id}`, qui retire
+    # `agent_system_prompt` pour ne pas l'exposer publiquement. Il tournait donc
+    # depuis toujours avec un prompt generique de secours : guided_tour,
+    # storymap_creator et les autres n'ont JAMAIS agi (verifie en production le
+    # 2026-09-11 ; le correctif « profils inertes » du 30 mai n'avait pas pris,
+    # puisqu'il lisait justement la route qui filtre).
+    #
+    # La restriction n'a plus lieu d'etre : ces prompts vivent dans des YAML
+    # d'un depot public. Ce qui les protege ici, c'est l'acces inter-pod
+    # (prefixe /internal, Bearer HUB_API_KEY), pas une liste de noms.
     p = profile_manager.get_profile(profile_id)
     if p.get("id") != profile_id:
         raise HTTPException(404, f"Profil '{profile_id}' introuvable")
@@ -9764,6 +9870,15 @@ async def session_checkpoint(
             studies.snapshot_active_pod_code(active_sid, ckpt_id, tool_name),
             timeout=15,
         )
+    except (httpx.TimeoutException, asyncio.TimeoutError) as exc:
+        # QGIS occupe par un traitement long : le snapshot n'a pas pu etre
+        # pris a temps. Ce n'est pas une panne du hub, et l'agent poursuit
+        # sans point de retour. Un 500 faisait chercher un bug ici alors que
+        # la cause est ailleurs -- mesure du 2026-09-17, ou chaque gel de
+        # QGIS produisait « Checkpoint refusé par hub (500) ».
+        log.info("Snapshot pré-%s pour ckpt %s : QGIS occupé (%s)",
+                 tool_name, ckpt_id, type(exc).__name__)
+        raise HTTPException(503, "QGIS occupé : snapshot non pris")
     except Exception as exc:
         log.warning("Snapshot pré-%s pour ckpt %s : %s", tool_name, ckpt_id, exc)
         raise HTTPException(500, f"Snapshot échec: {exc}")
