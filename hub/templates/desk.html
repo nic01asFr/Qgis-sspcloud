@@ -4483,8 +4483,61 @@ setInterval(refreshGpuChip, 20000);
       await verifier();
     }
 
+    // ── Les acces au stockage ────────────────────────────────────
+    // Ils durent sept jours et personne ne les renouvelle. Quand ils
+    // tombent, le catalogue se vide et les livrables disparaissent -- et
+    // rien ne le disait : l'utilisateur le decouvrait en constatant
+    // l'absence. On le lui annonce, et on lui donne le geste.
+    async function veillerSurLesAcces() {
+      if (!bandeau.hidden) return;        // une annonce a la fois
+      let etat;
+      try {
+        const r = await fetch('/desk/acces-stockage', { cache: 'no-store' });
+        if (!r.ok) return;
+        etat = await r.json();
+      } catch (e) { return; }
+      if (etat.valides !== false) return;
+
+      texte.innerHTML = 'Vos accès au stockage ont expiré : vos livrables et '
+        + 'vos scènes publiées sont momentanément inaccessibles. '
+        + '<span class="bandeau-maj__detail">Vos études et vos données ne '
+        + 'sont pas touchées.</span>';
+      lancer.textContent = 'Renouveler';
+      lancer.onclick = renouvelerLesAcces;
+      plusTard.hidden = false;
+      plusTard.onclick = () => { bandeau.hidden = true; };
+      bandeau.hidden = false;
+    }
+
+    async function renouvelerLesAcces() {
+      const jeton = window.prompt(
+        'Colle ton jeton d\'identite SSPCloud.\n'
+        + '(datalab.sspcloud.fr > Mon compte > jeton d\'identite).'
+        + '\n\nIl sert une fois, n\'est pas conserve, et ne quitte pas'
+        + ' ce service.');
+      if (!jeton) return;
+      lancer.disabled = true;
+      texte.textContent = 'Renouvellement en cours…';
+      try {
+        const r = await fetch('/desk/acces-stockage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jeton: jeton.trim() }),
+        });
+        const bilan = await r.json();
+        if (!r.ok) throw new Error(bilan.detail || ('HTTP ' + r.status));
+        texte.textContent = 'Accès renouvelés. La page se recharge…';
+        setTimeout(() => window.location.reload(), 2000);
+      } catch (e) {
+        texte.textContent = 'Renouvellement refusé : ' + e.message;
+        lancer.disabled = false;
+      }
+    }
+
     verifier();
+    veillerSurLesAcces();
     setInterval(veiller, INTERVALLE_VEILLE_MS);
+    setInterval(veillerSurLesAcces, INTERVALLE_VEILLE_MS);
     // Au retour sur l'onglet, la question se repose naturellement.
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') veiller();

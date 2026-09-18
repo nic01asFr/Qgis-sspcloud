@@ -30,8 +30,12 @@ import base64
 import json
 import logging
 import os
+import re
 import subprocess
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from functools import lru_cache
 from typing import Any
 
@@ -334,6 +338,165 @@ def s3_key(owner: str, kind: str, slug: str) -> str:
     ext = _KIND_EXT[kind]
     s = _safe_slug(slug)
     return f"{_S3_PREFIX}/{owner}/{kind}/{s}.{ext}"
+
+
+# ── Renouveler les acces au stockage, sans passer par install.sh ────────────
+#
+# Les identifiants S3 d'un service Onyxia sont temporaires : MinIO les delivre
+# a la creation du service, pour sept jours, et personne ne les renouvelle.
+# Passe ce delai, tout ce qui touche au stockage tombe -- catalogue vide,
+# livrables invisibles, scenes inaccessibles -- sans que le code soit en cause.
+#
+# Mesure le 2026-09-18 : le service Jupyter de reference datait du 23 aout.
+# Relancer `install.sh` n'y change RIEN : le script recopie fidelement les
+# identifiants du pod jupyter, morts avec lui (empreintes identiques verifiees
+# des deux cotes). Le message d'erreur du hub envoyait pourtant l'utilisateur
+# exactement la -- dans une impasse.
+#
+# Le jeton d'identite d'un compte SSPCloud porte l'audience `minio-datanode` :
+# il suffit donc a frapper STS directement, sans Onyxia et sans creer la
+# moindre cle de service. C'est ce que fait cette fonction, et ce que le hub
+# ne savait pas faire.
+
+_STS_URL = os.getenv("MINIO_STS_URL", "https://minio.lab.sspcloud.fr")
+_STS_DUREE_S = int(os.getenv("MINIO_STS_DUREE_S", "604800"))   # sept jours
+
+
+def renouveler_les_acces(jeton_identite: str, bucket: str = "") -> dict[str, Any]:
+    """Echange un jeton d'identite SSPCloud contre des acces au stockage.
+
+    Rend `{"ok": True, "expire_le": ...}` et pose le resultat dans le secret,
+    ou `{"ok": False, "erreur": ...}` en disant ce qui n'a pas marche. Ne leve
+    pas : l'appelant est une interface, pas un script.
+    """
+    jeton = (jeton_identite or "").strip()
+    if not jeton:
+        return {"ok": False, "erreur": "Aucun jeton fourni."}
+    if jeton.count(".") != 2:
+        return {"ok": False, "erreur": (
+            "Ceci ne ressemble pas a un jeton d'identite. Copie celui de "
+            "datalab.sspcloud.fr > Mon compte."
+        )}
+
+    corps = urllib.parse.urlencode({
+        "Action": "AssumeRoleWithWebIdentity",
+        "Version": "2011-06-15",
+        "WebIdentityToken": jeton,
+        "DurationSeconds": str(_STS_DUREE_S),
+    }).encode()
+    try:
+        requete = urllib.request.Request(
+            _STS_URL, data=corps, method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with urllib.request.urlopen(requete, timeout=30) as reponse:
+            xml = reponse.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")[:300]
+        except Exception:
+            pass
+        if exc.code in (400, 403):
+            return {"ok": False, "erreur": (
+                "Le stockage a refuse ce jeton. Il est peut-etre expire : "
+                "reprends-en un sur datalab.sspcloud.fr > Mon compte."
+            ), "detail": detail}
+        return {"ok": False, "erreur": f"Le stockage a repondu {exc.code}.",
+                "detail": detail}
+    except Exception as exc:
+        return {"ok": False,
+                "erreur": f"Stockage injoignable ({type(exc).__name__})."}
+
+    def _entre(balise: str) -> str:
+        m = re.search(rf"<{balise}>(.*?)</{balise}>", xml, re.S)
+        return m.group(1).strip() if m else ""
+
+    creds = {
+        "AWS_ACCESS_KEY_ID": _entre("AccessKeyId"),
+        "AWS_SECRET_ACCESS_KEY": _entre("SecretAccessKey"),
+        "AWS_SESSION_TOKEN": _entre("SessionToken"),
+    }
+    if not all(creds.values()):
+        return {"ok": False,
+                "erreur": "Reponse du stockage incomplete.", "detail": xml[:300]}
+
+    creds["SSPCLOUD_BUCKET"] = bucket or os.getenv("AWS_BUCKET_NAME", "") \
+        or os.getenv("SSPCLOUD_BUCKET", "")
+    pose = _poser_le_secret(creds)
+    if not pose.get("ok"):
+        return pose
+
+    _creds_cache["data"] = None          # la prochaine lecture repart du secret
+    _creds_cache["ts"] = 0
+    return {"ok": True, "expire_le": _entre("Expiration") or None,
+            "bucket": creds["SSPCLOUD_BUCKET"]}
+
+
+def _poser_le_secret(creds: dict[str, str]) -> dict[str, Any]:
+    """Ecrit les identifiants dans le secret, en preservant ce qu'il portait.
+
+    Un `create` ecraserait les autres cles du secret (HF_TOKEN,
+    S3_ENCRYPT_KEY...). On fusionne donc, et on cree s'il n'existe pas.
+    """
+    donnees = {k: base64.b64encode(v.encode()).decode() for k, v in creds.items()}
+    patch = json.dumps({"data": donnees})
+    r = subprocess.run(
+        ["kubectl", "patch", "secret", _SECRET_NAME, "--type=merge", "-p", patch],
+        capture_output=True, text=True, timeout=20,
+    )
+    if r.returncode == 0:
+        return {"ok": True}
+
+    manifeste = json.dumps({
+        "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+        "metadata": {"name": _SECRET_NAME},
+        "data": donnees,
+    })
+    r2 = subprocess.run(
+        ["kubectl", "apply", "-f", "-"],
+        input=manifeste, capture_output=True, text=True, timeout=20,
+    )
+    if r2.returncode == 0:
+        return {"ok": True}
+    return {"ok": False, "erreur": (
+        "Les acces ont ete obtenus, mais le service n'a pas pu les "
+        "enregistrer. Il lui manque le droit d'ecrire ses propres secrets."
+    ), "detail": (r2.stderr or r.stderr)[:300]}
+
+
+def etat_des_acces() -> dict[str, Any]:
+    """Les acces au stockage tiennent-ils encore, et jusqu'a quand.
+
+    Rien ne le disait a l'utilisateur : il decouvrait la panne en constatant
+    que ses livrables avaient disparu.
+    """
+    try:
+        creds = _read_passerelle_s3_creds()
+    except Exception as exc:
+        return {"valides": False, "raison": str(exc)[:200]}
+
+    jeton = creds.get("AWS_SESSION_TOKEN", "")
+    if not jeton or jeton.count(".") != 2:
+        # Pas d'echeance lisible : identifiants de longue duree.
+        return {"valides": True, "permanents": True}
+    try:
+        charge = jeton.split(".")[1]
+        charge += "=" * (-len(charge) % 4)
+        exp = json.loads(base64.urlsafe_b64decode(charge)).get("exp")
+    except Exception:
+        return {"valides": True, "permanents": True}
+    if not exp:
+        return {"valides": True, "permanents": True}
+
+    restant = float(exp) - time.time()
+    return {
+        "valides": restant > _STS_MARGE_S,
+        "permanents": False,
+        "expire_dans_heures": round(restant / 3600, 1),
+        "expire_le": time.strftime("%Y-%m-%d %H:%M",
+                                   time.localtime(float(exp))),
+    }
 
 
 def public_url(endpoint: str, bucket: str, key: str) -> str:

@@ -13617,6 +13617,52 @@ async def hub_proxy_agent(path: str, request: Request):
 # donc on lui offre ces endpoints sans Depends(auth.get_current_user).
 # Logique metier deleguee aux fonctions studies.recipe_index_* (S1.1).
 
+# ── Acces au stockage : etat et renouvellement ──────────────────────────────
+#
+# Les identifiants S3 d'un service Onyxia durent sept jours et personne ne les
+# renouvelle. Passe ce delai, le catalogue se vide, les livrables disparaissent
+# et les scenes publiees repondent 503 -- sans que le code soit en cause.
+#
+# Jusqu'ici la seule issue documentee etait « relance install.sh », qui ne
+# marche PAS quand le service Jupyter est lui-meme ancien : le script recopie
+# des identifiants deja morts. Mesure le 2026-09-18, empreintes identiques des
+# deux cotes. Le hub sait desormais s'en charger.
+
+
+@app.get("/desk/acces-stockage")
+async def desk_etat_acces_stockage():
+    """Les acces au stockage tiennent-ils encore, et jusqu'a quand."""
+    if not _S3_AVAILABLE:
+        return {"valides": None, "raison": "module de publication indisponible"}
+    try:
+        return s3_publication.etat_des_acces()
+    except Exception as exc:
+        return {"valides": False, "raison": f"{type(exc).__name__}: {exc}"[:200]}
+
+
+@app.post("/desk/acces-stockage")
+async def desk_renouveler_acces_stockage(request: Request):
+    """Echange un jeton d'identite SSPCloud contre sept jours d'acces.
+
+    Le jeton se prend sur datalab.sspcloud.fr > Mon compte. Ce n'est pas une
+    cle de service a creer : c'est l'identite de l'utilisateur, qui lui donne
+    acces a SON stockage. Il ne transite pas par la conversation et n'est pas
+    conserve -- seul le resultat de l'echange est enregistre.
+    """
+    if not _S3_AVAILABLE:
+        raise HTTPException(503, "Module de publication indisponible")
+    try:
+        corps = await request.json()
+    except Exception:
+        corps = {}
+    resultat = s3_publication.renouveler_les_acces(
+        corps.get("jeton", ""), corps.get("bucket", ""),
+    )
+    if not resultat.get("ok"):
+        raise HTTPException(400, resultat.get("erreur", "Renouvellement impossible"))
+    return resultat
+
+
 @app.get("/desk/recipes")
 async def desk_recipes_list():
     """UI desk : liste les recipes user de l'etude active (latest active)."""
