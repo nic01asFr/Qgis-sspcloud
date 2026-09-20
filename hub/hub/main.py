@@ -970,6 +970,8 @@ async def lifespan(app: FastAPI):
         _sas_gc_task.cancel()
 
 
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
 app = FastAPI(
     title="QgisRemoteMCP Hub",
     description=(
@@ -984,6 +986,34 @@ app = FastAPI(
 # accede a l'espace user. Cf. hub/hub/auth.py:oidc_auth_middleware pour la
 # logique de whitelist (healthchecks, inter-pod Bearer, kube-probe).
 app.middleware("http")(auth.oidc_auth_middleware)
+
+# ── Une erreur d'une ressource publique doit rester lisible ────────────────
+#
+# Les publications sont lues depuis une autre origine (l'atlas vit sur
+# github.io). Les reponses REUSSIES de /published portent bien
+# `Access-Control-Allow-Origin`, mais pas les reponses d'ERREUR : le
+# navigateur bloque alors leur lecture, et le client ne voit qu'un « Failed
+# to fetch » generique.
+#
+# Mesure le 2026-09-19 : le hub repondait 503 « Tes acces au stockage ont
+# expire » -- un message qui dit exactement quoi faire -- et l'atlas
+# affichait « scene injoignable, le serveur ne repond pas ou refuse la
+# lecture depuis une autre origine ». La cause reelle etait invisible, et
+# l'utilisateur cherchait un probleme de CORS qui n'existait pas.
+
+_PREFIXES_PUBLICS = ("/published/", "/version", "/p/")
+
+
+@app.exception_handler(StarletteHTTPException)
+async def erreur_lisible_hors_origine(request: Request, exc: StarletteHTTPException):
+    reponse = JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    chemin = request.url.path
+    if any(chemin.startswith(p) for p in _PREFIXES_PUBLICS):
+        reponse.headers["Access-Control-Allow-Origin"] = "*"
+    if exc.headers:
+        reponse.headers.update(exc.headers)
+    return reponse
+
 
 # Vague E2 Commit E1 (D-QGIS-010 2026-06-29) : editeur BlockNote standalone
 # bundle Vite mount statiquement. Le bundle est build par CI Docker
