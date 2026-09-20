@@ -661,17 +661,27 @@ def etat_des_acces() -> dict[str, Any]:
     """Les acces au stockage tiennent-ils encore, et jusqu'a quand.
 
     Rien ne le disait a l'utilisateur : il decouvrait la panne en constatant
-    que ses livrables avaient disparu.
+    que ses livrables avaient disparu. Depuis le depot local, ils ne
+    disparaissent plus -- l'etat rendu porte donc aussi `livrables_servis`,
+    pour que l'interface annonce ce qui est vrai et rien de plus.
     """
+    try:
+        depot = depot_local.etat()
+    except Exception:
+        depot = {"disponible": False}
+
     try:
         creds = _read_passerelle_s3_creds()
     except Exception as exc:
-        return {"valides": False, "raison": str(exc)[:200]}
+        return {"valides": False, "raison": str(exc)[:200],
+                "depot_local": depot,
+                "livrables_servis": bool(depot.get("disponible"))}
 
     exp = _echeance_du_jeton(creds.get("AWS_SESSION_TOKEN", ""))
     if exp is None:
         # Pas d'echeance lisible : identifiants de longue duree, rien a veiller.
-        return {"valides": True, "permanents": True}
+        return {"valides": True, "permanents": True, "depot_local": depot,
+                "livrables_servis": True}
 
     restant = exp - time.time()
     return {
@@ -680,11 +690,46 @@ def etat_des_acces() -> dict[str, Any]:
         "expire_dans_heures": round(restant / 3600, 1),
         "expire_le": time.strftime("%Y-%m-%d %H:%M",
                                    time.localtime(float(exp))),
+        "depot_local": depot,
+        # Les livrables restent servis par le hub meme sans acces au
+        # stockage. L'interface doit le dire : annoncer une indisponibilite
+        # qui n'existe plus inquieterait pour rien.
+        "livrables_servis": bool(depot.get("disponible")),
     }
 
 
 def public_url(endpoint: str, bucket: str, key: str) -> str:
     return f"{endpoint.rstrip('/')}/{bucket}/{key}"
+
+
+# ── Le depot local, et pourquoi il passe devant ─────────────────────────────
+#
+# Une publication ne vivait que sur MinIO. Les identifiants d'un service
+# Onyxia durent sept jours et personne ne les renouvelle : passe ce delai, le
+# catalogue se vidait, les livrables disparaissaient et les scenes
+# repondaient 503. Rien n'etait perdu, mais tout semblait l'etre.
+#
+# Le hub ecrit donc d'abord sur son propre disque, qui n'expire pas, et S3
+# n'est plus qu'un second exemplaire -- utile pour partager en dehors du
+# service, plus indispensable pour lire. Une expiration d'acces cesse d'etre
+# une panne : elle devient une simple impossibilite de mettre a jour la copie
+# distante.
+
+from hub import depot_local  # noqa: E402 — apres public_url, avant l'API
+
+# L'adresse du hub, pour rendre un lien qui marche quand S3 n'a pas repondu.
+# Derivee comme dans `main.py`, a partir de ce que SSPCloud injecte.
+_HUB_URL = (
+    os.getenv("HUB_URL")
+    or (f"https://user-{os.getenv('ONYXIA_USER')}-qgis.user.lab.sspcloud.fr"
+        if os.getenv("ONYXIA_USER") else "")
+)
+
+
+def _lien_hub(owner: str, kind: str, slug: str) -> str:
+    """L'adresse par laquelle le hub sert lui-meme cette publication."""
+    base = _HUB_URL.rstrip("/")
+    return f"{base}/published/{owner}/{kind}/{_safe_slug(slug)}"
 
 
 # ── API publique ──────────────────────────────────────────────────────────────
@@ -714,9 +759,15 @@ def publish(owner: str, kind: str, slug: str, content: bytes,
     Sert pour la traçabilité (provenance des données) et l'UI desk
     (grouper les publications par étude).
     """
-    client, bucket, endpoint = _get_s3_client(owner)
     key = s3_key(owner, kind, slug)
     ct = content_type or _KIND_CONTENT_TYPE.get(kind, "application/octet-stream")
+
+    # Le depot local en premier, avant toute compression : il conserve
+    # l'objet tel quel, et il n'a besoin d'aucun identifiant. Si S3 est hors
+    # d'atteinte, c'est lui qui rendra la publication lisible.
+    depose = depot_local.ecrire(
+        owner, kind, slug, _KIND_EXT.get(kind, "bin"), content,
+    )
 
     # Validation audience (anti-injection metadata). Valeurs conformes au
     # Literal Classification (hub/hub/models/classification.py).
@@ -772,7 +823,14 @@ def publish(owner: str, kind: str, slug: str, content: bytes,
     else:
         extra_kwargs = {}
 
+    # S3 n'est plus qu'un second exemplaire. Son echec ne doit plus faire
+    # echouer la publication tant que le depot local l'a acceptee : le
+    # livrable existe, il est lisible, il manque seulement sa copie distante.
+    # Avant, une expiration d'identifiants rendait la publication impossible
+    # -- et le travail semblait perdu.
+    sur_s3, url, echec_s3 = False, "", ""
     try:
+        client, bucket, endpoint = _get_s3_client(owner)
         client.put_object(
             Bucket=bucket, Key=key, Body=content,
             ContentType=ct,
@@ -780,21 +838,26 @@ def publish(owner: str, kind: str, slug: str, content: bytes,
             Metadata=metadata,
             **extra_kwargs,
         )
+        sur_s3 = True
+        url = public_url(endpoint, bucket, key)
     except Exception as exc:
         # Les acces au stockage SSPCloud sont des jetons temporaires (7 jours).
         # Passe ce delai, l'ecriture echoue et l'utilisateur ne voyait qu'une
         # trace botocore : il en concluait que le service etait casse. On
         # remonte une consigne actionnable a la place.
-        if is_s3_credentials_expired(exc):
-            log.error(
-                "publish %s/%s : identifiants de stockage expires (%s)",
-                owner, slug, type(exc).__name__,
-            )
-            raise RuntimeError(_S3_EXPIRED_MESSAGE) from exc
-        raise
-    url = public_url(endpoint, bucket, key)
+        echec_s3 = (_S3_EXPIRED_MESSAGE if is_s3_credentials_expired(exc)
+                    else f"{type(exc).__name__}: {exc}"[:300])
+        if not depose:
+            log.error("publish %s/%s : ni depot local ni S3 (%s)",
+                      owner, slug, type(exc).__name__)
+            if is_s3_credentials_expired(exc):
+                raise RuntimeError(_S3_EXPIRED_MESSAGE) from exc
+            raise
+        log.warning("publish %s/%s : garde en local, S3 refuse (%s)",
+                    owner, slug, type(exc).__name__)
+
     info = {
-        "url":      url,
+        "url":      url or _lien_hub(owner, kind, slug),
         "key":      key,
         "kind":     kind,
         "slug":     _safe_slug(slug),
@@ -804,7 +867,14 @@ def publish(owner: str, kind: str, slug: str, content: bytes,
         "content_type": ct,
         "audience": audience,
         "acl":      s3_acl,
+        # Ou vit reellement cette publication. L'interface peut ainsi dire
+        # « en ligne, pas encore recopiee sur le stockage » plutot que de
+        # laisser croire a un succes complet.
+        "local":    depose,
+        "distant":  sur_s3,
     }
+    if echec_s3:
+        info["stockage_distant_refuse"] = echec_s3
     if study_id:
         info["study_id"] = study_id
     # MAJ catalogue user
@@ -821,8 +891,14 @@ def read(owner: str, kind: str, slug: str) -> bytes | None:
     des gros objets 19-38MB). On decompresse ici pour que serve_published
     retourne bytes uncompressed comme avant, transparent pour le client.
     """
-    client, bucket, _ = _get_s3_client(owner)
     key = s3_key(owner, kind, slug)
+    # Le disque du hub d'abord : il est plus rapide, il ne peut pas expirer,
+    # et il conserve l'objet non compresse.
+    local = depot_local.lire(owner, kind, slug, _KIND_EXT.get(kind, "bin"))
+    if local is not None:
+        return local
+
+    client, bucket, _ = _get_s3_client(owner)
     try:
         obj = client.get_object(Bucket=bucket, Key=key)
         body = obj["Body"].read()
@@ -830,6 +906,9 @@ def read(owner: str, kind: str, slug: str) -> bytes | None:
         if obj.get("ContentEncoding") == "gzip":
             import gzip as _gzip
             body = _gzip.decompress(body)
+        # Publication d'avant le depot local : on en prend une copie au
+        # passage, pour qu'elle survive a la prochaine expiration.
+        depot_local.ecrire(owner, kind, slug, _KIND_EXT.get(kind, "bin"), body)
         return body
     except client.exceptions.NoSuchKey:
         return None
@@ -870,8 +949,15 @@ def read_range(
               "total_size": int,         # taille totale du fichier
             }
     """
-    client, bucket, _ = _get_s3_client(owner)
     key = s3_key(owner, kind, slug)
+    local = depot_local.lire_intervalle(
+        owner, kind, slug, _KIND_EXT.get(kind, "bin"), byte_range,
+        _KIND_CONTENT_TYPE.get(kind, "application/octet-stream"),
+    )
+    if local is not None:
+        return local
+
+    client, bucket, _ = _get_s3_client(owner)
     try:
         obj = client.get_object(Bucket=bucket, Key=key, Range=byte_range)
         body = obj["Body"].read()
@@ -940,10 +1026,51 @@ def _metadata_insensible_casse(brut: dict) -> dict:
     return sortie
 
 
+def _entree_du_catalogue(owner: str, kind: str, slug: str) -> dict:
+    """Ce que l'index local sait de cette publication. Vide s'il l'ignore."""
+    try:
+        items = depot_local.catalogue(owner) or []
+    except Exception:
+        return {}
+    voulu = _safe_slug(slug)
+    for item in items:
+        if item.get("kind") == kind and item.get("slug") == voulu:
+            return item
+    return {}
+
+
 def head(owner: str, kind: str, slug: str) -> dict | None:
-    """Métadonnées d'une publication sans télécharger le body."""
-    client, bucket, endpoint = _get_s3_client(owner)
+    """Métadonnées d'une publication sans télécharger le body.
+
+    Le depot local repond en premier. L'audience vient alors de l'index
+    local ; a defaut, du defaut restrictif -- une publication dont on ignore
+    l'audience ne doit pas devenir publique par accident.
+    """
     key = s3_key(owner, kind, slug)
+    ext = _KIND_EXT.get(kind, "bin")
+    sur_disque = depot_local.entete(owner, kind, slug, ext)
+    if sur_disque is not None:
+        entree = _entree_du_catalogue(owner, kind, slug)
+        metadonnees = {
+            "owner": owner,
+            "kind": kind,
+            "slug": _safe_slug(slug),
+            "audience": entree.get("audience", "cerema_internal"),
+        }
+        if entree.get("study_id"):
+            metadonnees["study-id"] = entree["study_id"]
+        return {
+            "key":           key,
+            "url":           entree.get("url") or _lien_hub(owner, kind, slug),
+            "size":          sur_disque["size"],
+            "content_type":  entree.get("content_type") or _KIND_CONTENT_TYPE.get(
+                kind, "application/octet-stream"),
+            "last_modified": sur_disque["last_modified"],
+            "metadata":      _metadata_insensible_casse(metadonnees),
+            "depuis":        "local",
+        }
+
+    client, bucket, endpoint = _get_s3_client(owner)
     try:
         h = client.head_object(Bucket=bucket, Key=key)
         return {
@@ -971,15 +1098,30 @@ def head(owner: str, kind: str, slug: str) -> dict | None:
 
 
 def delete(owner: str, kind: str, slug: str) -> bool:
-    """Dépublie. True si suppression effective."""
-    client, bucket, _ = _get_s3_client(owner)
+    """Dépublie. True si suppression effective.
+
+    Les deux exemplaires partent ensemble. Oublier le local ferait
+    reapparaitre un livrable que l'utilisateur croyait retire -- pire qu'une
+    suppression qui echoue, parce que silencieux.
+    """
     key = s3_key(owner, kind, slug)
+    retire_localement = depot_local.supprimer(
+        owner, kind, slug, _KIND_EXT.get(kind, "bin"))
     try:
+        client, bucket, _ = _get_s3_client(owner)
         client.delete_object(Bucket=bucket, Key=key)
         _remove_from_catalog(owner, kind, slug)
         return True
     except Exception as exc:
         log.warning("S3 delete failed %s/%s: %s", owner, slug, exc)
+        if retire_localement:
+            # Le livrable n'est plus servi : la depublication a bien eu lieu
+            # de notre cote. On retire aussi l'entree de l'index.
+            try:
+                _remove_from_catalog(owner, kind, slug)
+            except Exception:
+                pass
+            return True
         return False
 
 
@@ -1024,11 +1166,21 @@ def _catalog_key(owner: str) -> str:
 
 
 def get_catalog(owner: str) -> list[dict]:
-    """Retourne l'index complet (depuis le JSON catalogue S3)."""
+    """Retourne l'index complet des publications.
+
+    Le depot local passe devant : c'est lui qui repond quand les acces au
+    stockage ont expire. Sans cela, le catalogue devenait illisible et
+    l'utilisateur voyait « aucun livrable » alors qu'il en avait -- le
+    symptome le plus courant de l'expiration, et le plus trompeur.
+    """
+    local = depot_local.catalogue(owner)
+    if local is not None:
+        return local
+
     client, bucket, _ = _get_s3_client(owner)
     try:
         obj = client.get_object(Bucket=bucket, Key=_catalog_key(owner))
-        return json.loads(obj["Body"].read())
+        items = json.loads(obj["Body"].read())
     except client.exceptions.NoSuchKey:
         # Vraie absence : personne n'a encore publie. Le vide est la reponse.
         return []
@@ -1039,22 +1191,53 @@ def get_catalog(owner: str) -> list[dict]:
         # quelqu'un dont les publications existent toujours.
         raise StockageInaccessible(explain_s3_error(exc)) from exc
 
+    # Premiere lecture depuis S3 : on en garde une copie, pour que la
+    # prochaine expiration ne vide plus rien.
+    if isinstance(items, list):
+        depot_local.ecrire_catalogue(owner, items)
+        return items
+    return []
+
 
 def _save_catalog(owner: str, items: list[dict]) -> None:
-    client, bucket, _ = _get_s3_client(owner)
+    """Enregistre l'index, localement d'abord puis sur S3 si possible.
+
+    Ne leve pas quand S3 refuse : l'index local suffit a retrouver ses
+    livrables, et perdre la publication pour un index non recopie serait
+    disproportionne.
+    """
+    ecrit_localement = depot_local.ecrire_catalogue(owner, items)
     body = json.dumps(items, ensure_ascii=False, indent=2).encode("utf-8")
-    client.put_object(
-        Bucket=bucket,
-        Key=_catalog_key(owner),
-        Body=body,
-        ContentType="application/json; charset=utf-8",
-        ACL="public-read",
-    )
+    try:
+        client, bucket, _ = _get_s3_client(owner)
+        client.put_object(
+            Bucket=bucket,
+            Key=_catalog_key(owner),
+            Body=body,
+            ContentType="application/json; charset=utf-8",
+            ACL="public-read",
+        )
+    except Exception as exc:
+        if not ecrit_localement:
+            raise
+        log.warning("catalogue de %s : garde en local, S3 refuse (%s)",
+                    owner, type(exc).__name__)
 
 
 def _update_catalog(owner: str, info: dict) -> None:
-    """Ajoute ou met à jour une entrée. Idempotent par (kind, slug)."""
-    items = get_catalog(owner)
+    """Ajoute ou met à jour une entrée. Idempotent par (kind, slug).
+
+    Un index illisible ne doit pas faire perdre la publication : a la
+    premiere publication d'un compte, le catalogue local n'existe pas encore
+    et S3 peut deja etre inaccessible. On repart alors d'un index vide
+    plutot que d'echouer -- `rebuild_catalog` sait le reconstruire.
+    """
+    try:
+        items = get_catalog(owner)
+    except StockageInaccessible:
+        log.warning("catalogue de %s illisible : on repart d'un index vide",
+                    owner)
+        items = []
     items = [i for i in items if not (i["kind"] == info["kind"] and i["slug"] == info["slug"])]
     items.append(info)
     items.sort(key=lambda x: x.get("published_at", 0), reverse=True)

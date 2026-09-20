@@ -4543,10 +4543,19 @@ setInterval(refreshGpuChip, 20000);
       if (etat.valides !== false) return;
 
       reposerLeBandeau();
-      texte.innerHTML = 'Vos accès au stockage ont expiré : vos livrables et '
-        + 'vos scènes publiées sont momentanément inaccessibles. '
-        + '<span class="bandeau-maj__detail">Vos études et vos données ne '
-        + 'sont pas touchées.</span>';
+      // Depuis le depot local, une expiration n'est plus une panne : le hub
+      // sert les livrables depuis son propre disque. Annoncer une
+      // indisponibilite qui n'existe plus inquieterait pour rien -- et
+      // annoncer un fonctionnement normal cacherait ce qui, lui, est bloque.
+      texte.innerHTML = etat.livrables_servis
+        ? ('Vos accès au stockage ont expiré. '
+           + '<span class="bandeau-maj__detail">Vos livrables et vos scènes '
+           + 'restent en ligne — seule leur copie sur le stockage SSPCloud '
+           + 'ne se met plus à jour.</span>')
+        : ('Vos accès au stockage ont expiré : vos livrables et vos scènes '
+           + 'publiées sont momentanément inaccessibles. '
+           + '<span class="bandeau-maj__detail">Vos études et vos données ne '
+           + 'sont pas touchées.</span>');
       lancer.textContent = 'Renouveler';
       lancer.onclick = renouvelerLesAcces;
       plusTard.onclick = () => { bandeau.hidden = true; reposerLeBandeau(); };
