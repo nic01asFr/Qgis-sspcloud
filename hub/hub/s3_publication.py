@@ -429,8 +429,7 @@ def renouveler_les_acces(jeton_identite: str, bucket: str = "") -> dict[str, Any
         return {"ok": False,
                 "erreur": "Reponse du stockage incomplete.", "detail": xml[:300]}
 
-    creds["SSPCLOUD_BUCKET"] = bucket or os.getenv("AWS_BUCKET_NAME", "") \
-        or os.getenv("SSPCLOUD_BUCKET", "")
+    creds["SSPCLOUD_BUCKET"] = bucket or _seau_courant()
     pose = _poser_le_secret(creds)
     if not pose.get("ok"):
         return pose
@@ -519,6 +518,24 @@ def extraire_des_identifiants(colle: str) -> dict[str, str]:
     return trouve
 
 
+def _seau_courant() -> str:
+    """Le nom du seau deja configure, quelle qu'en soit la provenance.
+
+    Onyxia ne l'affiche pas toujours : l'onglet mc montre un seau d'exemple
+    (`your-bucket`), les autres parfois rien. Sans ce repli, renouveler les
+    acces effacait le nom qui marchait -- et toute publication tombait alors
+    sur « Invalid bucket name "" », une panne creee par la reparation.
+    Constate en production le 2026-09-20.
+    """
+    try:
+        creds = _read_passerelle_s3_creds()
+    except Exception:
+        creds = {}
+    return (creds.get("SSPCLOUD_BUCKET", "")
+            or os.getenv("AWS_BUCKET_NAME", "")
+            or os.getenv("SSPCLOUD_BUCKET", ""))
+
+
 def _echeance_du_jeton(jeton: str) -> float | None:
     """L'instant ou ce jeton de session cesse d'etre valable, s'il le dit.
 
@@ -561,12 +578,14 @@ def adopter_ce_qui_est_colle(colle: str, bucket: str = "") -> dict[str, Any]:
             "un bloc entier (onglet shell, Python ou mc) et colle-le ici."
         )}
 
-    seau = bucket or creds.get("SSPCLOUD_BUCKET", "") \
-        or os.getenv("AWS_BUCKET_NAME", "") or os.getenv("SSPCLOUD_BUCKET", "")
-    a_poser = {
+    seau = bucket or creds.get("SSPCLOUD_BUCKET", "") or _seau_courant()
+    jeton = creds.get("AWS_SESSION_TOKEN", "")
+    a_poser: dict[str, str | None] = {
         "AWS_ACCESS_KEY_ID": creds["AWS_ACCESS_KEY_ID"],
         "AWS_SECRET_ACCESS_KEY": creds["AWS_SECRET_ACCESS_KEY"],
-        "AWS_SESSION_TOKEN": creds.get("AWS_SESSION_TOKEN", ""),
+        # Pas de jeton = acces de longue duree : il faut RETIRER l'ancien,
+        # sinon le service signerait avec un jeton mort.
+        "AWS_SESSION_TOKEN": jeton or None,
         "SSPCLOUD_BUCKET": seau,
     }
     pose = _poser_le_secret(a_poser)
@@ -576,7 +595,7 @@ def adopter_ce_qui_est_colle(colle: str, bucket: str = "") -> dict[str, Any]:
     _creds_cache["data"] = None          # la prochaine lecture repart du secret
     _creds_cache["ts"] = 0
 
-    fin = _echeance_du_jeton(a_poser["AWS_SESSION_TOKEN"])
+    fin = _echeance_du_jeton(jeton)
     return {
         "ok": True,
         "bucket": seau,
@@ -586,13 +605,31 @@ def adopter_ce_qui_est_colle(colle: str, bucket: str = "") -> dict[str, Any]:
     }
 
 
-def _poser_le_secret(creds: dict[str, str]) -> dict[str, Any]:
+def _poser_le_secret(creds: dict[str, str | None]) -> dict[str, Any]:
     """Ecrit les identifiants dans le secret, en preservant ce qu'il portait.
 
     Un `create` ecraserait les autres cles du secret (HF_TOKEN,
     S3_ENCRYPT_KEY...). On fusionne donc, et on cree s'il n'existe pas.
+
+    Trois cas, volontairement distincts -- les confondre casse a coup sur :
+
+      * une valeur -> elle est ecrite ;
+      * une chaine vide = « je ne sais pas » -> la cle est laissee telle
+        quelle. L'ecrire effacerait ce qui marchait, et la reparation
+        creerait la panne (« Invalid bucket name "" », vu en production le
+        2026-09-20) ;
+      * `None` = « il n'y en a pas » -> la cle est RETIREE. Des acces de
+        longue duree n'ont pas de jeton de session : laisser l'ancien en
+        place ferait signer avec un jeton mort.
     """
-    donnees = {k: base64.b64encode(v.encode()).decode() for k, v in creds.items()}
+    donnees: dict[str, str | None] = {}
+    for cle, valeur in creds.items():
+        if valeur:
+            donnees[cle] = base64.b64encode(valeur.encode()).decode()
+        elif valeur is None:
+            donnees[cle] = None          # un null en merge patch supprime
+    if not any(v for v in donnees.values()):
+        return {"ok": False, "erreur": "Aucun identifiant a enregistrer."}
     patch = json.dumps({"data": donnees})
     r = subprocess.run(
         ["kubectl", "patch", "secret", _SECRET_NAME, "--type=merge", "-p", patch],
@@ -601,10 +638,12 @@ def _poser_le_secret(creds: dict[str, str]) -> dict[str, Any]:
     if r.returncode == 0:
         return {"ok": True}
 
+    # Le secret n'existe pas encore : on le cree. Il n'y a donc rien a
+    # supprimer, et un `null` y serait refuse par l'API.
     manifeste = json.dumps({
         "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
         "metadata": {"name": _SECRET_NAME},
-        "data": donnees,
+        "data": {k: v for k, v in donnees.items() if v is not None},
     })
     r2 = subprocess.run(
         ["kubectl", "apply", "-f", "-"],

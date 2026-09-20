@@ -279,3 +279,78 @@ def test_le_message_d_expiration_n_envoie_plus_vers_install_sh():
     """Il y envoyait : le script recopie des identifiants deja morts."""
     assert "install.sh" not in s3._S3_EXPIRED_MESSAGE
     assert "Connexion au stockage" in s3._S3_EXPIRED_MESSAGE
+
+
+# ── Reparer ne doit pas casser ───────────────────────────────────────────
+#
+# Vu en production le 2026-09-20, juste apres le premier renouvellement
+# reussi : l'onglet mc d'Onyxia affiche un seau d'exemple (`your-bucket`),
+# ecarte a raison. Mais rien ne prenait le relais, et on ecrivait un nom de
+# seau VIDE par-dessus celui qui marchait. Toute publication tombait alors
+# sur « Invalid bucket name "" » -- une panne creee par la reparation.
+
+
+def test_un_seau_absent_ne_remplace_pas_celui_qui_marchait(monkeypatch):
+    poses = {}
+    monkeypatch.setattr(s3, "_poser_le_secret",
+                        lambda creds: (poses.update(creds), {"ok": True})[1])
+    monkeypatch.setattr(s3, "_read_passerelle_s3_creds",
+                        lambda *a, **k: {"SSPCLOUD_BUCKET": "nic01asfr"})
+
+    r = s3.adopter_ce_qui_est_colle(
+        f"export MC_HOST_default='https://{_CLE}:{_SECRET}:{_JETON}"
+        "@minio.lab.sspcloud.fr'\n\nmc ls 'default/your-bucket'\n")
+
+    assert r["ok"] is True
+    assert r["bucket"] == "nic01asfr"
+    assert poses["SSPCLOUD_BUCKET"] == "nic01asfr"
+
+
+def test_une_valeur_vide_n_efface_pas_ce_qui_existe(monkeypatch):
+    """Chaine vide = « je ne sais pas », pas « efface »."""
+    envoye = {}
+
+    def _kubectl(cmd, **kw):
+        if "patch" in cmd:
+            envoye.update(json.loads(cmd[cmd.index("-p") + 1])["data"])
+        class _R:
+            returncode = 0
+            stderr = ""
+        return _R()
+
+    monkeypatch.setattr(s3.subprocess, "run", _kubectl)
+    s3._poser_le_secret({"AWS_ACCESS_KEY_ID": "AKI", "SSPCLOUD_BUCKET": ""})
+    assert "SSPCLOUD_BUCKET" not in envoye, "une cle inconnue reste intouchee"
+    assert "AWS_ACCESS_KEY_ID" in envoye
+
+
+def test_des_acces_permanents_retirent_l_ancien_jeton(monkeypatch):
+    """Sinon le service signerait avec un jeton de session mort."""
+    envoye = {}
+
+    def _kubectl(cmd, **kw):
+        if "patch" in cmd:
+            envoye.update(json.loads(cmd[cmd.index("-p") + 1])["data"])
+        class _R:
+            returncode = 0
+            stderr = ""
+        return _R()
+
+    monkeypatch.setattr(s3.subprocess, "run", _kubectl)
+    monkeypatch.setattr(s3, "_read_passerelle_s3_creds",
+                        lambda *a, **k: {"SSPCLOUD_BUCKET": "nic01asfr"})
+
+    s3.adopter_ce_qui_est_colle(
+        f"aws_access_key_id = {_CLE}\naws_secret_access_key = {_SECRET}\n")
+
+    assert "AWS_SESSION_TOKEN" in envoye
+    assert envoye["AWS_SESSION_TOKEN"] is None, "un null supprime la cle"
+
+
+def test_rien_a_enregistrer_est_refuse_sans_toucher_au_secret(monkeypatch):
+    def _interdit(*a, **k):
+        raise AssertionError("le secret ne doit pas etre touche")
+
+    monkeypatch.setattr(s3.subprocess, "run", _interdit)
+    r = s3._poser_le_secret({"AWS_ACCESS_KEY_ID": ""})
+    assert r["ok"] is False
