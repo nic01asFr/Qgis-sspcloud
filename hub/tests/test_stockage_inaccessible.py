@@ -78,8 +78,13 @@ class TestReponseAuLecteur:
         """
         from hub.s3_publication import _S3_EXPIRED_MESSAGE as msg
         assert "expir" in msg.lower(), "la cause n'est pas nommée"
-        assert "install.sh" in msg, "le remède n'est pas donné"
         assert "7 jours" in msg, "la durée n'est pas dite, donc pas anticipable"
+        # Ce test exigeait `install.sh`. C'était une impasse : le script
+        # recopie les identifiants du service Jupyter, morts en même temps
+        # que les autres (empreintes identiques vérifiées le 2026-09-18).
+        # Le remède est désormais le bandeau, qui accepte un copier-coller.
+        assert "install.sh" not in msg, "ce remède-là ne renouvelle rien"
+        assert "Connexion au stockage" in msg, "le remède n'est pas donné"
 
     def test_une_erreur_quelconque_reste_lisible(self):
         """Un message technique brut vaut mieux qu'un silence, tant qu'il

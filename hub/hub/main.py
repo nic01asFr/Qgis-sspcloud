@@ -13672,12 +13672,15 @@ async def desk_etat_acces_stockage():
 
 @app.post("/desk/acces-stockage")
 async def desk_renouveler_acces_stockage(request: Request):
-    """Echange un jeton d'identite SSPCloud contre sept jours d'acces.
+    """Redonne au service des acces au stockage, a partir d'un copier-coller.
 
-    Le jeton se prend sur datalab.sspcloud.fr > Mon compte. Ce n'est pas une
-    cle de service a creer : c'est l'identite de l'utilisateur, qui lui donne
-    acces a SON stockage. Il ne transite pas par la conversation et n'est pas
-    conserve -- seul le resultat de l'echange est enregistre.
+    Ce qu'on attend se prend sur datalab.sspcloud.fr > Mon compte > Connexion
+    au stockage : il suffit de copier le bloc affiche, quel que soit l'onglet
+    choisi (shell, Python, mc, fichier de configuration). Rien a trier, rien
+    a creer : ce sont les acces de l'utilisateur a SON stockage.
+
+    Le contenu colle ne transite pas par la conversation et n'est pas
+    conserve ailleurs que dans le secret du service.
     """
     if not _S3_AVAILABLE:
         raise HTTPException(503, "Module de publication indisponible")
@@ -13685,9 +13688,9 @@ async def desk_renouveler_acces_stockage(request: Request):
         corps = await request.json()
     except Exception:
         corps = {}
-    resultat = s3_publication.renouveler_les_acces(
-        corps.get("jeton", ""), corps.get("bucket", ""),
-    )
+    # `jeton` reste accepte : c'etait le seul champ de la premiere version.
+    colle = corps.get("colle") or corps.get("jeton") or ""
+    resultat = s3_publication.adopter_ce_qui_est_colle(colle, corps.get("bucket", ""))
     if not resultat.get("ok"):
         raise HTTPException(400, resultat.get("erreur", "Renouvellement impossible"))
     return resultat

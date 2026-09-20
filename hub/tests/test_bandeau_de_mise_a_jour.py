@@ -262,3 +262,63 @@ def test_le_bandeau_veille_au_lieu_de_ne_regarder_qu_une_fois():
 def test_la_veille_n_insiste_pas_sur_un_bandeau_deja_affiche():
     bloc = _DESK.split("async function veiller")[1].split("verifier();")[0]
     assert "if (!bandeau.hidden) return;" in bloc
+
+
+# ── Recoller des acces au stockage ───────────────────────────────────────
+#
+# Le bandeau annonce aussi l'expiration des acces au stockage, et propose le
+# geste qui la repare. Ce geste etait un `prompt()` -- une ligne unique. Or
+# Onyxia affiche un bloc de plusieurs lignes : colle dedans, il y perdait ses
+# retours a la ligne, donc ses valeurs. Mesure du 2026-09-20.
+
+
+def _ids_declares() -> set[str]:
+    import re
+    return set(re.findall(r'id="([\w-]+)"', _DESK))
+
+
+def test_le_bandeau_offre_une_vraie_zone_de_texte():
+    assert 'id="bandeau-maj-colle"' in _DESK
+    bloc = _DESK.split('id="bandeau-maj-colle"')[0][-200:]
+    assert "<textarea" in bloc, "une ligne unique tronquerait le bloc colle"
+
+
+def test_les_acces_ne_passent_plus_par_un_prompt():
+    bloc = _DESK.split("async function enregistrerLesAcces")[1][:1200]
+    assert "window.prompt" not in bloc
+
+
+def test_la_zone_de_collage_part_masquee_et_sait_le_rester():
+    """Meme piege que le bandeau : une classe `display:flex` bat [hidden]."""
+    balisage = _DESK.split('id="bandeau-maj-coller"')[1][:80]
+    assert "hidden" in balisage
+    assert ".bandeau-maj__coller[hidden]{display:none}" in _DESK
+
+
+def test_chaque_element_cherche_par_le_script_existe_dans_la_page():
+    """Un id renomme d'un cote seulement rend le bandeau muet, sans erreur."""
+    import re
+    declares = _ids_declares()
+    # Borne au seul bloc du bandeau : ailleurs, la page cree certains
+    # elements a la volee, et leur id n'est alors pas ecrit dans le balisage.
+    # Le titre « Bandeau de mise a jour » sert deux fois, en CSS puis en
+    # JavaScript : on s'ancre sur une ligne de code, pas sur un commentaire.
+    ancre = "const bandeau = document.getElementById('bandeau-maj')"
+    assert ancre in _DESK, "le bloc du bandeau a bouge"
+    bloc = ancre + _DESK.split(ancre)[1].split("})();")[0]
+    assert "bandeau-maj-colle" in bloc, "la zone de collage n'y est plus"
+    for cherche in re.findall(r"getElementById\('([\w-]+)'\)", bloc):
+        assert cherche in declares, f"le script cherche #{cherche}, absent"
+
+
+def test_ce_qui_est_colle_est_efface_apres_envoi():
+    """Des identifiants ne restent pas affiches dans la page."""
+    bloc = _DESK.split("async function enregistrerLesAcces")[1][:1400]
+    assert "zone.value = ''" in bloc
+
+
+def test_l_endpoint_accepte_un_copier_coller():
+    bloc = _MAIN.split("async def desk_renouveler_acces_stockage")[1][:1400]
+    assert 'corps.get("colle")' in bloc
+    assert 'corps.get("jeton")' in bloc, "l'ancien champ reste accepte"
+    assert "adopter_ce_qui_est_colle" in bloc

@@ -158,3 +158,124 @@ def test_un_stockage_illisible_est_dit_invalide_pas_valide(monkeypatch):
 
     monkeypatch.setattr(s3, "_read_passerelle_s3_creds", _explose)
     assert s3.etat_des_acces()["valides"] is False
+
+
+# ── Accepter ce que la page d'Onyxia affiche vraiment ────────────────────
+#
+# Mesure du 2026-09-20 : « Mon compte > Connexion au stockage » ne propose
+# aucun jeton d'identite. Elle montre des identifiants deja echanges, dans
+# la forme de l'onglet choisi. Exiger un jeton revenait a demander ce que la
+# page ne montre pas -- l'utilisateur restait bloque devant le bon ecran.
+
+_CLE = "5EGXMNUXQ6CJ22ACR1V9"
+_SECRET = "+EhBgSQvz1y0V++42+Corwbxxre1qYeKbCopEtes"
+_JETON = "tete.charge.signature"
+
+
+def test_la_forme_mc_host_est_reconnue():
+    """L'onglet mc colle les trois valeurs dans une URL, separees par `:`."""
+    colle = (
+        "# Re-run this export when the session token is renewed.\n"
+        f"export MC_HOST_default='https://{_CLE}:{_SECRET}:{_JETON}"
+        "@minio.lab.sspcloud.fr'\n\nmc ls 'default/mon-seau'\n"
+    )
+    trouve = s3.extraire_des_identifiants(colle)
+    assert trouve["AWS_ACCESS_KEY_ID"] == _CLE
+    assert trouve["AWS_SECRET_ACCESS_KEY"] == _SECRET, "le `+` doit survivre"
+    assert trouve["AWS_SESSION_TOKEN"] == _JETON
+
+
+def test_la_forme_export_shell_est_reconnue():
+    colle = (
+        f'export AWS_ACCESS_KEY_ID="{_CLE}"\n'
+        f'export AWS_SECRET_ACCESS_KEY="{_SECRET}"\n'
+        f'export AWS_SESSION_TOKEN="{_JETON}"\n'
+        'export AWS_S3_ENDPOINT="minio.lab.sspcloud.fr"\n'
+        'export AWS_BUCKET_NAME="nic01asfr"\n'
+    )
+    trouve = s3.extraire_des_identifiants(colle)
+    assert trouve["AWS_ACCESS_KEY_ID"] == _CLE
+    assert trouve["AWS_SECRET_ACCESS_KEY"] == _SECRET
+    assert trouve["AWS_SESSION_TOKEN"] == _JETON
+    assert trouve["SSPCLOUD_BUCKET"] == "nic01asfr"
+
+
+def test_la_forme_fichier_de_configuration_est_reconnue():
+    colle = (
+        "[default]\n"
+        f"aws_access_key_id = {_CLE}\n"
+        f"aws_secret_access_key = {_SECRET}\n"
+        f"aws_session_token = {_JETON}\n"
+    )
+    trouve = s3.extraire_des_identifiants(colle)
+    assert trouve["AWS_ACCESS_KEY_ID"] == _CLE
+    assert trouve["AWS_SESSION_TOKEN"] == _JETON
+
+
+def test_un_extrait_python_sans_valeurs_ne_donne_rien():
+    """L'onglet Python montre parfois le code, pas les identifiants."""
+    colle = ('import boto3\n'
+             'session = boto3.Session(profile_name="default")\n'
+             's3 = session.client("s3", endpoint_url="https://minio.lab.sspcloud.fr")\n')
+    assert s3.extraire_des_identifiants(colle) == {}
+
+
+def test_un_seau_donne_en_exemple_est_ecarte():
+    colle = f"AWS_ACCESS_KEY_ID={_CLE}\nbucket = your-bucket\n"
+    assert "SSPCLOUD_BUCKET" not in s3.extraire_des_identifiants(colle)
+
+
+def test_rien_de_colle_est_refuse_sans_appel_reseau():
+    r = s3.adopter_ce_qui_est_colle("   ")
+    assert r["ok"] is False
+
+
+def test_du_texte_sans_identifiants_dit_ou_les_prendre():
+    r = s3.adopter_ce_qui_est_colle("bonjour, voici mes cles")
+    assert r["ok"] is False
+    assert "datalab.sspcloud.fr" in r["erreur"]
+
+
+def test_un_jeton_d_identite_seul_part_vers_le_stockage(monkeypatch):
+    """Les deux chemins coexistent : on choisit sur le contenu, pas un bouton."""
+    appels = []
+    monkeypatch.setattr(s3, "renouveler_les_acces",
+                        lambda j, b="": appels.append((j, b)) or {"ok": True})
+    s3.adopter_ce_qui_est_colle("tete.charge.signature")
+    assert appels == [("tete.charge.signature", "")]
+
+
+def test_des_identifiants_colles_sont_enregistres(monkeypatch):
+    poses = {}
+    monkeypatch.setattr(s3, "_poser_le_secret",
+                        lambda creds: (poses.update(creds), {"ok": True})[1])
+    s3._creds_cache["data"] = {"vieux": "creds"}
+    s3._creds_cache["ts"] = time.time()
+
+    r = s3.adopter_ce_qui_est_colle(
+        f"export MC_HOST_default='https://{_CLE}:{_SECRET}:"
+        f"{_jeton_expirant_dans(86400)}@minio.lab.sspcloud.fr'",
+        bucket="nic01asfr",
+    )
+
+    assert r["ok"] is True
+    assert r["bucket"] == "nic01asfr"
+    assert r["permanents"] is False
+    assert r["expire_le"], "l'utilisateur doit savoir jusqu'a quand"
+    assert poses["AWS_ACCESS_KEY_ID"] == _CLE
+    assert poses["AWS_SECRET_ACCESS_KEY"] == _SECRET
+    assert s3._creds_cache["data"] is None, "sinon une heure d'anciens acces"
+
+
+def test_des_identifiants_sans_jeton_sont_dits_permanents(monkeypatch):
+    monkeypatch.setattr(s3, "_poser_le_secret", lambda c: {"ok": True})
+    r = s3.adopter_ce_qui_est_colle(
+        f"aws_access_key_id = {_CLE}\naws_secret_access_key = {_SECRET}\n")
+    assert r["ok"] is True and r["permanents"] is True
+    assert r["expire_le"] is None
+
+
+def test_le_message_d_expiration_n_envoie_plus_vers_install_sh():
+    """Il y envoyait : le script recopie des identifiants deja morts."""
+    assert "install.sh" not in s3._S3_EXPIRED_MESSAGE
+    assert "Connexion au stockage" in s3._S3_EXPIRED_MESSAGE

@@ -3,6 +3,60 @@
 Versions du chart Helm `qgis-hub` (publié via GitHub Actions dans
 [`helm-repo/`](helm-repo/)) et jalons majeurs du service.
 
+## 1.5.0 · 2026-09-20
+
+**Un tour ne se fige plus à vie.** Le modèle pouvait cesser de répondre au
+milieu d'une réponse sans que rien ne le signale : la lecture du flux se
+réarmait au moindre octet, y compris sur les battements de maintien. Deux
+tours sur cinq restaient bloqués sur « Analyse en cours… », indéfiniment.
+Une garde de silence (`LLM_SILENCE_MAX_S`, 90 s par défaut) les interrompt
+désormais en le disant.
+
+**Une conversation longue reste utilisable.** La fenêtre du modèle fait
+131 072 jetons ; une session de production en occupait 168 500 — au-delà,
+elle était définitivement cassée, sans message. L'historique est maintenant
+compacté : les images encodées sont retirées, les messages trop longs
+tronqués tête et queue, et le tout borné. La même session retombe à 53 500.
+
+**L'utilisateur voit qu'une mise à jour existe, et l'applique.** Les trois
+briques évoluent chacune de leur côté ; rien ne le disait. Un bandeau
+compare les empreintes réellement tirées à celles publiées au registre, et
+propose le redémarrage — sans perte : `imagePullPolicy: Always` sur un tag
+mobile, et le PVC n'est pas touché. Il veille toutes les dix minutes et au
+retour sur l'onglet, plus seulement au chargement.
+
+**Les accès au stockage se renouvellent depuis le bureau.** Ils durent sept
+jours et personne ne les renouvelait : passé ce délai le catalogue se vide,
+les livrables disparaissent, les scènes publiées répondent 503. Le message
+d'erreur envoyait relancer `install.sh` — une impasse, le script recopie des
+identifiants déjà morts. Le bandeau annonce désormais l'expiration et
+accepte ce que la page d'Onyxia affiche : on copie le bloc entier, quel que
+soit l'onglet (shell, Python, mc, fichier de configuration), on le colle.
+
+**Une ville entière se charge.** Quatre plafonds de délai se masquaient l'un
+l'autre et toute opération longue échouait à 30 s. Marseille tient
+maintenant : 300 551 bâtiments en 204 s. Un téléchargement vide ne passe
+plus pour un succès.
+
+**L'agent distingue les fichiers des couches.** Chaque couche dit son
+origine — fichier de l'étude, service distant, ou **mémoire**. Une couche en
+mémoire n'existe sur aucun disque et disparaît au redémarrage de QGIS ; sans
+cette distinction, un résultat volatile passait pour un acquis.
+
+**Les liens de livrable s'ouvrent.** Ils pointaient vers `localhost`,
+inatteignable depuis le poste de l'utilisatrice qui les recevait. Les
+exports sont aussi rangés dans l'étude au lieu de rester au vol.
+
+**Le téléchargement d'une étude emporte ses données.** « Projet + données »
+devient l'action principale : un `.qgz` seul ne contient aucune couche, et
+s'ouvrait donc vide chez qui le recevait.
+
+**Autres** — recherche du catalogue insensible aux accents (47 sources
+annoncées = 47 réelles) ; une erreur publique reste lisible depuis une autre
+origine (en-tête CORS sur les réponses d'erreur) ; l'indexation sémantique ne
+se bloque plus sur un item refusé ; le bureau QGIS noVNC n'est plus exposé
+sans authentification ; les prompts de profil atteignent enfin le modèle.
+
 ## 1.4.0 · 2026-09-05
 
 **Le service dit ce qui tourne.** `GET /version` — public, sans

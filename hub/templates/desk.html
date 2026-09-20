@@ -622,6 +622,21 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     <button type="button" class="bandeau-maj__plus-tard" id="bandeau-maj-plus-tard">
       Plus tard
     </button>
+    <!-- Recoller des acces au stockage. Reste cache tant que le bandeau
+         annonce autre chose : une mise a jour n'a rien a demander. -->
+    <div class="bandeau-maj__coller" id="bandeau-maj-coller" hidden>
+      <label class="bandeau-maj__legende" for="bandeau-maj-colle">
+        Sur <strong>datalab.sspcloud.fr &gt; Mon compte &gt; Connexion au
+        stockage</strong>, copiez le bloc affiché — n'importe quel onglet
+        (shell, Python, mc) — et collez-le ici tel quel.
+      </label>
+      <textarea id="bandeau-maj-colle" class="bandeau-maj__zone" rows="4"
+        spellcheck="false" autocomplete="off" autocapitalize="off"
+        placeholder="export AWS_ACCESS_KEY_ID=…"></textarea>
+      <button type="button" class="bandeau-maj__action" id="bandeau-maj-valider">
+        Enregistrer
+      </button>
+    </div>
   </div>
 
 <div class="desk" id="desk" data-resources="collapsed" data-chat="collapsed">
@@ -1403,6 +1418,18 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     .bandeau-maj__plus-tard{background:transparent;color:var(--qs-encre-2);
       border:1px solid var(--qs-trait)}
     .bandeau-maj__plus-tard:hover{background:var(--qs-surface-2)}
+    /* La zone de collage occupe sa propre ligne sous le message. Meme piege
+       que ci-dessus : `display:flex` bat le [hidden] du navigateur, il faut
+       donc le redire explicitement. */
+    .bandeau-maj__coller{flex:1 0 100%;display:flex;flex-direction:column;
+      gap:6px;padding-top:6px}
+    .bandeau-maj__coller[hidden]{display:none}
+    .bandeau-maj__legende{color:var(--qs-encre-2)}
+    .bandeau-maj__zone{width:100%;box-sizing:border-box;resize:vertical;
+      font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      padding:6px 8px;border:1px solid var(--qs-trait);border-radius:3px;
+      background:var(--qs-surface);color:var(--qs-encre)}
+    .bandeau-maj__coller .bandeau-maj__action{align-self:flex-start}
 
     .quick-action-toast{position:fixed;bottom:24px;left:50%;
       transform:translateX(-50%);padding:9px 16px;background:var(--qs-succes);
@@ -4330,7 +4357,22 @@ setInterval(refreshGpuChip, 20000);
     const texte = document.getElementById('bandeau-maj-texte');
     const lancer = document.getElementById('bandeau-maj-lancer');
     const plusTard = document.getElementById('bandeau-maj-plus-tard');
+    const coller = document.getElementById('bandeau-maj-coller');
+    const zone = document.getElementById('bandeau-maj-colle');
+    const valider = document.getElementById('bandeau-maj-valider');
     if (!bandeau || !texte || !lancer || !plusTard) return;
+    if (valider) valider.onclick = enregistrerLesAcces;
+
+    // Le bandeau sert deux annonces qui se partagent les memes commandes.
+    // Chacune repart donc d'un etat connu, plutot que d'heriter de l'autre.
+    function reposerLeBandeau() {
+      lancer.hidden = false;
+      lancer.disabled = false;
+      plusTard.hidden = false;
+      if (coller) coller.hidden = true;
+      if (valider) valider.disabled = false;
+      if (zone) zone.value = '';
+    }
 
     // Chaque brique porte un nom que l'utilisateur reconnait : il sait ce
     // qu'est son bureau QGIS, pas ce qu'est « le workspace ».
@@ -4372,10 +4414,12 @@ setInterval(refreshGpuChip, 20000);
       const briques = etat.mise_a_jour_disponible || [];
       if (!briques.length || dejaReporte(briques)) return;
 
+      reposerLeBandeau();
       texte.innerHTML = 'Une mise à jour est disponible pour '
         + enumerer(briques)
         + '. <span class="bandeau-maj__detail">Vos études et vos données '
         + 'sont conservées.</span>';
+      lancer.textContent = 'Mettre à jour';
       lancer.onclick = () => appliquer(briques);
       plusTard.onclick = () => reporter(briques);
       bandeau.hidden = false;
@@ -4498,39 +4542,50 @@ setInterval(refreshGpuChip, 20000);
       } catch (e) { return; }
       if (etat.valides !== false) return;
 
+      reposerLeBandeau();
       texte.innerHTML = 'Vos accès au stockage ont expiré : vos livrables et '
         + 'vos scènes publiées sont momentanément inaccessibles. '
         + '<span class="bandeau-maj__detail">Vos études et vos données ne '
         + 'sont pas touchées.</span>';
       lancer.textContent = 'Renouveler';
       lancer.onclick = renouvelerLesAcces;
-      plusTard.hidden = false;
-      plusTard.onclick = () => { bandeau.hidden = true; };
+      plusTard.onclick = () => { bandeau.hidden = true; reposerLeBandeau(); };
       bandeau.hidden = false;
     }
 
-    async function renouvelerLesAcces() {
-      const jeton = window.prompt(
-        'Colle ton jeton d\'identite SSPCloud.\n'
-        + '(datalab.sspcloud.fr > Mon compte > jeton d\'identite).'
-        + '\n\nIl sert une fois, n\'est pas conserve, et ne quitte pas'
-        + ' ce service.');
-      if (!jeton) return;
-      lancer.disabled = true;
-      texte.textContent = 'Renouvellement en cours…';
+    // `prompt()` n'accepte qu'une ligne : un bloc colle y perd ses retours,
+    // donc ses valeurs. Ce que la page d'Onyxia affiche tient sur plusieurs
+    // lignes -- il faut une vraie zone de texte.
+    function renouvelerLesAcces() {
+      coller.hidden = false;
+      lancer.hidden = true;
+      zone.value = '';
+      zone.focus();
+    }
+
+    async function enregistrerLesAcces() {
+      const colle = zone.value.trim();
+      if (!colle) { zone.focus(); return; }
+      valider.disabled = true;
+      texte.textContent = 'Enregistrement en cours…';
       try {
         const r = await fetch('/desk/acces-stockage', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jeton: jeton.trim() }),
+          body: JSON.stringify({ colle: colle }),
         });
         const bilan = await r.json();
         if (!r.ok) throw new Error(bilan.detail || ('HTTP ' + r.status));
-        texte.textContent = 'Accès renouvelés. La page se recharge…';
-        setTimeout(() => window.location.reload(), 2000);
+        zone.value = '';                  // ne rien laisser tramer a l'ecran
+        coller.hidden = true;
+        texte.textContent = bilan.expire_le
+          ? ('Accès rétablis jusqu\'au ' + bilan.expire_le
+             + '. La page se recharge…')
+          : 'Accès rétablis. La page se recharge…';
+        setTimeout(() => window.location.reload(), 1800);
       } catch (e) {
-        texte.textContent = 'Renouvellement refusé : ' + e.message;
-        lancer.disabled = false;
+        texte.textContent = 'Refusé : ' + e.message;
+        valider.disabled = false;
       }
     }
 

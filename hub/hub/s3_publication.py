@@ -265,7 +265,10 @@ def _get_s3_client(owner: str = ""):
         "s3", endpoint_url=endpoint,
         aws_access_key_id=creds["AWS_ACCESS_KEY_ID"],
         aws_secret_access_key=creds["AWS_SECRET_ACCESS_KEY"],
-        aws_session_token=creds.get("AWS_SESSION_TOKEN"),
+        # Une chaine vide n'est pas un jeton : elle ferait signer une requete
+        # avec un en-tete de securite vide, que MinIO rejette. Des acces de
+        # longue duree n'en portent pas -- il faut alors passer None.
+        aws_session_token=creds.get("AWS_SESSION_TOKEN") or None,
         region_name=creds.get("AWS_DEFAULT_REGION", "us-east-1"),
         config=boto_cfg,
     )
@@ -285,11 +288,16 @@ _S3_EXPIRED_CODES = (
     "AccessDenied",
 )
 
+# Ce message a longtemps renvoye vers `install.sh`. C'etait une impasse :
+# le script recopie les identifiants du service Jupyter, qui sont morts en
+# meme temps que les autres (empreintes identiques verifiees le 2026-09-18).
+# Il envoie desormais la ou le renouvellement marche vraiment.
 _S3_EXPIRED_MESSAGE = (
-    "Tes accès au stockage SSPCloud ont expiré (ils sont valables 7 jours). "
-    "Relance l'installation depuis un terminal de ton service Jupyter pour les "
-    "renouveler : "
-    "curl -fsSL https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/install.sh | bash"
+    "Tes accès au stockage SSPCloud ont expiré (ils durent 7 jours). "
+    "Le bandeau en haut du bureau propose « Renouveler » : ouvre "
+    "datalab.sspcloud.fr > Mon compte > Connexion au stockage, copie le bloc "
+    "affiché, et colle-le. Inutile de relancer l'installation, elle recopie "
+    "les mêmes identifiants expirés."
 )
 
 
@@ -433,6 +441,151 @@ def renouveler_les_acces(jeton_identite: str, bucket: str = "") -> dict[str, Any
             "bucket": creds["SSPCLOUD_BUCKET"]}
 
 
+# ── Accepter ce qu'Onyxia affiche vraiment ──────────────────────────────────
+#
+# Mesure le 2026-09-20 : la page « Mon compte > Connexion au stockage » ne
+# propose AUCUN jeton d'identite. Elle affiche des identifiants deja echanges,
+# sous la forme de l'onglet choisi : export shell, fichier de configuration
+# AWS, extrait Python boto3, ou une ligne `MC_HOST_...` ou la cle, le secret
+# et le jeton sont colles dans une URL.
+#
+# Exiger un jeton d'identite revenait donc a demander ce que la page ne montre
+# pas. On accepte desormais les deux : un jeton seul part vers STS, tout le
+# reste est lu tel quel. L'utilisateur copie le bloc entier sans le trier --
+# un copier-coller ne se trompe pas de champ, une saisie manuelle si.
+
+_NOMS_D_IDENTIFIANT = {
+    "AWS_ACCESS_KEY_ID": ("aws_access_key_id", "access_key_id", "accesskeyid",
+                          "aws_access_key"),
+    "AWS_SECRET_ACCESS_KEY": ("aws_secret_access_key", "secret_access_key",
+                              "secretaccesskey", "aws_secret_key"),
+    "AWS_SESSION_TOKEN": ("aws_session_token", "session_token", "sessiontoken",
+                          "aws_security_token"),
+    "SSPCLOUD_BUCKET": ("aws_bucket_name", "bucket_name", "sspcloud_bucket",
+                        "aws_s3_bucket", "bucket"),
+}
+
+# Des noms de seau qui ne designent rien : la page les montre en exemple.
+_SEAUX_FICTIFS = ("bucket", "your-bucket", "my-bucket", "mon-bucket",
+                  "votre-bucket", "<bucket>", "nom-du-bucket")
+
+# `MC_HOST_default='https://CLE:SECRET:JETON@minio.lab.sspcloud.fr'`
+# La partie avant `@` ne peut pas contenir d'arobase : on la prend entiere,
+# puis on la coupe en trois -- le jeton, qui vient en dernier, garde tout ce
+# qui reste, y compris d'eventuels deux-points.
+_MOTIF_MC_HOST = re.compile(
+    r"MC_HOST_\w+\s*=\s*['\"]?https?://([^@\s'\"]+)@", re.I)
+
+
+def extraire_des_identifiants(colle: str) -> dict[str, str]:
+    """Reconnait des identifiants S3 dans ce que l'utilisateur a copie.
+
+    Rend un dictionnaire des valeurs reconnues -- possiblement vide, jamais
+    d'exception : l'appelant est une interface, pas un script.
+    """
+    if not colle or not colle.strip():
+        return {}
+
+    trouve: dict[str, str] = {}
+
+    # La forme URL d'abord : elle porte les trois valeurs d'un coup, et ses
+    # composants sont encodes, donc illisibles par la recherche par nom.
+    m = _MOTIF_MC_HOST.search(colle)
+    if m:
+        morceaux = m.group(1).split(":", 2)
+        for nom, valeur in zip(
+            ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"),
+            morceaux,
+        ):
+            decode = urllib.parse.unquote(valeur)
+            if decode:
+                trouve[nom] = decode
+
+    # Puis la forme `NOM = valeur`, sous toutes ses ponctuations : avec ou
+    # sans `export`, deux-points ou egal, guillemets simples ou doubles.
+    for cible, noms in _NOMS_D_IDENTIFIANT.items():
+        if trouve.get(cible):
+            continue
+        for nom in noms:
+            motif = (rf"['\"]?{nom}['\"]?\s*[=:]\s*"
+                     rf"['\"]?([A-Za-z0-9/+=._\-]{{3,}})['\"]?")
+            trouvaille = re.search(motif, colle, re.I)
+            if trouvaille:
+                trouve[cible] = trouvaille.group(1)
+                break
+
+    if trouve.get("SSPCLOUD_BUCKET", "").lower() in _SEAUX_FICTIFS:
+        trouve.pop("SSPCLOUD_BUCKET")
+    return trouve
+
+
+def _echeance_du_jeton(jeton: str) -> float | None:
+    """L'instant ou ce jeton de session cesse d'etre valable, s'il le dit.
+
+    Un identifiant de longue duree n'a pas de jeton, donc pas d'echeance :
+    on rend `None`, et l'appelant en conclut qu'il n'y a rien a surveiller.
+    """
+    if not jeton or jeton.count(".") != 2:
+        return None
+    try:
+        charge = jeton.split(".")[1]
+        charge += "=" * (-len(charge) % 4)
+        exp = json.loads(base64.urlsafe_b64decode(charge)).get("exp")
+        return float(exp) if exp else None
+    except Exception:
+        return None
+
+
+def adopter_ce_qui_est_colle(colle: str, bucket: str = "") -> dict[str, Any]:
+    """Enregistre des acces au stockage a partir d'un copier-coller.
+
+    Choisit le chemin sur le contenu, pas sur un bouton : un jeton d'identite
+    seul est echange aupres de STS ; tout le reste est lu comme des
+    identifiants deja delivres.
+    """
+    texte = (colle or "").strip()
+    if not texte:
+        return {"ok": False, "erreur": "Rien n'a ete colle."}
+
+    # Un jeton d'identite nu : trois segments, aucun espace, rien autour.
+    if len(texte.split()) == 1 and texte.count(".") == 2:
+        return renouveler_les_acces(texte, bucket)
+
+    creds = extraire_des_identifiants(texte)
+    manquants = [n for n in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
+                 if not creds.get(n)]
+    if manquants:
+        return {"ok": False, "erreur": (
+            "Je n'ai pas retrouve d'identifiants la-dedans. Sur "
+            "datalab.sspcloud.fr > Mon compte > Connexion au stockage, copie "
+            "un bloc entier (onglet shell, Python ou mc) et colle-le ici."
+        )}
+
+    seau = bucket or creds.get("SSPCLOUD_BUCKET", "") \
+        or os.getenv("AWS_BUCKET_NAME", "") or os.getenv("SSPCLOUD_BUCKET", "")
+    a_poser = {
+        "AWS_ACCESS_KEY_ID": creds["AWS_ACCESS_KEY_ID"],
+        "AWS_SECRET_ACCESS_KEY": creds["AWS_SECRET_ACCESS_KEY"],
+        "AWS_SESSION_TOKEN": creds.get("AWS_SESSION_TOKEN", ""),
+        "SSPCLOUD_BUCKET": seau,
+    }
+    pose = _poser_le_secret(a_poser)
+    if not pose.get("ok"):
+        return pose
+
+    _creds_cache["data"] = None          # la prochaine lecture repart du secret
+    _creds_cache["ts"] = 0
+
+    fin = _echeance_du_jeton(a_poser["AWS_SESSION_TOKEN"])
+    return {
+        "ok": True,
+        "bucket": seau,
+        "permanents": fin is None,
+        "expire_le": (time.strftime("%Y-%m-%d %H:%M", time.localtime(fin))
+                      if fin else None),
+    }
+
+
 def _poser_le_secret(creds: dict[str, str]) -> dict[str, Any]:
     """Ecrit les identifiants dans le secret, en preservant ce qu'il portait.
 
@@ -476,20 +629,12 @@ def etat_des_acces() -> dict[str, Any]:
     except Exception as exc:
         return {"valides": False, "raison": str(exc)[:200]}
 
-    jeton = creds.get("AWS_SESSION_TOKEN", "")
-    if not jeton or jeton.count(".") != 2:
-        # Pas d'echeance lisible : identifiants de longue duree.
-        return {"valides": True, "permanents": True}
-    try:
-        charge = jeton.split(".")[1]
-        charge += "=" * (-len(charge) % 4)
-        exp = json.loads(base64.urlsafe_b64decode(charge)).get("exp")
-    except Exception:
-        return {"valides": True, "permanents": True}
-    if not exp:
+    exp = _echeance_du_jeton(creds.get("AWS_SESSION_TOKEN", ""))
+    if exp is None:
+        # Pas d'echeance lisible : identifiants de longue duree, rien a veiller.
         return {"valides": True, "permanents": True}
 
-    restant = float(exp) - time.time()
+    restant = exp - time.time()
     return {
         "valides": restant > _STS_MARGE_S,
         "permanents": False,
