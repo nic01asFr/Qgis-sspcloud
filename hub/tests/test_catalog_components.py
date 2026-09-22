@@ -49,11 +49,16 @@ class TestNativeToolsCatalog:
         from agent.native_tools_v2 import NATIVE_TOOLS_V2
         assert "list_catalog_assemblies" in NATIVE_TOOLS_V2
 
+    def test_native_tool_list_publications_existe(self):
+        from agent.native_tools_v2 import NATIVE_TOOLS_V2
+        assert "list_publications" in NATIVE_TOOLS_V2
+
     def test_catalog_tools_NOT_mutating(self):
         """Catalog tools sont LECTURE seule, pas mutants -> pas dans MUTATING."""
         from agent.native_tools_v2 import NATIVE_TOOLS_V2_MUTATING
         assert "list_catalog_components" not in NATIVE_TOOLS_V2_MUTATING
         assert "list_catalog_assemblies" not in NATIVE_TOOLS_V2_MUTATING
+        assert "list_publications" not in NATIVE_TOOLS_V2_MUTATING
 
     def test_openai_schemas_catalog_existent(self):
         from agent.native_tools_v2 import NATIVE_TOOLS_V2_OPENAI
@@ -64,6 +69,7 @@ class TestNativeToolsCatalog:
         ]
         assert "list_catalog_components" in names
         assert "list_catalog_assemblies" in names
+        assert "list_publications" in names
 
     def test_audience_default_cerema_internal(self):
         """Schema OpenAI : audience default = cerema_internal (anti-RGPD)."""
@@ -95,3 +101,9 @@ class TestProfileWhitelistCatalog:
         profile_path = Path(__file__).parent.parent / "hub" / "profiles" / "storymap_creator_v15.yaml"
         content = profile_path.read_text(encoding="utf-8")
         assert "list_catalog_assemblies" in content
+
+    def test_whitelist_list_publications(self):
+        from pathlib import Path
+        profile_path = Path(__file__).parent.parent / "hub" / "profiles" / "storymap_creator_v15.yaml"
+        content = profile_path.read_text(encoding="utf-8")
+        assert "list_publications" in content

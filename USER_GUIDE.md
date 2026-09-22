@@ -1,13 +1,13 @@
 # USER_GUIDE — qgis-sspcloud
 
-Guide utilisateur (agent CEREMA) pour tirer parti du service : études,
+Guide utilisateur pour tirer parti du service : études,
 projets, analyses géospatiales, publications, connecteur MCP externe.
 
-Version 2026-08-06 · Sprint Day 5 CLOS · chart Helm 1.2.5.
+Version 2026-09-22 · chart Helm 1.4.0.
 
-> **Installation depuis zéro** : voir [QUICKSTART.md](QUICKSTART.md)
-> (3 étapes) ou [docs/day5-user-guide-visuel.md](docs/day5-user-guide-visuel.md)
-> (7 étapes illustrées avec screenshots).
+> **Installation depuis zéro** : [QUICKSTART.md](QUICKSTART.md) —
+> service Onyxia Jupyter-python, **Kubernetes role = admin**, terminal,
+> one-liner GitHub. Images sur GHCR. Pas GitLab.
 
 ---
 

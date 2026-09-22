@@ -57,7 +57,7 @@ gratuit.
 ## La brique QGIS
 
 Le QGIS Desktop et ses outils MCP vivent dans un dépôt distinct :
-[QgisRemoteMCP](https://github.com/nic01asFr/QgisRemoteMCP), miroité sur le
-GitLab CEREMA. Une correction qui touche l'exécution PyQGIS, les algorithmes de
-traitement ou le pont noVNC va là-bas ; ce dépôt-ci porte le hub, l'agent et le
-chart Helm.
+[QgisRemoteMCP](https://github.com/nic01asFr/QgisRemoteMCP). L'image
+publiée est `ghcr.io/nic01asfr/qgisremotemcp` (GHCR, CI GitHub). Une
+correction PyQGIS / noVNC va là-bas ; ce dépôt-ci porte le hub, l'agent
+et le chart Helm. Pas de GitLab dans le chemin d'install ni d'images.

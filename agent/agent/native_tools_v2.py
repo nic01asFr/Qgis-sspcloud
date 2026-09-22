@@ -379,6 +379,94 @@ async def list_catalog_assemblies(
     return await _hub_call("GET", "/catalog/assemblies", params=params)
 
 
+async def list_publications(
+    kind: str | None = None,
+    study_id: str | None = None,
+) -> dict[str, Any]:
+    """Liste les livrables déjà publiés (catalogue owner), URLs hub uniquement.
+
+    CHARTE_AGENT §11.4 `list_publications`. Distinct de list_catalog_assemblies
+    (marketplace V1.5). Le champ MinIO `url` n'est jamais renvoyé au LLM.
+    """
+    owner = os.getenv("ONYXIA_USER", "").strip()
+    if not owner:
+        return {"error": "ONYXIA_USER absent, impossible de lister le catalogue"}
+    params = {}
+    if kind:
+        params["kind"] = kind
+    data = await _hub_call("GET", f"/catalog/{owner}", params=params or None)
+    if data.get("error"):
+        return data
+    items = []
+    for it in (data.get("items") or []):
+        if study_id and it.get("study_id") != study_id:
+            continue
+        hub = it.get("hub_url") or ""
+        if not hub:
+            continue
+        items.append({
+            "slug": it.get("slug"),
+            "kind": it.get("kind"),
+            "hub_url": hub,
+            "audience": it.get("audience"),
+            "study_id": it.get("study_id"),
+        })
+    return {"count": len(items), "items": items}
+
+
+def _norm_pub_slug(slug: str) -> str:
+    return (slug or "").strip().lower().replace("_", "-")
+
+
+def refuse_republish_if_exists(
+    slug: str,
+    kind: str | None,
+    items: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Bloque publish_artifact si le slug (ou slug-vN) existe déjà, tout kind.
+
+    Le LLM contourne `features` (absent du schéma workspace) en republicant
+    en `dataset` / `*-v2`. Le garde-fou est côté outil, pas seulement prompt.
+    `kind` est accepté pour signature stable ; le match est sur le slug.
+    """
+    del kind  # match inter-kind volontaire
+    want = _norm_pub_slug(slug)
+    if not want:
+        return None
+    for it in items:
+        have = _norm_pub_slug(str(it.get("slug") or ""))
+        if not have:
+            continue
+        derived = (
+            want.startswith(have + "-v")
+            and want[len(have) + 2 :].isdigit()
+        )
+        if have == want or derived:
+            return {
+                "error": "ALREADY_PUBLISHED",
+                "existing_kind": it.get("kind"),
+                "existing_slug": it.get("slug"),
+                "hub_url": it.get("hub_url"),
+                "instruction": (
+                    "DONNE hub_url tel quel à l'user. N'appelle plus "
+                    "publish_artifact. Attends un slug NOUVEAU et distinct "
+                    "confirmé explicitement."
+                ),
+            }
+    return None
+
+
+async def guard_publish_artifact(
+    slug: str,
+    kind: str | None = None,
+) -> dict[str, Any] | None:
+    """Fail-open si le catalogue est injoignable ; refuse si le slug existe."""
+    data = await list_publications()
+    if data.get("error"):
+        return None
+    return refuse_republish_if_exists(slug, kind, data.get("items") or [])
+
+
 # ── Storymap patterns (Vague E2 Commit 3, D-QGIS-009 §3) ──────────────────────
 
 async def list_storymap_patterns() -> dict[str, Any]:
@@ -1311,6 +1399,19 @@ NATIVE_TOOLS_V2 = {
             "offset": "int (default 0)",
         },
     },
+    "list_publications": {
+        "fn": list_publications,
+        "description": (
+            "Liste les livrables déjà publiés de cet utilisateur (catalogue). "
+            "Retourne hub_url (/published/owner/kind/slug) à coller tel quel. "
+            "Ne pas confondre avec list_catalog_assemblies (marketplace V1.5). "
+            "Ne republie pas pour retrouver une URL. Interdit : minio.lab.sspcloud.fr."
+        ),
+        "params": {
+            "kind": "str optionnel (storymap|dataset|features|pdf|recipe|flux)",
+            "study_id": "str optionnel (12 hex) — restreint à une étude",
+        },
+    },
     "clone_assembly": {
         "fn": clone_assembly,
         "description": (
@@ -1898,6 +1999,33 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
                     "kind": {"type": "string", "description": "Optionnel - filtre AssemblyKind."},
                     "limit": {"type": "integer", "default": 50},
                     "offset": {"type": "integer", "default": 0},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_publications",
+            "description": (
+                "LISTE les livrables déjà publiés de cet utilisateur. "
+                "Retourne hub_url (https://…/published/owner/kind/slug) à coller "
+                "tel quel. N'utilise PAS list_catalog_assemblies pour ça "
+                "(marketplace V1.5). Ne republie pas pour retrouver une URL. "
+                "Interdit : minio.lab.sspcloud.fr."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "description": "Optionnel — storymap, dataset, features, pdf, recipe, flux.",
+                    },
+                    "study_id": {
+                        "type": "string",
+                        "pattern": r"^[0-9a-f]{12}$",
+                        "description": "Optionnel — restreint aux livrables de cette étude.",
+                    },
                 },
             },
         },

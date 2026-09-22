@@ -94,6 +94,37 @@ _KIND_CONTENT_TYPE = {
     "component": "text/html; charset=utf-8",
 }
 
+# Extensions éventuellement collées au slug (clé S3). L'URL hub canonique
+# /published/{owner}/{kind}/{slug} n'en porte pas (serve_published les strip).
+_SLUG_EXTS = (
+    ".html", ".pdf", ".yaml", ".json", ".gpkg", ".qgz",
+    ".zip", ".pmtiles", ".geojson",
+)
+
+
+def hub_url_for(owner: str, kind: str, slug: str, hub_base: str) -> str:
+    """URL partageable hub, calculée à la lecture (ne pas persister dans S3)."""
+    base = (hub_base or "").rstrip("/")
+    clean = (slug or "").split("?")[0]
+    for ext in _SLUG_EXTS:
+        if clean.endswith(ext):
+            clean = clean[: -len(ext)]
+            break
+    return f"{base}/published/{owner}/{kind}/{clean}"
+
+
+def enrich_catalog_item(item: dict, hub_base: str) -> dict:
+    """Ajoute hub_url sans toucher au locateur MinIO `url`. Copie superficielle."""
+    out = dict(item or {})
+    owner = out.get("owner") or ""
+    kind = out.get("kind") or ""
+    slug = out.get("slug") or ""
+    if not (owner and kind and slug and hub_base):
+        return out
+    out.setdefault("hub_url", hub_url_for(owner, kind, slug, hub_base))
+    return out
+
+
 # Chemin du secret passerelle (creds long-lived service-side)
 _SECRET_NAME = os.getenv("PASSERELLE_S3_SECRET", "passerelle-s3-creds")
 _S3_PREFIX = "qgis-workspace/published"

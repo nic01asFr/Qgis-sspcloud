@@ -34,6 +34,9 @@ jobs:
           grep -q 'id="stack"' "$f"
           grep -q -- "--qs-accent" "$f"
           grep -q "nic01asFr/Qgis-sspcloud" "$f"
+          grep -q "admin" "$f"
+          grep -q "GHCR" "$f"
+          grep -q "GitHub" "$f"
           echo "smoke OK"
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -1,9 +1,10 @@
 #!/bin/bash
 # install.sh - Installe le service QGIS Hub dans ton espace SSPCloud.
 #
-# A executer depuis un terminal jupyter Onyxia (kubernetes.role: edit requis).
-# Sprint Day 5 (2026-08-06) : chart Helm packageur qgis-hub 1.2.0+
-# (3 pods : hub + agent + workspace). Zero admin pod requis.
+# A executer depuis un terminal d'un service Onyxia (Jupyter-python)
+# lance avec Kubernetes role = admin. Script + chart : GitHub
+# (nic01asFr/Qgis-sspcloud). Images : GHCR (ghcr.io/nic01asfr/...).
+# Pas GitLab.
 #
 # Usage :
 #   curl -fsSL https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/install.sh | bash
@@ -23,16 +24,14 @@ fi
 USERNAME="${ONYXIA_USER:-${NAMESPACE#user-}}"
 if [ -z "$USERNAME" ] || [ -z "$NAMESPACE" ]; then
     echo "ERREUR : impossible de detecter le namespace SSPCloud."
-    echo "Lance ce script depuis un terminal jupyter Onyxia."
+    echo "Lance ce script depuis un terminal d'un service Onyxia"
+    echo "(Jupyter-python, Kubernetes role = admin)."
     exit 1
 fi
 
 # Sprint Day 5 fix (2026-08-06) : detecte la SA du pod jupyter courant
-# (qui a le ClusterRole `edit` provisionne par Onyxia). Le hub doit
-# utiliser CETTE MEME SA pour pouvoir kubectl get/patch sts (scale
-# workspace, patch env agent, create ingress novnc). L'user OIDC
-# SSPCloud ne peut pas creer de RoleBinding, donc la SA custom
-# qgis-hub reste sans droits -> boucle infinie "Bureau endormi".
+# (ClusterRole `admin` provisionne par Onyxia). Le hub doit
+# utiliser CETTE MEME SA pour pouvoir kubectl get/patch sts.
 SERVICE_ACCOUNT="${KUBERNETES_SERVICE_ACCOUNT:-}"
 if [ -z "$SERVICE_ACCOUNT" ]; then
     # Fallback : deduire depuis le pod jupyter courant
@@ -75,19 +74,20 @@ K8S_DOMAIN="${K8S_DOMAIN:-user.lab.sspcloud.fr}"
 # droits `get secrets` -- on genererait alors une nouvelle cle, invalidant
 # les cookies de 90 jours deja poses dans les navigateurs.
 #
-# Le role par defaut d'un service Jupyter Onyxia est `view`, qui ne permet
-# ni de lire un Secret ni de creer quoi que ce soit.
+# Le role par defaut d'un service Jupyter Onyxia est `view`. Il faut
+# `admin` (pas seulement `edit`) pour deployer le chart dans le namespace.
 # ---------------------------------------------------------------------------
-if ! kubectl auth can-i get secrets -n "$NAMESPACE" >/dev/null 2>&1; then
+if ! kubectl auth can-i get secrets -n "$NAMESPACE" >/dev/null 2>&1 \
+   || ! kubectl auth can-i create roles -n "$NAMESPACE" >/dev/null 2>&1; then
     echo ""
-    echo "ERREUR : ton service Jupyter n'a pas les droits Kubernetes requis."
+    echo "ERREUR : ton service Onyxia n'a pas les droits Kubernetes requis."
     echo ""
     echo "  Relance-le en reglant, dans ses parametres :"
     echo "    Kubernetes > Enable access from within the service : oui"
-    echo "    Kubernetes > Kubernetes role                       : edit"
+    echo "    Kubernetes > Kubernetes role                       : admin"
     echo ""
-    echo "  Le role propose par defaut est 'view' : il ne permet pas"
-    echo "  d'installer un service."
+    echo "  Le role propose par defaut est 'view'. 'edit' ne suffit pas :"
+    echo "  il faut 'admin'."
     echo ""
     exit 1
 fi
@@ -171,7 +171,8 @@ echo "+==============================================================+"
 echo "|  Installation QGIS Hub - $USERNAME"
 echo "|  Namespace : $NAMESPACE"
 echo "|  Domaine   : $K8S_DOMAIN"
-echo "|  SA (herite Onyxia edit) : $SERVICE_ACCOUNT"
+echo "|  Chart/images : GitHub + GHCR (pas GitLab)"
+echo "|  SA (herite Onyxia admin) : $SERVICE_ACCOUNT"
 echo "+==============================================================+"
 echo ""
 
@@ -192,7 +193,7 @@ cat > "$VALUES_FILE" <<EOF
 oidc:
   username: "$USERNAME"
 
-# SA heritee du pod jupyter (ClusterRole edit provisionne Onyxia)
+# SA heritee du pod jupyter (ClusterRole admin provisionne Onyxia)
 serviceAccount:
   name: "$SERVICE_ACCOUNT"
 
@@ -392,9 +393,10 @@ if [ "$_helm_rc" -ne 0 ]; then
         echo "    kubectl delete statefulset $_sts -n $NAMESPACE --cascade=orphan"
     elif grep -qE "forbidden|Forbidden" "$_helm_log"; then
         echo "  Cause : droits Kubernetes insuffisants."
-        echo "  Relance ton service Jupyter avec, dans ses parametres :"
-        echo "    Kubernetes > Enable access > role = edit"
-        echo "  (le role par defaut, 'view', ne permet pas d'installer.)"
+        echo "  Relance ton service Onyxia (Jupyter) avec, dans ses parametres :"
+        echo "    Kubernetes > Enable access > role = admin"
+        echo "  (le role par defaut, 'view', ne permet pas d'installer ;"
+        echo "   'edit' ne suffit pas.)"
     else
         echo "  Detail complet : $_helm_log"
     fi

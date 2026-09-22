@@ -1,27 +1,32 @@
 # QGIS Hub — SSPCloud
 
-Service géospatial CEREMA sur SSPCloud Onyxia :
-**QGIS Desktop + Agent IA + connecteur MCP** installable en **3 minutes** par
-l'utilisateur, sans intervention admin.
+Service géospatial sur SSPCloud Onyxia :
+**QGIS Desktop + Agent IA + connecteur MCP**. Tu l'installes toi-même depuis
+un Jupyter Onyxia en rôle Kubernetes **admin** — pas de portail central,
+pas de GitLab.
 
-**Chart Helm stable** : `qgis-hub 1.3.0` (2026-08-22).
+**Chart Helm stable** : `qgis-hub 1.4.0`. Script, chart et images viennent de
+**GitHub / GHCR** — pas de GitLab.
 
 ---
 
 ## Démarrage rapide
 
-Lance un service **Jupyter-python** sur [datalab.sspcloud.fr](https://datalab.sspcloud.fr)
-en réglant `Kubernetes > Enable access > role = edit` — **ce n'est pas le
-réglage par défaut**, et c'est le seul point d'attention de l'installation.
-Puis, dans un terminal du service :
+1. Sur [datalab.sspcloud.fr](https://datalab.sspcloud.fr), lance un service
+   **Jupyter-python**.
+2. Avant de valider, déplie **Kubernetes** :
+   `Enable access from within the service = oui`,
+   **`Kubernetes role = admin`** (le défaut est `view` ; `edit` ne suffit pas).
+3. Dans un **terminal** du service, installe depuis GitHub :
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/install.sh | bash
 ```
 
-Le script déploie les 3 composants (hub + assistant + QGIS Desktop), reprend la
-clé de ton assistant IA depuis ton profil SSPCloud, enregistre le service dans
-ton interface Onyxia, et affiche ton adresse et ta clé d'accès. Colle-la sur
+Le script tire le chart `helm-repo/` de ce dépôt GitHub ; Helm déploie les
+images **GHCR** `ghcr.io/nic01asfr/qgis-hub`, `qgis-agent` et `qgisremotemcp`.
+Il reprend la clé de ton assistant IA depuis ton profil SSPCloud, enregistre
+le service dans Onyxia, et affiche ton adresse et ta clé d'accès. Colle-la sur
 `<URL>/login` : un cookie de 90 jours te dispense ensuite de cette étape.
 
 La clé reste consultable dans **Onyxia > Mes services > QGIS Hub**, sans aucune
@@ -125,7 +130,7 @@ affectant l'agent.
 ## Invariants d'architecture
 
 Règles dures à ne jamais violer, sous peine de casser l'engagement
-d'explicabilité du service CEREMA. Tout nouveau code doit les respecter.
+d'explicabilité du service. Tout nouveau code doit les respecter.
 
 ### 1. Audit trail = source de vérité
 

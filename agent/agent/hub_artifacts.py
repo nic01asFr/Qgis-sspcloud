@@ -8,7 +8,8 @@ les tokens injectés au LLM tout en lui donnant assez de signal pour proposer
 la next-action contextuelle.
 
 Pattern :
-1. fetch_study_artifacts(sid) → 2 GET parallèles vers le hub
+1. fetch_study_artifacts(sid) → 3 GET parallèles vers le hub
+   (components, assemblies, publications catalogue)
 2. summarize_artifacts(raw) → dict compact serializable
 3. memory.build_context_summary consomme via kwarg study_artifacts
 
@@ -39,19 +40,20 @@ _HTTP_TIMEOUT = 4.0  # < 200ms en local pod, mais 4s pour cold-start
 async def fetch_study_artifacts(
     hub_url: str, hub_key: str, sid: str,
 ) -> dict[str, Any] | None:
-    """Récupère components + assemblies de l'étude active en parallèle.
+    """Récupère components + assemblies + publications de l'étude active.
 
-    Retourne None si hub injoignable (l'agent reste opérationnel sans cache
-    artifacts — graceful degradation).
+    3 GET en parallèle. Retourne None si hub injoignable (l'agent reste
+    opérationnel sans cache artifacts — graceful degradation).
     """
     if not (hub_url and hub_key and sid):
         return None
     headers = {"Authorization": f"Bearer {hub_key}"}
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as c:
-            rc, ra = await asyncio.gather(
+            rc, ra, rp = await asyncio.gather(
                 c.get(f"{hub_url}/studies/{sid}/components", headers=headers),
                 c.get(f"{hub_url}/studies/{sid}/assemblies", headers=headers),
+                c.get(f"{hub_url}/studies/{sid}/publications", headers=headers),
                 return_exceptions=True,
             )
             comps = (
@@ -62,7 +64,21 @@ async def fetch_study_artifacts(
                 ra.json() if not isinstance(ra, Exception)
                 and getattr(ra, "status_code", 500) == 200 else []
             )
-            return {"components": comps or [], "assemblies": asms or []}
+            pubs_body = (
+                rp.json() if not isinstance(rp, Exception)
+                and getattr(rp, "status_code", 500) == 200 else {}
+            )
+            pubs = (
+                (pubs_body or {}).get("publications")
+                if isinstance(pubs_body, dict) else []
+            )
+            if not isinstance(pubs, list):
+                pubs = []
+            return {
+                "components": comps or [],
+                "assemblies": asms or [],
+                "publications": pubs or [],
+            }
     except Exception as exc:
         log.warning("fetch_study_artifacts(%s) failed: %s", sid, exc)
         return None
@@ -120,6 +136,7 @@ def summarize_artifacts(raw: dict[str, Any]) -> dict[str, Any]:
     now = int(time.time())
     comps = raw.get("components") or []
     asms = raw.get("assemblies") or []
+    pubs = raw.get("publications") or []
 
     # ── Composants ────────────────────────────────────────────────────────
     by_kind_c: dict[str, int] = {}
@@ -179,6 +196,16 @@ def summarize_artifacts(raw: dict[str, Any]) -> dict[str, Any]:
     # ── Derived ───────────────────────────────────────────────────────────
     orphan_cids = [c.get("cid", "") for c in comps if c.get("cid") not in referenced_cids]
 
+    recent_p: list[dict] = []
+    for p in pubs[:_MAX_ITEMS_PER_KIND]:
+        hub = p.get("hub_url") or ""
+        recent_p.append({
+            "slug": p.get("slug") or "",
+            "kind": p.get("kind") or "?",
+            "hub_url": hub,
+            "audience": p.get("audience") or "cerema_internal",
+        })
+
     return {
         "components": {
             "total": len(comps),
@@ -190,6 +217,10 @@ def summarize_artifacts(raw: dict[str, Any]) -> dict[str, Any]:
             "by_kind": by_kind_a,
             "by_status": by_status,
             "recent": recent_a,
+        },
+        "publications": {
+            "total": len(pubs),
+            "recent": recent_p,
         },
         "derived": {
             "orphan_component_cids": orphan_cids[:10],
@@ -224,7 +255,15 @@ def build_next_action_hints(art: dict | None) -> list[str]:
     hints = []
     c = art.get("components") or {}
     a = art.get("assemblies") or {}
+    p = art.get("publications") or {}
     d = art.get("derived") or {}
+
+    if p.get("total", 0) > 0:
+        hints.append(
+            "Livrables déjà publiés sur cette étude (URL = champ hub_url). "
+            "Ne republie pas pour les retrouver. "
+            "N'utilise jamais minio.lab.sspcloud.fr."
+        )
 
     # Règle 1 : composants orphelins (>=2) + aucun assembly → suggérer création
     orphans = d.get("orphan_component_cids") or []

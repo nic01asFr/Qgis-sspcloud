@@ -73,6 +73,7 @@ mcp_tools:
     - get_component_history
     - list_assemblies
     - list_catalog_assemblies  # Vague E1 D-QGIS-009 : decouvrir templates cross-etude
+    - list_publications        # catalogue livrables owner (hub_url, pas MinIO)
     - create_assembly
     - update_assembly
     - clone_assembly     # Vague E1 D-QGIS-009 : partir d'un template existant

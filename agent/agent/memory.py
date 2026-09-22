@@ -1456,6 +1456,7 @@ async def build_context_summary(
         from agent.hub_artifacts import fmt_age, build_next_action_hints
         c = study_artifacts.get("components") or {}
         a = study_artifacts.get("assemblies") or {}
+        p = study_artifacts.get("publications") or {}
 
         if c.get("total", 0) > 0:
             bk = c.get("by_kind") or {}
@@ -1487,6 +1488,14 @@ async def build_context_summary(
                 layer2.append(
                     f"  • {it.get('kind','?')} « {it.get('title','?')} » "
                     f"[aid={aid_short}, {it.get('n_refs', 0)} refs, {age}, {state}]"
+                )
+
+        if p.get("total", 0) > 0:
+            layer2.append(f"Livrables publiés (catalogue) : {p['total']}")
+            for it in (p.get("recent") or [])[:5]:
+                url = it.get("hub_url") or "(url hub absente)"
+                layer2.append(
+                    f"  • {it.get('kind', '?')} `{it.get('slug', '?')}` → {url}"
                 )
 
         # Hints next-action déterministes (règles, pas LLM)
@@ -1565,11 +1574,15 @@ def _brief_study_summary(
     if study_artifacts:
         c = study_artifacts.get("components") or {}
         a = study_artifacts.get("assemblies") or {}
+        p = study_artifacts.get("publications") or {}
         totals = []
         if c.get("total"):
             totals.append(f"{c['total']} composants")
         if a.get("total"):
             totals.append(f"{a['total']} assemblies")
+        if p.get("total"):
+            n = p["total"]
+            totals.append(f"{n} livrable{'s' if n > 1 else ''} publié{'s' if n > 1 else ''}")
         if totals:
             lines.append("Livrables existants : " + ", ".join(totals))
     return lines

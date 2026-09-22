@@ -137,11 +137,11 @@ docker build -t ghcr.io/nic01asfr/qgis-agent:local -f Dockerfile.agent .
 > laissé prendre avant de vérifier.
 
 Image `qgisremotemcp` (QGIS Desktop + QgisRemoteMCP + noVNC + Xvfb) construite
-par [QgisRemoteMCP](https://github.com/nic01asFr/QgisRemoteMCP) — miroir
-`gitlab.cerema.fr/mcp/QgisRemoteMCP`, **même base de code**, la CI est côté
-GitHub. Déclenchée sur push `main` touchant `Dockerfile`, `main_mcp.py`,
-`src/`, `recipes/`, `requirements.txt`… Elle pousse `:latest`, `:main` et
-`:<sha>`.
+par [QgisRemoteMCP](https://github.com/nic01asFr/QgisRemoteMCP). La CI est
+**GitHub** ; elle pousse `:latest`, `:main` et `:<sha>` sur
+`ghcr.io/nic01asfr/qgisremotemcp`. C'est la source des images du workspace.
+Un miroir GitLab, s'il existe encore, n'est **pas** le registre ni
+le chemin d'installation.
 
 Ce dépôt-ci ne construit que `qgis-hub` et `qgis-agent` ; son job
 `build-workspace` reste commenté (~30 min, image ~10 Go) et n'a pas à être
