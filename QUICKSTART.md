@@ -1,19 +1,28 @@
 # Installer QGIS Service sur SSPCloud
 
 QGIS Desktop, un assistant IA et un connecteur MCP dans ton espace SSPCloud,
-en une commande. Aucun administrateur n'intervient.
+en une commande. Pas de portail central : **toi** tu lances un service
+Onyxia avec le rôle Kubernetes `admin`, puis le script GitHub.
 
-Chart Helm `qgis-hub` **1.3.0**.
+Chart Helm `qgis-hub` **1.4.0**. Source : GitHub + GHCR (pas GitLab).
 
 ---
 
 ## Avant de commencer
 
-Un compte SSPCloud actif suffit : <https://datalab.sspcloud.fr>.
+Un compte SSPCloud actif : <https://datalab.sspcloud.fr>.
+
+**D’où ça vient** :
+
+| Quoi | Où |
+|---|---|
+| Script d’install + chart Helm | [github.com/nic01asFr/Qgis-sspcloud](https://github.com/nic01asFr/Qgis-sspcloud) (`install.sh`, `helm-repo/`) |
+| Images hub et agent | `ghcr.io/nic01asfr/qgis-hub:latest`, `ghcr.io/nic01asfr/qgis-agent:latest` |
+| Image QGIS Desktop | `ghcr.io/nic01asfr/qgisremotemcp:latest` ([QgisRemoteMCP](https://github.com/nic01asFr/QgisRemoteMCP)) |
 
 ---
 
-## 1. Lance un service Jupyter avec les droits Kubernetes
+## 1. Lance un service Onyxia avec le rôle Kubernetes **admin**
 
 Sur `datalab.sspcloud.fr` : **Nouveau service** → **Jupyter-python**.
 
@@ -21,13 +30,13 @@ Avant de valider, déplie **Kubernetes** et règle :
 
 ```
 Kubernetes  >  Enable access from within the service : oui
-            >  Kubernetes role                       : edit
+            >  Kubernetes role                       : admin
 ```
 
 > **C'est le seul point d'attention de toute l'installation.** Le rôle par
-> défaut est `view`, qui ne permet pas de créer des ressources : l'installation
-> échouerait. Le script le vérifie et s'arrête avec un message explicite si le
-> compte n'a pas les droits.
+> défaut est `view` (lecture seule). `edit` ne suffit pas pour ce déploiement.
+> Il faut **`admin`**. Le script le vérifie et s'arrête avec un message
+> explicite si le compte n'a pas les droits.
 >
 > Active aussi **Vault** (coché par défaut) : c'est ce qui permet de reprendre
 > automatiquement la clé de ton assistant IA depuis ton profil SSPCloud.
@@ -38,7 +47,7 @@ Lance le service, puis ouvre-le.
 
 Dans JupyterLab : **File** → **New** → **Terminal**.
 
-## 3. Lance l'installation
+## 3. Lance l'installation depuis GitHub
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nic01asFr/Qgis-sspcloud/main/install.sh | bash
@@ -166,7 +175,7 @@ kubectl delete secret -n user-<toi> qgis-hub-apikey qgis-llm-apikey
 
 | Message | Cause et correction |
 |---|---|
-| `droits Kubernetes insuffisants` | Le service Jupyter est en rôle `view`. Relance-le en `edit` (étape 1). |
+| `droits Kubernetes insuffisants` | Le service Onyxia n’est pas en rôle **`admin`**. Relance-le (étape 1). |
 | `le secret … n'appartient pas encore à la release` | Le script affiche les deux commandes de rattachement à copier, puis relance-le. |
 | L'assistant ne répond pas | Sa clé n'est pas configurée : un bandeau l'indique dans le bureau, avec la marche à suivre. |
 | Publication de livrables en échec | Les accès au stockage S3 expirent au bout de 7 jours. Relance `install.sh`. |

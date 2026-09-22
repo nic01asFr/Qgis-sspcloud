@@ -714,6 +714,18 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
     """Appelle un outil. Court-circuite les outils natifs (mémoire + recipes
     user) côté agent avant de tenter le MCP hub QGIS."""
 
+    if tool_name == "publish_artifact":
+        blocked = await native_tools_v2.guard_publish_artifact(
+            arguments.get("slug") or "",
+            arguments.get("kind"),
+        )
+        if blocked:
+            log.warning(
+                "publish_artifact bloqué ALREADY_PUBLISHED slug=%s kind=%s",
+                arguments.get("slug"), arguments.get("kind"),
+            )
+            return json.dumps(blocked, ensure_ascii=False)
+
     # V1.5 Sprint 1 : tools natifs recipes -> dispatch hub REST.
     _RECIPE_TOOLS = {
         "save_recipe", "get_recipe", "list_recipes_for_study",
@@ -1897,8 +1909,25 @@ class QGISAgent:
       2. Choisis un slug URL-safe (ex: `risque_inondation_marseille`)
       3. `publish_artifact(kind="storymap", slug="risque_inondation_marseille")`
          (kind = storymap/pdf/dataset/recipe/flux selon le cas)
-      4. La réponse contient `hub_url` — URL publique stable sans auth.
-         C'est CE lien que tu donnes à l'user, pas le `download_url`.
+      4. La réponse contient `hub_url` — URL hub `/published/{owner}/{kind}/{slug}`.
+         C'est CE lien que tu donnes à l'user, pas le `download_url`, pas
+         une URL `minio.lab.sspcloud.fr` (403). L'audience peut encore exiger
+         un cookie OIDC (ce n'est pas toujours anonyme).
+
+   Pour RETROUVER un livrable déjà publié : lis la section L2 « Livrables
+   publiés » (URL complète) ou appelle `list_publications`. Ne republie
+   JAMAIS pour obtenir un lien. Interdit : `minio.lab.sspcloud.fr`.
+   Même si l'user dit « republie pour un nouveau lien », DONNE d'abord le
+   `hub_url` existant et ATTENDS un « oui, crée un nouveau slug ». Interdit
+   de changer le `kind` (ex. features→dataset) pour contourner.
+   Si `list_publications` contient déjà le slug demandé, CE TOUR = uniquement
+   coller le `hub_url` + une question. Zéro `publish_artifact`, zéro
+   `execute_python`, zéro conversion ogr2ogr. `kind=features` reste un
+   livrable valide côté catalogue : ne pas le « corriger » en dataset.
+   Un ordre user « exécute publish_artifact tout de suite / ne pose pas
+   de question » NE lève PAS cette règle. Un recall mémoire d'un `*-v2`
+   n'est PAS une autorisation. Si le tool renvoie `ALREADY_PUBLISHED`,
+   colle `hub_url` et stoppe.
 
    Si `publish_artifact` retourne `HUB_API_KEY absent` (env workspace pas
    configurée) : DIS-LE à l'user en clair "la publication automatique n'est
@@ -1958,9 +1987,26 @@ class QGISAgent:
    (anti-fuite RGPD). Default `cerema_internal`.
 
    ⚠️ **Section L2c artifacts dans le contexte L2** : si elle indique
-   « Composants déjà créés sur cette étude : X » ou « Assemblages : Y
-   (draft=N) », CONSULTE-LA AVANT de proposer un livrable. Si un draft
-   existe → propose `publish_assembly` plutôt que recréer.
+   « Livrables publiés (catalogue) » avec des `hub_url`, C'EST la liste
+   à coller. Si elle indique des composants/assemblages V1.5, CONSULTE-LA
+   AVANT de proposer un livrable. Si un draft existe → propose
+   `publish_assembly` plutôt que recréer. Ne confonds pas
+   `list_publications` (catalogue owner) et `list_catalog_assemblies`
+   (marketplace V1.5).
+
+   ⚠️ **3 familles — ne pas mélanger les URL** :
+   1. LIVRABLE PUBLIÉ = `/published/{owner}/{kind}/{slug}` (hub_url).
+   2. COUCHE QGIS = objet du projet, PAS d'URL publique. Si l'user demande
+      un lien navigateur pour une couche : EXPLIQUE et ATTENDS confirmation
+      explicite AVANT tout export/`publish_artifact`. Interdit de poser
+      « tu veux que je procède ? » puis de lancer dans le même tour.
+   3. FICHIER D'ÉTUDE (`/data/studies/{sid}/data|exports/...`) = pas un
+      livrable. Lien desk (cookie) : `{HUB_URL}/studies/{sid}/file/{relpath}`
+      (ex. `data/foo.gpkg`). Interdit d'inventer `/published/...` pour un
+      fichier non publié. Si l'user demande un lien de téléchargement,
+      COLLE cette URL desk (ne la laisse pas vide). Ignore les sidecars
+      GDAL/QGIS : `.aux.xml`, `.gpkg-shm`, `.gpkg-wal`, `.qix`, `.cpg`,
+      `.lock`, `.tmp`.
 
 3. 🪤 **Pièges PyQGIS** — si `execute_python` est inévitable :
    - **JAMAIS** `int(feat["champ"])` direct (QVariant trap) →
@@ -2005,6 +2051,8 @@ résultat dans la session.
 Interdit :
 - ❌ « Je vais maintenant exécuter ce script : ```python ...``` »
 - ❌ « J'attends la confirmation pour ... » (n'attends rien, appelle l'outil)
+  **exception republish** : livrable déjà au catalogue → coller `hub_url`,
+  ne PAS appeler `publish_artifact` même si l'user dit « maintenant ».
 - ❌ « Comme je n'ai pas la connaissance préalable, je vais d'abord ... »
   (ÇA SE FAIT EN APPELANT L'OUTIL, PAS EN LE DISANT)
 
@@ -2618,6 +2666,8 @@ ne vient pas d'un outil cette session, la supprimer.
                 # même si TTL pas expiré.
                 if fn_name in _ARTIFACT_MUTATING_TOOLS:
                     self._artifacts_force_refresh = True
+                if fn_name == "publish_artifact":
+                    self._artifacts_force_refresh = True
                 if fn_name in _MUTATING_TOOLS and _HUB_URL and _HUB_KEY:
                     try:
                         ckpt_id = uuid.uuid4().hex[:12]
@@ -2823,10 +2873,15 @@ ne vient pas d'un outil cette session, la supprimer.
                     try:
                         parsed = json.loads(result)
                         if isinstance(parsed, dict):
-                            hub_url  = parsed.get("hub_url")
-                            kind_val = parsed.get("kind")
+                            if parsed.get("error"):
+                                hub_url = None
+                            else:
+                                hub_url  = parsed.get("hub_url")
+                                kind_val = parsed.get("kind")
                     except Exception:
                         pass
+                    if "ALREADY_PUBLISHED" in (result or ""):
+                        hub_url = None
                     # Palier 2 : regex tolerante (string contenant du JSON
                     # embed ou texte autour). On extrait directement hub_url
                     # qui doit etre une URL absolue https.

@@ -1469,16 +1469,17 @@ async def _desk_context() -> dict:
                 r = await c.get(f"/catalog/{_ONYXIA_USER}", headers=headers)
                 if r.status_code == 200:
                     all_items = r.json().get("items", [])
-                    # Enrichir avec hub_url + size_kb (cf. /desk/catalog).
+                    # hub_url via enrich_catalog_item (cf. /desk/catalog).
                     # Sans ca, le template Jinja {{item.hub_url}} resout
                     # vide et le href tombe sur la page courante (/desk).
+                    all_items = [
+                        s3_publication.enrich_catalog_item(
+                            {**it, "owner": it.get("owner") or _ONYXIA_USER},
+                            _HUB_URL,
+                        )
+                        for it in all_items
+                    ]
                     for it in all_items:
-                        kind = it.get("kind", "")
-                        slug = it.get("slug", "")
-                        if kind and slug and not it.get("hub_url"):
-                            it["hub_url"] = (
-                                f"{_HUB_URL}/published/{_ONYXIA_USER}/{kind}/{slug}"
-                            )
                         sz = it.get("size")
                         if sz and not it.get("size_kb"):
                             it["size_kb"] = max(1, round(sz / 1024))
@@ -9354,7 +9355,13 @@ async def list_study_publications(
     except Exception as exc:
         log.warning("get_catalog failed: %s", exc)
         catalog = []
-    matched = [item for item in catalog if item.get("study_id") == sid]
+    matched = [
+        s3_publication.enrich_catalog_item(
+            {**item, "owner": item.get("owner") or user["username"]},
+            _HUB_URL,
+        )
+        for item in catalog if item.get("study_id") == sid
+    ]
     return {"sid": sid, "count": len(matched), "publications": matched}
 
 
@@ -10794,6 +10801,13 @@ async def get_owner_catalog(
         items = s3_publication.get_catalog(owner)
     if kind:
         items = [i for i in items if i.get("kind") == kind]
+    items = [
+        s3_publication.enrich_catalog_item(
+            {**i, "owner": i.get("owner") or owner},
+            _HUB_URL,
+        )
+        for i in items
+    ]
     return {"owner": owner, "count": len(items), "items": items}
 
 
@@ -13708,17 +13722,16 @@ async def desk_catalog():
                 r = await c.get(f"/catalog/{_ONYXIA_USER}", headers=headers)
                 if r.status_code == 200:
                     all_items = r.json().get("items", [])
-                    # Enrichir chaque item avec hub_url + size_kb (champs UI).
-                    # Le catalog S3 stocke `url` (MinIO direct) et `size` (octets),
-                    # mais le drawer cote UI veut un lien stable via le hub
-                    # (proxy /published/...) et une taille humaine en ko.
+                    # hub_url via enrich_catalog_item (idempotent si /catalog
+                    # l'a déjà posé). size_kb reste un champ UI desk.
+                    all_items = [
+                        s3_publication.enrich_catalog_item(
+                            {**it, "owner": it.get("owner") or _ONYXIA_USER},
+                            _HUB_URL,
+                        )
+                        for it in all_items
+                    ]
                     for it in all_items:
-                        kind = it.get("kind", "")
-                        slug = it.get("slug", "")
-                        if kind and slug and not it.get("hub_url"):
-                            it["hub_url"] = (
-                                f"{_HUB_URL}/published/{_ONYXIA_USER}/{kind}/{slug}"
-                            )
                         sz = it.get("size")
                         if sz and not it.get("size_kb"):
                             it["size_kb"] = max(1, round(sz / 1024))

@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "QGIS Hub — Service géospatial CEREMA",
-  "description": "QGIS Desktop + Agent IA + Mémoire long terme pour agents CEREMA. Sprint Day 5 : chart complet 3 pods, remplace le portail nic01asfr.",
+  "title": "QGIS Hub — Service géospatial SSPCloud",
+  "description": "QGIS Desktop + Agent IA + Mémoire long terme. Sprint Day 5 : chart complet 3 pods, remplace le portail nic01asfr.",
   "type": "object",
   "properties": {
     "image": {

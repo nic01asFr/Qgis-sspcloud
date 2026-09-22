@@ -14,8 +14,9 @@ Avant Sprint Day 5, un user obtenait son service via le portail admin
 `nic01asfr` (page web `user-nic01asfr-qgis-mcp-portal-bridge...`). Le portail
 provisionnait 3 pods dans le namespace user via l'id-token OIDC.
 
-Après Sprint Day 5, chaque user installe lui-même le service via
-`helm install qgis-hub` depuis son terminal Jupyter Onyxia. Zero admin.
+Après Sprint Day 5, chaque user installe lui-même le service depuis un
+**service Onyxia Jupyter-python** (Kubernetes role = **admin**), terminal,
+one-liner GitHub. Pas de portail central, pas de GitLab.
 
 ### Étapes de migration user
 
@@ -141,7 +142,7 @@ soumettre PR sur https://github.com/InseeFrLab/helm-charts-datascience
 # catalogue-onyxia/qgis-hub/qgis-hub.md
 name: QGIS Hub
 description: |
-  QGIS Desktop noVNC + Agent LLM + Hub API géospatial pour agents CEREMA.
+  QGIS Desktop noVNC + Agent LLM + Hub API géospatial.
   Publications storymap DSFR, connecteur MCP (Claude Desktop, Cursor).
 category: geospatial
 image: <URL screenshot desk.html>

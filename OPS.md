@@ -3,20 +3,16 @@
 Runbook opérationnel : monitoring, incidents fréquents, procédures de
 maintenance.
 
-Version 2026-09-04 · chart Helm 1.3.0.
+Version 2026-09-22 · chart Helm 1.4.0.
 
-> Revu le 2026-09-04 : trois sections decrivaient un etat revolu — la
-> commande de redemarrage du hub (§3.1) visait le pod Jupyter de
-> l'utilisateur, la cle LLM etait annoncee perdue a chaque recreation
-> (§2.2), et le renouvellement des acces S3 ne connaissait qu'une voie
-> (§2.3). Chaque commande de ce document a ete executee sur les deux
-> instances de reference avant publication.
+> Revu le 2026-09-22 : l'installation self-service se fait depuis un
+> service Onyxia (Jupyter-python) avec **Kubernetes role = admin**,
+> terminal, `install.sh` GitHub. Chart et images : GitHub + GHCR, pas
+> GitLab. Pas de portail `nic01asfr`.
 
-> **Contexte** : depuis Sprint Day 5, chaque user déploie son propre
-> service via `helm install qgis-hub` depuis son terminal Jupyter Onyxia
-> (SA `jupyter-python-<hash>` avec `edit` role). Aucun pod admin central
-> requis. Les procédures ci-dessous s'exécutent depuis le terminal
-> Jupyter du user concerné (self-service).
+> **Contexte** : chaque user déploie son propre service via le one-liner
+> documenté dans [QUICKSTART.md](QUICKSTART.md) (SA héritée du Jupyter
+> `admin`). Les procédures ci-dessous s'exécutent depuis ce terminal.
 
 ---
 
@@ -355,11 +351,10 @@ Une simulation qui passe ne garantit donc pas qu'un `helm upgrade` passera.
 > conclu « construite a la main » en lisant le commentaire de `build.yml` cote
 > Qgis-sspcloud, sans aller verifier le depot d'en face.
 
-L'image **est** construite automatiquement — mais par un autre depot.
-`nic01asFr/QgisRemoteMCP` (miroir : `gitlab.cerema.fr/mcp/QgisRemoteMCP`) a son
-propre workflow, declenche sur push `main` touchant `Dockerfile`,
-`main_mcp.py`, `src/`, `recipes/`, `requirements.txt`… Il pousse `:latest`,
-`:main` et `:{sha}`.
+L'image **est** construite automatiquement — mais par un autre depot GitHub :
+`nic01asFr/QgisRemoteMCP`. Il pousse `:latest`, `:main` et `:{sha}` sur
+**GHCR** (`ghcr.io/nic01asfr/qgisremotemcp`). Un miroir GitLab n'est
+pas le registre ni le chemin d'install.
 
 `Qgis-sspcloud` ne construit que `qgis-hub` et `qgis-agent` ; son job
 `build-workspace` est commente, et son commentaire est trompeur.
