@@ -178,7 +178,6 @@ kubectl delete secret -n user-<toi> qgis-hub-apikey qgis-llm-apikey
 | `droits Kubernetes insuffisants` | Le service Onyxia n’est pas en rôle **`admin`**. Relance-le (étape 1). |
 | `le secret … n'appartient pas encore à la release` | Le script affiche les deux commandes de rattachement à copier, puis relance-le. |
 | L'assistant ne répond pas | Sa clé n'est pas configurée : un bandeau l'indique dans le bureau, avec la marche à suivre. |
-| Publication de livrables en échec | Les accès au stockage S3 expirent au bout de 7 jours. Relance `install.sh`. |
 
 ---
 
