@@ -1,0 +1,45 @@
+id: S2-bati-aix-perimetre-communal
+famille: fidelite_territoriale
+titre: Bati strictement dans le perimetre communal d'Aix
+source: plan comportements spatiaux, S2 (defauts T2, T4)
+description: >
+  La bbox ne suffit pas : il faut le contour de la commune et un decoupage.
+  La sonde compte les entites de la couche de bati qui ne touchent pas le
+  contour : zero attendu.
+preconditions:
+  vider_projet: true
+tours:
+  - message: Charge uniquement le bâti situé dans le périmètre communal d'Aix-en-Provence.
+attentes:
+  trajectoire:
+    outils_attendus:
+      - set_study_zone
+      - un_de: [smart_load, add_from_catalog]
+      - un_de:
+          - clip_to_study_zone
+          - {outil: run_processing, si_arguments: "(?i)clip|intersect|extractbylocation|selectbylocation"}
+          - {outil: execute_python, si_arguments: "(?i)clip|intersect"}
+    ordre:
+      - [set_study_zone, {un_de: [smart_load, add_from_catalog]}]
+    outils_interdits:
+      - {outil: execute_python, si_arguments: "(?i)wfs|getfeature|ogr2ogr"}
+    max_erreurs_outils: 2
+  etat:
+    zone:
+      nom_contient: Aix
+    couches:
+      - motif: "commune|contour|limite|p[ée]rim[eè]tre"
+        nombre_entites: {min: 1, max: 1}
+        emprise_dans: [5.20, 43.40, 5.60, 43.70]
+      - motif: "b[aâ]ti"
+        nombre_entites: {min: 5000, max: 200000}
+        emprise_dans: [5.20, 43.40, 5.60, 43.70]
+        hors_zone_max: 0
+        reference_hors_zone: contour
+        contour_motif: "commune|contour|limite|p[ée]rim[eè]tre"
+  reponse:
+    chiffres_tracables: true
+    doit_contenir: ["(?i)commun|p[ée]rim[eè]tre|contour|limite"]
+  cout:
+    iterations_max: 10
+    duree_max_s: 900

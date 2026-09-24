@@ -1,0 +1,38 @@
+data: {"phase": "reflexion"}
+
+data: {"phase": "outil", "outil": "smart_load", "label": "Chargement des donn\u00e9es\u2026"}
+
+data: {"text": "\n\n> **`smart_load`** \u2014 `id=bdtopo_batiments`\n"}
+
+data: {"text": "\n```\n{\"success\": true, \"layer\": \"bati_aix\", \"verification\": {\"feature_count\": 68412}}\n```\n"}
+
+data: {"phase": "reflexion"}
+
+data: {"phase": "outil", "outil": "export_pdf", "label": "Export PDF\u2026"}
+
+data: {"text": "\n\n> **`export_pdf`** \u2014 `path=/data/studies/s1/exports/carte_bati.pdf`\n"}
+
+data: {"text": "\n```\n{\"success\": true, \"path\": \"/data/studies/s1/exports/carte_bati.pdf\", \"pages\": 1}\n```\n"}
+
+data: {"phase": "reflexion"}
+
+data: {"phase": "outil", "outil": "publish_artifact", "label": "Publication du livrable\u2026"}
+
+data: {"text": "\n\n> **`publish_artifact`** \u2014 `slug=carte-bati-aix`, `kind=pdf`\n"}
+
+data: {"text": "\n```\n{\"success\": true, \"kind\": \"pdf\", \"hub_url\": \"https://hub.example.fr/livrables/carte-bati-aix\"}\n```\n"}
+
+data: {"text": "\n\n\ud83d\udcce **Livrable publie** : [Voir le pdf](https://hub.example.fr/livrables/carte-bati-aix)\n"}
+
+data: {"phase": "reflexion"}
+
+data: {"phase": "redaction"}
+
+data: {"text": "Ta carte est pr\u00eate : [carte des b\u00e2timents](https://hub.example.fr/livrables/carte-bati-aix). "}
+
+data: {"text": "Elle montre les 68\u202f412 b\u00e2timents de la zone."}
+
+data: {"text": "\n\n*\ud83e\udde0 M\u00e9moris\u00e9 : 2 insight(s).*"}
+
+data: {"done": true}
+

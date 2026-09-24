@@ -1,0 +1,19 @@
+id: C1-salutation
+famille: conversation
+titre: Bonjour
+description: >
+  Une salutation n'appelle aucune action sur le projet. Reponse courte, en
+  langage courant, qui dit ce que l'agent peut faire.
+tours:
+  - message: Bonjour !
+attentes:
+  trajectoire:
+    outils_mutateurs_interdits: true
+    max_appels: 1
+  reponse:
+    longueur_max: 700
+    mots_interdits: [execute_python, smart_load, add_from_catalog, set_study_zone,
+                     pyqgis, json, mcp, bridge, wfs, epsg, bbox]
+  cout:
+    iterations_max: 2
+    duree_max_s: 90
