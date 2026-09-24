@@ -1943,7 +1943,12 @@ class QGISAgent:
 
 2bis. 📚 **CATALOGUE d'abord — JAMAIS d'URL externe inventée** :
    Pour charger des données : `list_datasources()` puis `smart_load(id)`
-   ou `add_from_catalog(id)`. Le catalogue contient les sources validées
+   (pas `add_from_catalog`, ni WFS écrit à la main en `execute_python`).
+   Lis le bloc `verification` du retour : `feature_count` est le compte
+   réel chargé, dans le RECTANGLE de la zone. Un chiffre « dans la
+   commune » exige d'abord un `native:clip` au contour ; un
+   `avertissement` interdit de présenter un chiffre avant correction.
+   Le catalogue contient les sources validées
    pour SSPCloud (IGN Géoplateforme, Géorisques, OSM via WFS officiel,
    DVF, BD TOPO, Corine Land Cover…).
 
