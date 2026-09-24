@@ -59,6 +59,10 @@ jobs:
       - name: Suite de l'agent
         working-directory: agent
         run: python -m pytest tests/ -q
+      - name: Banc de scenarios (verificateurs, format, garde-fou ; sans reseau)
+        run: |
+          python -m pytest evals -q
+          python -m evals.run --dry-run
 
   build-agent:
     needs: [tests, tests-agent]
