@@ -3197,10 +3197,25 @@ ne vient pas d'un outil cette session, la supprimer.
                         f"contenu). NE GENERE PAS de markdown [texte](url) "
                         f"pointant vers le livrable -- c'est deja fait. <<<"
                     )
+                # Budget du resultat pour le modele (spec qualite §3.1) : un
+                # execute_python bavard ou un get_features avec geometries
+                # partait en entier, des dizaines de milliers de caracteres
+                # relus a chaque iteration. On borne le seul message envoye
+                # au LLM ; `llm_result` reste entier pour les detecteurs
+                # d'infra et de boucle d'erreur ci-dessous.
+                from agent import tool_result_budget
+                llm_content = tool_result_budget.abreger_resultat_outil(
+                    llm_result, fn_name,
+                )
+                if llm_content is not llm_result:
+                    log.info(
+                        "Resultat %s abrege pour le modele : %d -> %d caracteres",
+                        fn_name, len(llm_result), len(llm_content),
+                    )
                 messages.append({
                     "role":         "tool",
                     "tool_call_id": tc["id"],
-                    "content":      llm_result,
+                    "content":      llm_content,
                 })
 
                 # Détection bridge dégradé : 2+ tools différents qui échouent
