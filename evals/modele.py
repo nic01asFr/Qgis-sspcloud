@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 # banc, « modifier » inclut produire un livrable. Tenue a jour a la main ; le
 # test `test_outils_mutateurs_couvrent_l_agent` signale une divergence.
 OUTILS_MUTATEURS: frozenset[str] = frozenset({
-    "smart_load", "add_layer", "add_from_catalog", "remove_layer",
+    "smart_load", "clip_to_study_zone", "add_layer", "add_from_catalog", "remove_layer",
     "set_layer_style", "set_layer_visibility", "run_processing", "run_recipe",
     "execute_python", "apply_layout_template", "set_study_zone", "new_project",
     "open_project", "save_project", "upload_file", "zoom_to",
