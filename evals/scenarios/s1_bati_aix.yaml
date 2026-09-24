@@ -1,0 +1,42 @@
+# S1 du plan « comportements spatiaux » (docs/superpowers/plans/2026-09-24-agent-comportements-spatiaux.md).
+# Incident de reference : 51 450 444 entites a l'emprise nationale (fiche par. 7).
+id: S1-bati-aix
+famille: fidelite_territoriale
+titre: Charger le bati d'Aix-en-Provence
+source: plan comportements spatiaux, S1 ; incident du 2026-09-24
+description: >
+  Demande directe, commune explicite. Attendu : zone d'etude Aix, puis
+  chargement du bati borne a la zone, par l'outil catalogue (jamais un WFS
+  ecrit a la main), dans une couche dediee.
+preconditions:
+  vider_projet: true
+tours:
+  - message: Charge les bâtis sur Aix-en-Provence
+attentes:
+  trajectoire:
+    outils_attendus:
+      - set_study_zone
+      - un_de: [smart_load, add_from_catalog]
+    ordre:
+      - [set_study_zone, {un_de: [smart_load, add_from_catalog]}]
+    outils_interdits:
+      - {outil: add_layer, si_arguments: "(?i)wfs|geopf|typename"}
+      - {outil: execute_python, si_arguments: "(?i)wfs|getfeature|ogr2ogr|geo\\.api\\.gouv"}
+    max_erreurs_outils: 2
+  etat:
+    zone:
+      nom_contient: Aix
+      bbox_contient_point: [5.4474, 43.5298]
+      bbox_dans: [5.20, 43.40, 5.60, 43.70]
+    couches:
+      - motif: "b[aâ]ti"
+        nombre_entites: {min: 5000, max: 250000}
+        emprise_dans: [5.20, 43.40, 5.60, 43.70]
+        tolerance_km: 1
+        valide: true
+    noms_interdits: ["_temp$", "^temp"]
+  reponse:
+    chiffres_tracables: true
+  cout:
+    iterations_max: 8
+    duree_max_s: 600

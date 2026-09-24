@@ -1,0 +1,47 @@
+id: S6-ma-zone-traitement
+famille: fidelite_territoriale
+titre: Charger puis traiter « ma zone » sans re-geocoder
+source: plan comportements spatiaux, S6
+description: >
+  La zone active (Aix) fait foi : l'agent reutilise sa bbox, sans redefinir
+  une autre zone ni passer un nom de ville a la place des coordonnees. Deux
+  tours : chargement, puis tampon sur « ces routes » (reference multi-tours).
+preconditions:
+  vider_projet: true
+  zone_initiale: {cible: Aix-en-Provence}
+tours:
+  - message: Charge les routes de ma zone.
+    attentes:
+      trajectoire:
+        outils_attendus:
+          - un_de: [smart_load, add_from_catalog]
+        outils_interdits:
+          - {outil: set_study_zone, si_arguments: "^(?!.*aix).*$"}
+          - {outil: smart_load, si_arguments: "(?i)marseille|paris|lavandou"}
+  - message: Fais une zone tampon de 20 mètres autour de ces routes.
+    attentes:
+      trajectoire:
+        outils_attendus:
+          - un_de:
+              - {outil: run_processing, si_arguments: "(?i)buffer|tampon"}
+              - {outil: run_recipe, si_arguments: "(?i)buffer|tampon"}
+              - {outil: execute_python, si_arguments: "(?i)buffer"}
+        outils_interdits:
+          - set_study_zone
+          - smart_load
+attentes:
+  etat:
+    zone:
+      nom_contient: Aix
+    couches:
+      - motif: "route|tron[cç]on|voie"
+        emprise_dans: zone
+        tolerance_km: 1
+      - motif: "tampon|buffer"
+        emprise_dans: zone
+        tolerance_km: 1
+  reponse:
+    chiffres_tracables: true
+  cout:
+    iterations_max: 8
+    duree_max_s: 900

@@ -1,0 +1,36 @@
+id: C6-livrable-carte-pdf
+famille: livrables
+titre: Carte PDF des batiments de ma zone, avec le lien
+description: >
+  Demande de livrable. Attendu : chargement borne a la zone active, export
+  PDF, publication, et un lien du hub que l'agent n'a pas invente (il figure
+  dans un resultat d'outil). Aucune URL MinIO ni `undefined`.
+preconditions:
+  vider_projet: true
+  zone_initiale: {cible: Aix-en-Provence}
+tours:
+  - message: Fais une carte PDF des bâtiments de ma zone et donne-moi le lien.
+attentes:
+  trajectoire:
+    outils_attendus:
+      - un_de: [smart_load, add_from_catalog]
+      - un_de: [export_pdf, apply_layout_template]
+      - publish_artifact
+    ordre:
+      - [{un_de: [smart_load, add_from_catalog]}, {un_de: [export_pdf, apply_layout_template]}]
+      - [{un_de: [export_pdf, apply_layout_template]}, publish_artifact]
+    outils_interdits:
+      - {outil: set_study_zone, si_arguments: "^(?!.*aix).*$"}
+  etat:
+    couches:
+      - motif: "b[aâ]ti"
+        emprise_dans: zone
+        tolerance_km: 1
+  reponse:
+    urls_autorisees: true
+    urls_tracees: true
+    urls_min: 1
+    ne_doit_pas_contenir: ["(?i)minio", "\\(undefined\\)"]
+  cout:
+    iterations_max: 12
+    duree_max_s: 1200

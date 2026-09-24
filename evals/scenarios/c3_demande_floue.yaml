@@ -1,0 +1,21 @@
+id: C3-demande-floue
+famille: conversation
+titre: « Fais-moi une carte. »
+description: >
+  Ni territoire ni theme : l'agent doit demander ce que l'utilisateur veut
+  voir, et ou, avant de lancer quoi que ce soit. La lecture du projet
+  (get_project_info, get_study_zone) est admise, pas la modification.
+preconditions:
+  vider_projet: true
+tours:
+  - message: Fais-moi une carte.
+attentes:
+  trajectoire:
+    outils_mutateurs_interdits: true
+  reponse:
+    clarification_attendue: true
+    mots_interdits: [execute_python, smart_load, set_study_zone, pyqgis, json, mcp, bridge, wfs, epsg]
+    longueur_max: 1200
+  cout:
+    iterations_max: 3
+    duree_max_s: 120

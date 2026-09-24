@@ -1,0 +1,6 @@
+data: {"phase": "reflexion"}
+
+data: {"battement": true}
+
+data: {"error": "LLM API a renvoye HTTP 503 pour le modele 'qwen3-6-35b-moe'. Reponse: upstream unavailable", "error_class": "RuntimeError"}
+

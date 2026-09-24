@@ -1,0 +1,21 @@
+id: C2-cest-quoi-une-bbox
+famille: conversation
+titre: « C'est quoi une bbox ? »
+description: >
+  Question de definition. On attend une explication simple (un rectangle qui
+  encadre une zone) et aucune action. Les chiffres d'exemple sont admis :
+  la question ne porte sur aucune donnee, le controle de tracabilite est donc
+  leve pour ce scenario seulement.
+tours:
+  - message: C'est quoi une bbox ?
+attentes:
+  trajectoire:
+    outils_mutateurs_interdits: true
+  reponse:
+    chiffres_tracables: false
+    doit_contenir: ["(?i)rectangle|cadre|encadr|emprise"]
+    mots_interdits: [execute_python, smart_load, set_study_zone, pyqgis, json, mcp, bridge]
+    longueur_max: 1500
+  cout:
+    iterations_max: 2
+    duree_max_s: 120

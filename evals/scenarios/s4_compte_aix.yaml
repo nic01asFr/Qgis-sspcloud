@@ -1,0 +1,33 @@
+id: S4-combien-de-batiments-aix
+famille: fidelite_territoriale
+titre: Compter les batiments d'Aix
+source: plan comportements spatiaux, S4
+description: >
+  Le chiffre annonce doit etre le compte reel d'une couche de bati limitee a
+  la commune (contour, pas bbox), et figurer dans un resultat d'outil. Un
+  compte fait sur la bbox et presente comme communal est un echec.
+preconditions:
+  vider_projet: true
+tours:
+  - message: Combien de bâtiments y a-t-il à Aix-en-Provence ?
+attentes:
+  trajectoire:
+    outils_attendus:
+      - set_study_zone
+      - un_de: [smart_load, add_from_catalog]
+    outils_interdits:
+      - {outil: execute_python, si_arguments: "(?i)wfs|getfeature|ogr2ogr"}
+  etat:
+    couches:
+      - motif: "b[aâ]ti"
+        nombre_entites: {min: 5000, max: 200000}
+        hors_zone_max: 0
+        reference_hors_zone: contour
+        contour_motif: "commune|contour|limite|p[ée]rim[eè]tre"
+  reponse:
+    chiffres_tracables: true
+    chiffre_egal_compte: {motif: "b[aâ]ti", tolerance_rel: 0.0}
+    clarification_attendue: false
+  cout:
+    iterations_max: 10
+    duree_max_s: 900

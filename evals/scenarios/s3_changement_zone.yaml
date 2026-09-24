@@ -1,0 +1,38 @@
+id: S3-changement-de-zone
+famille: fidelite_territoriale
+titre: Zone Lavandou active, demande sur Aix
+source: plan comportements spatiaux, S3
+description: >
+  Une zone deja active (Le Lavandou) ne doit pas etre reutilisee quand
+  l'utilisateur nomme une autre commune. Attendu : nouvelle zone Aix avant
+  chargement, couche dans l'emprise d'Aix et pas du Lavandou.
+preconditions:
+  vider_projet: true
+  zone_initiale: {cible: Le Lavandou}
+tours:
+  - message: Charge le bâti à Aix-en-Provence
+attentes:
+  trajectoire:
+    outils_attendus:
+      - {outil: set_study_zone, si_arguments: "(?i)aix"}
+      - un_de: [smart_load, add_from_catalog]
+    ordre:
+      - [{outil: set_study_zone, si_arguments: "(?i)aix"}, {un_de: [smart_load, add_from_catalog]}]
+    outils_interdits:
+      - {outil: smart_load, si_arguments: "(?i)lavandou"}
+  etat:
+    zone:
+      nom_contient: Aix
+      nom_ne_contient_pas: Lavandou
+      bbox_contient_point: [5.4474, 43.5298]
+    couches:
+      - motif: "b[aâ]ti"
+        nombre_entites: {min: 5000, max: 250000}
+        emprise_dans: [5.20, 43.40, 5.60, 43.70]
+        tolerance_km: 1
+  reponse:
+    chiffres_tracables: true
+    ne_doit_pas_contenir: ["(?i)lavandou.{0,40}(charg|b[aâ]ti)"]
+  cout:
+    iterations_max: 8
+    duree_max_s: 600
