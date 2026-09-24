@@ -918,6 +918,7 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
     _LONG_RUNNING_TOOLS = {
         "run_recipe":          1800,  # 20+ min serveur, on prend large
         "smart_load":           600,  # WFS download lourds (BD TOPO commune)
+        "clip_to_study_zone":   600,  # decoupe au contour (300 000 batis sur Marseille)
         "execute_python":       900,  # spatial joins sur 100k+ features
         "set_study_zone":       300,
         "export_flood_map":     600,
@@ -1075,6 +1076,7 @@ def _mcp_tool_to_openai(tool: dict) -> dict:
 # (get_*, list_*, export_*) volontairement exclus.
 _MUTATING_TOOLS: frozenset[str] = frozenset({
     "smart_load",
+    "clip_to_study_zone",
     "add_layer",
     "add_from_catalog",
     "remove_layer",
@@ -1951,7 +1953,7 @@ class QGISAgent:
    (pas `add_from_catalog`, ni WFS écrit à la main en `execute_python`).
    Lis le bloc `verification` du retour : `feature_count` est le compte
    réel chargé, dans le RECTANGLE de la zone. Un chiffre « dans la
-   commune » exige d'abord un `native:clip` au contour ; un
+   commune » exige d'abord `clip_to_study_zone(layer_id)` ; un
    `avertissement` interdit de présenter un chiffre avant correction.
    Le catalogue contient les sources validées
    pour SSPCloud (IGN Géoplateforme, Géorisques, OSM via WFS officiel,
@@ -3508,7 +3510,7 @@ ne vient pas d'un outil cette session, la supprimer.
         # Tout le reste (list/get/save/read metadata) est non-visuel.
         _VISUAL_TOOLS = {
             # Chargement de donnees / couches
-            "load_layer", "smart_load", "set_study_zone",
+            "load_layer", "smart_load", "clip_to_study_zone", "set_study_zone",
             "load_vector", "load_raster", "load_wms", "load_wfs",
             # Modification visuelle
             "set_style", "apply_style", "set_layer_visibility",
