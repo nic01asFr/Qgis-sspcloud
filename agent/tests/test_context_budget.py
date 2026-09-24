@@ -11,7 +11,9 @@ import json
 import os
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
@@ -211,3 +213,42 @@ def test_chaque_tour_journalise_son_budget(monkeypatch, caplog) -> None:
     assert r["n_outils"] == 1 and r["n_historique"] == 1
     assert r["systeme"] > 0 and r["message"] > 0
     assert any("budget contexte session=tour-budget total=" in m for m in caplog.messages)
+
+
+# ── G9 : la portee part bien vers la L2 ──────────────────────────────────────
+
+@pytest.mark.parametrize("session_id, attendu", [
+    ("assist:sid42:cid:c1", "assist_component"),
+    ("study:sid42:recipe:densite_bati", "recipe_run"),
+    ("study:sid42", "desk"),
+    ("5d0c7b1e-uuid-historique", None),   # legacy -> vue desk, sans alerte
+])
+def test_la_portee_est_transmise_au_constructeur_de_contexte(session_id, attendu) -> None:
+    agent = qa.QGISAgent(username="user", session_id=session_id)
+    capture = AsyncMock(return_value="")
+    with patch.object(qa, "_load_profile_prompt", return_value="P"), \
+         patch.object(qa, "_resolve_active_sid", new=AsyncMock(return_value=None)), \
+         patch.object(qa.briques_client, "fetch_briques_rules",
+                      new=AsyncMock(return_value=([], []))), \
+         patch.object(agent, "_fetch_active_study_context",
+                      new=AsyncMock(return_value=(None, None))), \
+         patch.object(agent, "_fetch_project_state", new=AsyncMock(return_value=None)), \
+         patch.object(agent, "_fetch_study_artifacts_summary",
+                      new=AsyncMock(return_value=None)), \
+         patch.object(memory, "get_session_messages", new=AsyncMock(return_value=[])), \
+         patch.object(memory, "get_session_tags",
+                      new=AsyncMock(return_value={"cid": "ancien", "note": "x"})), \
+         patch.object(memory, "build_context_summary", new=capture):
+        _run(agent._build_system_prompt(user_message=None))
+
+    kwargs = capture.await_args.kwargs
+    assert kwargs["context_kind"] == attendu
+    if attendu:
+        # Le session_id prime sur un tag perime ; les autres tags passent.
+        assert kwargs["scope_ids"]["sid"] == "sid42"
+        assert kwargs["scope_ids"].get("note") == "x"
+        if attendu == "assist_component":
+            assert kwargs["scope_ids"]["cid"] == "c1"
+        assert kwargs["hub_url"] == qa._HUB_URL
+    else:
+        assert kwargs["scope_ids"] == {}

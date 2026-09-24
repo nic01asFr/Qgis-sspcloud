@@ -2436,6 +2436,22 @@ ne vient pas d'un outil cette session, la supprimer.
         # Extraction du data_scope depuis le session_id (helper sync, cheap).
         scope = memory.parse_session_id(self.session_id)
 
+        # Chantier G9 : la portee de la session choisit la vue L2 (composant,
+        # assemblage, recette, brouillon). Elle n'etait jamais transmise : la
+        # vue par portee de build_context_summary ne servait donc pas, et un
+        # assistant de composant recevait tout l'etat de l'etude. `legacy`
+        # (UUID historiques) garde la vue desk.
+        context_kind = scope.get("context_kind")
+        if context_kind == "legacy":
+            context_kind = None
+        scope_ids: dict = {}
+        if context_kind:
+            try:
+                scope_ids.update(await memory.get_session_tags(self.session_id))
+            except Exception:
+                pass
+            scope_ids.update(scope)
+
         # Couches 2 + 3 assemblées dans memory.build_context_summary
         ctx = await memory.build_context_summary(
             self.username, self.session_id, self.profile_id,
@@ -2443,6 +2459,10 @@ ne vient pas d'un outil cette session, la supprimer.
             active_study_treatments=active_treats,
             project_state=project_state,
             study_artifacts=study_artifacts,
+            context_kind=context_kind,
+            scope_ids=scope_ids,
+            hub_url=_HUB_URL,
+            hub_key=_HUB_KEY,
         )
 
         # Contexte enrichi spécifique à la requête (si applicable)
