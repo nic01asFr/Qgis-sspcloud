@@ -39,8 +39,29 @@ jobs:
         working-directory: hub
         run: python -m pytest tests/ -q
 
+  # Meme defaut, cote agent : ses 246 tests ne tournaient que sur un poste,
+  # et l'image partait sans eux (strategie qualite, §6 : « agent/tests en
+  # CI », premier point P0). Job a part pour que l'echec designe la brique
+  # fautive, et que l'agent attende ses propres tests en plus de ceux du hub.
+  # Pas de Node ni de QGIS : la suite n'en depend pas.
+  tests-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Dependances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ./agent
+          pip install pytest
+      - name: Suite de l'agent
+        working-directory: agent
+        run: python -m pytest tests/ -q
+
   build-agent:
-    needs: tests
+    needs: [tests, tests-agent]
     runs-on: ubuntu-latest
     permissions:
       contents: read
