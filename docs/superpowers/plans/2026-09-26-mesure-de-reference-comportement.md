@@ -135,3 +135,36 @@ appel au modèle, dont **19 253 pour les 90 schémas d'outils**.
   0,82), y compris d'anciennes conversations : à borner par étude.
 - **D7 — vérificateur de chiffres** absent en production (le « < 5 % »
   inventé a disparu ici par chance, pas par construction).
+
+## Après déploiement du lot qualité 2 (2026-09-26, 07:10-07:25 UTC)
+
+Version : Qgis-sspcloud 2aef1fe (agent et hub, overlays alignés paquets ET
+gabarits), QgisRemoteMCP 2f36a8a. Étude bac-a-sable remise à zéro. Un passage.
+
+| Scénario | Lot 1 | Lot 2 |
+|---|---|---|
+| S1 bâti Aix | 3 appels | 4 appels, 24 s ; étapes repliées en langage courant |
+| S2 périmètre communal | 1 tour perdu (appel écrit en texte) + 3 appels | **2 appels, 23 s**, découpage direct avec l'id lu dans la L2 ; 54 557 ; « dans le rectangle de la zone d'étude » juste ; aucun nom d'outil |
+
+Interface : statut unique replié (« 3 étapes · 24 s »), heure + Copier +
+Relancer, nouvelle conversation sans rechargement (annonce aria-live),
+suggestions en langage courant, onglets Ressources au clavier (flèches,
+aria-selected), barre d'état sans jargon. Budget : ~28 400-29 000 jetons par
+appel, dont 19 300 de schémas d'outils ; L2 de 131 à 358 jetons.
+
+### Défauts restants (lot 3)
+- Noms d'outils et « bbox » encore cités dans la réponse de S1 malgré la règle
+  de prompt : ajouter un garde-fou de sortie (remplacer les noms d'outils
+  connus par leur libellé courant, table `_LIBELLES_OUTILS` déjà disponible).
+- Schémas d'outils = 66 % du contexte : filtrage par phase (lot L3 de la spec
+  sous-agents).
+- Carte écrasée (~380 px) quand Ressources et chat sont ouverts sur un écran
+  de 1 280 px ; bandes noires au-dessus et au-dessous du cadre QGIS.
+- Recettes : « Recette web V0.3.1 · usage : diagnostic_temporel » et titres
+  sans accents viennent des données de recette : correspondance d'affichage.
+- Les overlays contiennent aussi `templates/` : l'empreinte de `/health` ne
+  couvre que les `.py` ; l'étendre aux gabarits (ou supprimer les overlays).
+- Non testé en live par prudence : « Dépublier » puis « Annuler » (irréversible
+  si l'annulation échoue) et « Archiver » puis « Annuler » : à tester sur un
+  livrable et une étude jetables créés pour l'occasion.
+- Banc répété (3 passages) toujours à exécuter : il faut la clé d'accès.
