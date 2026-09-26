@@ -33,6 +33,7 @@ from pathlib import Path
 from agent import memory
 from agent import vector_store
 from agent import embed_worker
+from agent import empreinte_code
 from agent.qgis_agent import QGISAgent
 
 # État partagé du worker d'embedding (lancé au startup, stoppé au shutdown).
@@ -489,6 +490,17 @@ async def shutdown():
 
 # ── Healthcheck ────────────────────────────────────────────────────────────────
 
+# Quel code s'execute : releve une fois, a l'import. L'agent de production
+# charge son paquet depuis un overlay du PVC qui a diverge de l'image
+# (strategie qualite, §3.6) ; le commit de l'image ne suffit plus a dire ce
+# qui tourne. `AGENT_CODE_IMAGE` est pose par Dockerfile.agent.
+_CODE = empreinte_code.releve(
+    Path(__file__).resolve().parent,
+    os.getenv("AGENT_CODE_IMAGE"),
+    os.getenv("AGENT_GIT_SHA"),
+)
+
+
 @app.get("/health")
 async def health():
     return {
@@ -496,6 +508,7 @@ async def health():
         "service":  "qgis-agent",
         "hub_url":  _HUB_URL,
         "profile":  _DEFAULT_PROFILE,
+        "code":     _CODE,
     }
 
 

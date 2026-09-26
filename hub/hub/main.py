@@ -48,6 +48,7 @@ from starlette.websockets import WebSocketDisconnect
 from pathlib import Path
 
 from hub import auth, sessions
+from hub import empreinte_code
 # Alias : une variable locale `scene_layers` (les couches d'une scene)
 # existe deja a deux endroits et masquait le module -- le rendu des cartes
 # echouait sur « 'list' object has no attribute 'origine_donnees' ».
@@ -2214,6 +2215,18 @@ async def mettre_a_jour_les_briques(request: Request):
     return {"redemarre": faits, "hub_differe": hub_differe}
 
 
+# Quel code s'execute : releve une fois, a l'import. Le hub de production
+# charge son paquet depuis un overlay du PVC qui a diverge de l'image
+# (strategie qualite, §3.6) ; le commit et l'empreinte d'image que rend
+# `/version` ne disent plus ce qui tourne. `HUB_CODE_IMAGE` est pose par
+# Dockerfile.hub.
+_CODE = empreinte_code.releve(
+    Path(__file__).resolve().parent,
+    os.getenv("HUB_CODE_IMAGE"),
+    os.getenv("HUB_GIT_SHA"),
+)
+
+
 @app.get("/health")
 async def health():
     return {
@@ -2221,6 +2234,7 @@ async def health():
         "service":   "qgis-mcp-hub",
         "geoai_gpu": bool(_GEOAI_GPU_SERVICE),
         "profiles":  _PROFILES_AVAILABLE,
+        "code":      _CODE,
     }
 
 

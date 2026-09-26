@@ -1369,6 +1369,14 @@ async def build_context_summary(
         )
         layer3.append(f"Projets QGIS récents : {proj_list}")
 
+    # Plafond de la L3 (strategie qualite §3.5) : la memoire n'etait bornee
+    # par rien -- un document « À propos de moi » de plusieurs pages entrait
+    # tout entier a chaque tour. Les elements sont deja ranges par priorite ;
+    # ce qui deborde est coupe et le modele en est averti.
+    if layer3:
+        from agent.context_budget import borner_l3
+        layer3 = borner_l3(layer3)
+
     # ── Couche 2 (étude active + état projet QGIS) ───────────────────────
     layer2 = []
 
@@ -1423,6 +1431,14 @@ async def build_context_summary(
                     "les recettes spatiales)."
                 )
                 layer2.append(zline)
+        elif "study_zone" in project_state:
+            # Le pont a repondu et dit explicitement qu'aucune zone n'est
+            # definie (`study_zone: null`). Sans cette ligne, le modele ne
+            # savait pas s'il manquait la zone ou seulement l'information.
+            layer2.append(
+                "Aucune zone d'étude définie : propose à l'utilisateur de la "
+                "définir (set_study_zone) avant de charger des données."
+            )
 
     # 2b — Méta-étude (côté hub : nom, profil, audit trail)
     if active_study:

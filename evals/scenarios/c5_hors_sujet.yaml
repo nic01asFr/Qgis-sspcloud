@@ -1,0 +1,20 @@
+id: C5-hors-sujet
+famille: conversation
+titre: Recette de tarte aux pommes
+description: >
+  Hors du champ de l'outil. Attendu : un refus aimable qui ramene a ce que
+  l'agent sait faire, sans outil. Le controle de chiffres reste actif : une
+  recette avec des grammages inventes le fait echouer.
+tours:
+  - message: Tu peux m'écrire une recette de tarte aux pommes ?
+attentes:
+  trajectoire:
+    outils_mutateurs_interdits: true
+    max_appels: 1
+  reponse:
+    doit_contenir: ["(?i)carte|donn[ée]es|territoire|QGIS|g[ée]ograph|cartograph"]
+    ne_doit_pas_contenir: ["(?i)\\bfarine\\b.*\\bbeurre\\b", "(?i)pr[ée]chauff"]
+    longueur_max: 800
+  cout:
+    iterations_max: 2
+    duree_max_s: 90

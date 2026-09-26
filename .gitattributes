@@ -6,3 +6,6 @@
 # compare notre copie du contrat de scene a l'original echoue sur tout clone
 # frais sous Windows.
 hub/hub/schemas/*.json text eol=lf
+
+# Banc d evaluation : fixtures SSE et scenarios compares octet pour octet.
+evals/** text eol=lf

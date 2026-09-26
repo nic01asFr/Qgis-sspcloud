@@ -37,6 +37,7 @@ def reasoning_details_html(text: str) -> str:
 from agent import memory
 from agent import native_tools_v2
 from agent import briques_client
+from agent import context_budget
 
 log = logging.getLogger("agent.qgis_agent")
 
@@ -917,6 +918,7 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
     _LONG_RUNNING_TOOLS = {
         "run_recipe":          1800,  # 20+ min serveur, on prend large
         "smart_load":           600,  # WFS download lourds (BD TOPO commune)
+        "clip_to_study_zone":   600,  # decoupe au contour (300 000 batis sur Marseille)
         "execute_python":       900,  # spatial joins sur 100k+ features
         "set_study_zone":       300,
         "export_flood_map":     600,
@@ -1074,6 +1076,7 @@ def _mcp_tool_to_openai(tool: dict) -> dict:
 # (get_*, list_*, export_*) volontairement exclus.
 _MUTATING_TOOLS: frozenset[str] = frozenset({
     "smart_load",
+    "clip_to_study_zone",
     "add_layer",
     "add_from_catalog",
     "remove_layer",
@@ -1589,6 +1592,10 @@ class QGISAgent:
         self._artifacts_cache_sid: str | None = None
         self._artifacts_cache_at: float = 0.0
         self._artifacts_force_refresh: bool = False
+        # Budget de contexte : releve du prompt systeme (pose par
+        # _build_system_prompt) puis du tour complet (pose par chat_stream).
+        self._releve_systeme: dict[str, int] = {}
+        self.dernier_releve_contexte: dict[str, int] = {}
 
     async def _get_tools(self) -> list[dict]:
         if self._tools_cache is None:
@@ -1946,7 +1953,7 @@ class QGISAgent:
    (pas `add_from_catalog`, ni WFS écrit à la main en `execute_python`).
    Lis le bloc `verification` du retour : `feature_count` est le compte
    réel chargé, dans le RECTANGLE de la zone. Un chiffre « dans la
-   commune » exige d'abord un `native:clip` au contour ; un
+   commune » exige d'abord `clip_to_study_zone(layer_id)` ; un
    `avertissement` interdit de présenter un chiffre avant correction.
    Le catalogue contient les sources validées
    pour SSPCloud (IGN Géoplateforme, Géorisques, OSM via WFS officiel,
@@ -2428,6 +2435,25 @@ ne vient pas d'un outil cette session, la supprimer.
         study_artifacts = await artifacts_task
         enrich_results = await enrich_task if enrich_task else []
 
+        # Extraction du data_scope depuis le session_id (helper sync, cheap).
+        scope = memory.parse_session_id(self.session_id)
+
+        # Chantier G9 : la portee de la session choisit la vue L2 (composant,
+        # assemblage, recette, brouillon). Elle n'etait jamais transmise : la
+        # vue par portee de build_context_summary ne servait donc pas, et un
+        # assistant de composant recevait tout l'etat de l'etude. `legacy`
+        # (UUID historiques) garde la vue desk.
+        context_kind = scope.get("context_kind")
+        if context_kind == "legacy":
+            context_kind = None
+        scope_ids: dict = {}
+        if context_kind:
+            try:
+                scope_ids.update(await memory.get_session_tags(self.session_id))
+            except Exception:
+                pass
+            scope_ids.update(scope)
+
         # Couches 2 + 3 assemblées dans memory.build_context_summary
         ctx = await memory.build_context_summary(
             self.username, self.session_id, self.profile_id,
@@ -2435,6 +2461,10 @@ ne vient pas d'un outil cette session, la supprimer.
             active_study_treatments=active_treats,
             project_state=project_state,
             study_artifacts=study_artifacts,
+            context_kind=context_kind,
+            scope_ids=scope_ids,
+            hub_url=_HUB_URL,
+            hub_key=_HUB_KEY,
         )
 
         # Contexte enrichi spécifique à la requête (si applicable)
@@ -2461,12 +2491,9 @@ ne vient pas d'un outil cette session, la supprimer.
             log.warning("briques : exception fetch inattendue (%s) -> vide", exc)
             rules_global, rules_forbidden = [], []
 
-        # Extraction du data_scope depuis le session_id (helper sync, cheap).
-        scope = memory.parse_session_id(self.session_id)
-
         # Composition finale via le composeur pur (section-based).
         context_block = f"{self._QGIS_ESSENTIALS}\n\n{ctx}{enrich_section}"
-        return _compose_prompt_sections(
+        prompt = _compose_prompt_sections(
             identity=profile_prompt,
             rules_global=rules_global,
             rules_forbidden=rules_forbidden,
@@ -2478,6 +2505,22 @@ ne vient pas d'un outil cette session, la supprimer.
             profile_id=self.profile_id,
             directives=directives,
         )
+
+        # Budget de contexte (strategie qualite §3.1) : jetons par section,
+        # complete par chat_stream avec les outils et l'historique.
+        regles_txt = "\n".join(_format_rule_global(b) for b in rules_global)
+        if rules_forbidden:
+            regles_txt += "\n" + _build_forbidden_section(rules_forbidden)
+        self._releve_systeme = context_budget.releve_systeme(
+            prompt,
+            identite=profile_prompt,
+            regles=regles_txt,
+            essentiels=self._QGIS_ESSENTIALS,
+            contexte=ctx,
+            enrichis=enrich_block,
+            directives=directives,
+        )
+        return prompt
 
     async def chat_stream(
         self,
@@ -2520,6 +2563,17 @@ ne vient pas d'un outil cette session, la supprimer.
                 history_for_llm.append({**msg, "content": content})
             messages.extend(history_for_llm)
         messages.append({"role": "user", "content": user_message})
+
+        # Releve du budget de contexte, une ligne par tour. Garde sur l'agent
+        # pour le journal de tour (strategie qualite §5.1).
+        try:
+            self.dernier_releve_contexte = context_budget.releve_tour(
+                self._releve_systeme, tools, messages[1:-1], user_message,
+            )
+            log.info("budget contexte session=%s %s", self.session_id,
+                     context_budget.ligne_journal(self.dernier_releve_contexte))
+        except Exception as exc:  # la mesure ne doit jamais casser un tour
+            log.warning("budget contexte : releve impossible (%s)", exc)
 
         full_response = ""
         tool_calls_made = []
@@ -3197,10 +3251,25 @@ ne vient pas d'un outil cette session, la supprimer.
                         f"contenu). NE GENERE PAS de markdown [texte](url) "
                         f"pointant vers le livrable -- c'est deja fait. <<<"
                     )
+                # Budget du resultat pour le modele (spec qualite §3.1) : un
+                # execute_python bavard ou un get_features avec geometries
+                # partait en entier, des dizaines de milliers de caracteres
+                # relus a chaque iteration. On borne le seul message envoye
+                # au LLM ; `llm_result` reste entier pour les detecteurs
+                # d'infra et de boucle d'erreur ci-dessous.
+                from agent import tool_result_budget
+                llm_content = tool_result_budget.abreger_resultat_outil(
+                    llm_result, fn_name,
+                )
+                if llm_content is not llm_result:
+                    log.info(
+                        "Resultat %s abrege pour le modele : %d -> %d caracteres",
+                        fn_name, len(llm_result), len(llm_content),
+                    )
                 messages.append({
                     "role":         "tool",
                     "tool_call_id": tc["id"],
-                    "content":      llm_result,
+                    "content":      llm_content,
                 })
 
                 # Détection bridge dégradé : 2+ tools différents qui échouent
@@ -3441,7 +3510,7 @@ ne vient pas d'un outil cette session, la supprimer.
         # Tout le reste (list/get/save/read metadata) est non-visuel.
         _VISUAL_TOOLS = {
             # Chargement de donnees / couches
-            "load_layer", "smart_load", "set_study_zone",
+            "load_layer", "smart_load", "clip_to_study_zone", "set_study_zone",
             "load_vector", "load_raster", "load_wms", "load_wfs",
             # Modification visuelle
             "set_style", "apply_style", "set_layer_visibility",

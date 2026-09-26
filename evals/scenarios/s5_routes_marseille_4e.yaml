@@ -1,0 +1,33 @@
+id: S5-routes-marseille-4e
+famille: fidelite_territoriale
+titre: Routes du 4e arrondissement de Marseille
+source: plan comportements spatiaux, S5
+description: >
+  Sous-zone : l'arrondissement, pas la ville entiere. La zone et la couche de
+  routes doivent tenir dans l'emprise du 4e (quartiers Chartreux, Cinq
+  Avenues, Chutes-Lavie, Blancarde), avec une marge.
+preconditions:
+  vider_projet: true
+tours:
+  - message: Montre-moi les routes dans le 4e arrondissement de Marseille.
+attentes:
+  trajectoire:
+    outils_attendus:
+      - {outil: set_study_zone, si_arguments: "(?i)\\b4\\s*(e|ème|eme)?\\b|quatri|IV"}
+      - un_de: [smart_load, add_from_catalog]
+    ordre:
+      - [set_study_zone, {un_de: [smart_load, add_from_catalog]}]
+  etat:
+    zone:
+      bbox_dans: [5.37, 43.29, 5.44, 43.33]
+      tolerance_km: 0.5
+    couches:
+      - motif: "route|tron[cç]on|voie|voirie"
+        nombre_entites: {min: 50, max: 20000}
+        emprise_dans: [5.37, 43.29, 5.44, 43.33]
+        tolerance_km: 0.5
+  reponse:
+    chiffres_tracables: true
+  cout:
+    iterations_max: 8
+    duree_max_s: 600

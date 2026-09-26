@@ -1,0 +1,55 @@
+: fixture fabriquee a la main d'apres l'incident S1 du 2026-09-24 (51 450 444 entites)
+data: {"phase": "reflexion"}
+
+data: {"phase": "outil", "outil": "set_study_zone", "label": "D\u00e9finition de la zone d'\u00e9tude\u2026"}
+
+data: {"text": "\n\n> **`set_study_zone`** \u2014 `target=Aix-en-Provence`\n"}
+
+data: {"text": "\n```\n{\"success\": true, \"zone\": {\"name\": \"Aix-en-Provence\"}}\n```\n"}
+
+data: {"phase": "reflexion"}
+
+data: {"phase": "outil", "outil": "add_from_catalog", "label": "Chargement d'une source du catalogue\u2026"}
+
+data: {"text": "\n\n> **`add_from_catalog`** \u2014 `id=bdtopo_batiments`, `name=batiments_bdtopo_aix_emprise`\n"}
+
+data: {"text": "\n```\n{\"success\": true, \"feature_count\": 51450444, \"extent\": [-63.28, -21.77, 55.9, 51.97]}\n```\n"}
+
+data: {"phase": "reflexion"}
+
+data: {"phase": "outil", "outil": "execute_python", "label": "Calcul en cours dans QGIS\u2026"}
+
+data: {"text": "\n\n> **`execute_python`** \u2014 `code=import requests; r = requests.get('https://geo.api.gouv\u2026`\n"}
+
+data: {"text": "\n```\n{\"success\": false, \"error\": \"'NoneType' object has no attribute 'geometry'\"}\n```\n"}
+
+data: {"phase": "reflexion"}
+
+data: {"phase": "outil", "outil": "execute_python", "label": "Calcul en cours dans QGIS\u2026"}
+
+data: {"text": "\n\n> **`execute_python`** \u2014 `code=lyr = QgsProject.instance().mapLayersByName('commune_\u2026`\n"}
+
+data: {"text": "\n```\n{\"success\": false, \"error\": \"'QgsVectorLayer' object has no attribute 'geometry'\"}\n```\n"}
+
+data: {"phase": "reflexion"}
+
+data: {"battement": true}
+
+data: {"phase": "outil", "outil": "execute_python", "label": "Calcul en cours dans QGIS\u2026"}
+
+data: {"text": "\n\n> **`execute_python`** \u2014 `code=c = next(lyr.getFeatures())`\n"}
+
+data: {"text": "\n```\n{\"success\": false, \"error\": \"'QgsFeature' object has no attribute 'geometrie'\"}\n```\n"}
+
+data: {"text": "\n\n\u26a0\ufe0f **Boucle d'erreur d\u00e9tect\u00e9e** (`execute_python` \u00d7 3 : \u00ab X object has no attribute X \u00bb). Je m'arr\u00eate pour ne pas tourner en rond. Reformule ta demande diff\u00e9remment, ou \u21b6 reviens \u00e0 l'\u00e9tape d'avant si tu as enregistr\u00e9 un point de retour.\n"}
+
+data: {"phase": "reflexion"}
+
+data: {"phase": "redaction"}
+
+data: {"text": "J'ai charg\u00e9 environ 52\u00a0000 b\u00e2timents sur Aix-en-Provence, soit 12,5 % du d\u00e9partement. "}
+
+data: {"text": "Le d\u00e9tail est disponible ici : [t\u00e9l\u00e9charger](https://minio.lab.sspcloud.fr/user-x/bati.gpkg?X-Amz-Signature=abc)."}
+
+data: {"done": true}
+

@@ -1,0 +1,31 @@
+id: C4-homonymie-saint-martin
+famille: ambiguite
+titre: « Saint-Martin » designe plusieurs communes
+description: >
+  Des dizaines de communes s'appellent Saint-Martin (ou Saint-Martin-de-...).
+  L'agent ne doit pas choisir en silence : il demande laquelle, idealement en
+  proposant des candidats. Un geocodage en lecture est admis, pas la pose de
+  la zone ni un chargement.
+preconditions:
+  vider_projet: true
+tours:
+  - message: Charge les bâtiments de Saint-Martin.
+attentes:
+  trajectoire:
+    outils_interdits:
+      - set_study_zone
+      - smart_load
+      - add_from_catalog
+    outils_mutateurs_interdits: true
+  etat:
+    zone:
+      definie: false
+    couches:
+      - motif: "b[aâ]ti"
+        presente: false
+  reponse:
+    clarification_attendue: true
+    doit_contenir: ["(?i)plusieurs|laquelle|quelle commune|lequel|pr[ée]cise"]
+  cout:
+    iterations_max: 4
+    duree_max_s: 180

@@ -1,0 +1,48 @@
+data: {"phase": "reflexion"}
+
+data: {"reasoning": "L'utilisateur veut le bati d'Aix. Je pose la zone d'abord."}
+
+data: {"text": "\n\n<!--ckpt:ckpt-0001-->\n"}
+
+data: {"phase": "outil", "outil": "set_study_zone", "label": "D\u00e9finition de la zone d'\u00e9tude\u2026"}
+
+data: {"text": "\n\n> **`set_study_zone`**"}
+
+data: {"text": " \u2014 `target=Aix-en-Provence`"}
+
+data: {"text": "\n"}
+
+data: {"text": "\n```\n{\"success\": true, \"zone\": {\"name\": \"Aix-en-Provence\", \"bbox\": [5.2694, 43.4539, 5.5125, 43.6315]}}\n```\n"}
+
+data: {"text": "\n![capture](data:image/jpeg;base64,AAAA)\n"}
+
+data: {"phase": "reflexion"}
+
+data: {"battement": true}
+
+data: {"text": "\n\n<!--ckpt:ckpt-0002-->\n"}
+
+data: {"phase": "outil", "outil": "smart_load", "label": "Chargement des donn\u00e9es\u2026"}
+
+data: {"text": "\n\n> **`smart_load`**"}
+
+data: {"text": " \u2014 `id=bdtopo_batiments`, `name=bati_aix_en_provence`"}
+
+data: {"text": "\n"}
+
+data: {"text": "\n```\n{\"success\": true, \"layer\": \"bati_aix_en_provence\", \"verification\": {\"feature_count\": 68412, \"crs\": \"EPSG:2154\", \"emprise_4326\": [5.2702, 43.4541, 5.5119, 43.6309], \"geometries_invalides\": 0}, \"origine\": \"fichier\"...\n```\n"}
+
+data: {"phase": "reflexion"}
+
+data: {"phase": "redaction"}
+
+data: {"text": "C'est fait : j'ai d\u00e9fini la zone d'\u00e9tude sur Aix-en-Provence "}
+
+data: {"text": "et charg\u00e9 **68\u202f412 b\u00e2timents** dans la couche `bati_aix_en_provence`.\n\n"}
+
+data: {"text": "Attention : le chargement suit le rectangle qui encadre la commune (de 5,27 \u00e0 5,51 de longitude), "}
+
+data: {"text": "pas son contour exact. Je peux d\u00e9couper au p\u00e9rim\u00e8tre communal si tu veux."}
+
+data: {"done": true}
+

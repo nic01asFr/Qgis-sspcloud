@@ -1,0 +1,9 @@
+: agent sans evenements de phase : les outils ne se lisent que dans le texte
+data: {"text": "Je regarde le projet.\n\n> **`get_project_info`**\n"}
+
+data: {"text": "\n```\n{\"layers\": [{\"name\": \"routes\", \"feature_count\": 1234}]}\n```\n"}
+
+data: {"text": "\nLe projet contient une couche de routes avec 1\u00a0234 tron\u00e7ons."}
+
+data: {"done": true}
+
