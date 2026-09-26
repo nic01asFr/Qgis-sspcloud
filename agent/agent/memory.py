@@ -1320,6 +1320,7 @@ async def build_context_summary(
     scope_ids: dict | None = None,
     hub_url: str | None = None,
     hub_key: str | None = None,
+    study_documents: dict | None = None,
 ) -> str:
     """
     Phase 4 : construit un résumé en 3 couches pour l'system prompt LLM.
@@ -1362,6 +1363,10 @@ async def build_context_summary(
     complémentaires du client ``hub_scope_client`` (historique composant,
     composants d'un assembly). Absents → sections d'enrichissement
     vides mais fail-soft (le prompt reste valide).
+
+    study_documents (lot L7) : resume des documents de l'etude
+    (``documents_etude.resume_documents``) ; une ligne courte en L2 s'il y
+    en a, rien sinon.
 
     BACKWARD-COMPAT : les appelants qui ne passent aucun des 4 nouveaux
     paramètres retrouvent exactement le comportement historique.
@@ -1567,6 +1572,13 @@ async def build_context_summary(
                     for t in sig[-3:]
                 )
                 layer2.append(f"Derniers traitements : {last_str}")
+
+    # 2b bis — Documents d'etude consultables (lot L7) : une ligne, pas plus.
+    if active_study and study_documents:
+        from agent.documents_etude import ligne_l2
+        _ligne_docs = ligne_l2(study_documents)
+        if _ligne_docs:
+            layer2.append(_ligne_docs)
 
     # ── Couche 2c (Sprint Composants V1.5 — composants/assemblages) ───────
     # Append à layer2 pour cohérence visuelle dans la section "Étude en cours".

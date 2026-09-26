@@ -168,5 +168,6 @@ def test_livrables_recherche_filtre_tri() -> None:
 
 
 def test_emplacement_documents_de_l_etude_pour_t5() -> None:
-    assert 'id="src-section-documents"' in _DESK
-    assert 'data-emplacement="documents-etude" hidden' in _DESK
+    # L'emplacement reserve a ete rempli par le lot L7 (corpus documentaire) :
+    # le bloc autonome est inclus a cet endroit de l'onglet Sources.
+    assert '{% include "_documents_etude.html" %}' in _DESK
