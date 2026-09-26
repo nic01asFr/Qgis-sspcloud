@@ -73,6 +73,8 @@ try:
     _STUDIES_AVAILABLE = True
 except ImportError:
     _STUDIES_AVAILABLE = False
+from hub import documents_api  # noqa: E402  (corpus documentaire, lot L7)
+from hub import documents_etude  # noqa: E402
 try:
     from hub import briques_loader
     _BRIQUES_AVAILABLE = True
@@ -10123,8 +10125,17 @@ async def delete_study_endpoint(
         except Exception as exc:
             log.warning("Purge layout étude %s : %s", sid, exc)
         await studies.purge_study(sid)
+        # Corpus documentaire (volume du hub) : purge avec l'etude.
+        try:
+            documents_etude.supprimer_etude(sid)
+        except Exception as exc:
+            log.warning("Purge documents étude %s : %s", sid, exc)
     else:
         await studies.archive_study(sid)
+
+
+# Corpus documentaire de l'etude (lot L7) : routes /studies/{sid}/documents.
+app.include_router(documents_api.router)
 
 
 @app.get("/studies/{sid}/treatments")
