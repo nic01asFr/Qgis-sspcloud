@@ -1121,6 +1121,42 @@ def _workspace_internal_host() -> str:
     return f"qgis-workspace-{user}.{ns}.svc.cluster.local"
 
 
+# Libelles d'affichage des cas d'usage des recettes web. Les identifiants
+# (`diagnostic_temporel`...) restent ceux des YAML et des exemples de schema ;
+# seule la carte de la galerie les traduit. Un identifiant inconnu est
+# humanise (tirets bas en espaces) plutot qu'affiche brut.
+_LIBELLES_USAGE_RECETTE = {
+    "diagnostic_temporel": "diagnostic dans le temps",
+    "corpus_documentaire": "corpus documentaire",
+    "choropleth_demographique": "carte démographique par zones",
+    "heatmap_rag": "carte de chaleur",
+    "timeline_overlay_simple": "frise chronologique sur carte",
+    "multi_layers_narrative": "récit à plusieurs couches",
+    "maquette_3d": "maquette 3D",
+    "validation_terrain": "validation terrain",
+}
+
+
+def _description_carte_recette(recette: dict) -> str:
+    """Ligne courte en francais courant pour la carte d'une recette web.
+
+    Le YAML peut porter sa propre `description` ; a defaut on la derive des
+    cas d'usage. La version du format (V0.3.1) n'est pas montree : elle ne
+    dit rien a l'utilisateur et vieillit a chaque evolution du format.
+    """
+    propre = str(recette.get("description") or "").strip()
+    if propre:
+        return propre
+    usages = [
+        _LIBELLES_USAGE_RECETTE.get(u, str(u).replace("_", " ").strip())
+        for u in (recette.get("use_cases") or [])
+        if str(u).strip()
+    ]
+    if usages:
+        return "Usage : " + ", ".join(usages)
+    return "Enchaînement d'étapes automatisé."
+
+
 def _inject_vnc_desk_embed(html: str) -> str:
     """Masque le chrome noVNC (top_bar, CtrlAltDel) pour l'embed /desk.
 
@@ -1675,16 +1711,7 @@ async def _desk_context() -> dict:
             _r2["session_hint"] = (
                 f"study:{_sid_hint}:recipe:{_r2.get('id')}"
             )
-            # Description synthetique (le YAML V0.3.1 n'a pas encore de
-            # champ description ; on derive une ligne courte a partir du
-            # title + des use_cases pour la card).
-            _uc = _r2.get("use_cases") or []
-            if _uc:
-                _r2["description"] = (
-                    f"Recette web V0.3.1 · usage : {', '.join(_uc)}"
-                )
-            else:
-                _r2["description"] = "Recette deterministe web V0.3.1"
+            _r2["description"] = _description_carte_recette(_r2)
             _recipes_ctx.append(_r2)
         ctx["recipes"] = _recipes_ctx
     except Exception as _exc:
@@ -2756,14 +2783,8 @@ async def gallery_recipes_web_endpoint(
     for r in entries:
         rid = r.get("id")
         title = r.get("title") or rid
-        # Fallback description : le YAML V0.3.1 n'a pas encore de champ
-        # description. On synthetise une ligne courte a partir du title +
-        # des use_cases pour donner du contexte a l'user dans la card.
         use_cases = r.get("use_cases") or []
-        if use_cases:
-            desc = f"Recette web V0.3.1 · usage : {', '.join(use_cases)}"
-        else:
-            desc = "Recette deterministe web V0.3.1"
+        desc = _description_carte_recette(r)
         out.append({
             "id":            rid,
             "title":         title,
