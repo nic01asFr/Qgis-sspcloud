@@ -38,6 +38,7 @@ from agent import memory
 from agent import native_tools_v2
 from agent import briques_client
 from agent import context_budget
+from agent import paquets_outils
 from agent import texte_modele
 
 log = logging.getLogger("agent.qgis_agent")
@@ -1567,6 +1568,16 @@ _LIBELLES_OUTILS = {
 }
 
 
+_RE_ETAT_VERSION = re.compile(r'"etat_version"\s*:\s*"([^"]{1,64})"')
+
+
+def _lire_etat_version(resultat: str | None) -> str | None:
+    """`etat_version` du `_context` d'un resultat d'outil, si le workspace
+    la fournit (spec L3 §3.1 ; absente avant la facade dynamique)."""
+    m = _RE_ETAT_VERSION.search(resultat or "")
+    return m.group(1) if m else None
+
+
 def _libelle_outil(nom: str) -> str:
     return _LIBELLES_OUTILS.get(nom, "Action en cours dans QGIS…")
 
@@ -1615,9 +1626,26 @@ class QGISAgent:
         # _build_system_prompt) puis du tour complet (pose par chat_stream).
         self._releve_systeme: dict[str, int] = {}
         self.dernier_releve_contexte: dict[str, int] = {}
+        # Outils par paquets (lot L3) : portee de la session (posee par
+        # _build_system_prompt), version de la liste complete (incrementee a
+        # chaque rechargement) et cache des selections par signature
+        # (version, paquets) : recalculer a chaque tour ne coute rien.
+        self._context_kind: str | None = None
+        self._outils_version: int = 0
+        self._cache_selection: dict[tuple, list[dict]] = {}
+        self._etat_version: str | None = None
+        self._paquets_tour: set[str] = set()
+        # Evenements du filet, pour le journal de tour et les tests.
+        self.evenements_filet: list[dict] = []
 
     async def _get_tools(self) -> list[dict]:
+        """Liste COMPLETE des outils autorises par le profil (borne superieure).
+
+        Le modele n'en voit qu'une partie : cf. ``_outils_exposes``.
+        """
         if self._tools_cache is None:
+            self._outils_version += 1
+            self._cache_selection.clear()
             mcp_tools = await _get_mcp_tools(self.profile_id)
             self._tools_cache = [_mcp_tool_to_openai(t) for t in mcp_tools]
             # Outils natifs mémoire : exposés à l'agent comme n'importe quel
@@ -1654,6 +1682,107 @@ class QGISAgent:
                         if t.get("function", {}).get("name") in whitelist
                     ])
         return self._tools_cache
+
+    # ── Outils exposes par paquets (lot L3) ──────────────────────────────────
+
+    def _filtrage_par_paquets(self) -> bool:
+        """Vrai si le modele ne voit qu'un sous-ensemble des outils du profil.
+
+        Un profil a liste blanche explicite (storymap, guided_tour, geoai...)
+        a deja une liste courte et choisie pour son metier : on la sert telle
+        quelle. Le filtrage vise les profils « all » (standard, risk_analyst,
+        db_analyst), soit 90 outils et 19 300 jetons mesures le 2026-09-26.
+        """
+        if not paquets_outils.filtrage_actif():
+            return False
+        whitelist = _get_profile_tools_whitelist(self.profile_id)
+        return not whitelist
+
+    def _paquets_du_tour(self, user_message: str | None,
+                         history: list[dict] | None,
+                         noms_connus: set[str]) -> set[str]:
+        """Paquets du tour : intention, profil et portee, usage recent."""
+        paquets = paquets_outils.paquets_par_intention(user_message)
+        paquets |= paquets_outils.paquets_par_etat(self.profile_id, self._context_kind)
+        recents = (history or [])[-6:]
+        # Continuite : la demande precedente de l'utilisateur (« fais une
+        # storymap » puis « ajoute un titre »).
+        precedents_user = [m for m in recents if m.get("role") == "user"][-1:]
+        for m in precedents_user:
+            paquets |= paquets_outils.paquets_par_intention(m.get("content") or "")
+        # Usage : le memo des actions de l'historique cite les outils appeles.
+        cites = paquets_outils.outils_cites(
+            ((m.get("content") or "") for m in recents
+             if m.get("role") in ("assistant", "tool")),
+            noms_connus,
+        )
+        paquets |= paquets_outils.paquets_par_usage(cites)
+        return paquets
+
+    async def _outils_exposes(self, paquets: set[str]) -> list[dict]:
+        """Outils envoyes au modele : socle + paquets, bornes par le profil.
+
+        Cache par signature (version de la liste complete, paquets). Ajoute
+        ``demander_outils`` des qu'un outil du profil est masque.
+        """
+        complets = await self._get_tools()
+        if not self._filtrage_par_paquets():
+            return complets
+        cle = (self._outils_version, frozenset(paquets))
+        sel = self._cache_selection.get(cle)
+        if sel is None:
+            sel = paquets_outils.selectionner(complets, paquets)
+            if len(sel) < len(complets):
+                sel = sel + [paquets_outils.schema_demander_outils()]
+            self._cache_selection[cle] = sel
+        return sel
+
+    async def _recharger_outils(self) -> None:
+        """Vide le cache de la liste complete (changement d'etat QGIS).
+
+        Si le hub ne rend plus aucun outil (erreur reseau passagere), on
+        garde l'ancienne liste plutot que de priver le modele de ses outils
+        au milieu d'un tour.
+        """
+        ancien = self._tools_cache
+        self._tools_cache = None
+        try:
+            nouveau = await self._get_tools()
+        except Exception as exc:  # jamais d'echec du tour pour ca
+            log.warning("rechargement des outils impossible (%s)", exc)
+            nouveau = []
+        natifs = {
+            paquets_outils.nom_outil(o)
+            for o in (*_NATIVE_MEMORY_TOOLS, *_NATIVE_RECIPE_TOOLS,
+                      *native_tools_v2.NATIVE_TOOLS_V2_OPENAI)
+        }
+        if ancien and not any(paquets_outils.nom_outil(o) not in natifs
+                              for o in (nouveau or [])):
+            log.warning("rechargement des outils : liste du hub vide, "
+                        "ancienne liste conservee")
+            self._tools_cache = ancien
+            self._outils_version += 1
+            self._cache_selection.clear()
+
+    async def _ajouter_paquets_outil(self, outil: str, evenement: str) -> list[dict]:
+        """Expose le paquet d'un outil masque pour la suite du tour."""
+        paquet = paquets_outils.paquet_de(outil)
+        if paquet in paquets_outils.PAQUETS:
+            self._paquets_tour.add(paquet)
+        self._noter_filet(evenement, outil, paquet=paquet or "-")
+        tools = await self._outils_exposes(self._paquets_tour)
+        if outil not in {paquets_outils.nom_outil(t) for t in tools}:
+            # Outil masque sans paquet connu (cas impossible aujourd'hui) :
+            # on rend la liste complete plutot que de le perdre.
+            tools = await self._get_tools()
+        return tools
+
+    def _noter_filet(self, evenement: str, outil: str, **detail) -> None:
+        """Journalise un passage par le filet (indicateur de reglage des paquets)."""
+        ev = {"evenement": evenement, "outil": outil, **detail}
+        self.evenements_filet.append(ev)
+        log.warning("filet outils session=%s %s", self.session_id,
+                    " ".join(f"{k}={v}" for k, v in ev.items()))
 
     async def set_profile(self, new_profile_id: str) -> None:
         """
@@ -2469,6 +2598,7 @@ ne vient pas d'un outil cette session, la supprimer.
         context_kind = scope.get("context_kind")
         if context_kind == "legacy":
             context_kind = None
+        self._context_kind = context_kind
         scope_ids: dict = {}
         if context_kind:
             try:
@@ -2564,7 +2694,18 @@ ne vient pas d'un outil cette session, la supprimer.
         await memory.add_message(self.session_id, "user", user_message)
 
         system_prompt = await self._build_system_prompt(user_message=user_message)
-        tools         = await self._get_tools()
+        # Lot L3 : le modele voit le socle et les paquets du tour, pas les 90
+        # outils du profil (19 300 jetons mesures le 2026-09-26). La liste
+        # complete reste la borne du filet d'execution.
+        outils_profil = await self._get_tools()
+        noms_profil = {paquets_outils.nom_outil(t) for t in (outils_profil or [])
+                       if isinstance(t, dict)}
+        self._paquets_tour = self._paquets_du_tour(user_message, history, noms_profil)
+        tools = await self._outils_exposes(self._paquets_tour)
+        if len(tools) != len(outils_profil or []):
+            log.info("outils exposes session=%s paquets=%s n=%d/%d",
+                     self.session_id, ",".join(sorted(self._paquets_tour)) or "-",
+                     len(tools), len(outils_profil or []))
 
         # Construire les messages
         messages = [{"role": "system", "content": system_prompt}]
@@ -2599,6 +2740,7 @@ ne vient pas d'un outil cette session, la supprimer.
         try:
             self.dernier_releve_contexte = context_budget.releve_tour(
                 self._releve_systeme, tools, messages[1:-1], user_message,
+                outils_profil=outils_profil,
             )
             log.info("budget contexte session=%s %s", self.session_id,
                      context_budget.ligne_journal(self.dernier_releve_contexte))
@@ -2622,7 +2764,9 @@ ne vient pas d'un outil cette session, la supprimer.
         relance_budget_faite = False
         # Une seule relance quand le modele ecrit un appel en texte (D1).
         relance_appel_ecrit_faite = False
-        noms_outils = {
+        # Tous les outils du profil, exposes ou non : un appel ecrit en texte
+        # vers un outil masque par les paquets est aussi un appel manque.
+        noms_outils = noms_profil | {
             (t.get("function") or {}).get("name")
             for t in (tools or []) if isinstance(t, dict)
         }
@@ -2890,6 +3034,10 @@ ne vient pas d'un outil cette session, la supprimer.
                     yield {"retirer_texte": chunk_text}
                     if not relance_appel_ecrit_faite:
                         relance_appel_ecrit_faite = True
+                        # L'outil ecrit peut etre masque par les paquets : on
+                        # l'expose pour la relance, sinon elle echoue encore.
+                        if outil_ecrit not in {paquets_outils.nom_outil(t) for t in tools}:
+                            tools = await self._ajouter_paquets_outil(outil_ecrit, "appel_ecrit")
                         yield {"phase": "relance", "label": "Je lance l'action…"}
                         messages.append({"role": "assistant", "content": chunk_brut})
                         messages.append({"role": "system",
@@ -3025,6 +3173,43 @@ ne vient pas d'un outil cette session, la supprimer.
                     fn_args = json.loads(tc["function"]["arguments"] or "{}")
                 except Exception:
                     fn_args = {}
+
+                # ── Filet des paquets d'outils (lot L3) ──────────────────
+                # demander_outils : traite ici, sans hub ni affichage ; il
+                # elargit la liste pour la suite du tour.
+                if fn_name == paquets_outils.OUTIL_DEMANDER:
+                    besoin = str(fn_args.get("besoin") or "")
+                    ajout = paquets_outils.paquets_pour_besoin(besoin)
+                    avant = {paquets_outils.nom_outil(t) for t in tools}
+                    self._paquets_tour |= ajout
+                    tools = await self._outils_exposes(self._paquets_tour)
+                    nouveaux = sorted({paquets_outils.nom_outil(t) for t in tools} - avant)
+                    self._noter_filet("demande", fn_name, besoin=besoin[:80],
+                                      paquets=",".join(sorted(ajout)),
+                                      ajoutes=len(nouveaux))
+                    messages.append({
+                        "role":         "tool",
+                        "tool_call_id": tc["id"],
+                        "content":      json.dumps({
+                            "success": True,
+                            "paquets": sorted(ajout),
+                            "outils_ajoutes": nouveaux,
+                            "note": ("Ces outils sont disponibles des maintenant."
+                                     if nouveaux else
+                                     "Ces outils etaient deja disponibles."),
+                        }, ensure_ascii=False),
+                    })
+                    continue
+                # Outil connu du profil mais masque : on l'execute quand meme
+                # (jamais d'echec pour un outil legitime) et on expose son
+                # paquet pour la suite du tour. Hors profil : comportement
+                # d'avant (le hub tranche), mais c'est journalise.
+                if fn_name not in {paquets_outils.nom_outil(t) for t in tools}:
+                    if fn_name in noms_profil:
+                        tools = await self._ajouter_paquets_outil(fn_name, "hors_liste")
+                    else:
+                        self._noter_filet("hors_profil", fn_name,
+                                          profil=self.profile_id)
 
                 # ── Hook checkpoint pré-mutating ───────────────────────────
                 # Avant chaque tool modifiant l'état projet, on demande au hub
@@ -3237,6 +3422,22 @@ ne vient pas d'un outil cette session, la supprimer.
                     result = result + zone_warning
 
                 tool_calls_made.append({"tool": fn_name, "args": fn_args, "result": result[:200]})
+
+                # Invalidation des outils (spec L3 §3.3) : un changement de
+                # zone, d'etude ou de projet, ou une `etat_version` nouvelle
+                # dans le `_context` du resultat, rechargent la liste pour
+                # l'iteration suivante du meme tour.
+                etat_version = _lire_etat_version(result)
+                version_changee = (etat_version is not None
+                                   and self._etat_version is not None
+                                   and etat_version != self._etat_version)
+                if etat_version is not None:
+                    self._etat_version = etat_version
+                if fn_name in paquets_outils.OUTILS_INVALIDANTS or version_changee:
+                    await self._recharger_outils()
+                    tools = await self._outils_exposes(self._paquets_tour)
+                    log.info("outils recalcules apres %s (etat_version=%s) : %d exposes",
+                             fn_name, etat_version or "-", len(tools))
 
                 # Sprint UX-3 (2026-06-21) : append history.jsonl du projet
                 # actif (fire-and-forget). Source primaire pour macros futures.
