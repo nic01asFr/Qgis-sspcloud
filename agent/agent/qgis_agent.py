@@ -2691,6 +2691,41 @@ ne vient pas d'un outil cette session, la supprimer.
                     )
                     reasoning_saved = True
 
+            # Garde-fou de sortie (lot 3, mesure live du 2026-09-26) : noms
+            # d'outils et « bbox » remplaces par leur libelle courant dans le
+            # texte VISIBLE. Le nettoyeur retient ~3 jetons en fin de tampon
+            # pour ne pas couper un nom entre deux fragments SSE ; il est vide
+            # en fin de flux. `chunk_brut` garde le texte avant cette
+            # reecriture : c'est lui que lisent la detection d'appel ecrit en
+            # texte (D1) et les messages renvoyes au modele pendant le tour.
+            nettoyeur = texte_modele.NettoyeurSortie(noms_outils)
+            chunk_brut = ""
+
+            def _texte_visible(clean: str) -> list:
+                """Evenements a emettre pour un morceau de texte deja nettoye."""
+                nonlocal chunk_text, full_response, texte_emis
+                if not clean:
+                    return []
+                evenements: list = []
+                _flush_reasoning()
+                if not chunk_text:
+                    evenements.append({"phase": "redaction"})
+                    # Apres un outil, la reponse doit ouvrir un
+                    # paragraphe. Collee a la ligne precedente,
+                    # elle devient en Markdown la SUITE de la
+                    # citation qui annonce l'outil -- citation
+                    # masquee avec les details techniques : la
+                    # premiere phrase disparaissait avec elle.
+                    if tool_calls_made and not full_response.endswith("\n\n"):
+                        _sep = "\n\n" if not full_response.endswith("\n") else "\n"
+                        full_response += _sep
+                        evenements.append(_sep)
+                chunk_text += clean
+                full_response += clean
+                texte_emis = True
+                evenements.append(clean)
+                return evenements
+
             async with httpx.AsyncClient(timeout=120) as client:
                 async with client.stream(
                     "POST",
@@ -2804,24 +2839,9 @@ ne vient pas d'un outil cette session, la supprimer.
                                 # orange vus en live le 2026-09-26).
                                 # Chiffres jamais touches.
                                 clean = texte_modele.retirer_emojis(clean)
-                                if clean:
-                                    _flush_reasoning()
-                                    if not chunk_text:
-                                        yield {"phase": "redaction"}
-                                        # Apres un outil, la reponse doit ouvrir un
-                                        # paragraphe. Collee a la ligne precedente,
-                                        # elle devient en Markdown la SUITE de la
-                                        # citation qui annonce l'outil -- citation
-                                        # masquee avec les details techniques : la
-                                        # premiere phrase disparaissait avec elle.
-                                        if tool_calls_made and not full_response.endswith("\n\n"):
-                                            _sep = "\n\n" if not full_response.endswith("\n") else "\n"
-                                            full_response += _sep
-                                            yield _sep
-                                    chunk_text += clean
-                                    full_response += clean
-                                    texte_emis = True
-                                    yield clean
+                                chunk_brut += clean
+                                for _ev in _texte_visible(nettoyeur.pousser(clean)):
+                                    yield _ev
 
                             # Tool calls (accumulation)
                             for tc in delta.get("tool_calls", []):
@@ -2842,6 +2862,9 @@ ne vient pas d'un outil cette session, la supprimer.
                         except Exception:
                             pass
 
+            # Fin du flux : ce que le nettoyeur retenait encore s'affiche.
+            for _ev in _texte_visible(nettoyeur.vider()):
+                yield _ev
             _flush_reasoning()
 
             final_finish_reason = finish_reason
@@ -2854,7 +2877,7 @@ ne vient pas d'un outil cette session, la supprimer.
                 # live du 2026-09-26) : clore le tour laissait l'utilisateur
                 # sans action ni message. On retire ce faux appel de la reponse
                 # (persistance et affichage) et on relance UNE fois.
-                outil_ecrit = texte_modele.appel_ecrit_en_texte(chunk_text, noms_outils)
+                outil_ecrit = texte_modele.appel_ecrit_en_texte(chunk_brut, noms_outils)
                 if outil_ecrit:
                     log.warning(
                         "Appel d'outil ecrit en texte (%s, iter=%d, session=%s)%s",
@@ -2868,7 +2891,7 @@ ne vient pas d'un outil cette session, la supprimer.
                     if not relance_appel_ecrit_faite:
                         relance_appel_ecrit_faite = True
                         yield {"phase": "relance", "label": "Je lance l'action…"}
-                        messages.append({"role": "assistant", "content": chunk_text})
+                        messages.append({"role": "assistant", "content": chunk_brut})
                         messages.append({"role": "system",
                                          "content": _CONSIGNE_APPEL_ECRIT})
                         continue
@@ -2935,6 +2958,10 @@ ne vient pas d'un outil cette session, la supprimer.
                                         "Content-Type":  "application/json",
                                     }
                                 ) as resp_f:
+                                    # Meme garde-fou de sortie que le flux
+                                    # principal (lot 3) : ce recap est lu
+                                    # par l'utilisateur comme le reste.
+                                    nett_f = texte_modele.NettoyeurSortie(noms_outils)
                                     async for line in resp_f.aiter_lines():
                                         if not line.startswith("data: "):
                                             continue
@@ -2944,11 +2971,16 @@ ne vient pas d'un outil cette session, la supprimer.
                                         try:
                                             d = json.loads(data)
                                             ct = d["choices"][0].get("delta", {}).get("content") or ""
+                                            ct = nett_f.pousser(texte_modele.retirer_emojis(ct))
                                             if ct:
                                                 full_response += ct
                                                 yield ct
                                         except Exception:
                                             pass
+                                    ct = nett_f.vider()
+                                    if ct:
+                                        full_response += ct
+                                        yield ct
                         except Exception:
                             fb = (
                                 "\n\n_J'ai exécuté quelques actions mais je n'ai "
@@ -2983,7 +3015,7 @@ ne vient pas d'un outil cette session, la supprimer.
             tool_calls = list(tool_call_data.values())
             messages.append({
                 "role":       "assistant",
-                "content":    chunk_text or None,
+                "content":    chunk_brut or None,
                 "tool_calls": tool_calls,
             })
 
@@ -3445,6 +3477,8 @@ ne vient pas d'un outil cette session, la supprimer.
                             "Content-Type":  "application/json",
                         }
                     ) as resp_final:
+                        # Garde-fou de sortie (lot 3), comme le flux principal.
+                        nett_final = texte_modele.NettoyeurSortie(noms_outils)
                         async for line in resp_final.aiter_lines():
                             if not line.startswith("data: "):
                                 continue
@@ -3455,11 +3489,17 @@ ne vient pas d'un outil cette session, la supprimer.
                                 d = json.loads(data)
                                 delta = d["choices"][0].get("delta", {})
                                 content = delta.get("content") or ""
+                                content = nett_final.pousser(
+                                    texte_modele.retirer_emojis(content))
                                 if content:
                                     full_response += content
                                     yield content
                             except Exception:
                                 pass
+                        content = nett_final.vider()
+                        if content:
+                            full_response += content
+                            yield content
             except Exception:
                 fallback = (
                     "\n\n_Je n'ai pas pu terminer entièrement le travail dans "

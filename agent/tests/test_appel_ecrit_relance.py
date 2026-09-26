@@ -184,8 +184,12 @@ def test_un_appel_ecrit_relance_le_modele_une_fois(agent):
     relance = _ClientModele.envois[1]["messages"]
     assert relance[-1] == {"role": "system", "content": qa._CONSIGNE_APPEL_ECRIT}
     assert relance[-2] == {"role": "assistant", "content": _FAUX_APPEL}
-    # Le faux appel est retire de l'affichage et de la persistance.
-    assert {"retirer_texte": _FAUX_APPEL} in evenements
+    # Le faux appel est retire de l'affichage et de la persistance. Le
+    # retrait porte sur le texte AFFICHE, deja passe par le garde-fou de
+    # sortie (lot 3) : c'est lui que le chat doit retrouver en fin de bulle.
+    affiche = texte_modele.humaniser(_FAUX_APPEL, {"get_project_info"})
+    assert "get_project_info" not in affiche
+    assert {"retirer_texte": affiche} in evenements
     assert _FAUX_APPEL not in agent.persistes[-1]
     assert "La couche bâti est prête." in agent.persistes[-1]
 
