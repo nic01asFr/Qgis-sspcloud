@@ -695,7 +695,7 @@ async def touch_session(session_id: str) -> None:
 # OIDC. Remplace l'ancienne URL d'Ingress public sans authentification.
 _NOVNC_PROXY_PATH = (
     "/workspace/vnc/vnc_lite.html"
-    "?path=workspace/vnc/websockify&scale=true&resize=true&show_dot=false"
+    "?path=workspace/vnc/websockify&scale=true&show_dot=false"
 )
 
 

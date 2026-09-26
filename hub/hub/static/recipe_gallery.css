@@ -125,6 +125,10 @@
   border-radius: 8px;
   font-weight: 600;
   font-size: 11px;
+  /* Casse du texte source (« Exemple ») : un parent en capitales ne doit pas
+     la transformer en « EXEMPLE ». */
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 .rct-card[data-source="example"] .rct-source {
