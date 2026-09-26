@@ -328,3 +328,13 @@ def test_archive_docx_valide_exige_le_document_principal(racine):
     with pytest.raises(de.ErreurDocument) as exc:
         de.ajouter("etA", "x.docx", tampon.getvalue())
     assert exc.value.code == 415
+
+
+def test_routes_documents_enregistrees_sans_routeur_inclus():
+    """FastAPI 0.141 : `include_router` depose un `_IncludedRouter` sans
+    `path` dans `app.routes`, ce qui cassait tout parcours de la table. Les
+    routes du corpus sont ajoutees une a une (constate en CI le 2026-09-26)."""
+    from hub import main as _main
+    chemins = [getattr(r, "path", None) for r in _main.app.routes]
+    assert None not in chemins
+    assert "/studies/{sid}/documents" in chemins
