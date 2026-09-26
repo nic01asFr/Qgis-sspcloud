@@ -18,6 +18,10 @@ def test_inject_vnc_desk_embed_masque_top_bar():
     assert "#top_bar" in out
     assert "clipViewport = false" in out
     assert "resizeSession" in out
+    # Bureau distant a taille fixe : pas de redimensionnement demande par
+    # defaut, et le fond gris de noVNC (bandes sombres) est neutralise.
+    assert "readQueryVariable('resize', 'false')" in out
+    assert "rfb.background = 'transparent'" in out
     assert "readQueryVariable('scale', false)" not in out
 
 

@@ -1175,13 +1175,22 @@ def _inject_vnc_desk_embed(html: str) -> str:
 """
     if "</head>" in html:
         html = html.replace("</head>", embed_css + "</head>", 1)
-    # Remplit le cadre sans bandes : resizeSession adapte le bureau distant
-    # au conteneur ; scaleViewport garde un fallback fluide pendant le resize.
+    # Bandes autour de QGIS. Le bureau distant a une taille FIXE (Xvfb lance a
+    # QGIS_RESOLUTION = 1920x1080 par le workspace) et x11vnc ne sait pas le
+    # redimensionner a la demande du client : resizeSession n'y change rien.
+    # scaleViewport reduit donc l'image en gardant son ratio 16:9 et le reste
+    # du cadre est peint par noVNC avec son fond par defaut rgb(40,40,40)
+    # (style en ligne de son <div> interne, hors de portee du CSS ci-dessus)
+    # -- d'ou les bandes sombres. Le fond passe en transparent et c'est le
+    # bureau (desk.html) qui donne au cadre le ratio du bureau distant.
+    # resizeSession reste pilotable par `?resize=true` si un workspace sait un
+    # jour redimensionner son ecran (Xvnc / xrandr), mais n'est plus demande.
     old_scale = "rfb.scaleViewport = readQueryVariable('scale', false);"
     new_scale = (
         "rfb.scaleViewport = (readQueryVariable('scale', 'true') + '').toLowerCase() !== 'false';"
         "\n        rfb.clipViewport = false;"
-        "\n        rfb.resizeSession = (readQueryVariable('resize', 'true') + '').toLowerCase() !== 'false';"
+        "\n        rfb.resizeSession = (readQueryVariable('resize', 'false') + '').toLowerCase() === 'true';"
+        "\n        rfb.background = 'transparent';"
     )
     if old_scale in html:
         html = html.replace(old_scale, new_scale, 1)
