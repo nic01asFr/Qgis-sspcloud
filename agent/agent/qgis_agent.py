@@ -38,6 +38,7 @@ from agent import memory
 from agent import native_tools_v2
 from agent import briques_client
 from agent import context_budget
+from agent import documents_etude
 from agent import paquets_outils
 from agent import texte_modele
 
@@ -858,6 +859,14 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
         except Exception as e:
             return json.dumps({"error": f"{tool_name} fail: {e}"})
 
+    # Lot L7 : documents de l'etude active, recherche bornee et sourcee.
+    if tool_name == documents_etude.OUTIL:
+        _sid = await _resolve_active_sid(username)
+        resultat = await documents_etude.consulter_documents(
+            arguments.get("question", ""), arguments.get("k"), _sid, _HUB_URL, _HUB_KEY,
+        )
+        return json.dumps(resultat, ensure_ascii=False)
+
     # Outils natifs côté agent — n'appellent pas le hub MCP.
     if tool_name in ("memory_search", "memory_similar"):
         try:
@@ -1561,6 +1570,7 @@ _LIBELLES_OUTILS = {
     "publish_artifact":     "Publication du livrable…",
     "save_project":         "Enregistrement du projet…",
     "memory_search":        "Recherche dans la mémoire…",
+    "consulter_documents":  "Consultation des documents de l'étude…",
     "create_component":     "Création d'une brique de livrable…",
     "create_assembly":      "Assemblage du livrable…",
     "describe_entity_schema": "Lecture du format attendu…",
@@ -1635,6 +1645,10 @@ class QGISAgent:
         self._cache_selection: dict[tuple, list[dict]] = {}
         self._etat_version: str | None = None
         self._paquets_tour: set[str] = set()
+        # Lot L7 : resume des documents de l'etude active (pose par
+        # _build_system_prompt). Sans document indexe, consulter_documents
+        # n'est pas expose.
+        self._documents_etude: dict | None = None
         # Evenements du filet, pour le journal de tour et les tests.
         self.evenements_filet: list[dict] = []
 
@@ -1658,6 +1672,10 @@ class QGISAgent:
             whitelist = _get_profile_tools_whitelist(self.profile_id)
             if whitelist is None or "save_recipe" in whitelist:
                 self._tools_cache.extend(_NATIVE_RECIPE_TOOLS)
+            # Lot L7 : documents de l'etude. Retire de la liste exposee tant
+            # que l'etude n'a aucun document indexe (cf. _outils_exposes).
+            if whitelist is None or documents_etude.OUTIL in whitelist:
+                self._tools_cache.append(documents_etude.SCHEMA)
             # Sprint Composants Phase 3b (2026-06-26) : 13 tools natifs V1.5.
             # Format OpenAI function calling avec JSONSchema strict (cf.
             # native_tools_v2.NATIVE_TOOLS_V2_OPENAI). Dispatch dans
@@ -1727,15 +1745,25 @@ class QGISAgent:
         """
         complets = await self._get_tools()
         if not self._filtrage_par_paquets():
-            return complets
-        cle = (self._outils_version, frozenset(paquets))
+            return self._sans_documents_absents(complets)
+        avec_documents = bool((self._documents_etude or {}).get("indexes"))
+        cle = (self._outils_version, frozenset(paquets), avec_documents)
         sel = self._cache_selection.get(cle)
         if sel is None:
             sel = paquets_outils.selectionner(complets, paquets)
             if len(sel) < len(complets):
                 sel = sel + [paquets_outils.schema_demander_outils()]
+            sel = self._sans_documents_absents(sel)
             self._cache_selection[cle] = sel
         return sel
+
+    def _sans_documents_absents(self, outils: list[dict]) -> list[dict]:
+        """Retire ``consulter_documents`` si l'etude n'a aucun document indexe
+        (spec L7 §3.4 : un outil n'apparait que si son objet existe)."""
+        if (self._documents_etude or {}).get("indexes"):
+            return outils
+        return [o for o in outils
+                if paquets_outils.nom_outil(o) != documents_etude.OUTIL]
 
     async def _recharger_outils(self) -> None:
         """Vide le cache de la liste complete (changement d'etat QGIS).
@@ -1754,6 +1782,7 @@ class QGISAgent:
         natifs = {
             paquets_outils.nom_outil(o)
             for o in (*_NATIVE_MEMORY_TOOLS, *_NATIVE_RECIPE_TOOLS,
+                      documents_etude.SCHEMA,
                       *native_tools_v2.NATIVE_TOOLS_V2_OPENAI)
         }
         if ancien and not any(paquets_outils.nom_outil(o) not in natifs
@@ -1905,6 +1934,14 @@ class QGISAgent:
         self._artifacts_cache_at = now
         self._artifacts_force_refresh = False
         return summary
+
+    async def _fetch_documents_etude(self, sid: str | None) -> dict | None:
+        """Lot L7 : documents de l'etude (compte, titres), fail-soft, cache 30 s."""
+        try:
+            return await documents_etude.resume_documents(_HUB_URL, _HUB_KEY, sid)
+        except Exception as exc:  # jamais d'echec du tour pour ca
+            log.warning("resume des documents indisponible (%s)", exc)
+            return None
 
     async def _autosave_active_study(self) -> None:
         """
@@ -2177,6 +2214,8 @@ class QGISAgent:
          C'est CE lien que tu donnes à l'user, pas le `download_url`, pas
          une URL `minio.lab.sspcloud.fr` (403). L'audience peut encore exiger
          un cookie OIDC (ce n'est pas toujours anonyme).
+   Exception `.grist` (`export_grist`) : aucun kind ne le couvre, donc pas
+   de `publish_artifact` ; donne `download_url` et `ouvrir_dans_grist`.
 
    Pour RETROUVER un livrable déjà publié : lis la section L2 « Livrables
    publiés » (URL complète) ou appelle `list_publications`. Ne republie
@@ -2242,10 +2281,9 @@ class QGISAgent:
 
    ⚠️ **JAMAIS de manifest `{basemap, bbox}` minimal en prod** pour
    `interactive_map`. Utilise toujours un pattern canonique adapte via
-   `describe_entity_schema(..., use_case='<pattern>')`. Le composant
-   `passerelle-geo-components@dev` de la lib carto commune ne rend
-   correctement que les manifests V0.3.1 riches (contract SceneManifest
-   V0.3.1 publie sur npm 2026-07-10).
+   `describe_entity_schema(..., use_case='<pattern>')`. `runtime: 'atlas'`
+   n'affiche Atlas que si `params.scene_url` est une scène https lisible
+   sans connexion (livrable `public`) ; sinon le hub rend MapLibre.
 
    ⚠️ **JAMAIS `audience: "public"`** sans confirmation EXPLICITE user
    (anti-fuite RGPD). Default `cerema_internal`.
@@ -2581,10 +2619,14 @@ ne vient pas d'un outil cette session, la supprimer.
         artifacts_task = asyncio.create_task(
             self._fetch_study_artifacts_summary(sid_for_artifacts)
         )
+        documents_task = asyncio.create_task(
+            self._fetch_documents_etude(sid_for_artifacts)
+        )
         project_state = await project_state_task
         # Stocke pour le tool loop (cf. _zone_context_warning ci-dessous)
         self._project_state = project_state
         study_artifacts = await artifacts_task
+        self._documents_etude = await documents_task
         enrich_results = await enrich_task if enrich_task else []
 
         # Extraction du data_scope depuis le session_id (helper sync, cheap).
@@ -2614,6 +2656,7 @@ ne vient pas d'un outil cette session, la supprimer.
             active_study_treatments=active_treats,
             project_state=project_state,
             study_artifacts=study_artifacts,
+            study_documents=self._documents_etude,
             context_kind=context_kind,
             scope_ids=scope_ids,
             hub_url=_HUB_URL,

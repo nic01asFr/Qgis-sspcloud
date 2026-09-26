@@ -65,6 +65,10 @@ interface            ~630  cliquer, souris, clavier, touche, bouton, menu,
 etudes             ~1 410  etude (hors « zone d'etude »), projet voisin,
                            nouveau projet, changer de projet, basculer
 memoire              ~150  souviens, rappelle, la derniere fois, similaire
+documents            ~230  document, rapport, pdf, cahier des charges, cctp,
+                           compte rendu, note de, selon le..., d'apres le...,
+                           que dit ; retire tant que l'etude n'a aucun
+                           document indexe (lot L7)
 =================  ======  ====================================================
 
 (``demander_outils`` compte ~220 jetons dans le socle.)
@@ -218,6 +222,15 @@ PAQUETS: dict[str, Paquet] = {p.nom: p for p in (
        ("memory_similar",),
        (r"\bsouvien", r"\brappel", r"derniere fois", r"\bprecedemment",
         r"\bdeja fait", r"\bcomme avant", r"\bsimilaire")),
+    # Lot L7 : documents deposes dans l'etude. L'outil n'est expose que si
+    # l'etude en a au moins un d'indexe (filtre cote QGISAgent).
+    _p("documents", "documents de l'etude",
+       ("consulter_documents",),
+       (r"\bdocuments?\b", r"\brapports?\b", r"\bpdf\b", r"cahiers? des charges",
+        r"\bcctp\b", r"\bcomptes?[- ]rendus?\b", r"\bnotes? (?:de|d')",
+        r"\bselon (?:le|la|les|l')", r"\bd'apres (?:le|la|les|l')",
+        r"\bque (?:dit|disent)\b", r"\bdeliberations?\b", r"\bdocx?\b", r"\bodt\b",
+        r"\bpieces? (?:ecrites?|du dossier)")),
 )}
 
 _PAQUET_DE: dict[str, str] = {

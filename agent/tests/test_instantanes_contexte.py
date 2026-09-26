@@ -175,6 +175,7 @@ class Cas:
     etat_projet: dict | None = None
     etat_precedent: dict | None = None            # tour precedent (changement)
     artefacts: dict | None = None
+    documents: dict | None = None                 # lot L7 : resume du hub
     memoire: dict = field(default_factory=dict)
     insights: int = 0
     tags: dict = field(default_factory=dict)
@@ -268,6 +269,14 @@ CAS = [
         exposes_presents=("export_pdf", "apply_layout_template", "publish_artifact"),
         exposes_absents=("create_assembly", "run_recipe"),
         outils_max=7_000),
+    # T6 (2026-09-26) : un livrable Grist n'a pas de kind de publication.
+    Cas("livrable_grist",
+        session_id="study:sid42", etude=ETUDE, etat_projet=ETAT_AIX,
+        message="Prépare-moi un document Grist des bâtiments de ma zone.",
+        doit_contenir=("Exception `.grist` (`export_grist`)",),
+        exposes_presents=("export_grist",),
+        exposes_absents=("create_assembly", "run_recipe"),
+        outils_max=7_000),
     Cas("storymap_a_publier",
         session_id="study:sid42", etude=ETUDE, etat_projet=ETAT_AIX,
         message="Crée une storymap du bâti et publie-la",
@@ -301,6 +310,27 @@ CAS = [
         session_id="study:sid42", etude=ETUDE, etat_projet=ETAT_AIX,
         doit_contenir=("context_kind=desk", "=== Étude en cours ==="),
         ne_doit_pas_contenir=("=== Composant en édition ===",)),
+    # Lot L7 : documents d'etude. Une ligne en L2, et l'outil n'est expose
+    # que si l'etude a au moins un document indexe.
+    Cas("documents_d_etude",
+        session_id="study:sid42", etude=ETUDE, etat_projet=ETAT_AIX,
+        documents={"indexes": 4, "en_cours": 1,
+                   "titres": ["Rapport phase 1", "CCTP voirie", "Note zones humides",
+                              "Arrêté"]},
+        message="Que dit le rapport de phase 1 sur les zones humides ?",
+        doit_contenir=("4 documents d'étude consultables (« Rapport phase 1 », "
+                       "« CCTP voirie », « Note zones humides », …) : "
+                       "consulter_documents, en citant la source.",
+                       "1 autre(s) en cours d'indexation."),
+        ne_doit_pas_contenir=("Arrêté",),
+        exposes_presents=("consulter_documents",),
+        outils_max=10_500),
+    Cas("documents_demandes_sans_document",
+        session_id="study:sid42", etude=ETUDE, etat_projet=ETAT_AIX,
+        documents={"indexes": 0, "en_cours": 0, "titres": []},
+        message="Que dit le cahier des charges ?",
+        ne_doit_pas_contenir=("document d'étude", "documents d'étude"),
+        exposes_absents=("consulter_documents",)),
     Cas("pire_cas_budget",
         session_id="study:sid42", etude=ETUDE,
         etat_projet=_etat("Aix-en-Provence", BBOX_AIX, [
@@ -392,7 +422,8 @@ async def _assembler(cas: Cas) -> tuple[str, list[dict], list[dict], QGISAgent]:
          patch.object(agent, "_fetch_active_study_context",
                       new=AsyncMock(return_value=(cas.etude, []))), \
          patch.object(agent, "_fetch_study_artifacts_summary",
-                      new=AsyncMock(return_value=cas.artefacts)), \
+                      new=AsyncMock(return_value=cas.artefacts)),          patch.object(agent, "_fetch_documents_etude",
+                      new=AsyncMock(return_value=cas.documents)), \
          patch.object(hub_scope_client, "fetch_component_history",
                       new=AsyncMock(return_value=[
                           {"version": 3, "author": "marie", "summary": "titre revu"}])), \

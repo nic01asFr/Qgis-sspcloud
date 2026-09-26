@@ -44,5 +44,10 @@ setup(
         "pmtiles>=3.4.0",
         "mapbox-vector-tile>=2.0.0",
         "shapely>=2.0",
+        # Lot L7 (2026-09-26) : corpus documentaire d'etude. Extraction du
+        # texte des PDF deposes (hub/documents_extraction.py). Pur Python,
+        # sans dependance native : quelques centaines de Ko dans l'image.
+        # DOCX, ODT et XLSX sont lus avec la bibliotheque standard.
+        "pypdf>=4.0",
     ],
 )

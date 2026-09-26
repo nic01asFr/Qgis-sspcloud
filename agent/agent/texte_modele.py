@@ -248,6 +248,7 @@ LIBELLES_COURANTS = {
     "publish_artifact":     "la publication du livrable",
     "save_project":         "l'enregistrement du projet",
     "memory_search":        "la recherche dans la mémoire",
+    "consulter_documents":  "la consultation des documents de l'étude",
     "create_component":     "la création d'une brique de livrable",
     "create_assembly":      "l'assemblage du livrable",
     "publish_assembly":     "la publication du livrable",
