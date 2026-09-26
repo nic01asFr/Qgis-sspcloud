@@ -34,6 +34,7 @@ from agent import memory
 from agent import vector_store
 from agent import embed_worker
 from agent import empreinte_code
+from agent import texte_modele
 from agent.qgis_agent import QGISAgent
 
 # État partagé du worker d'embedding (lancé au startup, stoppé au shutdown).
@@ -1046,7 +1047,17 @@ def _historique_pour_le_modele(messages: list[dict]) -> list[dict]:
     retenus: list[dict] = []
     total = 0
     for m in reversed(messages):
-        contenu = _alleger_message(m.get("content", ""))
+        contenu = m.get("content", "") or ""
+        # Un message assistant stocke est le RENDU du chat : raisonnement,
+        # lignes `> **`outil`**`, blocs de resultat. Relu tel quel, le modele
+        # l'imitait et ecrivait ses appels en texte au lieu de les emettre
+        # (mesure live du 2026-09-26, defaut D1). On ne lui rend que le texte
+        # final, precede d'un memo factuel des actions du tour.
+        if m.get("role") == "assistant":
+            contenu = texte_modele.contenu_assistant_pour_le_modele(
+                contenu, m.get("tool_calls"),
+            )
+        contenu = _alleger_message(contenu)
         if not contenu.strip():
             continue
         if total + len(contenu) > _BUDGET_HISTORIQUE and retenus:
