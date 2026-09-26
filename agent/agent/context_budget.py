@@ -73,6 +73,18 @@ PLAFONDS: dict[str, int] = {
     "systeme": 12_000,
 }
 
+# Liste des couches de la L2 (sous-partie du plafond « l2 »). Depuis le lot 2
+# (defaut D3), chaque couche porte son id QGIS (nom + UUID, ~30 jetons : Qwen
+# code chaque chiffre a part). Mesure du 2026-09-26 sur l'instantane
+# « pire_cas_budget » (15 couches aux noms longs, 12 livrables, memoire
+# pleine) : L2 = 980 sans les ids, 1 563 avec, au-dela du plafond de 1 500.
+# Une ligne de couche coute 43 a 56 jetons pour des noms courants (75 pour
+# les noms longs du pire cas) : 850 laisse passer 15 couches courantes et
+# ramene le pire cas a ~1 300. Les couches qui ne tiennent pas sont comptees,
+# pas listees ; le cas courant (3 couches, ~150 jetons) n'est pas touche.
+PLAFOND_COUCHES_L2 = 850
+PLAFOND_NB_COUCHES_L2 = 15
+
 # Cibles : un depassement est journalise mais ne casse rien.
 CIBLES: dict[str, int] = {
     "systeme_et_outils": 14_000,
