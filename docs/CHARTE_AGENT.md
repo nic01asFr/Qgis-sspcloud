@@ -201,7 +201,11 @@ Chaque référence fichier porte un `kind` explicite. Cela garantit :
 - ZIP export propre (seules les bonnes catégories incluses)
 
 État : ⏳ cadré, partiellement implémenté. Famille A : tools ✅, panel UI ✅.
-Famille B : tools ⏳ Phase 13+. Famille C : tools partiels (publish existe),
+Famille B : MVP ✅ (lot L7, 2026-09-26) — documents déposés dans « Documents
+de l'étude », stockés et indexés par étude sur le volume du hub, consultés
+par l'outil natif `consulter_documents` (extraits sourcés) ; voir
+`docs/superpowers/specs/2026-09-26-corpus-documentaire.md`. Pas encore dans
+le ZIP d'étude. Famille C : tools partiels (publish existe),
 embed_agent ⏳ Phase 10. Détail complet : voir §11 Fichiers.
 
 ## 4. Architecture mémoire — 4 couches
