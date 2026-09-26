@@ -16,6 +16,7 @@ import re
 import sys
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -86,9 +87,22 @@ BBOX_AIX = [5.2694, 43.4583, 5.5122, 43.6043]
 BBOX_MARSEILLE = [5.3748, 43.289, 5.4243, 43.325]
 
 
-def _couche(nom: str, n: int, geom: str = "Polygon") -> dict:
-    return {"name": nom, "geometry_type": geom, "feature_count": n,
-            "crs": "EPSG:2154"}
+def _id_qgis(nom: str) -> str:
+    """Id tel que QGIS le genere (QgsMapLayer::generateId) : nom, puis UUID,
+    tout caractere non alphanumerique remplace par « _ ». C'est sa longueur
+    reelle (~30 jetons) qui compte pour le budget L2."""
+    graine = uuid.uuid5(uuid.NAMESPACE_DNS, nom)
+    return re.sub(r"\W", "_", f"{nom}_{graine}")
+
+
+def _couche(nom: str, n: int, geom: str = "Polygon",
+            origine: str = "fichier") -> dict:
+    """Couche vecteur telle que la decrit get_project_info (champs utiles)."""
+    ly = {"id": _id_qgis(nom), "name": nom, "geometry_type": geom,
+          "feature_count": n, "crs": "EPSG:2154", "origine": origine}
+    if origine == "fichier":
+        ly["fichier_present"] = True
+    return ly
 
 
 def _etat(zone: str | None, bbox: list | None, couches: list[dict]) -> dict:
@@ -103,8 +117,13 @@ def _etat(zone: str | None, bbox: list | None, couches: list[dict]) -> dict:
 
 ETAT_AIX = _etat("Aix-en-Provence", BBOX_AIX, [
     _couche("Bâti BDTOPO - Aix-en-Provence", 48213),
-    _couche("Communes Aix", 1),
-    _couche("Routes Aix", 12876, "LineString"),
+    _couche("Communes Aix", 1, origine="memoire"),
+    _couche("Routes Aix", 12876, "LineString", origine="service distant"),
+])
+# Sortie de clip_to_study_zone : nommee « <couche>_<zone normalisee> ».
+ETAT_AIX_DECOUPE = _etat("Aix-en-Provence", BBOX_AIX, [
+    _couche("Bâti BDTOPO - Aix-en-Provence", 112816),
+    _couche("bati_bdtopo_aix_en_provence_aix_en_provence", 54557),
 ])
 ETAT_MARSEILLE = _etat("Marseille 4e", BBOX_MARSEILLE, [
     _couche("Bâti BDTOPO - Marseille 4e", 50110),
@@ -178,11 +197,26 @@ CAS = [
         session_id="study:sid42", etude=ETUDE, etat_projet=ETAT_AIX,
         doit_contenir=("Zone d'étude active : « Aix-en-Provence »", str(BBOX_AIX),
                        "Couches chargées dans le projet QGIS (3 total)",
-                       "Bâti BDTOPO - Aix-en-Provence (Polygon, 48213 entités",
-                       "Routes Aix (LineString, 12876 entités",
+                       "Bâti BDTOPO - Aix-en-Provence (Polygon, 48213 entités, "
+                       "fichier) id=" + _id_qgis("Bâti BDTOPO - Aix-en-Provence"),
+                       "Communes Aix (Polygon, 1 entités, en mémoire, perdue au "
+                       "redémarrage) id=" + _id_qgis("Communes Aix"),
+                       "Routes Aix (LineString, 12876 entités, service distant) id="
+                       + _id_qgis("Routes Aix"),
+                       "layer_id prend l'id ci-dessus tel quel",
                        "Étude active : « Diagnostic bâti Aix »"),
         ne_doit_pas_contenir=("Marseille 4e", str(BBOX_MARSEILLE),
-                              "Aucune zone d'étude définie")),
+                              "Aucune zone d'étude définie",
+                              # CRS de couche = CRS du projet : affiche une fois.
+                              "entités, EPSG:2154", "découpée")),
+    # Defaut D3 : la sortie d'un decoupage se distingue de la couche brute.
+    Cas("couche_decoupee_a_la_zone",
+        session_id="study:sid42", etude=ETUDE, etat_projet=ETAT_AIX_DECOUPE,
+        doit_contenir=("bati_bdtopo_aix_en_provence_aix_en_provence (Polygon, "
+                       "54557 entités, fichier, découpée à Aix-en-Provence) id=",
+                       "Bâti BDTOPO - Aix-en-Provence (Polygon, 112816 entités, "
+                       "fichier) id="),
+        ne_doit_pas_contenir=("112816 entités, fichier, découpée",)),
     Cas("changement_de_zone",
         session_id="study:sid42", etude=ETUDE,
         etat_precedent=ETAT_MARSEILLE, etat_projet=ETAT_AIX,
@@ -242,7 +276,10 @@ CAS = [
             for i in range(40)]),
         artefacts=_artefacts_publies(12),
         memoire=MEMOIRE_LONGUE, insights=25,
-        doit_contenir=("(40 total)", cb.MENTION_L3_TRONQUEE),
+        # Les ids de couche (D3) font deborder la liste : le surplus est
+        # compte, pas liste, pour tenir le plafond L2.
+        doit_contenir=("(40 total)", cb.MENTION_L3_TRONQUEE,
+                       "autre(s) non listée(s) : get_project_info"),
         ne_doit_pas_contenir=("numéro 15 - Aix", MINIO)),
 ]
 

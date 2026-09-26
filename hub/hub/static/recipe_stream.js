@@ -25,17 +25,17 @@
       "." + CTA_CLASS + "{" +
       "position:fixed;bottom:24px;right:24px;z-index:9999;" +
       "padding:12px 20px;border:0;border-radius:6px;" +
-      "background:#000091;color:#fff;font:600 14px/1.4 system-ui,sans-serif;" +
+      "background:#41701F;color:#fff;font:600 14px/1.4 system-ui,sans-serif;" +
       "cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.18);" +
       "max-width:400px;text-align:left;}" +
-      "." + CTA_CLASS + ":hover{background:#1212a3;}" +
+      "." + CTA_CLASS + ":hover{background:#33591A;}" +
       "." + CTA_CLASS + "[disabled]{opacity:.6;cursor:wait;}" +
       "." + TOAST_CLASS + "{" +
       "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);" +
       "z-index:9999;padding:12px 20px;border-radius:4px;" +
-      "background:#18753c;color:#fff;font:14px/1.4 system-ui,sans-serif;" +
+      "background:#0E2433;color:#fff;border-left:4px solid #6FAE45;font:14px/1.4 system-ui,sans-serif;" +
       "max-width:80%;box-shadow:0 4px 12px rgba(0,0,0,.18);}" +
-      "." + TOAST_CLASS + ".error{background:#ce0500;}" +
+      "." + TOAST_CLASS + ".error{background:#A32E28;}" +
       "." + TOAST_CLASS + " a{color:#fff;text-decoration:underline;}";
     var style = document.createElement("style");
     style.id = "rct-publish-styles";
@@ -104,10 +104,10 @@
       }
       if (r.ok && body.published_url) {
         showToast(
-          "Publie : <a href=\"" +
+          "Livrable publié : <a href=\"" +
             escapeAttr(body.published_url) +
             "\" target=\"_blank\" rel=\"noopener\">" +
-            escapeHtml(body.published_url) +
+            "ouvrir (nouvel onglet)" +
             "</a>",
           false
         );
@@ -116,18 +116,18 @@
       } else {
         var detail =
           (body && (body.detail || body.error)) ||
-          "publication echouee (HTTP " + r.status + ")";
-        showToast("Erreur : " + escapeHtml(String(detail)), true);
+          "publication échouée (erreur " + r.status + ")";
+        showToast("La publication a échoué : " + escapeHtml(String(detail)), true);
         if (btn) {
           btn.removeAttribute("disabled");
-          btn.textContent = "Reessayer la publication";
+          btn.textContent = "Réessayer la publication";
         }
       }
     } catch (exc) {
-      showToast("Erreur reseau : " + escapeHtml(String(exc)), true);
+      showToast("Connexion perdue : le livrable n'a pas été publié. Réessaie dans un instant.", true);
       if (btn) {
         btn.removeAttribute("disabled");
-        btn.textContent = "Reessayer la publication";
+        btn.textContent = "Réessayer la publication";
       }
     }
   }

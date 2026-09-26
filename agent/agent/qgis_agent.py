@@ -38,6 +38,7 @@ from agent import memory
 from agent import native_tools_v2
 from agent import briques_client
 from agent import context_budget
+from agent import texte_modele
 
 log = logging.getLogger("agent.qgis_agent")
 
@@ -57,6 +58,24 @@ _LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://llm.lab.sspcloud.fr/api")
 # « saint martin » : deux tours sur cinq figes plus de sept minutes sur
 # « Analyse en cours… », sans message ni issue pour l'utilisateur.
 _SILENCE_LLM_MAX = float(os.getenv("LLM_SILENCE_MAX_S", "90"))
+
+# Consigne de relance quand le modele ECRIT un appel d'outil au lieu de
+# l'emettre. Mesure live du 2026-09-26 (defaut D1) : `> **`get_project_info`**
+# — pour récupérer le layer_id…` en texte, tour clos a iter=0 sans action.
+_CONSIGNE_APPEL_ECRIT = (
+    "Tu as décrit un appel d'outil dans ton texte sans l'exécuter : rien n'a "
+    "été fait. Émets-le maintenant réellement, via un appel d'outil (tool "
+    "call), sans le recopier en texte. Si aucune action n'est nécessaire, "
+    "réponds simplement à l'utilisateur en langage courant."
+)
+
+# Ce que lit l'utilisateur quand un tour se termine sans rien de visible
+# (raisonnement masque et lignes d'outils retires). Avant, la bulle restait
+# sur « Rédaction de la réponse… 5 s », figee, sans un mot.
+MESSAGE_TOUR_SANS_REPONSE = (
+    "Je n'ai pas pu terminer cette étape. Peux-tu reformuler ou me dire "
+    "de continuer ?"
+)
 
 # Message rendu a l'utilisateur quand la garde ci-dessus se declenche. Il dit
 # ce qui s'est passe et ce qu'il peut faire, plutot que de laisser un spinner
@@ -2171,6 +2190,7 @@ Interdit :
   ne PAS appeler `publish_artifact` même si l'user dit « maintenant ».
 - ❌ « Comme je n'ai pas la connaissance préalable, je vais d'abord ... »
   (ÇA SE FAIT EN APPELANT L'OUTIL, PAS EN LE DISANT)
+- Écrire un appel en texte (`> **`outil`** — …`) : il ne s'exécute pas.
 
 Attendu :
 - ✅ Appel d'outil immédiat (set_study_zone, smart_load, etc.)
@@ -2331,6 +2351,9 @@ Vérifie les types attendus (string vs liste vs object), demande confirmation
 Toujours conclure par un message en français résumant en LANGUE NATURELLE
 ce qui a été fait, ce qui a échoué le cas échéant, et la prochaine étape
 suggérée. NE LAISSE JAMAIS un traceback brut comme dernière sortie utilisateur.
+Parle en langage courant (« découper selon les limites de la commune », pas
+« clipper »). Ne nomme JAMAIS un outil ni une fonction à l'utilisateur. Aucun
+emoji. Ne raconte pas les erreurs internes sauf si elles changent le résultat.
 
 ## 3. Hypothèses ≠ faits — toujours étiqueter
 
@@ -2555,6 +2578,13 @@ ne vient pas d'un outil cette session, la supprimer.
             history_for_llm = []
             for msg in history[-20:]:
                 content = msg.get("content", "") or ""
+                # Filet de securite si l'appelant n'a pas deja nettoye (la
+                # fonction est idempotente) : le modele ne doit pas relire le
+                # rendu Markdown de ses appels d'outils, il l'imite (D1).
+                if msg.get("role") == "assistant":
+                    content = texte_modele.contenu_assistant_pour_le_modele(content)
+                    if not content:
+                        continue
                 if "data:image/" in content:
                     content = _IMG_RE.sub(
                         '[image affichée précédemment à l\'utilisateur]',
@@ -2590,6 +2620,12 @@ ne vient pas d'un outil cette session, la supprimer.
         # Une seule relance quand la reflexion epuise le budget du tour : au
         # dela, on previent l'utilisateur plutot que de le faire attendre encore.
         relance_budget_faite = False
+        # Une seule relance quand le modele ecrit un appel en texte (D1).
+        relance_appel_ecrit_faite = False
+        noms_outils = {
+            (t.get("function") or {}).get("name")
+            for t in (tools or []) if isinstance(t, dict)
+        }
         # On capte le hub_url du dernier publish_artifact reussi pour pouvoir
         # patcher en fin de turn les liens fantomes [undefined](undefined)
         # que le LLM genere parfois (cf. hotfix infra ci-dessous).
@@ -2642,6 +2678,7 @@ ne vient pas d'un outil cette session, la supprimer.
             yield {"phase": "reflexion"}
             llm_t0 = asyncio.get_event_loop().time()
             iter_start = len(full_response)
+            texte_emis_avant = texte_emis
             reasoning_buf = ""
             reasoning_saved = False
 
@@ -2762,6 +2799,11 @@ ne vient pas d'un outil cette session, la supprimer.
                                     r'<remember>[^<]*</remember>',
                                     '', clean, flags=_re.IGNORECASE,
                                 )
+                                # D5 : pas d'emoji face a un public non
+                                # specialiste (triangle d'alerte, pastille
+                                # orange vus en live le 2026-09-26).
+                                # Chiffres jamais touches.
+                                clean = texte_modele.retirer_emojis(clean)
                                 if clean:
                                     _flush_reasoning()
                                     if not chunk_text:
@@ -2808,6 +2850,31 @@ ne vient pas d'un outil cette session, la supprimer.
             # renvoie souvent "stop" même quand des tool_calls sont présents.
             # Seule la présence/absence de tool_call_data détermine la suite.
             if not tool_call_data:
+                # Appel d'outil ECRIT en texte au lieu d'etre emis (D1, mesure
+                # live du 2026-09-26) : clore le tour laissait l'utilisateur
+                # sans action ni message. On retire ce faux appel de la reponse
+                # (persistance et affichage) et on relance UNE fois.
+                outil_ecrit = texte_modele.appel_ecrit_en_texte(chunk_text, noms_outils)
+                if outil_ecrit:
+                    log.warning(
+                        "Appel d'outil ecrit en texte (%s, iter=%d, session=%s)%s",
+                        outil_ecrit, iteration, self.session_id,
+                        "" if relance_appel_ecrit_faite else " : relance",
+                    )
+                    if chunk_text and full_response.endswith(chunk_text):
+                        full_response = full_response[:-len(chunk_text)]
+                    texte_emis = texte_emis_avant
+                    yield {"retirer_texte": chunk_text}
+                    if not relance_appel_ecrit_faite:
+                        relance_appel_ecrit_faite = True
+                        yield {"phase": "relance", "label": "Je lance l'action…"}
+                        messages.append({"role": "assistant", "content": chunk_text})
+                        messages.append({"role": "system",
+                                         "content": _CONSIGNE_APPEL_ECRIT})
+                        continue
+                    # Deuxieme echec : on sort, le garde-fou de fin de tour
+                    # donnera un message clair a l'utilisateur.
+                    break
                 # Budget du tour epuise par la reflexion, avant toute reponse.
                 #
                 # Les jetons de raisonnement comptent dans `max_tokens`. Un
@@ -3401,6 +3468,17 @@ ne vient pas d'un outil cette session, la supprimer.
                 )
                 full_response += fallback
                 yield fallback
+
+        # Garde-fou final : rien de lisible pour l'utilisateur (raisonnement
+        # masque, lignes d'outils repliees, faux appel retire). Sans ce
+        # message, la bulle restait figee sur « Rédaction de la réponse… »
+        # (live 2026-09-26, D1). La fin normale du flux suit.
+        if not texte_modele.texte_final(full_response):
+            log.warning("Tour sans texte visible (session=%s) : message de repli",
+                        self.session_id)
+            fb = "\n\n" + MESSAGE_TOUR_SANS_REPONSE
+            full_response += fb
+            yield fb
 
         # Détecter directives <remember> en fin de turn → insights mémoire
         import re as _re_end

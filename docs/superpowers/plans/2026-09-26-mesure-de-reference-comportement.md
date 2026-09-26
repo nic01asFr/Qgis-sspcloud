@@ -93,3 +93,45 @@ Mêmes messages, même étude remise à zéro, 3 répétitions chacun (banc `eva
 plus S5, S6 et les scénarios grand public du banc. Critères : S4 doit donner le
 chiffre communal ou proposer le découpage ; S2 en ≤ 5 appels via
 clip_to_study_zone avec un GeoPackage persistant ; aucun chiffre non traçable.
+
+## Après déploiement du lot qualité 1 (2026-09-26, 05:05-05:30 UTC)
+
+Version : Qgis-sspcloud 9161da1 (agent et hub, overlays alignés : `/health`
+`aligne: true`), QgisRemoteMCP 1434783. Même étude remise à zéro, mêmes
+messages, un passage chacun (le banc répété reste à faire).
+
+| Scénario | Avant | Après |
+|---|---|---|
+| S1 bâti Aix | réussi, 3 appels | réussi, 3 appels ; contour mémorisé (WKT 34 488 car.) ; plus d'emoji |
+| S2 périmètre communal | 15 appels, 3 erreurs PyQGIS, couche mémoire, affirmation fausse | **3 appels** (get_project_info → clip_to_study_zone), 54 557 = contrôle indépendant, GeoPackage d'étude persistant — mais **1 tour perdu** avant (voir D1) |
+| S4 « combien à Aix ? » | **échec** (112 816) | **réussi** : 54 557 et explication bbox/commune |
+| S3 routes Lavandou | style non demandé, boucle, 2 plantages QGIS | 3 appels, rien d'hors demande, aucun plantage |
+| Grand public bbox | chiffre inventé (« < 5 % ») | clair, aucun chiffre inventé |
+
+Budget mesuré en production (nouvelle ligne de journal) : ~29 000 jetons par
+appel au modèle, dont **19 253 pour les 90 schémas d'outils**.
+
+### Défauts restants, par priorité
+- **D1 — appel d'outil écrit en texte.** Au premier message de S2, le modèle a
+  rédigé `> **\`get_project_info\`** — …` au lieu d'émettre un appel : tour
+  terminé sans action, l'utilisateur voit « Rédaction de la réponse… 5 s »
+  figé, sans message. Cause : l'historique renvoyé au modèle contient les
+  tours précédents tels que l'interface les rend (appels d'outils en
+  Markdown) ; le modèle imite ce format. Correctifs : historique propre pour
+  le modèle (texte final seul, ou vrais messages tool) ; détecter un appel
+  écrit en texte et relancer une fois ; message clair si le tour finit vide.
+- **D2 — champ `rapport_emprise_zone` mal lu.** Deux fois interprété comme
+  « rectangle / commune » (« rapport 1.1 », « 19× plus grande que la
+  commune »), alors qu'il compare l'emprise chargée au rectangle de la zone.
+  Correctif : renommer, et ajouter le rapport à la surface du contour.
+- **D3 — L2 sans identifiant de couche** : clip_to_study_zone exige
+  `layer_id`, d'où un get_project_info systématique. Donner l'id dans L2, ou
+  accepter le nom de couche.
+- **D4 — schémas d'outils = 66 % du contexte.** Filtrage par phase (lot L3
+  de la spec sous-agents).
+- **D5 — surface utilisateur** : noms d'outils cités (`clip_to_study_zone`),
+  « clip/clippe », emoji ⚠️ résiduel ; bandeau de statut qui reste affiché.
+- **D6 — rappel mémoire** : 4 messages injectés à chaque tour (sim. 0,68 à
+  0,82), y compris d'anciennes conversations : à borner par étude.
+- **D7 — vérificateur de chiffres** absent en production (le « < 5 % »
+  inventé a disparu ici par chance, pas par construction).

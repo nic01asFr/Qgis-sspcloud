@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -600,6 +601,34 @@ async def get_session_messages(session_id: str, limit: int = 50) -> list[dict]:
             ORDER BY created_at DESC LIMIT ?
         """, (session_id, limit))).fetchall()
     return [dict(r) for r in reversed(rows)]
+
+
+async def portee_des_messages(message_ids) -> dict[str, dict]:
+    """Portée ACTUELLE de messages : {id: {session_id, study_id, created_at}}.
+
+    Sert au rappel sémantique (défaut D6 du 2026-09-26). L'index vectoriel
+    fige l'étude d'un message au moment où il est indexé : un message
+    antérieur à la colonne study_id, ou indexé avant que sa conversation soit
+    rattachée à une étude, y reste sans étude (NULL), donc « transverse », et
+    remontait dans toutes les études. On relit ici l'étude de la conversation
+    telle qu'elle est maintenant, dans la base des messages qui fait foi.
+    Un id absent du résultat désigne un message supprimé.
+    """
+    ids = [int(i) for i in message_ids if str(i).isdigit()]
+    if not ids:
+        return {}
+    marques = ",".join("?" * len(ids))
+    async with aiosqlite.connect(_DB_PATH) as db:
+        rows = await (await db.execute(
+            f"SELECT m.id, m.session_id, s.study_id, m.created_at "
+            f"FROM messages m LEFT JOIN sessions s ON s.id = m.session_id "
+            f"WHERE m.id IN ({marques})", ids,
+        )).fetchall()
+    return {
+        str(r[0]): {"session_id": r[1], "study_id": r[2] or None,
+                    "created_at": r[3]}
+        for r in rows
+    }
 
 
 async def get_recent_sessions(
@@ -1217,6 +1246,69 @@ class _NormalisateurValeurs:
         return (" " + n + " ") in self._vu
 
 
+def _nom_normalise_couche(texte: str | None) -> str:
+    """Même normalisation que le pont pour nommer une sortie de découpage
+    (qgis_bridge._nom_normalise) : « Aix-en-Provence » -> aix_en_provence."""
+    import unicodedata
+    ascii_ = (unicodedata.normalize("NFKD", str(texte or ""))
+              .encode("ascii", "ignore").decode("ascii"))
+    return re.sub(r"[^a-z0-9]+", "_", ascii_.lower()).strip("_")[:80]
+
+
+# Nature de la couche telle que la rend le pont (champ `origine` de
+# get_project_info), en un mot pour la L2.
+_ORIGINES_L2 = {
+    "fichier": "fichier",
+    "memoire": "en mémoire, perdue au redémarrage",
+    "service distant": "service distant",
+}
+
+
+def _ligne_couche_l2(ly: dict, proj_crs: str | None, zone_nom: str | None) -> str:
+    """Une couche de la L2 : nom, type, compte, nature, id.
+
+    L'id est indispensable : clip_to_study_zone et les autres outils de
+    couche exigent `layer_id`. Sans lui, mesure live du 2026-09-26 (défaut
+    D3), le modèle appelait get_project_info avant chaque découpage, soit
+    un appel LLM de plus (~29 000 jetons de contexte relus).
+
+    Pour payer l'id sans dépasser le plafond L2, on retire le CRS de chaque
+    couche quand il est celui du projet (déjà affiché une fois, « CRS du
+    projet ») : l'id d'une couche QGIS (nom + UUID) coûte ~30 jetons, le CRS
+    répété ~6.
+    """
+    nm = ly.get("name", "?")
+    bits = [str(ly.get("geometry_type") or ly.get("type", "?"))]
+    fc = ly.get("feature_count")
+    if fc is not None:
+        bits.append(f"{fc} entités")
+    crs = ly.get("crs") or ""
+    if crs and crs != proj_crs:
+        bits.append(crs)
+    origine = ly.get("origine")
+    if origine in _ORIGINES_L2:
+        nature = _ORIGINES_L2[origine]
+        if origine == "fichier" and ly.get("fichier_present") is False:
+            nature = "fichier introuvable"
+        bits.append(nature)
+    # Sortie de clip_to_study_zone : le pont l'écrit dans l'étude sous le nom
+    # « <couche>_<zone normalisée> » (qgis_bridge._action_clip_to_study_zone).
+    # Heuristique volontairement étroite (fichier + nom) : dans le doute, on
+    # ne dit rien plutôt que d'annoncer à tort un compte communal.
+    # Le nom d'une sortie est déjà normalisé (minuscules ASCII et « _ ») ; une
+    # couche brute de smart_load (« Bâti BDTOPO - Aix-en-Provence ») ne l'est
+    # pas, même quand son nom finit par la zone.
+    suffixe = _nom_normalise_couche(zone_nom)
+    if (origine == "fichier" and suffixe and nm == _nom_normalise_couche(nm)
+            and nm.endswith("_" + suffixe)):
+        bits.append(f"découpée à {zone_nom}")
+    ligne = f"  • {nm} ({', '.join(bits)})"
+    lid = ly.get("id")
+    if lid:
+        ligne += f" id={lid}"
+    return ligne
+
+
 async def build_context_summary(
     username: str, session_id: str,
     profile_id: str = "standard",
@@ -1384,27 +1476,37 @@ async def build_context_summary(
     # L'agent doit consulter cette section AVANT toute décision de chargement.
     if project_state and isinstance(project_state, dict):
         layers = project_state.get("layers") or []
+        proj_crs = project_state.get("project_crs") or project_state.get("crs")
+        _sz = project_state.get("study_zone") or project_state.get("zone")
+        _zone_nom = (_sz.get("name") if isinstance(_sz, dict)
+                     else _sz if isinstance(_sz, str) else None)
         if layers:
-            # Format compact : nom (type, count, crs)
-            layer_lines = []
-            for ly in layers[:15]:
-                nm   = ly.get("name", "?")
-                gtyp = ly.get("geometry_type") or ly.get("type", "?")
-                fc   = ly.get("feature_count")
-                crs  = ly.get("crs", "")
-                bits = [str(gtyp)]
-                if fc is not None:
-                    bits.append(f"{fc} entités")
-                if crs:
-                    bits.append(crs)
-                layer_lines.append(f"  • {nm} ({', '.join(bits)})")
+            from agent.context_budget import (
+                PLAFOND_COUCHES_L2, PLAFOND_NB_COUCHES_L2, estimer_tokens,
+            )
+            layer_lines: list[str] = []
+            cout = 0
+            for ly in layers[:PLAFOND_NB_COUCHES_L2]:
+                ligne = _ligne_couche_l2(ly, proj_crs, _zone_nom)
+                c = estimer_tokens(ligne + "\n")
+                if cout + c > PLAFOND_COUCHES_L2:
+                    break
+                layer_lines.append(ligne)
+                cout += c
+            omises = len(layers) - len(layer_lines)
+            if omises:
+                layer_lines.append(
+                    f"  … {omises} autre(s) non listée(s) : get_project_info "
+                    "pour leur id."
+                )
             layer2.append(
                 f"Couches chargées dans le projet QGIS ({len(layers)} total) :\n"
                 + "\n".join(layer_lines)
-                + "\n  ⚠️ Vérifie cette liste AVANT de proposer un nouveau "
-                  "chargement — la couche peut déjà être là."
+                + "\n  Vérifie cette liste AVANT de proposer un nouveau "
+                  "chargement : la couche peut déjà être là. Un outil qui "
+                  "demande layer_id prend l'id ci-dessus tel quel, sans "
+                  "get_project_info (sauf couche créée pendant ce tour)."
             )
-        proj_crs = project_state.get("project_crs") or project_state.get("crs")
         if proj_crs:
             layer2.append(f"CRS du projet : {proj_crs}")
         proj_zone = project_state.get("study_zone") or project_state.get("zone")

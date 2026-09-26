@@ -39,11 +39,16 @@ def test_embed_ne_rend_pas_le_footer_html() -> None:
     assert foot_end > foot_start
 
 
-def test_nouvelle_conversation_sans_confirm() -> None:
+def test_nouvelle_conversation_sans_confirm_ni_rechargement() -> None:
+    """Recharger laissait l'ancienne conversation visible un instant, puis
+    faisait clignoter l'accueil : la conversation neuve se prepare sur place."""
     chunk = _CHAT.split("function startNewConversation()")[1].split("function toggleHistoryPopover")[0]
     assert "confirm(" not in chunk
     assert "showChatToast(" in chunk
-    assert "embed=1" in chunk
+    assert "location.href" not in chunk
+    assert "randomUUID" in chunk
+    assert "afficherAccueil()" in chunk
+    assert "tourEnCours()" in chunk
 
 
 def test_drawer_charge_memoire_et_insights() -> None:

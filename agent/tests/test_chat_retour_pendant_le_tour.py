@@ -91,17 +91,19 @@ def test_la_duree_d_attente_avance_puis_s_arrete() -> None:
 # ── Bulle vide ───────────────────────────────────────────────────────────
 
 
-def test_le_repere_d_attente_reste_tant_que_rien_n_est_visible() -> None:
+def test_le_repere_d_attente_reste_tant_que_le_tour_dure() -> None:
     """Raisonnement et blocs d'outil masques : la bulle restait vide 24 s.
 
-    `innerText` ignore ce que le CSS masque -- c'est lui qui dit si
-    l'utilisateur voit quelque chose, pas la longueur du HTML rendu.
+    La ligne d'etat du tour vit hors du contenu rendu : chaque morceau recu
+    remplace le rendu, pas elle. Elle ne disparait qu'a la fin du tour.
     """
-    corps = _envoi()
-    assert "if (!responseDiv.innerText.trim())" in corps
-    bloc = corps.split("if (!responseDiv.innerText.trim())")[1][:200]
-    assert "bubble-thinking" in bloc
-    assert "majAttente()" in bloc
+    bulle = _CHAT.split("function creerBulleAssistant()")[1].split("\nfunction ")[0]
+    assert 'class="tour-statut"' in bulle
+    assert 'class="tour-reponse"' in bulle
+    rendu = _CHAT.split("function rendreTour(")[1].split("\nfunction ")[0]
+    assert "tour-statut" not in rendu
+    fin = _CHAT.split("function terminerTour(")[1].split("\nfunction ")[0]
+    assert "'.tour-statut, .bubble-thinking'" in fin
 
 
 # ── Largeur de la colonne ────────────────────────────────────────────────
