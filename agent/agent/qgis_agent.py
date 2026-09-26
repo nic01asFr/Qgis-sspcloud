@@ -2214,6 +2214,8 @@ class QGISAgent:
          C'est CE lien que tu donnes à l'user, pas le `download_url`, pas
          une URL `minio.lab.sspcloud.fr` (403). L'audience peut encore exiger
          un cookie OIDC (ce n'est pas toujours anonyme).
+   Exception `.grist` (`export_grist`) : aucun kind ne le couvre, donc pas
+   de `publish_artifact` ; donne `download_url` et `ouvrir_dans_grist`.
 
    Pour RETROUVER un livrable déjà publié : lis la section L2 « Livrables
    publiés » (URL complète) ou appelle `list_publications`. Ne republie
