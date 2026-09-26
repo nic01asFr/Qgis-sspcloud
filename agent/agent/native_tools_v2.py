@@ -29,6 +29,8 @@ from typing import Any
 
 import httpx
 
+from agent import cles_deleguees
+
 log = logging.getLogger("agent.native_tools_v2")
 
 _HUB_URL = os.getenv("HUB_URL", "").rstrip("/")
@@ -1102,7 +1104,10 @@ async def create_agent(
     L'assistant DOIT avoir appelé analyze_agent_config AVANT pour proposer
     le plan + obtenir confirmation user. Cf. discipline plan-puis-execute.
 
-    Retourne {key, key_masked, ..., warning_copy_now}.
+    Retourne {agent_ref, key_masked, lien_remise_cle, ...}. La cle brute
+    n'est JAMAIS rendue : elle reste dans le coffre du pod agent
+    (`cles_deleguees`) et l'utilisateur la recupere une fois par
+    l'interface. Le modele ne manipule que `agent_ref`.
     """
     payload = {
         "profile": profile, "audience": audience,
@@ -1110,10 +1115,39 @@ async def create_agent(
         "tools_whitelist": tools_whitelist,
         "project_id": project_id, "label": label,
     }
-    return await _hub_call(
+    reponse = await _hub_call(
         "POST", f"/studies/{sid}/scoped-keys",
         json_body=payload,
     )
+    return _sans_cle_brute(reponse)
+
+
+def _lien_remise(ref: str) -> str:
+    """Lien de remise de la cle, servi par le pod agent (via le proxy hub)."""
+    base = (_HUB_URL or "").rstrip("/")
+    chemin = f"/api/cles-deleguees/{ref}"
+    return f"{base}/agent{chemin}" if base else chemin
+
+
+def _sans_cle_brute(reponse: dict[str, Any]) -> dict[str, Any]:
+    """Retire la cle brute d'une reponse de mint avant qu'elle n'atteigne
+    le modele, et la remplace par une reference opaque."""
+    if not isinstance(reponse, dict):
+        return reponse
+    propre = dict(reponse)
+    cle = propre.pop("key", None)
+    propre.pop("warning_copy_now", None)
+    if isinstance(cle, str) and cle:
+        ref = cles_deleguees.deposer(cle)
+        propre["agent_ref"] = ref
+        propre["key_masked"] = propre.get("key_masked") or cles_deleguees.masquer(cle)
+        propre["lien_remise_cle"] = _lien_remise(ref)
+        propre["remise_cle"] = (
+            "La clé n'est pas transmise à l'assistant. Donne ce lien à "
+            "l'utilisateur : il affiche la clé une seule fois, pendant une "
+            "heure. Pour publier ou révoquer, passe agent_ref (jamais la clé)."
+        )
+    return propre
 
 
 async def publish_agent(
@@ -1126,20 +1160,52 @@ async def publish_agent(
     L'agent doit appeler create_agent d'abord pour obtenir key_id.
     Retourne {published_url, audit_chain: {signed_hash, ...}}.
     """
+    cle = cles_deleguees.resoudre(key_id)
+    if not cle:
+        return _ref_inconnue(key_id)
     body: dict[str, Any] = {}
     if audience:
         body["audience"] = audience
-    return await _hub_call(
-        "POST", f"/studies/{sid}/scoped-keys/{key_id}/publish",
+    reponse = await _hub_call(
+        "POST", f"/studies/{sid}/scoped-keys/{cle}/publish",
         json_body=body or None,
     )
+    if isinstance(reponse, dict) and reponse.get("published_url"):
+        # La route `/agent-share/{key_short}` n'existe pas (HUB-1) : l'URL
+        # repondrait 404. On ne la donne pas au modele, qui la presenterait
+        # comme un lien de partage fonctionnel.
+        reponse = dict(reponse)
+        reponse.pop("published_url", None)
+        reponse["published_url_notice"] = (
+            "Aucun lien de partage n'est encore servi pour les agents : la "
+            "page d'accès est à venir. L'agent est enregistré comme publié."
+        )
+    return reponse
 
 
 async def revoke_agent(sid: str, key_id: str) -> dict[str, Any]:
     """Révoque un agent partagé (soft delete)."""
+    cle = cles_deleguees.resoudre(key_id)
+    if not cle:
+        return _ref_inconnue(key_id)
     return await _hub_call(
-        "DELETE", f"/studies/{sid}/scoped-keys/{key_id}",
+        "DELETE", f"/studies/{sid}/scoped-keys/{cle}",
     )
+
+
+def _ref_inconnue(ref: str) -> dict[str, Any]:
+    return {
+        "error": "agent_ref_inconnue",
+        "detail": (
+            f"Référence d'agent inconnue ({str(ref)[:20]}). Elle n'est valable "
+            "que dans la session où l'agent a été créé, jusqu'au redémarrage "
+            "de l'assistant."
+        ),
+        "fix_hint": (
+            "Utilise l'agent_ref rendu par create_agent. Sinon, l'utilisateur "
+            "publie ou révoque l'agent depuis l'interface."
+        ),
+    }
 
 
 async def analyze_recipe(
@@ -1517,8 +1583,8 @@ NATIVE_TOOLS_V2 = {
         "description": (
             "Mint un agent partagé (clé scopée qgisk_). Appelle "
             "analyze_agent_config AVANT pour valider config. Retourne "
-            "{key, key_masked, ...} — la clé brute n'est retournée qu'une "
-            "seule fois, copier maintenant."
+            "{agent_ref, key_masked, lien_remise_cle, ...} : la clé brute "
+            "n'est jamais transmise à l'assistant."
         ),
         "params": {
             "sid": "str", "profile": "str", "audience": "str",
@@ -1536,7 +1602,7 @@ NATIVE_TOOLS_V2 = {
             "audit_chain: {signed_hash, ...}}."
         ),
         "params": {
-            "sid": "str", "key_id": "str (qgisk_...)",
+            "sid": "str", "key_id": "str (agent_ref rendu par create_agent)",
             "audience": "str optionnel (override)",
         },
     },
@@ -2215,8 +2281,9 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
         "function": {
             "name": "create_agent",
             "description": (
-                "Mint un agent partagé. Retourne {key, key_masked, ...} — "
-                "la clé brute est retournée UNE SEULE FOIS. RECOMMANDÉ : "
+                "Mint un agent partagé. Retourne {agent_ref, key_masked, "
+                "lien_remise_cle} : la clé brute ne t'est jamais transmise, "
+                "donne le lien à l'utilisateur. RECOMMANDÉ : "
                 "appelle analyze_agent_config d'abord pour valider config + "
                 "obtenir confirmation user (discipline plan-puis-execute)."
             ),
@@ -2253,7 +2320,7 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
                     "sid": _SID_SCHEMA,
                     "key_id": {
                         "type": "string",
-                        "description": "qgisk_<user>_<hex32> retourné par create_agent.",
+                        "description": "agent_ref rendu par create_agent (agent-<hex>).",
                     },
                     "audience": {
                         "type": "string",
@@ -2274,7 +2341,10 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "sid": _SID_SCHEMA,
-                    "key_id": {"type": "string"},
+                    "key_id": {
+                        "type": "string",
+                        "description": "agent_ref rendu par create_agent (agent-<hex>).",
+                    },
                 },
                 "required": ["sid", "key_id"],
             },

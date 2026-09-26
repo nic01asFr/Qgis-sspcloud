@@ -20,6 +20,17 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+
+def _executer(coro):
+    """Execute sans toucher a la boucle courante du fil principal : d'autres
+    tests de la suite s'appuient sur `asyncio.get_event_loop()`."""
+    boucle = asyncio.new_event_loop()
+    try:
+        return boucle.run_until_complete(coro)
+    finally:
+        boucle.close()
+
+
 from agent import qgis_agent as qa  # noqa: E402
 
 OUTILS = [{"name": n, "description": "", "inputSchema": {}}
@@ -55,7 +66,7 @@ def _outils(profil: str, cache: dict, rechargement=None) -> list[str]:
          patch.object(qa.httpx, "AsyncClient", _Client), \
          patch.object(qa, "fetch_profiles_from_hub",
                       rechargement or _pas_de_hub):
-        return [t["name"] for t in asyncio.run(qa._get_mcp_tools(profil))]
+        return [t["name"] for t in _executer(qa._get_mcp_tools(profil))]
 
 
 def test_liste_vide_veut_dire_aucun_outil():
