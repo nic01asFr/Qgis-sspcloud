@@ -292,6 +292,7 @@ for _r in \
     "pvc qgis-hub" \
     "secret qgis-hub-apikey" \
     "secret qgis-llm-apikey" \
+    "secret qgis-hub-s3" \
     "service qgis-hub" \
     "service qgis-agent" \
     "service qgis-agent-svc" \

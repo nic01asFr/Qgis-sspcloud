@@ -111,6 +111,12 @@
           "properties": {
             "size": { "type": "string", "default": "10Gi" }
           }
+        },
+        "authMode": {
+          "type": "string",
+          "enum": ["off", "permissive", "enforce"],
+          "default": "permissive",
+          "description": "Authentification hub -> workspace : permissive (transition), enforce, off."
         }
       }
     },
@@ -234,6 +240,12 @@
             "hidden": true,
             "overwriteDefaultWith": "{{s3.AWS_BUCKET_NAME}}/{{project.id}}/qgis-hub/"
           }
+        },
+        "existingSecret": {
+          "type": "string",
+          "default": "",
+          "description": "Secret existant portant les identifiants S3 (vide : cree par le chart).",
+          "x-onyxia": { "hidden": true }
         }
       }
     },
@@ -302,6 +314,23 @@
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean", "default": true }
+          }
+        }
+      }
+    },
+    "publication": {
+      "type": "object",
+      "title": "Signature des bundles",
+      "properties": {
+        "signingKey": {
+          "type": "object",
+          "properties": {
+            "existingSecret": {
+              "type": "string",
+              "default": "",
+              "description": "Secret portant la cle Ed25519 (32 octets hex ou base64). Vide : bundles non signes."
+            },
+            "key": { "type": "string", "default": "CEREMA_ED25519_PRIVATE_KEY" }
           }
         }
       }
