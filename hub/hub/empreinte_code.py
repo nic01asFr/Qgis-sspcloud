@@ -14,8 +14,10 @@ meme facon des deux cotes pour se lire de la meme facon.
 Ce module releve, une fois au demarrage :
 
   chemin           le dossier du paquet effectivement importe ;
-  empreinte        sha256 court du contenu de ses .py (chemins relatifs et
-                   contenus, tries) ;
+  empreinte        sha256 court de ce qui est servi : les .py du paquet,
+                   ses statiques (`static/`), les gabarits et statiques
+                   poses a cote (`../templates`, `../static`) ; chemins
+                   relatifs et contenus, tries ;
   commit_image     le commit d'ou l'image a ete construite (`GIT_SHA` au
                    build) -- celui de l'image, pas forcement celui du code
                    charge, d'ou le nom ;
@@ -30,6 +32,13 @@ Ce module releve, une fois au demarrage :
 Les fins de ligne sont normalisees avant hachage : un fichier depose en
 CRLF depuis un poste Windows reste le meme code, et ne doit pas faire
 crier a la divergence.
+
+Pourquoi les gabarits et les statiques (mesure du 2026-09-26, apres le lot
+qualite 2) : les overlays de production contiennent aussi `templates/`
+(chat.html, desk.html, workspace.html) et `hub/hub/static`. Limitee aux
+.py, l'empreinte disait « aligne » d'un overlay dont la page servie
+differait de l'image : le defaut que ce releve doit montrer, deplace
+d'un cran.
 """
 
 from __future__ import annotations
@@ -45,20 +54,49 @@ log = logging.getLogger(__name__)
 _LONGUEUR = 12
 
 
+# Ce qui est servi en plus du code Python, relativement au paquet : les
+# statiques montes par le paquet lui-meme (hub : `hub/hub/static`) et, a cote
+# du paquet, les gabarits Jinja et les statiques de l'agent -- `main.py` les
+# cherche en `Path(__file__).parent.parent / ...`, l'overlay les pose donc au
+# meme endroit (`<overlay>/templates`). Un dossier absent ne
+# compte pas : l'empreinte d'un paquet sans gabarit reste celle de ses .py.
+_DOSSIERS_SERVIS = ("static", "../templates", "../static")
+
+
+def _fichiers(dossier: Path) -> list[tuple[str, Path]]:
+    """(cle, fichier) tries par cle, sans doublon ni cache Python."""
+    vus: dict[str, Path] = {}
+    for f in dossier.rglob("*.py"):
+        if "__pycache__" not in f.parts:
+            vus[f.relative_to(dossier).as_posix()] = f
+    for sous in _DOSSIERS_SERVIS:
+        racine = dossier / sous
+        if not racine.is_dir():
+            continue
+        for f in racine.rglob("*"):
+            if not f.is_file() or "__pycache__" in f.parts:
+                continue
+            # Cle lisible et stable (`static/produit.css`,
+            # `../templates/chat.html`). Un .py de `static/` a deja la meme
+            # cle cote code : `setdefault` evite de le compter deux fois.
+            vus.setdefault(f"{sous}/{f.relative_to(racine).as_posix()}", f)
+    return sorted(vus.items())
+
+
 def empreinte(dossier: Path) -> str:
-    """sha256 court du code Python d'un paquet : chemins relatifs et contenus.
+    """sha256 court de ce que sert un paquet : code, gabarits et statiques.
 
     Le chemin relatif entre dans le hachage : renommer ou deplacer un module
-    change le code importable, meme si les octets sont les memes.
+    change le code importable, meme si les octets sont les memes. Les fins
+    de ligne sont neutralisees pour tous les fichiers, binaires compris : la
+    transformation est deterministe, deux copies identiques restent donc
+    identiques. Cout mesure en local : ~190 Ko de statiques et trois
+    gabarits ajoutent quelques millisecondes, une fois au demarrage.
     """
     dossier = Path(dossier)
-    fichiers = sorted(
-        (f for f in dossier.rglob("*.py") if "__pycache__" not in f.parts),
-        key=lambda f: f.relative_to(dossier).as_posix(),
-    )
     h = hashlib.sha256()
-    for f in fichiers:
-        h.update(f.relative_to(dossier).as_posix().encode("utf-8"))
+    for cle, f in _fichiers(dossier):
+        h.update(cle.encode("utf-8"))
         h.update(b"\0")
         h.update(f.read_bytes().replace(b"\r\n", b"\n"))
         h.update(b"\0")
