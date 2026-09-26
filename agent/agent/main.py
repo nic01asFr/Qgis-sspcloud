@@ -534,6 +534,34 @@ async def api_version():
     return etat
 
 
+@app.get("/api/cles-deleguees/{ref}")
+async def remettre_cle_deleguee(ref: str):
+    """Remise unique, a l'utilisateur, de la cle d'un agent partage.
+
+    La cle ne passe plus par le modele (audit securite des acces,
+    2026-09-26) : `create_agent` la range dans le coffre du pod et ne rend
+    au modele qu'une reference. Cette route, derriere le middleware
+    d'authentification de l'agent (proprietaire seulement), la remet une
+    seule fois, dans l'heure. `no-store` : ni le navigateur ni un proxy ne
+    doivent la garder.
+    """
+    from agent import cles_deleguees
+    cle = cles_deleguees.remettre(ref)
+    entetes = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex"}
+    if not cle:
+        return JSONResponse(
+            {"detail": "Clé introuvable, déjà remise ou expirée. Révoque "
+                       "l'agent et recrée-le si la clé a été perdue."},
+            status_code=404, headers=entetes,
+        )
+    return JSONResponse(
+        {"key": cle,
+         "avertissement": "Copiez cette clé maintenant : elle ne sera plus "
+                          "affichée."},
+        headers=entetes,
+    )
+
+
 @app.get("/api/status")
 async def api_status():
     """État de l'agent côté UI (polling) — sert au bandeau d'avertissement
@@ -1121,6 +1149,40 @@ async def _avec_battement(source, periode: float = _PERIODE_BATTEMENT):
             suivant.cancel()
 
 
+# Contextes ou l'interface fixe la persona : seuls ceux-la peuvent verrouiller
+# le profil. Pour les deux contextes d'assistance, le profil est impose par le
+# serveur, quel que soit celui du formulaire.
+_CONTEXTES_VERROUILLABLES: frozenset[str] = frozenset({
+    "editor_freeform", "recipe_create", "assist_component", "assist_assembly",
+})
+_PROFIL_IMPOSE_PAR_CONTEXTE: dict[str, str] = {
+    "assist_component": "component_assist",
+    "assist_assembly": "assembly_assist",
+}
+
+
+def _verrou_de_profil(
+    demande: bool, session_id: str, profile_id: str,
+) -> tuple[bool, str]:
+    """Decide cote serveur du verrou de profil. Rend (verrouille, profil).
+
+    Le verrou n'est accorde que si le client le demande ET que la session
+    est d'un contexte ou l'interface fixe la persona. Une session de bureau
+    ou historique n'est jamais verrouillee : le routeur contextuel et la
+    bascule `<switch_profile>` restent actifs.
+    """
+    if not demande:
+        return False, profile_id
+    contexte = memory.parse_session_id(session_id).get("context_kind", "legacy")
+    if contexte not in _CONTEXTES_VERROUILLABLES:
+        log.info(
+            "profile_locked demande mais refuse (contexte %s, session %s)",
+            contexte, session_id[:40],
+        )
+        return False, profile_id
+    return True, _PROFIL_IMPOSE_PAR_CONTEXTE.get(contexte, profile_id)
+
+
 @app.post("/chat")
 async def chat(
     request:        Request,
@@ -1143,9 +1205,16 @@ async def chat(
       - un tag `profile_locked=true` est pose sur la session (best effort).
     """
     # Parsing tolerant du flag (form data est string). Accepte "true"/"1"/"yes".
-    profile_locked_flag = str(profile_locked).strip().lower() in {
-        "true", "1", "yes", "on",
-    }
+    #
+    # Audit securite des acces (2026-09-26) : le verrou etait un champ de
+    # formulaire pose par le client, donc une commodite d'interface et non
+    # une frontiere. Le client DEMANDE le verrou ; le serveur l'accorde
+    # d'apres le contexte qu'il lit lui-meme dans l'identifiant de session,
+    # et impose le profil quand ce contexte en fixe un.
+    profile_locked_flag, profile_id = _verrou_de_profil(
+        str(profile_locked).strip().lower() in {"true", "1", "yes", "on"},
+        session_id, profile_id,
+    )
 
     # Routeur contextuel : le render actif (sélection livrable dans le desk)
     # ou l'étude active prime sur le form. Cf. CHARTE_AGENT §3 Principe 1.

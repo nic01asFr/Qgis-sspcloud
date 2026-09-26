@@ -342,18 +342,25 @@ def _get_profile_tools_whitelist(profile_id: str) -> list[str] | None:
     """Retourne la whitelist mcp_tools.allowed du profil, ou None.
 
     Convention YAML : `mcp_tools.allowed = "all"` ou `[liste, de, tools]`.
-    Retourne None si le profil est absent du cache OU si allowed="all" :
-    dans ces deux cas, pas de filtrage cote `_get_mcp_tools` (compat
-    arriere). Sinon une liste de noms exacts pour intersection.
+    None (pas de filtrage) seulement si le profil est CONNU et declare
+    `allowed: all` (ou n'a pas de cle `allowed`). Une liste, meme vide, est
+    une liste blanche : `[]` veut dire « aucun outil ».
+
+    Profil absent du cache (inconnu, ou profils pas encore charges) : liste
+    vide, donc aucun outil. Avant le 2026-09-26, ce cas rendait None, c'est a
+    dire TOUS les outils : un repli ouvrant (audit securite des acces).
     """
-    profile = _PROFILES_CACHE.get(profile_id, {})
+    profile = _PROFILES_CACHE.get(profile_id)
+    if profile is None:
+        return []
     mcp_tools_cfg = profile.get("mcp_tools", {}) or {}
     allowed = mcp_tools_cfg.get("allowed")
     if allowed is None or allowed == "all":
         return None
     if isinstance(allowed, list):
         return [str(t) for t in allowed]
-    return None
+    # Valeur inattendue (chaine autre que "all", nombre...) : fermee.
+    return []
 
 
 # ── Outils MCP disponibles ─────────────────────────────────────────────────────
@@ -386,16 +393,35 @@ async def _get_mcp_tools(profile_id: str = "standard") -> list[dict]:
         return []
 
     # Filtrage par profil : whitelist (allowed) + blacklist (disabled).
-    # Si profil pas dans le cache (fetch initial pas encore reussi, ou
-    # profile_id custom), on revient au comportement legacy (tous les tools).
-    profile = _PROFILES_CACHE.get(profile_id, {})
+    #
+    # Ferme par defaut depuis le 2026-09-26 (audit securite des acces) :
+    #   - `allowed: []` veut dire AUCUN outil MCP. Le test `and allowed`
+    #     sautait le filtre sur une liste vide : les profils d'assistance
+    #     (component_assist, assembly_assist, recipe_analyzer,
+    #     agent_config_analyzer) recevaient les 49 outils, dont
+    #     `execute_python` et `delete_file` (AG-14).
+    #   - un profil absent du cache n'ouvre plus tout. Si le cache est vide
+    #     (hub pas pret au demarrage), on retente le chargement une fois ;
+    #     un profil toujours inconnu n'a aucun outil MCP.
+    if profile_id not in _PROFILES_CACHE and not _PROFILES_CACHE:
+        try:
+            await fetch_profiles_from_hub()
+        except Exception as exc:  # jamais bloquant : on reste ferme
+            log.warning("MCP tools : rechargement des profils echoue : %s", exc)
+    profile = _PROFILES_CACHE.get(profile_id)
+    if profile is None:
+        log.warning(
+            "MCP tools : profil '%s' inconnu -> aucun outil MCP (repli ferme)",
+            profile_id,
+        )
+        return []
     mcp_tools_cfg = profile.get("mcp_tools", {}) or {}
     allowed = mcp_tools_cfg.get("allowed")
     disabled = set(mcp_tools_cfg.get("disabled", []) or [])
 
     filtered = all_tools
-    if isinstance(allowed, list) and allowed:
-        allowed_set = set(allowed)
+    if allowed is not None and allowed != "all":
+        allowed_set = set(allowed) if isinstance(allowed, list) else set()
         filtered = [t for t in filtered if t.get("name") in allowed_set]
     if disabled:
         filtered = [t for t in filtered if t.get("name") not in disabled]

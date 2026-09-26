@@ -17,8 +17,13 @@ tamper-evident : quiconque a la cle publique CEREMA peut verifier que
 le hash n'a pas ete modifie.
 
 Gestion de la cle privee :
-- Env var `CEREMA_ED25519_PRIVATE_KEY` (raw hex 32 bytes ou base64) en prod.
-- Fallback : cle deterministe demo (WARN log en prod, safe pour tests).
+- Env var `CEREMA_ED25519_PRIVATE_KEY` (raw hex 32 bytes ou base64), fournie
+  par l'installation (chart : `publication.signingKey.existingSecret`).
+- Sans cle valide, le bundle n'est PAS signe, et le dit (integrity.txt,
+  README.txt). Il n'y a plus de cle de demonstration : jusqu'au 2026-09-26,
+  l'absence de cle faisait signer avec `bytes(range(32))`, cle publique
+  connue de tous. N'importe qui pouvait donc forger une signature « valide »
+  sur un bundle modifie : l'auditabilite promise etait nulle (LIV-3).
 
 Choix produit : Ed25519 plutot que RSA-PSS car cles courtes (32 bytes),
 signatures courtes (64 bytes), verification rapide, pas de choix de courbe.
@@ -45,46 +50,48 @@ log = logging.getLogger("hub.publish.bundle")
 
 _ENV_PRIV_KEY = "CEREMA_ED25519_PRIVATE_KEY"
 
-# Cle demo deterministe pour tests / dev.
-# Ne JAMAIS utiliser en prod (log un warning cote sign_integrity).
-_DEMO_PRIV_KEY = bytes(range(32))
+
+class SignatureIndisponible(RuntimeError):
+    """Aucune cle de signature fournie par l'installation."""
 
 
-def _load_private_key(priv_key_bytes: bytes | None = None) -> tuple[Ed25519PrivateKey, bool]:
-    """Charge la cle Ed25519. Retourne (key, is_demo).
+def _load_private_key(priv_key_bytes: bytes | None = None) -> Ed25519PrivateKey | None:
+    """Charge la cle Ed25519 fournie, ou None s'il n'y en a pas.
 
     Priorite :
     1. Argument `priv_key_bytes` (utilise par les tests).
     2. Env var CEREMA_ED25519_PRIVATE_KEY (raw hex 64 chars, ou base64).
-    3. Fallback cle demo deterministe (WARN log).
+    Aucun repli : sans cle valide, on ne signe pas.
     """
     if priv_key_bytes:
-        return Ed25519PrivateKey.from_private_bytes(priv_key_bytes[:32]), False
+        return Ed25519PrivateKey.from_private_bytes(priv_key_bytes[:32])
 
     raw = os.getenv(_ENV_PRIV_KEY, "").strip()
     if raw:
         try:
             key_bytes = binascii.unhexlify(raw)
             if len(key_bytes) == 32:
-                return Ed25519PrivateKey.from_private_bytes(key_bytes), False
+                return Ed25519PrivateKey.from_private_bytes(key_bytes)
         except (binascii.Error, ValueError):
             pass
         try:
             key_bytes = base64.b64decode(raw)
             if len(key_bytes) == 32:
-                return Ed25519PrivateKey.from_private_bytes(key_bytes), False
+                return Ed25519PrivateKey.from_private_bytes(key_bytes)
         except (binascii.Error, ValueError):
             pass
         log.warning(
-            "%s present mais format invalide (attendu : 32 bytes hex ou base64). "
-            "Fallback sur cle demo.", _ENV_PRIV_KEY,
+            "%s present mais format invalide (attendu : 32 octets en hex ou "
+            "base64). Bundle NON signe.", _ENV_PRIV_KEY,
         )
+        return None
 
     log.warning(
-        "F16 bundle : signature via cle demo deterministe (NON PROD). "
-        "Configurer %s pour prod.", _ENV_PRIV_KEY,
+        "F16 bundle : aucune cle de signature (%s absente). Bundle NON signe. "
+        "Fournir la cle via publication.signingKey.existingSecret du chart.",
+        _ENV_PRIV_KEY,
     )
-    return Ed25519PrivateKey.from_private_bytes(_DEMO_PRIV_KEY), True
+    return None
 
 
 def sign_integrity(
@@ -93,24 +100,37 @@ def sign_integrity(
 ) -> tuple[bytes, str]:
     """Signe `integrity_hash` avec Ed25519.
 
-    Retourne (signature_64bytes, public_key_hex).
+    Retourne (signature_64bytes, public_key_hex). Leve SignatureIndisponible
+    si aucune cle n'est fournie : pas de signature de complaisance.
     """
-    priv, _is_demo = _load_private_key(priv_key_bytes)
+    priv = _load_private_key(priv_key_bytes)
+    if priv is None:
+        raise SignatureIndisponible(
+            f"Aucune cle de signature : definir {_ENV_PRIV_KEY}."
+        )
     signature = priv.sign(integrity_hash)
     pub_hex = priv.public_key().public_bytes_raw().hex()
     return signature, pub_hex
 
 
 def _readme_txt(slug: str, version_num: int, integrity_hash: str,
-                pub_key_hex: str, is_demo: bool) -> str:
-    warn = ""
-    if is_demo:
-        warn = (
-            "\n\n[!] AVERTISSEMENT : ce bundle a ete signe avec une cle demo\n"
-            "    non-production. La signature n'authentifie PAS ce bundle\n"
-            "    comme livrable officiel CEREMA. Deployer avec la variable\n"
-            f"    d'environnement {_ENV_PRIV_KEY} configuree pour signer\n"
-            "    en mode prod.\n"
+                pub_key_hex: str, signe: bool) -> str:
+    if signe:
+        bloc_signature = f"""SIGNATURE :
+Algorithme       : Ed25519 (RFC 8032)
+Cle publique hex : {pub_key_hex}
+
+Verifier la signature :
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    pub = Ed25519PublicKey.from_public_bytes(bytes.fromhex(PUB_HEX))
+    pub.verify(SIG_BYTES, INTEGRITY_HASH.encode())
+"""
+    else:
+        bloc_signature = (
+            "SIGNATURE :\n"
+            "[!] Ce bundle N'EST PAS SIGNE : l'installation n'a pas fourni de\n"
+            "    cle de signature. Le hash d'integrite ci-dessus detecte une\n"
+            "    modification accidentelle, mais n'authentifie pas l'emetteur.\n"
         )
     return f"""BUNDLE PUBLICATION QGIS-SSPCLOUD - F16 (Sprint 1.4)
 ======================================================
@@ -134,15 +154,7 @@ Ce hash est calcule sur la version canonique JSON du manifest
 Assembly (D-FORMAT-008 2026-06-29). Toute modification de manifest.json
 INVALIDE ce hash.
 
-SIGNATURE :
-Algorithme       : Ed25519 (RFC 8032)
-Cle publique hex : {pub_key_hex}
-
-Verifier la signature :
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-    pub = Ed25519PublicKey.from_public_bytes(bytes.fromhex(PUB_HEX))
-    pub.verify(SIG_BYTES, INTEGRITY_HASH.encode())
-{warn}
+{bloc_signature}
 Emis par : QGIS-SSPCloud Hub (CEREMA)
 """
 
@@ -174,18 +186,27 @@ def build_zip_bundle(
         or audit_chain.get("signed_hash")
         or "sha256:unknown"
     )
-    priv, is_demo = _load_private_key(priv_key_bytes)
-    signature = priv.sign(integrity_hash.encode("utf-8"))
-    pub_hex = priv.public_key().public_bytes_raw().hex()
-
-    integrity_txt = (
-        f"INTEGRITY_HASH: {integrity_hash}\n"
-        f"SIGNATURE_ALGO: Ed25519\n"
-        f"SIGNATURE_HEX:  {signature.hex()}\n"
-        f"PUBLIC_KEY_HEX: {pub_hex}\n"
-        f"SIGNED_AT_UTC:  {int(time.time())}\n"
-        f"IS_DEMO_KEY:    {'true' if is_demo else 'false'}\n"
-    )
+    priv = _load_private_key(priv_key_bytes)
+    signe = priv is not None
+    if signe:
+        signature = priv.sign(integrity_hash.encode("utf-8"))
+        pub_hex = priv.public_key().public_bytes_raw().hex()
+        integrity_txt = (
+            f"INTEGRITY_HASH: {integrity_hash}\n"
+            f"SIGNATURE_ALGO: Ed25519\n"
+            f"SIGNATURE_HEX:  {signature.hex()}\n"
+            f"PUBLIC_KEY_HEX: {pub_hex}\n"
+            f"SIGNED_AT_UTC:  {int(time.time())}\n"
+            f"SIGNED:         true\n"
+        )
+    else:
+        pub_hex = ""
+        integrity_txt = (
+            f"INTEGRITY_HASH: {integrity_hash}\n"
+            f"SIGNATURE_ALGO: none\n"
+            f"SIGNED:         false\n"
+            f"GENERATED_AT_UTC: {int(time.time())}\n"
+        )
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -201,7 +222,7 @@ def build_zip_bundle(
         z.writestr("integrity.txt", integrity_txt)
         z.writestr(
             "README.txt",
-            _readme_txt(slug, version_num, integrity_hash, pub_hex, is_demo),
+            _readme_txt(slug, version_num, integrity_hash, pub_hex, signe),
         )
         for cid, comp in (components or {}).items():
             z.writestr(
