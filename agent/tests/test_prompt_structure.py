@@ -442,3 +442,12 @@ if __name__ == "__main__":
             print(f"> {name}")
             fn()
     print("OK — G7 prompt structure tests passent (mode standalone).")
+
+
+def test_cache_briques_vide_jamais_frais_juste_apres_le_demarrage():
+    """Un cache jamais rempli n'est pas frais, meme si la machine vient de
+    demarrer (`time.monotonic()` inferieur au TTL). Constate en CI le
+    2026-09-26."""
+    briques_client.reset_cache()
+    with patch.object(briques_client.time, "monotonic", return_value=5.0):
+        assert briques_client._cache_valid() is False

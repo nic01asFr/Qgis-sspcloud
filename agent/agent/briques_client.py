@@ -43,8 +43,14 @@ _CACHE_TTL_SEC = 60.0
 
 # Cache in-memory best-effort (pas de Lock : plusieurs fetch concurrents
 # aboutiront au meme resultat, la derniere ecriture gagne, sans casse).
+#
+# « Jamais rempli » vaut None, pas 0.0 : `time.monotonic()` compte depuis le
+# demarrage de la machine, si bien qu'un horodatage a 0.0 passait pour frais
+# pendant la premiere minute apres le boot. Constate le 2026-09-26 sur un
+# runner CI tout juste demarre : un cache vide etait servi comme valide, et en
+# production les regles du hub auraient ete ignorees la premiere minute.
 _CACHE: dict[str, Any] = {
-    "timestamp": 0.0,
+    "timestamp": None,
     "rules_global": [],
     "rules_forbidden": [],
 }
@@ -52,12 +58,15 @@ _CACHE: dict[str, Any] = {
 
 def _cache_valid() -> bool:
     """True si le cache est encore frais (TTL non expire)."""
-    return (time.monotonic() - _CACHE["timestamp"]) < _CACHE_TTL_SEC
+    horodatage = _CACHE["timestamp"]
+    if horodatage is None:
+        return False
+    return (time.monotonic() - horodatage) < _CACHE_TTL_SEC
 
 
 def reset_cache() -> None:
     """Vide le cache. Reserve aux tests unitaires."""
-    _CACHE["timestamp"] = 0.0
+    _CACHE["timestamp"] = None
     _CACHE["rules_global"] = []
     _CACHE["rules_forbidden"] = []
 
