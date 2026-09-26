@@ -1,0 +1,113 @@
+# Exemple complet d'agent dedie (schema 0.1).
+# Reference : docs/superpowers/specs/2026-09-26-agents-dedies-projet.md, section 3.
+# Valide par hub/tests/test_agents_dedies.py : toute evolution du schema doit
+# garder cet exemple valide, ou le faire evoluer dans le meme commit.
+kind: agent_dedie
+version_schema: "0.1"
+slug: ppri-lavandou-partenaires
+nom: "Conseiller PPRi du Lavandou"
+description: >-
+  Repond aux services de la commune et de la DDTM sur le zonage PPRi,
+  le reglement et les enjeux exposes. Consultation seule, sauf le suivi
+  des reperes de crue que les partenaires peuvent completer.
+version: 1
+version_precedente: null
+
+etude:
+  sid: 4c176e577d70
+  projets: []
+
+public:
+  audience: partenaires
+  invites:
+    - groupe:ddtm83-risques
+    - mairie-lavandou@exemple.fr
+  anonyme: false
+
+perimetre:
+  couches:
+    - id: zonage_ppri
+      source: data/ppri/zonage_reglementaire.gpkg
+      libelle: "Zonage reglementaire PPRi"
+      droits: [lire, requeter, afficher, exporter]
+    - id: enjeux_batis
+      source: data/enjeux/batiments_exposes.gpkg
+      libelle: "Batiments exposes (aleas T100)"
+      droits: [lire, requeter, afficher]
+      attributs_exclus: [proprietaire, parcelle_proprietaire]
+    - id: reperes_crue
+      source: data/terrain/reperes_crue.gpkg
+      libelle: "Reperes de crue"
+      droits: [lire, afficher, modifier]
+  documents:
+    - id: reglement_ppri
+      chemin: docs/ppri/reglement_ppri_2019.pdf
+      libelle: "Reglement du PPRi (2019)"
+      droits: [lire, citer]
+    - id: note_presentation
+      chemin: docs/ppri/note_presentation.pdf
+      droits: [lire, citer]
+  bases: []
+  livrables:
+    - storymap/risque-t100-lavandou
+
+actions:
+  lire: {}
+  requeter: {}
+  citer: {}
+  afficher: {}
+  exporter:
+    confirmation: utilisateur
+    formats: [csv, gpkg]
+  modifier:
+    confirmation: proprietaire
+
+outils:
+  paquets: []
+  autorises:
+    - get_features
+    - get_project_info
+    - consulter_documents
+    - afficher_atlas
+    - zoom_to
+    - set_layer_visibility
+    - export_layer
+    - modifier_entites
+
+garde_fous:
+  lecture_seule: false
+  citations_obligatoires: true
+  max_entites_par_reponse: 500
+  max_appels_outils_par_tour: 8
+  message_hors_perimetre: >-
+    Je ne peux repondre que sur le PPRi du Lavandou et les donnees
+    listees dans ma fiche.
+
+memoire:
+  conversation: session
+  fiche_etude: lecture
+  documents: corpus_perimetre
+  visiteur: aucune
+  apprentissage: desactive
+
+ton:
+  profil_base: risk_analyst
+  registre: pedagogique
+  langue: fr
+  consignes: >-
+    Tu t'adresses a des agents de collectivite. Cite l'article du
+    reglement pour toute regle. Ne donne jamais d'avis juridique sur un
+    permis particulier : renvoie vers le service instructeur.
+
+affichage:
+  atlas:
+    active: true
+    couches: [zonage_ppri, enjeux_batis, reperes_crue]
+    fond: plan_ign
+  livrables:
+    - storymap/risque-t100-lavandou
+
+quotas:
+  messages_par_jour: 300
+  jetons_par_mois: 3000000
+  expire_le: 2027-06-30
