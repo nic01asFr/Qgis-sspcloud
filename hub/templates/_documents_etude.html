@@ -1,0 +1,67 @@
+{# ═══ Documents de l'étude (lot L7, corpus documentaire) ══════════════════
+   Bloc autonome du panneau Ressources > Sources : balisage et style ici,
+   comportement dans /static/documents_etude.js. Inclus par desk.html
+   ({% include "_documents_etude.html" %}) ; ne dépend d'aucune fonction
+   du bureau, pour ne pas entrer en conflit avec la refonte du panneau.
+   API : /studies/{sid}/documents (hub/hub/documents_api.py). #}
+<style>
+.docs-etude-depot{display:flex;flex-direction:column;align-items:center;gap:6px;
+  border:1px dashed var(--qs-trait);border-radius:4px;padding:10px 8px;margin-bottom:4px;
+  text-align:center;font-size:12px;line-height:1.4;color:var(--qs-discret);
+  background:var(--qs-surface-2)}
+.docs-etude-depot p{margin:0}
+.docs-etude-depot.docs-etude-survol{border-color:var(--qs-accent);background:var(--qs-accent-pale)}
+.docs-etude-formats{font-size:11.5px}
+.docs-etude-liste{list-style:none;margin:6px 0 0;padding:0;max-height:260px;overflow-y:auto}
+.docs-etude-doc{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;padding:5px 0;
+  border-bottom:1px solid var(--qs-trait);font-size:12.5px}
+.docs-etude-doc:last-child{border-bottom:none}
+.docs-etude-nom{flex:1 1 60%;min-width:0;font-weight:600;color:var(--qs-encre);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.docs-etude-meta{font-size:11.5px;color:var(--qs-discret);white-space:nowrap}
+.docs-etude-badge{font-size:11px;font-weight:600;padding:1px 7px;border-radius:8px;
+  white-space:nowrap;background:var(--qs-surface-2);color:var(--qs-encre-2)}
+.docs-etude-doc[data-statut="indexe"] .docs-etude-badge{background:#d1f0d8;color:var(--qs-succes)}
+.docs-etude-doc[data-statut="erreur"] .docs-etude-badge{background:var(--qs-danger-pale);color:var(--qs-danger)}
+.docs-etude-doc[data-statut="en_attente"] .docs-etude-badge,
+.docs-etude-doc[data-statut="extraction"] .docs-etude-badge{background:var(--qs-alerte-pale);color:var(--qs-alerte)}
+.docs-etude-message{flex-basis:100%;margin:0;font-size:11.5px;color:var(--qs-danger);line-height:1.35}
+.docs-etude-actions{display:flex;gap:4px;margin-left:auto}
+.docs-etude-actions a,.docs-etude-actions button{min-height:28px;padding:3px 8px;font-size:12px;
+  font-family:inherit;border:1px solid var(--qs-trait);border-radius:3px;background:#fff;
+  color:var(--qs-accent);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+.docs-etude-actions a:hover,.docs-etude-actions button:hover{background:var(--qs-accent-pale)}
+.docs-etude-actions .docs-etude-retirer{color:var(--qs-danger)}
+.docs-etude-actions .docs-etude-retirer:hover{background:var(--qs-danger-pale)}
+</style>
+<div class="src-section docs-etude" id="src-section-documents"
+     data-sid="{{ active_study_id or '' }}">
+  <button type="button" class="src-section-header collapsible" id="docs-etude-toggle"
+          aria-expanded="false" aria-controls="docs-etude-contenu">
+    <span class="src-chevron" aria-hidden="true">▸</span>
+    Documents de l'étude
+    <span class="src-header-meta" id="docs-etude-resume">…</span>
+  </button>
+  <div class="src-section-content collapsed" id="docs-etude-contenu">
+    <p class="src-hint">Rapports, cahiers des charges, notes, tableaux : l'assistant
+      les consulte et cite ses sources (document, page).</p>
+    {% if active_study_id %}
+    <div class="docs-etude-depot" id="docs-etude-depot" role="group"
+         aria-label="Ajouter des documents à l'étude">
+      <p>Glisser-déposer des documents ici, ou</p>
+      <button type="button" class="qs-btn qs-btn--sm qs-btn--secondaire"
+              id="docs-etude-choisir">Ajouter des documents…</button>
+      <p class="docs-etude-formats" id="docs-etude-formats">PDF, DOCX, ODT, TXT, MD, CSV, XLSX
+        (25 Mo au plus par document)</p>
+      <input type="file" id="docs-etude-input" multiple hidden
+             aria-describedby="docs-etude-formats"
+             accept=".pdf,.docx,.odt,.txt,.md,.markdown,.csv,.xlsx">
+    </div>
+    <div id="docs-etude-statut" class="src-upload-status" role="status" aria-live="polite"></div>
+    <ul class="docs-etude-liste" id="docs-etude-liste" aria-label="Documents de l'étude"></ul>
+    {% else %}
+    <div class="src-empty">Choisis une étude (menu du haut) pour y ajouter des documents.</div>
+    {% endif %}
+  </div>
+</div>
+<script src="/static/documents_etude.js" defer></script>
