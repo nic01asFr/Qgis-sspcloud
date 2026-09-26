@@ -144,6 +144,9 @@ async def create_component(
                - title
                - source (ex: {scope: 'project', sid, pid, scene_hash})
                - rendering (ex: {runtime: 'atlas', container_size: 'responsive'})
+                 `atlas` = visionneuse Atlas en iframe ; active seulement si
+                 params.scene_url est une scene https lisible sans connexion
+                 (livrable public), sinon le hub rend MapLibre.
 
     Recommandation : appeler validate_manifest() AVANT pour éviter les
     erreurs tardives.
@@ -548,8 +551,10 @@ async def publish_component(
     """A3 (Vague A Commit 3) — Publie un composant standalone S3 + URL hub.
 
     Use case : composant publishable individuellement (interactive_map,
-    chart, data_table, ...) embarquable en iframe par sites tiers
-    (Atlas widget Grist, sites CEREMA, etc.) sans contexte assembly.
+    chart, data_table, ...) embarquable en iframe par une page tierce
+    (site CEREMA, page d'un document Grist) sans contexte assembly.
+    Hors session hub, seule l'audience `public` s'affiche : les autres
+    exigent l'identite hub du lecteur (401 sinon).
 
     Workflow :
     1. Lit manifest depuis components_index + PVC
@@ -1456,10 +1461,11 @@ NATIVE_TOOLS_V2 = {
         "fn": publish_component,
         "description": (
             "A3 (Vague A) — PUBLIE un composant standalone S3 + URL hub. "
-            "Use case : composant embarquable iframe par sites tiers "
-            "(Atlas widget Grist, sites CEREMA externes). Retourne URL "
+            "Use case : composant embarquable en iframe (page tierce, "
+            "document Grist). Retourne URL "
             "hub /published/{owner}/component/component-{cid}. "
-            "Audience cerema_internal default (anti-fuite RGPD)."
+            "Audience cerema_internal default (anti-fuite RGPD) : "
+            "illisible hors session hub, seule `public` l'est."
         ),
         "params": {
             "sid": "str", "cid": "str",
@@ -2111,10 +2117,11 @@ NATIVE_TOOLS_V2_OPENAI: list[dict[str, Any]] = [
             "name": "publish_component",
             "description": (
                 "A3 (Vague A) - PUBLIE un composant standalone S3 + URL hub. "
-                "Use case : composant embarquable iframe par sites tiers "
-                "(Atlas widget Grist, sites CEREMA, etc.). Retourne URL hub "
+                "Use case : composant embarquable en iframe (page tierce, "
+                "document Grist). Retourne URL hub "
                 "/published/{owner}/component/component-{cid}. Audience "
-                "cerema_internal default - JAMAIS public par défaut (anti-RGPD)."
+                "cerema_internal default - JAMAIS public par défaut (anti-RGPD) ; "
+                "hors session hub, seule `public` s'affiche."
             ),
             "parameters": {
                 "type": "object",

@@ -2242,10 +2242,9 @@ class QGISAgent:
 
    ⚠️ **JAMAIS de manifest `{basemap, bbox}` minimal en prod** pour
    `interactive_map`. Utilise toujours un pattern canonique adapte via
-   `describe_entity_schema(..., use_case='<pattern>')`. Le composant
-   `passerelle-geo-components@dev` de la lib carto commune ne rend
-   correctement que les manifests V0.3.1 riches (contract SceneManifest
-   V0.3.1 publie sur npm 2026-07-10).
+   `describe_entity_schema(..., use_case='<pattern>')`. `runtime: 'atlas'`
+   n'affiche Atlas que si `params.scene_url` est une scène https lisible
+   sans connexion (livrable `public`) ; sinon le hub rend MapLibre.
 
    ⚠️ **JAMAIS `audience: "public"`** sans confirmation EXPLICITE user
    (anti-fuite RGPD). Default `cerema_internal`.
