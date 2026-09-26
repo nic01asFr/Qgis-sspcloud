@@ -1409,6 +1409,13 @@ window.addEventListener('message', (e) => {
   const recipeId = String(data.recipe_id || '').trim();
   const sid = String(data.sid || '').trim();
   if (!recipeId || !sid) return;
+  // Le bureau reemet jusqu'a l'accuse (id) : ne lancer la recette qu'une fois.
+  const ident = String(data.id || '').slice(0, 64);
+  if (ident && _composeDejaTraites.has(ident)) {
+    _accuserReceptionBureau(ident, 'deja');
+    return;
+  }
+  if (ident) _composeDejaTraites.add(ident);
   const mode = (data.mode === 'pure') ? 'pure' : 'polished';
   const textarea = document.getElementById('message-input');
   const sessionIdField = document.getElementById('session-id');
@@ -1420,7 +1427,66 @@ window.addEventListener('message', (e) => {
   // Message utile mais court -- le mode recipe_run n'appelle pas le LLM,
   // le user_message est juste stocke en trace + injecte dans le narratif.
   textarea.value = `Lance la recette (mode ${mode}).`;
+  const occupe = tourEnCours();
   form.dispatchEvent(new Event('submit', {cancelable: true, bubbles: true}));
+  _accuserReceptionBureau(ident, occupe ? 'occupe' : 'envoye');
+});
+
+// Accuse de reception au bureau. Il reemet tant qu'il n'a pas de reponse
+// (le chat peut etre en train de charger) : sans accuse, une ressource
+// deposee pendant le chargement etait perdue sans que personne le sache.
+function _accuserReceptionBureau(id, statut) {
+  const ident = String(id || '').slice(0, 64);
+  if (!ident) return;
+  window.parent.postMessage({type: 'desk_compose_recu', id: ident, statut: statut}, location.origin);
+}
+
+// ── Contrat desk_compose (2026-09-26) ──────────────────────────────────
+// Le bureau depose un texte dans la conversation apres un geste explicite
+// de l'utilisateur : glisser-deposer d'une ressource sur la carte ou sur le
+// chat, boutons « Ajouter a la carte » / « Envoyer a l'assistant », demandes
+// toutes faites des livrables.
+//   {type: 'desk_compose', id: str, texte: str (2 000 car. max), envoyer: bool}
+// envoyer=true  : la demande part comme si l'utilisateur l'avait tapee
+//                 (ex. « Ajoute a la carte la source … ») ; si une reponse
+//                 est en cours, elle attend dans la zone de saisie.
+// envoyer=false : le texte est ajoute a la zone de saisie, qui prend le
+//                 focus ; l'utilisateur complete puis envoie lui-meme.
+// Reponse : {type: 'desk_compose_recu', id, statut: 'envoye' | 'brouillon'
+// | 'deja'}. Un meme id n'est traite qu'une fois (le bureau reemet).
+// recipe_run_request accepte le meme champ id et repond de meme, avec
+// 'occupe' si une reponse etait en cours (la recette n'est pas lancee).
+const _composeDejaTraites = new Set();
+window.addEventListener('message', (e) => {
+  if (!_messageDuBureau(e)) return;
+  const data = e.data;
+  if (!data || data.type !== 'desk_compose') return;
+  const id = String(data.id || '').slice(0, 64);
+  // Pas de trim en fin : « A propos de la couche X : » attend la suite.
+  const texte = String(data.texte || '').replace(/^\s+/, '').slice(0, 2000);
+  const saisie = document.getElementById('message-input');
+  const form = document.getElementById('chat-form');
+  if (!texte.trim() || !saisie || !form) return;
+  if (id && _composeDejaTraites.has(id)) {
+    _accuserReceptionBureau(id, 'deja');
+    return;
+  }
+  if (id) _composeDejaTraites.add(id);
+  if (data.envoyer === true && !tourEnCours()) {
+    saisie.value = texte;
+    form.requestSubmit();
+    _accuserReceptionBureau(id, 'envoye');
+    return;
+  }
+  const avant = saisie.value.trim();
+  saisie.value = avant ? avant + '\n' + texte : texte;
+  saisie.dispatchEvent(new Event('input', {bubbles: true}));
+  saisie.focus();
+  saisie.setSelectionRange(saisie.value.length, saisie.value.length);
+  if (data.envoyer === true) {
+    showChatToast('Une réponse est en cours : ta demande attend dans la zone de message.');
+  }
+  _accuserReceptionBureau(id, 'brouillon');
 });
 
 window.addEventListener('message', async (e) => {
