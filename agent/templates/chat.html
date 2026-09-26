@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
 <meta name="theme-color" content="#0E2433">
-<title>QGIS Agent — QGIS Service</title>
+<title>Assistant IA — QGIS Service</title>
+<meta name="description" content="Assistant IA de QGIS Service : pose tes questions géographiques en langage courant.">
 <link rel="stylesheet" href="/static/produit.css">
 <script src="https://unpkg.com/marked@9/marked.min.js"></script>
 <style>
@@ -403,6 +404,113 @@ body.embed .msg .bubble pre{max-width:100%}
   .chat-app{grid-template-columns:1fr}
   .chat-sidebar{display:none}
 }
+
+/* ── Tour de l'assistant (audit UX 2026-09-26) ─────────────────────────
+   Un seul endroit pour l'etat : la ligne de statut DANS le tour en cours.
+   La barre au-dessus de la saisie repetait le meme texte et restait parfois
+   affichee apres la fin du tour ; elle ne sert plus qu'aux lecteurs d'ecran. */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.status-bar,.status-bar.visible{position:absolute;width:1px;height:1px;margin:-1px;
+  overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;padding:0}
+.tour-statut{display:flex;align-items:center;gap:8px;color:var(--qs-accent);
+  font-size:13px;min-height:24px}
+.tour-statut .duree{color:var(--qs-discret);font-variant-numeric:tabular-nums;font-size:12px}
+.tour-statut + .tour-reponse:not(:empty),
+.tour-etapes + .tour-reponse:not(:empty){margin-top:8px}
+/* Etapes : repliees par defaut. Les messages intermediaires du modele
+   (« je vais appeler... ») et les blocs d'outil y sont ranges, hors de la
+   reponse. */
+.msg .bubble details.tour-etapes{margin:4px 0 0}
+.msg .bubble details.tour-etapes > summary{display:inline-flex;align-items:center;gap:6px;
+  min-height:24px;padding:2px 8px 2px 4px;border-radius:3px;cursor:pointer;
+  font-size:12px;color:var(--qs-discret);list-style:none;user-select:none}
+.msg .bubble details.tour-etapes > summary::-webkit-details-marker{display:none}
+.msg .bubble details.tour-etapes > summary::before{content:"";width:0;height:0;
+  border-left:5px solid currentColor;border-top:4px solid transparent;
+  border-bottom:4px solid transparent;transition:transform .15s ease}
+.msg .bubble details.tour-etapes[open] > summary::before{transform:rotate(90deg)}
+.msg .bubble details.tour-etapes > summary:hover{background:var(--qs-surface-2);color:var(--qs-encre-2)}
+.tour-etapes-corps{margin:6px 0 4px;padding:6px 10px;border-left:2px solid var(--qs-trait);
+  font-size:12.5px;color:var(--qs-encre-2)}
+.tour-etapes-corps .tour-liste{margin:0 0 6px;padding-left:18px}
+.tour-etapes-corps .tour-liste li{padding:1px 0}
+.tour-etapes-corps .tour-liste li[aria-current="step"]{color:var(--qs-accent);font-weight:600}
+.tour-etapes-corps .tour-technique > :first-child{margin-top:0}
+/* Pied d'une reponse : heure, copier, relancer. Discret, sous la bulle. */
+.tour-pied{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:8px;
+  padding-top:6px;border-top:1px solid var(--qs-trait-2);font-size:11.5px;color:var(--qs-discret)}
+.tour-pied time{margin-right:6px;font-variant-numeric:tabular-nums}
+.tour-pied button{background:transparent;border:1px solid transparent;border-radius:3px;
+  min-height:24px;padding:2px 8px;font:inherit;color:var(--qs-encre-2);cursor:pointer;
+  display:inline-flex;align-items:center;gap:4px}
+.tour-pied button[hidden]{display:none}
+.tour-pied time{color:inherit}
+.tour-pied button:hover{background:var(--qs-surface-2);border-color:var(--qs-trait)}
+.msg.user{flex-direction:column;align-items:flex-end;gap:2px}
+.msg.user time{font-size:11px;color:var(--qs-discret);font-variant-numeric:tabular-nums;margin-right:2px}
+.msg .bubble .tour-orphelin{margin:0;color:var(--qs-encre-2)}
+/* Titres dans une reponse : a l'echelle de la bulle, pas de la page. */
+.msg .bubble h1,.msg .bubble h2,.msg .bubble h3,.msg .bubble h4{
+  font-size:1.05em;line-height:1.35;margin:12px 0 4px;color:var(--qs-encre)}
+.msg .bubble h1{font-size:1.15em}
+.msg .bubble h2{font-size:1.1em}
+.msg .bubble > :first-child,.tour-reponse > :first-child{margin-top:0}
+.msg .bubble table{border-collapse:collapse;margin:6px 0;font-size:.95em}
+.msg .bubble th,.msg .bubble td{border:1px solid var(--qs-trait);padding:4px 8px;text-align:left}
+.msg .bubble th{background:var(--qs-surface-2)}
+.msg .bubble hr{border:0;border-top:1px solid var(--qs-trait);margin:10px 0}
+/* Chargement d'une conversation reprise : pas d'ecran d'accueil fugace. */
+.chargement-conv{color:var(--qs-discret);font-size:13px;margin:8px 0}
+/* Retour en bas : l'utilisateur a remonte, on ne lui vole pas la main. */
+.aller-en-bas{position:absolute;left:50%;transform:translateX(-50%);bottom:12px;
+  z-index:5;display:none;background:#fff;color:var(--qs-accent);border:1px solid var(--qs-trait);
+  border-radius:16px;padding:4px 12px;min-height:28px;font:inherit;font-size:12px;cursor:pointer;
+  box-shadow:0 2px 8px rgba(0,0,0,.12)}
+.aller-en-bas.visible{display:block}
+.zone-messages{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+.zone-messages .chat-messages{min-height:0}
+.chat-messages:focus{outline:none}
+/* Detail technique affiche : l'etat du bouton se voit sans ouvrir le menu. */
+.chat-toolbar button.tool-btn[data-actif="true"]{background:var(--qs-accent-pale);
+  color:var(--qs-accent);border-color:var(--qs-accent)}
+/* Cibles d'au moins 24 px (WCAG 2.5.8). */
+.suggestion-btn,.welcome-example{min-height:28px}
+.msg .bubble details.tool-result > summary,
+.msg .bubble details.agent-reasoning > summary{min-height:24px;box-sizing:border-box}
+.msg .bubble blockquote .rollback-btn{min-height:24px}
+.insight-card button.del{min-width:24px;min-height:24px}
+.mem-md-actions .save-btn{min-height:24px}
+/* Page seule : repere de l'etude et retours vers le reste du service. */
+.entete-chat{display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap}
+.entete-chat .etude-active{font-size:12.5px;color:var(--qs-encre-2);
+  display:flex;align-items:center;gap:6px;max-width:320px}
+.entete-chat .etude-active strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.entete-chat nav ul{display:flex;gap:4px;list-style:none;margin:0;padding:0}
+.entete-chat nav a{display:inline-flex;align-items:center;min-height:32px;padding:4px 10px;
+  border-radius:3px;font-size:13px;color:var(--qs-accent);text-decoration:none}
+.entete-chat nav a:hover{background:var(--qs-accent-pale);text-decoration:underline}
+/* L'en-tete mene deja au bureau : pas de second lien dans la barre d'outils. */
+body:not(.embed) .chat-toolbar a.tool-btn-link{display:none}
+/* Un pied sans rien de visible (reponse perdue, deja relancee) disparait. */
+.tour-pied:not(:has(> :not([hidden]))){display:none}
+/* Page seule : le chat occupe la fenetre, le pied de page vient apres. */
+body:not(.embed){height:auto;min-height:100%}
+body:not(.embed) .chat-app{flex:none;height:calc(100vh - var(--entete-h, 70px));
+  height:calc(100dvh - var(--entete-h, 70px));min-height:420px}
+/* La barre laterale porte deja « Nouvelle conversation » : pas de doublon. */
+@media(min-width:701px){
+  body:not(.embed) #btn-new-conv{display:none}
+}
+@media(max-width:600px){
+  .entete-chat .etude-active{max-width:100%}
+}
+@media (prefers-reduced-motion: reduce){
+  .msg .bubble .bubble-spinner,.spinner{animation:none;border-top-color:var(--qs-accent)}
+  .msg .bubble blockquote:last-of-type{animation:none}
+  .mic-btn.recording{animation:none}
+  .memory-drawer,.chat-toast{transition:none}
+}
 </style>
 </head>
 <body{% if embed %} class="embed"{% endif %}>
@@ -413,7 +521,7 @@ body.embed .msg .bubble pre{max-width:100%}
   {# Ni « République Française », ni nom d'opérateur : cette interface est
      servie par l'instance de celui qui l'a installée, et rien ne permet d'y
      affirmer une identité d'État ou un exploitant. Cf. workspace.html. #}
-  <div class="qs-entete__marque qs-lien-etendu"><div class="qs-entete__marque-haut">
+  <div class="qs-entete__marque">
     <div class="qs-entete__marque-haut">
       {# Sprint UX-1 (2026-06-20) : harmonisation wording avec workspace.html
          operator (QGIS Service). Avant : 'QGIS Agent' incoherent vs workspace. #}
@@ -424,6 +532,22 @@ body.embed .msg .bubble pre{max-width:100%}
   {# Sprint UX-2 (2026-06-21) : retire service_title + tagline = doublon
      avec l'onglet 'Agent IA seul' actif dans qgis-nav juste en dessous.
      Economie ~80px de hauteur header + supprime redondance visuelle. #}
+  {# Page seule : l'utilisateur doit savoir sur quelle etude il parle, et
+     retrouver le reste du service. Libelles alignes sur le bureau et
+     « Mon espace ». #}
+  <div class="entete-chat">
+    {% if etude_active_nom %}
+    <p class="etude-active" title="Étude active : {{ etude_active_nom }}">
+      <span class="ic-dossier ic--sm" aria-hidden="true"></span>
+      <span>Étude active :</span> <strong>{{ etude_active_nom }}</strong>
+    </p>
+    {% endif %}
+    <nav aria-label="Navigation du service">
+      <ul>
+        <li><a href="{{ hub_url ~ '/workspace' if hub_url else '/workspace' }}">Mon espace</a></li>
+        <li><a href="{{ hub_url ~ '/desk' if hub_url else '/desk' }}">Bureau de travail</a></li>
+      </ul>
+    </nav>
   </div>
 </div></div></div>
 </header>
@@ -505,16 +629,21 @@ body.embed .msg .bubble pre{max-width:100%}
          embed) avec liste des sessions cliquables. #}
       <button type="button" class="tool-btn" id="btn-history"
               onclick="toggleHistoryPopover(event)" aria-label="Historique des conversations"
+              aria-haspopup="true" aria-expanded="false" aria-controls="history-popover"
               title="Voir l'historique des conversations récentes">
         <span class="ic-horloge ic--sm" aria-hidden="true"></span> <span class="tool-btn-label">Historique</span>
       </button>
+      {# L'etat (masques / affiches) se lit sur le bouton lui-meme : il
+         fallait ouvrir le menu pour le savoir. #}
       <button type="button" class="tool-btn" id="btn-tech-details"
-              onclick="toggleTechPopover(event)" aria-label="Détails techniques"
-              title="Afficher ou masquer le raisonnement et les appels d'outils">
-        <span class="ic-reglages ic--sm" aria-hidden="true"></span> <span class="tool-btn-label">Technique</span>
+              onclick="toggleTechPopover(event)" aria-haspopup="true" aria-expanded="false"
+              aria-controls="tech-popover" aria-label="Détails techniques : masqués"
+              title="Afficher ou masquer le raisonnement et les actions de l'assistant">
+        <span class="ic-reglages ic--sm" aria-hidden="true"></span> <span class="tool-btn-label" id="tech-btn-label">Détails masqués</span>
       </button>
       <button type="button" class="tool-btn" id="btn-memory"
-              onclick="toggleMemoryDrawer()" aria-label="Mémoire de l'agent"
+              onclick="toggleMemoryDrawer()" aria-label="Mémoire de l'assistant"
+              aria-expanded="false" aria-controls="memory-drawer"
               title="Voir et éditer la mémoire de l'agent">
         <span class="ic-livre ic--sm" aria-hidden="true"></span> <span class="tool-btn-label">Mémoire</span>
       </button>
@@ -535,13 +664,13 @@ body.embed .msg .bubble pre{max-width:100%}
         <div class="tech-popover-body">
           <label class="tech-toggle-row">
             <input type="checkbox" id="tech-show-reasoning" onchange="setTechPref('reasoning', this.checked)">
-            <span>Raisonnement de l'agent</span>
+            <span>Montrer le raisonnement de l'assistant</span>
           </label>
           <label class="tech-toggle-row">
             <input type="checkbox" id="tech-show-tools" onchange="setTechPref('tools', this.checked)">
-            <span>Appels d'outils et résultats</span>
+            <span>Montrer les actions QGIS et leurs résultats bruts</span>
           </label>
-          <p class="tech-popover-hint">Masqué par défaut pour garder la conversation lisible. Réactivable à tout moment.</p>
+          <p class="tech-popover-hint">Masqués par défaut pour garder la conversation lisible. Ils restent dans « Voir les étapes » sous chaque réponse.</p>
         </div>
       </div>
       <div id="history-popover" class="history-popover" aria-hidden="true">
@@ -664,11 +793,24 @@ body.embed .msg .bubble pre{max-width:100%}
       t._hideTimer = setTimeout(() => t.classList.remove('visible'), 2800);
     }
 
+    // Nouvelle conversation sans recharger la page : le rechargement laissait
+    // l'ancienne conversation a l'ecran le temps que la page revienne, puis
+    // faisait clignoter l'accueil. Le serveur cree la session au premier
+    // message (POST /chat) : un nouvel identifiant suffit.
     function startNewConversation() {
-      showChatToast('Nouvelle conversation — l\'ancienne reste dans Historique');
-      const url = window.location.pathname + '?new=1' +
-                  (window.location.search.includes('embed=') ? '&embed=1' : '');
-      setTimeout(() => { window.location.href = url; }, 120);
+      if (tourEnCours()) {
+        showChatToast('Attends la fin de la réponse en cours, ou arrête-la.');
+        return;
+      }
+      document.getElementById('session-id').value =
+        (crypto.randomUUID && crypto.randomUUID())
+        || ('c' + Date.now() + Math.random().toString(36).slice(2));
+      marquerConversationCourante(document.getElementById('session-id').value);
+      afficherAccueil();
+      const saisie = document.getElementById('message-input');
+      saisie.value = '';
+      saisie.focus();
+      showChatToast('Nouvelle conversation. L\'ancienne reste dans l\'historique.');
     }
 
     const TECH_PREFS_KEY = 'chat-tech-prefs';
@@ -686,12 +828,23 @@ body.embed .msg .bubble pre{max-width:100%}
       const reasoningCb = document.getElementById('tech-show-reasoning');
       if (toolsCb) toolsCb.checked = !!prefs.tools;
       if (reasoningCb) reasoningCb.checked = !!prefs.reasoning;
+      const actif = !!(prefs.tools || prefs.reasoning);
+      const bouton = document.getElementById('btn-tech-details');
+      if (bouton) {
+        bouton.dataset.actif = String(actif);
+        bouton.setAttribute('aria-label', actif ? 'Détails techniques : affichés'
+                                                : 'Détails techniques : masqués');
+      }
+      const libelle = document.getElementById('tech-btn-label');
+      if (libelle) libelle.textContent = actif ? 'Détails affichés' : 'Détails masqués';
     }
     function setTechPref(key, value) {
       const prefs = loadTechPrefs();
       prefs[key] = !!value;
-      localStorage.setItem(TECH_PREFS_KEY, JSON.stringify(prefs));
+      try { localStorage.setItem(TECH_PREFS_KEY, JSON.stringify(prefs)); } catch {}
       applyTechPrefs();
+      // La preference change ce qui compte comme « etape » visible.
+      if (typeof rafraichirEtapesVisibles === 'function') rafraichirEtapesVisibles();
     }
     function toggleTechPopover(event, force) {
       if (event) event.stopPropagation();
@@ -769,10 +922,10 @@ body.embed .msg .bubble pre{max-width:100%}
     </script>
 
     <!-- Mémoire drawer : sections + faits auto-détectés -->
-    <aside id="memory-drawer" class="memory-drawer" aria-hidden="true">
+    <aside id="memory-drawer" class="memory-drawer" aria-hidden="true" inert aria-label="Mémoire de l'assistant">
       <header>
         <span><span class="ic-livre ic--sm" aria-hidden="true"></span> Mémoire</span>
-        <button class="close" onclick="toggleMemoryDrawer(false)" aria-label="Fermer"><span class="ic-fermer ic--sm" aria-hidden="true"></span></button>
+        <button type="button" class="close" onclick="toggleMemoryDrawer(false)" aria-label="Fermer la mémoire"><span class="ic-fermer ic--sm" aria-hidden="true"></span></button>
       </header>
       <div class="body" id="memory-body">
         <div class="memory-empty">Chargement…</div>
@@ -782,29 +935,42 @@ body.embed .msg .bubble pre{max-width:100%}
       </footer>
     </aside>
 
-    <div id="messages" class="chat-messages">
+    {# Accueil d'une conversation neuve. Gabarit : reutilise par « Nouvelle
+       conversation » sans recharger la page, et pour une conversation vide. #}
+    <template id="modele-accueil">
       <div class="msg">
         <div class="avatar"><span class="ic-carte ic--md" aria-hidden="true"></span></div>
         <div class="bubble welcome">
           <h3>Assistant prêt</h3>
-          <p>Décris ton analyse géospatiale. J'ai accès aux outils QGIS, aux données IGN,
-             Géorisques, OSM et DVF.</p>
+          <p>Dis-moi ce que tu veux savoir ou produire, avec tes mots. Je m'occupe
+             de QGIS et des données (IGN, Géorisques, OpenStreetMap, DVF).</p>
           <ul class="welcome-examples">
             <li><button type="button" class="welcome-example"
-                onclick="useSuggestion('Analyse le risque inondation T100 sur Le Lavandou')">
-                « Analyse le risque inondation T100 sur Le Lavandou »
+                onclick="useSuggestion('Explique-moi ce que tu peux faire pour moi')">
+                « Explique-moi ce que tu peux faire pour moi »
             </button></li>
             <li><button type="button" class="welcome-example"
-                onclick="useSuggestion('Carte de densité du bâti à Montpellier')">
-                « Carte de densité du bâti à Montpellier »
+                onclick="useSuggestion('Affiche les bâtiments de ma zone d\'étude')">
+                « Affiche les bâtiments de ma zone d'étude »
             </button></li>
             <li><button type="button" class="welcome-example"
-                onclick="useSuggestion('Détecte les arbres sur cette zone avec SAM3')">
-                « Détecte les arbres sur cette zone avec SAM3 »
+                onclick="useSuggestion('Quels secteurs de ma zone d\'étude sont inondables ?')">
+                « Quels secteurs de ma zone d'étude sont inondables ? »
             </button></li>
           </ul>
         </div>
       </div>
+    </template>
+
+    <div class="zone-messages">
+    <h1 class="sr-only">Conversation avec l'assistant</h1>
+    <div id="messages" class="chat-messages" role="region" aria-label="Conversation" tabindex="-1">
+      {% if session_resumed %}
+      <p class="chargement-conv">Chargement de la conversation…</p>
+      {% endif %}
+    </div>
+    <button type="button" id="aller-en-bas" class="aller-en-bas"
+            onclick="allerEnBas(true)">Aller au dernier message</button>
     </div>
 
     <!-- Bandeau "clé LLM manquante" — visible si le pod agent n'a
@@ -836,27 +1002,31 @@ body.embed .msg .bubble pre{max-width:100%}
     </div>
 
     <div class="chat-input">
-      <div id="status-bar" class="status-bar">
-        <span class="spinner"></span>
-        <span id="status-text">Analyse en cours…</span>
+      {# Annonces aux lecteurs d'ecran seulement : l'etat visible est dans le
+         tour en cours. Mis a jour a chaque changement d'etape, pas chaque
+         seconde. #}
+      <div id="status-bar" class="status-bar" role="status" aria-live="polite">
+        <span id="status-text"></span>
       </div>
       <form id="chat-form" class="chat-form">
         <input type="hidden" name="session_id" id="session-id" value="{{ session_id }}">
         <input type="hidden" name="profile_id" id="profile-id" value="{{ profile_id }}">
         <div class="input-wrap">
           <textarea id="message-input" name="message" rows="2"
+            aria-label="Message à l'assistant" aria-describedby="aide-saisie"
             placeholder="Écris ton message…"></textarea>
-          <button type="button" id="mic-btn" class="mic-btn" title="Dicter (cliquer pour démarrer/arrêter)">
+          <button type="button" id="mic-btn" class="mic-btn" aria-label="Dicter un message"
+                  title="Dicter (cliquer pour démarrer/arrêter)">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
             </svg>
           </button>
         </div>
-        <button type="submit" id="send-btn" class="send-btn">Envoyer ↑</button>
+        <button type="submit" id="send-btn" class="send-btn">Envoyer</button>
         <button type="button" id="stop-btn" class="stop-btn" style="display:none"
-                title="Interrompre l'agent à la fin du tool en cours">Arrêter</button>
+                title="L'assistant s'arrête après l'action en cours">Arrêter</button>
       </form>
-      <p class="hint">Entrée pour envoyer · Maj+Entrée pour nouvelle ligne</p>
+      <p class="hint" id="aide-saisie">Entrée pour envoyer · Maj+Entrée pour aller à la ligne</p>
     </div>
 
   </main>
@@ -907,6 +1077,17 @@ body.embed .msg .bubble pre{max-width:100%}
 if (new URLSearchParams(location.search).get('embed') === '1') {
   document.body.classList.add('embed');
 }
+
+// Page seule : la conversation occupe la fenetre sous l'en-tete, dont la
+// hauteur varie avec la largeur (repere d'etude, navigation).
+(function ajusterHauteurEntete() {
+  const entete = document.querySelector('.qs-entete');
+  if (!entete) return;
+  const maj = () => document.documentElement.style.setProperty(
+    '--entete-h', entete.offsetHeight + 'px');
+  maj();
+  window.addEventListener('resize', maj);
+})();
 
 // Tous les liens markdown rendus par l'agent doivent ouvrir un nouvel onglet
 // (sinon, en mode embed iframe, le clic navigue l'iframe vers la cible et
@@ -1092,9 +1273,9 @@ if (typeof marked !== 'undefined' && marked.use) {
 
 const SUGGESTIONS = {
   standard: [
-    "Risque inondation T100 sur Le Lavandou",
-    "Densité bâti à Montpellier",
-    "Évolution DVF côte 2021-2024",
+    "Explique-moi ce que tu peux faire pour moi",
+    "Affiche les bâtiments de ma zone d'étude",
+    "Quels secteurs de ma zone d'étude sont inondables ?",
   ],
   geoai_analyst: [
     "Détecter les arbres sur la zone",
@@ -1137,7 +1318,16 @@ function loadSuggestions(profile) {
   const sugs = SUGGESTIONS[profile] || SUGGESTIONS.standard;
   const cont = document.getElementById('suggestions');
   if (!cont) return;
-  cont.innerHTML = sugs.map(s => `<button class="suggestion-btn" onclick="useSuggestion('${s.replace(/'/g, "\\'")}')">↗ ${s}</button>`).join('');
+  // Construction par le DOM : une apostrophe dans le texte cassait le
+  // gestionnaire en ligne.
+  cont.replaceChildren(...sugs.map(s => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'suggestion-btn';
+    b.textContent = s;
+    b.addEventListener('click', () => useSuggestion(s));
+    return b;
+  }));
 }
 
 function useSuggestion(text) {
@@ -1276,10 +1466,14 @@ async function toggleMemoryDrawer(forceState) {
   const willOpen = forceState !== undefined ? forceState : !drawer.classList.contains('open');
   drawer.classList.toggle('open', willOpen);
   drawer.setAttribute('aria-hidden', willOpen ? 'false' : 'true');
+  // Ferme, le tiroir est hors ecran : ses champs ne doivent pas recevoir le
+  // focus clavier (constat Lighthouse, aria-hidden-focus).
+  drawer.inert = !willOpen;
   document.getElementById('btn-memory')?.setAttribute('aria-expanded', String(willOpen));
   if (willOpen) {
     toggleHistoryPopover(null, false);
     toggleTechPopover(null, false);
+    drawer.querySelector('header .close')?.focus();
     await loadMemoryPanel();
   }
 }
@@ -1456,7 +1650,7 @@ function afficherDatesConversations() {
 function loadSession(sid) {
   // Un tour en cours ecrit dans la conversation affichee : en changer au
   // milieu melangerait les deux.
-  if (document.getElementById('send-btn').disabled && document.getElementById('stop-btn').style.display !== 'none') {
+  if (tourEnCours()) {
     showChatToast('Attends la fin de la réponse en cours, ou arrête-la.');
     return;
   }
@@ -1472,26 +1666,56 @@ function loadSession(sid) {
       marquerConversationCourante(sid);
       const c = document.getElementById('messages');
       c.innerHTML = '';
+      if (!msgs.length) {
+        afficherAccueil();
+        return;
+      }
+      let demande = '';
       msgs.forEach(m => {
-        const role = m.role === 'user' ? 'user' : 'assistant';
+        if (m.role === 'user') {
+          demande = m.content || '';
+          c.appendChild(creerMessageUtilisateur(m.content, m.created_at));
+          return;
+        }
         // Une reponse vide a pu etre enregistree avant que le tour ne soit
         // garanti : sans ce repli, l'historique montrait une bulle blanche.
-        const corps = (m.content || '').trim()
-          ? marked.parse(m.content)
-          : '<p class="bubble-vide">Aucune réponse n’a été enregistrée pour ce message.</p>';
-        const html = role === 'user'
-          ? `<div class="msg user"><div class="bubble">${escapeHtml(m.content)}</div></div>`
-          : `<div class="msg"><div class="avatar"><span class="ic-carte ic--md" aria-hidden="true"></span></div><div class="bubble">${corps}</div></div>`;
-        c.insertAdjacentHTML('beforeend', html);
+        const msg = creerBulleAssistant();
+        const bulle = msg.querySelector('.bubble');
+        bulle.querySelector('.tour-statut').remove();
+        if ((m.content || '').trim()) {
+          rendreTour(bulle, m.content, '', {etapes: [], enCours: false});
+        } else {
+          bulle.querySelector('.tour-reponse').innerHTML =
+            '<p class="bubble-vide">Aucune réponse n’a été enregistrée pour ce message.</p>';
+        }
+        terminerTour(bulle, {etapes: [], quand: m.created_at, texteDemande: demande});
+        c.appendChild(msg);
       });
-      // Replie tous les blocs résultat-tool dans les messages history
-      c.querySelectorAll('.msg .bubble').forEach(foldToolResults);
-      c.scrollTop = c.scrollHeight;
+      // Dernier message sans reponse : la page a ete rechargee (ou la
+      // connexion coupee) pendant que la reponse se preparait. Le serveur ne
+      // l'enregistre qu'a la fin du tour : elle est perdue. On le dit, et on
+      // propose de relancer, au lieu de laisser le message seul.
+      const dernier = msgs[msgs.length - 1];
+      if (dernier && dernier.role === 'user') {
+        const msg = creerBulleAssistant();
+        const bulle = msg.querySelector('.bubble');
+        bulle.querySelector('.tour-statut').remove();
+        bulle.querySelector('.tour-reponse').innerHTML =
+          '<p class="tour-orphelin">La réponse à ce message n’a pas été conservée : '
+          + 'la page a été rechargée ou la connexion coupée pendant qu’elle se préparait.</p>';
+        terminerTour(bulle, {etapes: [], texteDemande: dernier.content, sansCopie: true,
+                             sansHeure: true});
+        c.appendChild(msg);
+      }
+      marquerDernierRelancable();
+      allerEnBas(false);
       // Re-attache les boutons "↶ Revenir avant" depuis la DB
       // (les marqueurs SSE n'existent pas dans l'historique re-rendu).
       reattachRollbackButtonsFromHistory();
     })
     .catch(() => {
+      const c = document.getElementById('messages');
+      if (c.querySelector('.chargement-conv')) afficherAccueil();
       showChatToast('Impossible d’ouvrir cette conversation. Réessaie.');
     });
 }
@@ -1613,6 +1837,7 @@ function _onChatReady() {
   marquerConversationCourante(document.getElementById('session-id').value);
   reattachRollbackButtonsFromHistory();
   const sessionResumed = {{ 'true' if session_resumed else 'false' }};
+  if (!sessionResumed) afficherAccueil();
   if (sessionResumed) {
     const sid = document.getElementById('session-id').value;
     if (sid) {
@@ -1662,6 +1887,14 @@ function foldToolResults(container) {
   }
   container.querySelectorAll('pre').forEach(pre => {
     if (pre.closest('details.tool-result')) return;          // déjà wrapped
+    // Seul le resultat d'une action suit son bloc d'outil. Un bloc de code
+    // ecrit dans la reponse n'en est pas un : replie et masque avec les
+    // details techniques, il disparaissait de la reponse.
+    const avant = pre.previousElementSibling;
+    const suitUnOutil = !!avant && (
+      (avant.tagName === 'BLOCKQUOTE' && !!avant.querySelector('strong > code'))
+      || avant.matches('details.tool-result'));
+    if (!suitUnOutil) return;
     const txt = (pre.textContent || '').trim();
     if (txt.length < 30) return;                              // probable inline / petit retour
     let label = 'Résultat outil';
@@ -1705,27 +1938,290 @@ function foldToolResults(container) {
   });
 }
 
+// ── Tours de conversation (audit UX 2026-09-26) ───────────────────────────
+//
+// Une reponse de l'assistant se lit en trois parties, dans la bulle :
+//   1. une ligne d'etat pendant le tour (« Chargement des donnees… · 12 s ») --
+//      le seul endroit ou l'etat s'affiche ; elle disparait a la fin ;
+//   2. « Voir les etapes » : les etapes en langage courant, et, repliés, les
+//      messages intermediaires du modele et les blocs d'outil ;
+//   3. la reponse elle-meme, puis un pied discret : heure, Copier, Relancer.
+
+// Libelles lisibles des actions, fournis par le serveur (meme table que
+// celle des phases annoncees en direct).
+const _LIBELLES_OUTILS = {{ libelles_outils | default({}) | tojson }};
+
+// Etat du tour en cours ; null hors tour.
+let _tourCourant = null;
+
+function tourEnCours() {
+  return !!_tourCourant;
+}
+
+function presDuBas() {
+  const m = document.getElementById('messages');
+  return m.scrollHeight - m.scrollTop - m.clientHeight < 80;
+}
+
+function allerEnBas(focus) {
+  const m = document.getElementById('messages');
+  m.scrollTop = m.scrollHeight;
+  document.getElementById('aller-en-bas').classList.remove('visible');
+  if (focus) m.focus({preventScroll: true});
+}
+
+// Suit le flux si l'utilisateur est en bas ; s'il a remonte pour relire, on
+// ne lui vole pas la main : un bouton propose d'aller au dernier message.
+function suivreOuSignaler(suivre) {
+  if (suivre) allerEnBas(false);
+  else document.getElementById('aller-en-bas').classList.add('visible');
+}
+
+document.getElementById('messages').addEventListener('scroll', () => {
+  if (presDuBas()) document.getElementById('aller-en-bas').classList.remove('visible');
+});
+
+// Annonce aux lecteurs d'ecran (region role=status). Seulement quand le
+// texte change : la duree qui avance a chaque seconde n'est pas annoncee.
+function annoncer(texte) {
+  const el = document.getElementById('status-text');
+  if (el && el.textContent !== texte) el.textContent = texte;
+}
+
+function baliseHeure(quand) {
+  const date = quand ? new Date(Number(quand) * 1000) : new Date();
+  if (isNaN(date.getTime())) return '';
+  const aujourdhui = new Date().toDateString() === date.toDateString();
+  const court = new Intl.DateTimeFormat('fr', aujourdhui
+    ? {hour: '2-digit', minute: '2-digit'}
+    : {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}).format(date);
+  const long = new Intl.DateTimeFormat('fr', {dateStyle: 'full', timeStyle: 'short'}).format(date);
+  return '<time datetime="' + date.toISOString() + '" title="' + escapeHtml(long) + '">'
+    + escapeHtml(court) + '</time>';
+}
+
+function afficherAccueil() {
+  const c = document.getElementById('messages');
+  const modele = document.getElementById('modele-accueil');
+  c.replaceChildren(modele.content.cloneNode(true));
+  document.getElementById('aller-en-bas').classList.remove('visible');
+}
+
+function creerMessageUtilisateur(texte, quand) {
+  const div = document.createElement('div');
+  div.className = 'msg user';
+  div.innerHTML = '<div class="bubble"><span class="sr-only">Toi : </span>'
+    + escapeHtml(texte) + '</div>' + baliseHeure(quand);
+  return div;
+}
+
+function creerBulleAssistant() {
+  const div = document.createElement('div');
+  div.className = 'msg assistant';
+  div.innerHTML = '<div class="avatar"><span class="ic-carte ic--md" aria-hidden="true"></span></div>'
+    + '<div class="bubble"><span class="sr-only">Assistant : </span>'
+    + '<div class="tour-statut"><span class="bubble-spinner" aria-hidden="true"></span>'
+    + '<span class="tour-libelle">Analyse en cours…</span><span class="duree"></span></div>'
+    + '<details class="tour-etapes" hidden><summary>Voir les étapes</summary>'
+    + '<div class="tour-etapes-corps"><ol class="tour-liste"></ol>'
+    + '<div class="tour-technique"></div></div></details>'
+    + '<div class="tour-reponse"></div>'
+    + '</div>';
+  return div;
+}
+
+// Un bloc d'outil est un blockquote « > **`nom`** — `args` ». Son resultat
+// (bloc de code, deja replie en details.tool-result) le suit directement.
+function _estBlocOutil(n) {
+  return n.nodeType === 1 && n.tagName === 'BLOCKQUOTE' && !!n.querySelector('strong > code');
+}
+
+function _estImageSeule(n) {
+  return n.nodeType === 1 && (n.matches('details.embed-screenshot')
+    || (n.tagName === 'P' && !!n.querySelector('img') && !n.textContent.trim()));
+}
+
+// Range dans les etapes tout ce qui precede la fin du dernier bloc d'outil :
+// ce que le modele ecrit entre deux actions (« je vais charger… ») n'est pas
+// la reponse. Les captures de carte restent visibles, en tete de reponse.
+function repartirTour(conteneur) {
+  const noeuds = Array.from(conteneur.childNodes);
+  let dernier = -1;
+  let chaineOutil = false;
+  noeuds.forEach((n, i) => {
+    if (n.nodeType === 8) {
+      if (/^ckpt:/.test(n.textContent || '')) dernier = i;
+      return;
+    }
+    if (n.nodeType !== 1) return;
+    const resultat = chaineOutil && n.matches('details.tool-result, pre');
+    if (_estBlocOutil(n) || resultat) {
+      dernier = i;
+      chaineOutil = true;
+    } else if (!_estImageSeule(n)) {
+      chaineOutil = false;
+    }
+  });
+  const etapes = [];
+  const images = [];
+  const reponse = [];
+  const outils = [];
+  noeuds.forEach((n, i) => {
+    if (_estBlocOutil(n)) {
+      const nom = n.querySelector('strong > code').textContent.trim();
+      outils.push(_LIBELLES_OUTILS[nom] || 'Action dans QGIS…');
+    }
+    if (i <= dernier) {
+      if (_estImageSeule(n)) images.push(n);
+      else etapes.push(n);
+    } else {
+      reponse.push(n);
+    }
+  });
+  return {etapes, reponse: images.concat(reponse), outils};
+}
+
+// Rend le texte et le raisonnement recus dans la bulle.
+function rendreTour(bulle, texte, raisonnement, tour) {
+  const tmp = document.createElement('div');
+  // Une ligne vide apres chaque en-tete d'outil : sans elle, le texte qui
+  // suit directement devient, en Markdown, la suite du bloc cite -- et la
+  // reponse disparaissait avec les blocs d'outil masques.
+  const source = String(texte || '').replace(/^(> \*\*`[^`\n]+`\*\*[^\n]*\n)(?!\n)/gm, '$1\n');
+  tmp.innerHTML = marked.parse(source);
+  foldToolResults(tmp);
+  const parts = repartirTour(tmp);
+  const technique = bulle.querySelector('.tour-technique');
+  const contenu = [];
+  if ((raisonnement || '').trim()) {
+    const r = document.createElement('div');
+    r.innerHTML = renderAssistantHtml(raisonnement, '');
+    contenu.push(...r.childNodes);
+  }
+  technique.replaceChildren(...contenu, ...parts.etapes);
+  bulle.querySelector('.tour-reponse').replaceChildren(...parts.reponse);
+  // Conversation rechargee : pas de phases, les etapes viennent des blocs.
+  bulle._etapesOutils = parts.outils;
+  majEtapes(bulle, tour);
+}
+
+// Met a jour la liste lisible des etapes et le resume « Voir les etapes ».
+function majEtapes(bulle, tour) {
+  const details = bulle.querySelector('details.tour-etapes');
+  if (!details) return;
+  const libelles = (tour && tour.etapes && tour.etapes.length)
+    ? tour.etapes : (bulle._etapesOutils || []);
+  const enCours = !!(tour && tour.enCours);
+  const liste = details.querySelector('.tour-liste');
+  liste.replaceChildren(...libelles.map((l, i) => {
+    const li = document.createElement('li');
+    const fin = enCours && i === libelles.length - 1;
+    li.textContent = fin ? l : l.replace(/…$/, '');
+    if (fin) li.setAttribute('aria-current', 'step');
+    return li;
+  }));
+  const technique = details.querySelector('.tour-technique');
+  // Contenu technique visible selon les preferences : texte intermediaire
+  // toujours ; blocs d'outil et raisonnement seulement s'ils sont affiches.
+  const prefs = loadTechPrefs();
+  let visible = false;
+  technique.childNodes.forEach(n => {
+    if (n.nodeType === 3 && n.textContent.trim()) visible = true;
+    if (n.nodeType !== 1) return;
+    if (_estBlocOutil(n) || n.matches('details.tool-result, pre')) {
+      if (prefs.tools) visible = true;
+    } else if (n.matches('details.agent-reasoning')) {
+      if (prefs.reasoning) visible = true;
+    } else if (n.textContent.trim() || n.querySelector('img')) {
+      visible = true;
+    }
+  });
+  details.hidden = !(libelles.length || visible);
+  const n = libelles.length;
+  const summary = details.querySelector('summary');
+  let resume = n ? 'Voir les étapes (' + n + ')' : 'Voir le détail';
+  if (!enCours && tour && tour.duree) {
+    resume = (n ? n + (n > 1 ? ' étapes' : ' étape') : 'Détail') + ' · ' + tour.duree;
+  }
+  summary.textContent = resume;
+}
+
+// Apres un changement de preference : recalcule ce qui est visible.
+function rafraichirEtapesVisibles() {
+  document.querySelectorAll('#messages .msg.assistant .bubble').forEach(b => {
+    majEtapes(b, b._tour || null);
+  });
+}
+
+// Fin de tour, en direct comme au rechargement : plus d'indicateur d'attente,
+// et le pied de reponse (heure, Copier, Relancer).
+function terminerTour(bulle, options) {
+  const opts = options || {};
+  bulle.querySelectorAll('.tour-statut, .bubble-thinking').forEach(n => n.remove());
+  bulle._tour = {etapes: opts.etapes || [], enCours: false, duree: opts.duree || ''};
+  majEtapes(bulle, bulle._tour);
+  const reponse = bulle.querySelector('.tour-reponse');
+  if (reponse && !reponse.innerText.trim() && !reponse.querySelector('img')
+      && !bulle.querySelector('.bubble-err, .bubble-coupure')) {
+    reponse.innerHTML = '<p class="bubble-vide">L’assistant n’a pas donné de réponse '
+      + 'lisible pour ce tour. Tu peux relancer ta demande ou la reformuler.</p>';
+  }
+  const pied = document.createElement('div');
+  pied.className = 'tour-pied';
+  pied.innerHTML = opts.sansHeure ? '' : baliseHeure(opts.quand);
+  if (!opts.sansCopie) {
+    const copier = document.createElement('button');
+    copier.type = 'button';
+    copier.innerHTML = '<span class="ic-copier ic--sm" aria-hidden="true"></span> Copier';
+    copier.setAttribute('aria-label', 'Copier la réponse');
+    copier.addEventListener('click', () => copierReponse(bulle, copier));
+    pied.appendChild(copier);
+  }
+  if (opts.texteDemande) {
+    const relancer = document.createElement('button');
+    relancer.type = 'button';
+    relancer.className = 'tour-relancer';
+    relancer.textContent = 'Relancer';
+    relancer.setAttribute('aria-label', 'Relancer la dernière demande');
+    relancer.addEventListener('click', () => relancerDemande(opts.texteDemande));
+    pied.appendChild(relancer);
+  }
+  bulle.querySelectorAll('.tour-pied').forEach(n => n.remove());
+  bulle.appendChild(pied);
+}
+
+// Seule la derniere reponse propose « Relancer ».
+function marquerDernierRelancable() {
+  const boutons = document.querySelectorAll('#messages .tour-relancer');
+  boutons.forEach((b, i) => { b.hidden = i !== boutons.length - 1; });
+}
+
+async function copierReponse(bulle, bouton) {
+  const texte = (bulle.querySelector('.tour-reponse')?.innerText || '').trim();
+  try {
+    await navigator.clipboard.writeText(texte);
+    showChatToast('Réponse copiée.');
+  } catch {
+    showChatToast('Copie impossible : sélectionne le texte et copie-le.');
+  }
+  bouton.focus();
+}
+
+function relancerDemande(texte) {
+  if (tourEnCours()) return;
+  const saisie = document.getElementById('message-input');
+  saisie.value = texte;
+  document.getElementById('chat-form').requestSubmit();
+}
+
 function appendMessage(role, content) {
   const msgs = document.getElementById('messages');
-  const div = document.createElement('div');
-  if (role === 'user') {
-    div.className = 'msg user';
-    div.innerHTML = `<div class="bubble">${escapeHtml(content)}</div>`;
-  } else {
-    // Bulle assistant : placeholder "Analyse en cours…" + spinner DANS la
-    // bulle pour ne pas avoir un rectangle blanc vide avant le 1er chunk
-    // SSE. Le placeholder est écrasé par responseDiv.innerHTML = ... dès
-    // que le streaming commence.
-    div.className = 'msg';
-    div.innerHTML = '<div class="avatar"><span class="ic-carte ic--md" aria-hidden="true"></span></div>'
-      + '<div class="bubble" id="current-response">'
-      + '<div class="bubble-thinking">'
-      + '<span class="bubble-spinner"></span>'
-      + '<span>Analyse en cours…</span>'
-      + '</div></div>';
-  }
+  // L'accueil laisse la place a la conversation.
+  msgs.querySelectorAll('.welcome, .chargement-conv').forEach(n => {
+    (n.closest('.msg') || n).remove();
+  });
+  const div = role === 'user' ? creerMessageUtilisateur(content) : creerBulleAssistant();
   msgs.appendChild(div);
-  msgs.scrollTop = msgs.scrollHeight;
   return div;
 }
 
@@ -1752,11 +2248,17 @@ function _messageErreurHttp(statut) {
     + 'signale-le.';
 }
 
+// Silence maximal du flux. Le serveur envoie un battement toutes les 15 s
+// quand il n'a rien a dire : au-dela d'une minute sans rien, la connexion est
+// perdue (passerelle, reseau), meme si le navigateur ne l'a pas vu.
+const _SILENCE_MAX_MS = 75000;
+
 document.getElementById('stop-btn').addEventListener('click', async () => {
   const sid = document.getElementById('session-id').value;
   const btn = document.getElementById('stop-btn');
   btn.disabled = true;
   btn.textContent = 'Arrêt…';
+  if (_tourCourant) _tourCourant.arretDemande();
   try {
     // Signal côté serveur : la boucle agent break après le tool en cours
     await fetch(`/chat/${encodeURIComponent(sid)}/stop`, {method: 'POST'});
@@ -1777,20 +2279,25 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const input   = document.getElementById('message-input');
   const message = input.value.trim();
-  if (!message) return;
+  if (!message || tourEnCours()) return;
 
   input.value = '';
+  input.style.height = '';
   document.getElementById('send-btn').disabled = true;
   document.getElementById('send-btn').style.display = 'none';
   document.getElementById('stop-btn').style.display = '';
   document.getElementById('stop-btn').disabled = false;
   document.getElementById('stop-btn').textContent = 'Arrêter';
-  document.getElementById('status-bar').classList.add('visible');
-  document.getElementById('status-text').textContent = 'Analyse en cours…';
 
+  // Un nouveau tour : l'ancien « Relancer » n'a plus de sens.
+  document.querySelectorAll('#messages .tour-relancer').forEach(b => { b.hidden = true; });
   appendMessage('user', message);
-  appendMessage('assistant', '');
-  const responseDiv = document.getElementById('current-response');
+  const msgAssistant = appendMessage('assistant', '');
+  // Nouveau message de l'utilisateur : on va en bas, c'est lui qui l'a voulu.
+  allerEnBas(false);
+  const responseDiv = msgAssistant.querySelector('.bubble');
+  responseDiv.id = 'current-response';
+  const reponseDiv = responseDiv.querySelector('.tour-reponse');
   let fullText = '';
   let fullReasoning = '';
   // Etat visible du tour. `recuFin` distingue une reponse complete d'un flux
@@ -1800,21 +2307,50 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
   let recuFin = false;
   let phasesVues = false;
   let libellePhase = 'Analyse en cours…';
+  let silence = false;
+  let derniereNouvelle = Date.now();
+  const tour = {etapes: [], enCours: true};
+  responseDiv._tour = tour;
   const debutTour = Date.now();
+  const dureeTexte = () => {
+    const s = Math.round((Date.now() - debutTour) / 1000);
+    return s >= 60 ? Math.floor(s / 60) + ' min ' + String(s % 60).padStart(2, '0') + ' s'
+                   : s + ' s';
+  };
+  // La ligne d'etat du tour : le seul endroit ou l'etat s'affiche.
   const majAttente = () => {
     const secondes = Math.round((Date.now() - debutTour) / 1000);
-    const duree = secondes >= 2 ? ' · ' + secondes + ' s' : '';
-    document.getElementById('status-text').textContent = libellePhase + duree;
-    // Tant que rien de visible n'est arrive, la bulle garde son repere : il
-    // suit la phase et le temps ecoule au lieu de disparaitre.
-    const repere = responseDiv && responseDiv.querySelector('.bubble-thinking');
-    if (repere) {
-      repere.innerHTML = '<span class="bubble-spinner"></span>'
-        + '<span>' + escapeHtml(libellePhase) + '</span>'
-        + (duree ? '<span class="duree">' + escapeHtml(duree.replace(' · ', '')) + '</span>' : '');
+    const statut = responseDiv.querySelector('.tour-statut');
+    if (statut) {
+      statut.querySelector('.tour-libelle').textContent = libellePhase;
+      statut.querySelector('.duree').textContent = secondes >= 2 ? dureeTexte() : '';
+    }
+    annoncer(libellePhase);
+    // Garde-fou : plus rien du serveur depuis trop longtemps.
+    if (!silence && Date.now() - derniereNouvelle > _SILENCE_MAX_MS && _currentAbort) {
+      silence = true;
+      try { _currentAbort.abort(); } catch {}
     }
   };
   const minuteur = setInterval(majAttente, 1000);
+  const nouvelleEtape = (libelle) => {
+    if (!libelle) return;
+    if (tour.etapes[tour.etapes.length - 1] !== libelle) tour.etapes.push(libelle);
+    majEtapes(responseDiv, tour);
+  };
+  let arretDemande = false;
+  _tourCourant = {
+    arretDemande() {
+      arretDemande = true;
+      libellePhase = 'Arrêt demandé : je termine l’action en cours…';
+      majAttente();
+    },
+  };
+  const rendre = () => {
+    const suivre = presDuBas();
+    rendreTour(responseDiv, fullText, fullReasoning, tour);
+    suivreOuSignaler(suivre);
+  };
 
   // Une exécution de recette utilise un session_id `study:{sid}:recipe:{rid}`
   // qui court-circuite l'agent côté serveur. Il ne vaut que pour ce tour :
@@ -1833,7 +2369,7 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
     const resp = await fetch('/chat', { method: 'POST', body: formData, signal: _currentAbort.signal });
     if (!resp.ok || !resp.body) {
       recuFin = true;
-      responseDiv.innerHTML = `<span class="bubble-err">${escapeHtml(_messageErreurHttp(resp.status))}</span>`;
+      reponseDiv.innerHTML = `<p class="bubble-err">${escapeHtml(_messageErreurHttp(resp.status))}</p>`;
       return;
     }
     const reader = resp.body.getReader();
@@ -1843,109 +2379,105 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
     // URLs d'images >100 KB) qui sont fragmentés par le réseau.
     let buffer = '';
 
+    lecture:
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      derniereNouvelle = Date.now();
       buffer += decoder.decode(value, {stream: true});
       const events = buffer.split('\n\n');
       buffer = events.pop();  // garde la queue potentiellement incomplète
       for (const evt of events) {
         for (const line of evt.split('\n')) {
           if (!line.startsWith('data: ')) continue;
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.battement) {
-              // Le serveur est vivant, meme s'il n'a rien a dire : un outil
-              // tourne. Rien a afficher, la duree continue d'avancer.
-              continue;
+          let data;
+          try { data = JSON.parse(line.slice(6)); } catch { continue; }
+          if (data.battement) {
+            // Le serveur est vivant, meme s'il n'a rien a dire : un outil
+            // tourne. Rien a afficher, la duree continue d'avancer.
+            continue;
+          }
+          if (data.phase) {
+            phasesVues = true;
+            if (data.phase === 'reflexion') libellePhase = 'Réflexion…';
+            else if (data.phase === 'redaction') libellePhase = 'Rédaction de la réponse…';
+            else {
+              libellePhase = data.label || 'Action en cours…';
+              nouvelleEtape(libellePhase);
             }
-            if (data.phase) {
-              phasesVues = true;
-              if (data.phase === 'reflexion') libellePhase = 'Réflexion…';
-              else if (data.phase === 'redaction') libellePhase = 'Rédaction de la réponse…';
-              else libellePhase = data.label || 'Action en cours…';
-              majAttente();
-              continue;
+            if (!arretDemande) majAttente();
+            continue;
+          }
+          if (typeof data.retirer_texte === 'string') {
+            // Le modele a ecrit un faux appel d'outil en texte ; le serveur le
+            // relance et demande de retirer ce texte deja affiche. On ne
+            // retire que s'il termine bien la reponse, sinon on ignore.
+            const cible = data.retirer_texte.trimEnd();
+            const base = fullText.trimEnd();
+            if (cible && base.endsWith(cible)) {
+              fullText = base.slice(0, base.length - cible.length);
+              rendre();
             }
-            if (data.error) {
-              recuFin = true;
-              responseDiv.innerHTML = `<span class="bubble-err">Erreur : ${escapeHtml(data.error)}</span>`;
-              break;
-            }
-            if (data.done) {
-              recuFin = true;
-              // Signaler au desk parent que le turn agent est termine.
-              // Le desk peut refetcher /desk/catalog pour mettre a jour
-              // le compteur publications et le drawer si publish_artifact
-              // a ete invoque (le marqueur "Livrable publie" sera dans
-              // fullText, mais on broadcast systematiquement -- le desk
-              // sait si refresh utile).
+            continue;
+          }
+          if (data.error) {
+            recuFin = true;
+            // Le message brut (classe d'exception, trace) ne parle pas a
+            // l'utilisateur : il reste accessible, replie.
+            reponseDiv.insertAdjacentHTML('beforeend',
+              '<p class="bubble-err">Une erreur a interrompu la réponse. '
+              + 'Relance ta demande ; si cela se reproduit, signale-le.</p>'
+              + '<details class="tool-result tool-error"><summary>Détail de l’erreur</summary>'
+              + '<pre>' + escapeHtml(data.error) + '</pre></details>');
+            break lecture;
+          }
+          if (data.done) {
+            recuFin = true;
+            // Signaler au desk parent que le turn agent est termine.
+            // Le desk peut refetcher /desk/catalog pour mettre a jour
+            // le compteur publications et le drawer si publish_artifact
+            // a ete invoque (le marqueur "Livrable publie" sera dans
+            // fullText, mais on broadcast systematiquement -- le desk
+            // sait si refresh utile).
+            try {
+              if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                  type: 'qgis_agent_turn_done',
+                  has_publish: fullText.includes('Livrable publie'),
+                }, location.origin);
+              }
+            } catch {}
+            break lecture;
+          }
+          if (data.reasoning) {
+            fullReasoning += data.reasoning;
+          }
+          if (data.text) {
+            fullText += data.text;
+            // Si le chunk contient le marqueur de publish_artifact reussi,
+            // postMessage immediat au desk pour refresh sans attendre la
+            // fin du turn (l'user voit le compteur bouger en temps reel).
+            if (data.text.includes('Livrable publie')) {
               try {
                 if (window.parent && window.parent !== window) {
                   window.parent.postMessage({
-                    type: 'qgis_agent_turn_done',
-                    has_publish: fullText.includes('Livrable publie'),
+                    type: 'qgis_publish_done',
                   }, location.origin);
                 }
               } catch {}
-              break;
             }
-            if (data.reasoning) {
-              fullReasoning += data.reasoning;
+            // Match le NOM du tool (chunk "> **`name`**") et pas les args
+            // ("`key=value`"). Repli pour un serveur qui n'annonce pas ses
+            // phases : le libelle lisible vient alors de la table locale,
+            // jamais du nom technique.
+            const tname = data.text.match(/>\s*\*\*`([^`]+)`\*\*/);
+            if (tname && !phasesVues) {
+              libellePhase = _LIBELLES_OUTILS[tname[1]] || 'Action dans QGIS…';
+              nouvelleEtape(libellePhase);
+              majAttente();
             }
-            if (data.text) {
-              fullText += data.text;
-              // Si le chunk contient le marqueur de publish_artifact reussi,
-              // postMessage immediat au desk pour refresh sans attendre la
-              // fin du turn (l'user voit le compteur bouger en temps reel).
-              if (data.text.includes('Livrable publie')) {
-                try {
-                  if (window.parent && window.parent !== window) {
-                    window.parent.postMessage({
-                      type: 'qgis_publish_done',
-                    }, location.origin);
-                  }
-                } catch {}
-              }
-              // Match le NOM du tool (chunk "> **`name`**") et pas les args
-              // ("`key=value`"). Le pattern strong+code en début de ligne
-              // (apres `> **`) marque le nom du tool.
-              const tname = data.text.match(/>\s*\*\*`([^`]+)`\*\*/);
-              // Repli pour un serveur qui n'annonce pas ses phases : sinon le
-              // nom technique ecraserait le libelle lisible qu'il vient d'envoyer.
-              if (tname && !phasesVues) {
-                libellePhase = `Outil : ${tname[1]}`;
-                majAttente();
-              }
-            }
-            if (data.reasoning || data.text) {
-              const rendered = renderAssistantHtml(fullReasoning, fullText);
-              // Ne pas écraser le placeholder "Analyse en cours…" tant que
-              // le rendu est vide (chunks initiaux "\n\n" qui parsent en ""
-              // — sinon la bulle redevient visuellement vide entre les
-              // premiers chunks et le 1er contenu utile).
-              if (rendered.trim()) {
-                responseDiv.innerHTML = rendered;
-                // Replie chaque <pre> de résultat-tool dans un <details> fermé
-                // pour que le user voie le dernier blockquote (tool en cours)
-                // et le texte final sans devoir scroller à travers les JSON bruts.
-                foldToolResults(responseDiv);
-                // Le rendu peut ne rien montrer : le raisonnement et les blocs
-                // d'outil sont masques par defaut avec les details techniques.
-                // Le remplacer tel quel effacait le repere d'attente et laissait
-                // une bulle vide -- 24 s mesurees dans le bureau, precisement
-                // pendant que le modele travaillait. `innerText` ignore ce que
-                // le CSS masque : c'est lui qui dit si l'utilisateur voit quelque
-                // chose. Sinon, on remet le repere, qui suit la phase en cours.
-                if (!responseDiv.innerText.trim()) {
-                  responseDiv.insertAdjacentHTML('beforeend', '<div class="bubble-thinking"></div>');
-                  majAttente();
-                }
-              }
-              const msgs = document.getElementById('messages');
-              msgs.scrollTop = msgs.scrollHeight;
-            }
-          } catch {}
+          }
+          if (data.reasoning || data.text) rendre();
         }
       }
     }
@@ -1953,28 +2485,40 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
       // Le flux s'est ferme sans que le serveur annonce la fin : connexion
       // coupee, passerelle, agent redemarre. La reponse est incomplete, et il
       // faut le dire -- sans quoi elle passait pour entiere.
-      responseDiv.insertAdjacentHTML('beforeend',
+      reponseDiv.insertAdjacentHTML('beforeend',
         '<p class="bubble-coupure">Réponse interrompue : la connexion s’est coupée avant la fin. '
         + 'Relance ta demande pour la compléter.</p>');
     }
   } catch (err) {
-    if (err && err.name === 'AbortError') {
+    if (err && err.name === 'AbortError' && silence) {
+      reponseDiv.insertAdjacentHTML('beforeend',
+        '<p class="bubble-coupure">Réponse interrompue : plus aucune nouvelle de l’assistant '
+        + 'depuis plus d’une minute. Relance ta demande.</p>');
+    } else if (err && err.name === 'AbortError') {
       // Coupure user via stop-btn — message déjà affiché par le serveur si
       // SSE a délivré son dernier chunk. Sinon on l'écrit ici.
       if (responseDiv && !responseDiv.textContent.includes('Arrêté')) {
-        responseDiv.innerHTML += '<p class="bubble-err">Arrêté par l\'utilisateur.</p>';
+        reponseDiv.insertAdjacentHTML('beforeend', '<p class="bubble-err">Arrêté à ta demande.</p>');
       }
     } else if (responseDiv) {
-      responseDiv.innerHTML = `<span class="bubble-err">Erreur réseau : ${escapeHtml(err.message)}</span>`;
+      reponseDiv.insertAdjacentHTML('beforeend',
+        '<p class="bubble-err">La connexion avec l’assistant a été perdue. '
+        + 'Vérifie ta connexion, puis relance ta demande.</p>');
     }
   } finally {
     clearInterval(minuteur);
+    // Fin de tour nette : plus d'indicateur d'attente nulle part.
+    const suivre = presDuBas();
+    terminerTour(responseDiv, {etapes: tour.etapes, duree: dureeTexte(), texteDemande: message});
+    suivreOuSignaler(suivre);
+    annoncer(recuFin ? 'Réponse terminée.' : 'Réponse interrompue.');
     document.getElementById('send-btn').disabled = false;
     document.getElementById('send-btn').style.display = '';
     document.getElementById('stop-btn').style.display = 'none';
     document.getElementById('status-bar').classList.remove('visible');
-    if (responseDiv) responseDiv.removeAttribute('id');
+    responseDiv.removeAttribute('id');
     _currentAbort = null;
+    _tourCourant = null;
     // Après une recette, on repart sur une conversation neuve pour que le
     // prochain message aille bien à l'agent.
     if (etaitUneRecette
@@ -1987,7 +2531,8 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
 });
 
 document.getElementById('message-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  // `isComposing` : Entree valide une saisie accentuee (IME), sans envoyer.
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     document.getElementById('chat-form').requestSubmit();
   }

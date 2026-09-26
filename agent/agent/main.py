@@ -34,7 +34,7 @@ from agent import memory
 from agent import vector_store
 from agent import embed_worker
 from agent import empreinte_code
-from agent.qgis_agent import QGISAgent
+from agent.qgis_agent import QGISAgent, _LIBELLES_OUTILS
 
 # État partagé du worker d'embedding (lancé au startup, stoppé au shutdown).
 _embed_task: asyncio.Task | None = None
@@ -859,6 +859,13 @@ async def extract_insights_endpoint(request: Request):
 
 # ── Interface principale ───────────────────────────────────────────────────────
 
+# Nom de la derniere etude active lue sur le hub, par identifiant. La page
+# seule du chat l'affiche en en-tete : l'utilisateur doit savoir sur quelle
+# etude il parle. Rempli au passage par `_fetch_active_study_id`, sans second
+# appel au hub.
+_NOMS_ETUDES: dict[str, str] = {}
+
+
 async def _fetch_active_study_id() -> str | None:
     """Recupere l'id de l'etude active cote hub (sentinel central).
 
@@ -878,7 +885,10 @@ async def _fetch_active_study_id() -> str | None:
                 headers={"Authorization": f"Bearer {api_key}"},
             )
             if r.status_code == 200 and r.json():
-                return r.json().get("id")
+                etude = r.json()
+                if etude.get("id") and etude.get("name"):
+                    _NOMS_ETUDES[etude["id"]] = str(etude["name"])
+                return etude.get("id")
     except Exception:
         pass
     return None
@@ -946,6 +956,10 @@ async def index(request: Request):
         "session_id":      session_id,
         "session_resumed": session_resumed,
         "embed":           embed,
+        "etude_active_nom": _NOMS_ETUDES.get(active_study_id or "", ""),
+        # Libelles lisibles des actions, pour nommer les etapes d'une
+        # conversation rechargee (le flux en direct les recoit du serveur).
+        "libelles_outils": _LIBELLES_OUTILS,
     }, headers=_ENTETES_PAGE_CHAT)
 
 
