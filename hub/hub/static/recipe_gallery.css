@@ -1,8 +1,10 @@
 /*
  * Recipe gallery — chantier G4-b-3c
  * Galerie de recettes web SSR affichee dans la section RECETTES du desk.
- * Palette DSFR (bleu Marianne #000091, blanc, gris #f6f6f6, bordure #e5e5e5).
- * Aucun import externe : polices heritees du desk parent (Marianne DSFR).
+ * Jetons du produit (produit.css) : vert d'action, gris de surface. Le bleu
+ * Marianne herite de la charte d'Etat detonnait dans un bureau vert, et les
+ * tailles de 9,5 a 11 px passaient sous le seuil de lecture confortable.
+ * Repli en dur dans chaque var() : la feuille reste lisible seule.
  *
  * Structure :
  *   .rct-gallery
@@ -32,16 +34,16 @@
 
 .rct-gallery-title {
   margin: 0;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 700;
-  color: #161616;
+  color: var(--qs-encre, #13212C);
   flex: 1;
 }
 
 .rct-count {
-  font-size: 11px;
-  color: #666;
-  background: #f6f6f6;
+  font-size: 11.5px;
+  color: var(--qs-encre-2, #3B4C58);
+  background: var(--qs-surface-2, #E9EDEF);
   border: 1px solid #e5e5e5;
   border-radius: 10px;
   padding: 1px 8px;
@@ -73,21 +75,21 @@
 
 .rct-card:hover,
 .rct-card:focus-visible {
-  border-color: #000091;
+  border-color: var(--qs-accent, #41701F);
   transform: translateY(-1px);
-  box-shadow: 0 3px 8px rgba(0, 0, 145, 0.12);
+  box-shadow: 0 3px 8px rgba(65, 112, 31, 0.14);
   outline: none;
 }
 
 .rct-card:focus-visible {
-  outline: 2px solid #000091;
+  outline: 2px solid var(--qs-accent, #41701F);
   outline-offset: 2px;
 }
 
 .rct-card-title {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 700;
-  color: #000091;
+  color: var(--qs-accent, #41701F);
   line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -97,9 +99,9 @@
 }
 
 .rct-card-desc {
-  font-size: 11px;
-  color: #3a3a3a;
-  line-height: 1.35;
+  font-size: 12px;
+  color: var(--qs-encre-2, #3B4C58);
+  line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
@@ -111,8 +113,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 10px;
-  color: #666;
+  font-size: 11px;
+  color: var(--qs-discret, #697987);
   margin-top: 2px;
 }
 
@@ -122,19 +124,17 @@
   padding: 1px 6px;
   border-radius: 8px;
   font-weight: 600;
-  font-size: 9.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
+  font-size: 11px;
 }
 
 .rct-card[data-source="example"] .rct-source {
-  background: #e3e3fd;
-  color: #000091;
+  background: var(--qs-accent-pale, #EDF4E6);
+  color: var(--qs-accent, #41701F);
 }
 
 .rct-card[data-source="user"] .rct-source {
-  background: #ffe7d6;
-  color: #d64d00;
+  background: var(--qs-alerte-pale, #FDF0E4);
+  color: var(--qs-alerte, #B0560B);
 }
 
 .rct-author {
@@ -143,12 +143,11 @@
 }
 
 .rct-card-cta {
-  font-size: 10.5px;
-  color: #000091;
+  font-size: 12px;
+  color: var(--qs-accent, #41701F);
   font-weight: 600;
   text-align: right;
   margin-top: 2px;
-  opacity: 0.75;
   transition: opacity 0.12s ease;
 }
 
@@ -158,9 +157,8 @@
 }
 
 .rct-empty {
-  font-size: 11px;
-  color: #666;
-  font-style: italic;
+  font-size: 12px;
+  color: var(--qs-discret, #697987);
   padding: 12px 8px;
   text-align: center;
   background: #f6f6f6;
@@ -170,6 +168,13 @@
 }
 
 /* Responsive : sur petit ecran (<=600px), on garde la colonne (deja col). */
+@media (prefers-reduced-motion: reduce) {
+  .rct-card:hover,
+  .rct-card:focus-visible {
+    transform: none;
+  }
+}
+
 @media (max-width: 600px) {
   .rct-cards {
     gap: 8px;

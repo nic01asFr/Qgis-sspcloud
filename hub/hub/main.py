@@ -3245,7 +3245,8 @@ h1{{color:#41701F;font-size:24px}}
 .step{{background:#EDF4E6;border-left:4px solid #41701F;padding:16px 20px;margin:20px 0;border-radius:2px}}
 input[type=password]{{width:100%;padding:10px;border:1px solid #ddd;border-radius:2px;font-family:monospace;font-size:12px;box-sizing:border-box}}
 button{{background:#41701F;color:#fff;padding:10px 24px;border:none;border-radius:2px;font-size:14px;cursor:pointer;font-family:inherit;margin-top:8px}}
-button:hover{{background:#1212ff}}
+button:hover{{background:#33591A}}
+button:focus-visible,input:focus-visible,a:focus-visible{{outline:2px solid #41701F;outline-offset:2px}}
 a{{color:#41701F}}
 .hint{{color:#666;font-size:12px;margin-top:4px}}
 .alt{{margin-top:30px;padding-top:20px;border-top:1px solid #ddd;color:#666;font-size:13px}}
@@ -10460,6 +10461,7 @@ async def list_published_owner(owner: str) -> HTMLResponse:
     body = f"""<!DOCTYPE html>
 <html lang="fr"><head>
 <meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Publications de {owner} — QGIS Service</title>
 <style>
   body {{ margin:0; font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif; background:#f6f6f6; color:#14202B }}

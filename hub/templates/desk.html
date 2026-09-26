@@ -9,6 +9,7 @@
 <!-- Chantier G4-b-3c : galerie de recettes web (section RECETTES du desk).
      CSS servi via app.mount("/static", ...) -> hub/hub/static/. -->
 <link rel="stylesheet" href="/static/recipe_gallery.css">
+<script src="/static/produit.js" defer></script>
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   font-family:var(--qs-police)}
@@ -201,7 +202,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
    scroll horizontal disgracieux. min-width:0 sur le flex enfant + l'overflow
    ellipsis sur le span enfant suffit. */
 .study-dropdown .item{display:flex;align-items:center;gap:8px;padding:8px 12px;
-  font-size:12.5px;cursor:pointer;color:var(--qs-encre-2);
+  font-size:13px;min-height:36px;cursor:pointer;color:var(--qs-encre-2);
   border-bottom:1px solid var(--qs-surface-2);
   min-width:0;max-width:100%}
 /* `flex:1` revient au LIBELLE seul. La regle visait `:not(.ic)`, ce qui
@@ -221,7 +222,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
    les projets de celle qui est active. Sans separation nommee, les deux se
    lisaient comme une seule enumeration. */
 /* Titres courts : le contexte (nom d'étude) est déjà dans le trigger. */
-.study-dropdown .sd-titre{font-size:10px;color:var(--qs-discret);
+.study-dropdown .sd-titre{font-size:11px;color:var(--qs-discret);
   text-transform:uppercase;letter-spacing:.5px;padding:8px 10px 3px;
   font-weight:600}
 .study-dropdown .sd-titre + .sd-titre,
@@ -233,11 +234,11 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   display:flex;flex-direction:row;align-items:center;gap:6px}
 .study-dropdown .new-form input,.study-dropdown .new-form select{
   flex:1;min-width:0;width:auto;box-sizing:border-box;
-  padding:6px 8px;font-size:11.5px;border:1px solid var(--qs-trait);
+  padding:6px 8px;font-size:12.5px;min-height:32px;border:1px solid var(--qs-trait);
   border-radius:3px;margin:0;font-family:inherit;background:#fff}
 .study-dropdown .new-form button{
   flex:0 0 auto;width:auto;box-sizing:border-box;
-  padding:6px 10px;font-size:11.5px;white-space:nowrap;
+  padding:6px 10px;font-size:12.5px;min-height:32px;white-space:nowrap;
   background:var(--qs-accent);color:#fff;border:none;
   border-radius:3px;cursor:pointer;font-family:inherit;font-weight:500}
 .study-dropdown .new-form button:hover{
@@ -261,9 +262,13 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .publi-drawer-header{display:flex;align-items:center;justify-content:space-between;
   padding:10px 16px;border-bottom:1px solid var(--qs-trait);
   background:var(--qs-surface-2);min-height:38px}
-.publi-drawer-header .publi-label{font-size:11px;color:var(--qs-discret);
-  text-transform:uppercase;letter-spacing:.5px;font-weight:700;white-space:nowrap;
+.publi-drawer-header .publi-label{font-size:13px;color:var(--qs-encre);
+  margin:0;font-weight:700;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
+.publi-fermer{width:32px;height:32px;flex:none;border:0;border-radius:4px;
+  background:transparent;color:var(--qs-encre-2);cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center}
+.publi-fermer:hover{background:#fff;color:var(--qs-encre)}
 .publi-drawer-header .publi-count{font-size:10px;color:var(--qs-discret);
   background:#fff;padding:1px 7px;border-radius:10px;
   border:1px solid var(--qs-trait);font-weight:600;flex-shrink:0}
@@ -280,12 +285,15 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   scrollbar-width:thin;scrollbar-color:var(--qs-trait) transparent}
 .rtabs::-webkit-scrollbar{height:4px}
 .rtabs::-webkit-scrollbar-thumb{background:var(--qs-trait);border-radius:2px}
-.rtabs .rtab{flex:1 1 calc(33.333% - 0px);min-width:75px;
-  padding:7px 4px;font-size:10.5px;font-weight:600;line-height:1.25;
+.rtabs .rtab{flex:1 1 calc(33.333% - 0px);min-width:75px;min-height:40px;
+  padding:9px 6px;font-size:12.5px;font-weight:600;line-height:1.25;
   cursor:pointer;text-align:center;background:transparent;border:none;
   color:var(--qs-discret);font-family:inherit;white-space:nowrap;
   border-bottom:2px solid transparent;position:relative;
   transition:background .12s,color .12s,border-color .12s}
+.rtabs .rtab .rtab-count{display:inline-block;margin-left:4px;padding:0 6px;
+  border-radius:9px;background:var(--qs-surface-2);color:var(--qs-encre-2);
+  font-size:11px;font-weight:600;line-height:17px}
 .rtabs .rtab.active{color:var(--qs-accent);
   background:#fff;border-bottom-color:var(--qs-accent)}
 .rtabs .rtab:hover:not(.active){background:rgba(0,0,145,.05);
@@ -322,7 +330,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .publi-item .name{font-weight:600;color:var(--qs-encre);
   white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font-size:12px}
 .publi-item .meta{font-size:10px;color:var(--qs-discret);margin-top:2px}
-.publi-empty{padding:20px 14px;font-size:11.5px;color:var(--qs-discret);text-align:center}
+.publi-empty{padding:20px 14px;font-size:12.5px;color:var(--qs-discret);text-align:center;line-height:1.5}
 
 /* ── Resize handles ───────────────────────────────────────────── */
 .handle{background:transparent;cursor:col-resize;position:relative;z-index:5;touch-action:none}
@@ -456,7 +464,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 
 /* ── Status bar ──────────────────────────────────────────────── */
 .desk-status{grid-area:status;background:#fff;border-top:1px solid var(--qs-trait);
-  padding:0 14px;display:flex;align-items:center;gap:12px;font-size:11px;
+  padding:0 14px;display:flex;align-items:center;gap:12px;font-size:12px;
   color:var(--qs-discret);overflow-x:auto;white-space:nowrap}
 .desk-status .user-chip{font-size:11px;color:var(--qs-discret);
   padding:2px 8px;background:var(--qs-surface-2);border-radius:2px;
@@ -466,7 +474,9 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .desk-status .badge.ok{color:var(--qs-succes)}
 .desk-status .badge.warn{color:#b04400}
 .desk-status .sep{color:var(--qs-trait)}
-.desk-status .recent-tool{color:var(--qs-accent);font-weight:500}
+.desk-status .status-lien{font:inherit;color:inherit;background:none;border:0;
+  padding:2px 4px;min-height:24px;cursor:pointer;border-radius:3px;white-space:nowrap}
+.desk-status .status-lien:hover{color:var(--qs-accent);text-decoration:underline}
 
 /* Backdrop de base (caché) — activé quand ressources overlay ou chat deck. */
 .desk-backdrop{display:none;position:fixed;top:48px;right:0;bottom:32px;left:0;
@@ -476,7 +486,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .desk[data-resources="panel"] .desk-publi,
 .desk[data-resources="deck"] .desk-publi{
   position:fixed;top:48px;bottom:32px;left:0;z-index:30;
-  width:var(--publi-w,240px);max-width:85vw;visibility:visible;
+  width:max(300px,var(--publi-w,240px));max-width:85vw;visibility:visible;
   box-shadow:0 0 28px rgba(0,0,0,.18);transform:translateX(0)}
 .desk[data-resources="collapsed"] .desk-publi{
   visibility:hidden;pointer-events:none}
@@ -552,16 +562,20 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   .study-trigger .fa-projet{display:none}
   .study-trigger{max-width:none;min-width:0}
   .study-trigger .study-name{max-width:96px}
-  .study-dropdown{min-width:0;width:calc(100vw - 24px);max-width:none;
-    left:auto;right:-44px}
+  /* Ancre a l'ecran, pas au bouton : centre dans la barre, le menu ancre
+     a droite du bouton debordait a gauche de l'ecran (noms coupes). */
+  .study-dropdown{position:fixed;top:54px;left:12px;right:12px;
+    min-width:0;width:auto;max-width:none}
 
   /* Barre d'etat : elle defilait lateralement faute de place. On garde ce qui
      renseigne sur l'etat du bureau -- session, moteur IA -- et on retire les
      precisions qui ne se lisent qu'au repos. */
   .desk-status #footer-publi-total,
-  .desk-status .recent-tool,
+  .desk-status .status-detail,
   .desk-status .sep{display:none}
   .desk-status{gap:10px}
+  #gpu-chip{max-width:44vw;overflow:hidden}
+  #gpu-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 }
 
 /* Modal éditeur recettes YAML (Sources) — compact, jetons produit */
@@ -650,8 +664,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     <nav class="desk-nav" aria-label="Navigation bureau">
       <div class="desk-nav__left">
         <button class="toggle-btn toggle-publi ic-livre" id="toggle-publi"
-                title="Ouvrir/fermer le panneau Ressources (Sources · Livrables · Recettes)"
-                aria-label="Panneau Ressources" aria-expanded="false"
+                title="Afficher ou masquer les ressources de l'étude (données, recettes, livrables)"
+                aria-label="Ressources de l'étude" aria-expanded="false"
                 aria-controls="desk-publi-panel"></button>
       </div>
 
@@ -664,7 +678,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       </a>
       <div class="center-content">
         <div class="study-menu">
-          <button class="study-trigger" id="study-trigger" onclick="toggleStudyMenu(event)"
+          <button type="button" class="study-trigger" id="study-trigger" onclick="toggleStudyMenu(event)"
+                  aria-haspopup="true" aria-expanded="false" aria-controls="study-dropdown"
                   title="{% if active_study %}Étude : {{ active_study.name }}{% if active_project %} — Projet : {{ active_project.label }}{% endif %} — clique pour changer de projet{% else %}Choisir une étude{% endif %}">
             <span class="ic-dossier" aria-hidden="true"></span>
             {% if active_study %}
@@ -687,9 +702,9 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             {% else %}
               <span>Choisir une étude…</span>
             {% endif %}
-            <span class="caret">▾</span>
+            <span class="caret" aria-hidden="true">▾</span>
           </button>
-          <div class="study-dropdown" id="study-dropdown">
+          <div class="study-dropdown" id="study-dropdown" aria-label="Changer d'étude ou de projet">
             {# Les etudes se choisissent ICI.
 
                Une decision anterieure les avait retirees de ce menu : changer
@@ -724,8 +739,9 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
               {% endfor %}
               <form class="new-form" method="POST"
                     action="/workspace/study/new?return_to=desk">
-                <input name="name" required placeholder="Nouvelle étude…">
-                <button type="submit">+ Créer</button>
+                <input name="name" required placeholder="Nouvelle étude…"
+                       aria-label="Nom de la nouvelle étude" autocomplete="off">
+                <button type="submit">Créer</button>
               </form>
             {% endif %}
 
@@ -748,14 +764,15 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
               {% endfor %}
               <form class="new-form" method="POST"
                     action="/workspace/project/{{ active_study.id }}/new?return_to=desk">
-                <input name="label" required placeholder="Nouveau projet…">
-                <button type="submit">+ Créer</button>
+                <input name="label" required placeholder="Nouveau projet…"
+                       aria-label="Nom du nouveau projet" autocomplete="off">
+                <button type="submit">Créer</button>
               </form>
             {% endif %}
             <a href="/workspace" style="display:block;padding:8px 10px;
                font-size:11px;color:var(--qs-discret);
                text-decoration:none;border-top:1px solid var(--qs-trait)">
-              Vue d’ensemble…
+              Toutes mes études (Mon espace)
             </a>
           </div>
         </div>
@@ -772,8 +789,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 
       <div class="desk-nav__actions">
         <button class="toggle-btn toggle-chat ic-discussion" id="toggle-chat"
-                title="Ouvrir/fermer le chat agent"
-                aria-label="Chat agent" aria-expanded="false"
+                title="Afficher ou masquer l'assistant"
+                aria-label="Assistant IA" aria-expanded="false"
                 aria-controls="desk-chat-panel"></button>
 
       {# ── Compte ──────────────────────────────────────────────────────── #}
@@ -812,9 +829,20 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           <a class="qs-menu__item ic-grille" role="menuitem" href="/workspace">
             Mon espace de travail
           </a>
+          <a class="qs-menu__item ic-fenetre" role="menuitem" href="/desk"
+             aria-current="page">
+            Bureau de travail
+          </a>
           <a class="qs-menu__item ic-archive" role="menuitem"
              href="/published/{{ username }}/">
             Mes publications
+          </a>
+          <a class="qs-menu__item ic-discussion" role="menuitem" target="_blank"
+             rel="noopener" href="{{ agent_url or '/agent/' }}">
+            Assistant en pleine page
+            <span class="qs-menu__suffixe ic-lien-externe ic--sm"
+                  aria-hidden="true"></span>
+            <span class="qs-sr">(nouvel onglet)</span>
           </a>
 
           <hr class="qs-menu__sep">
@@ -825,6 +853,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             Documentation
             <span class="qs-menu__suffixe ic-lien-externe ic--sm"
                   aria-hidden="true"></span>
+            <span class="qs-sr">(nouvel onglet)</span>
           </a>
           <a class="qs-menu__item ic-deconnexion qs-menu__item--danger" role="menuitem"
              href="/auth/logout">
@@ -843,11 +872,11 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
        Panel central pour TOUT ce qui appartient à l'étude active :
        couches QGIS du projet, publications/livrables, fichiers de
        l'étude. Bascule entre les 3 vues via onglets internes. -->
-  <aside class="desk-publi" id="desk-publi-panel">
+  <aside class="desk-publi" id="desk-publi-panel" aria-labelledby="publi-titre">
     <div class="publi-drawer-header">
-      <span class="publi-label">Ressources</span>
-      <span class="publi-count" id="publi-count-badge"
-            title="{{ catalog_count }} publication(s) sur ce compte (cumul toutes etudes)">{{ catalog_count }}</span>
+      <h2 class="publi-label" id="publi-titre">Ressources de l'étude</h2>
+      <button type="button" class="publi-fermer ic-fermer" id="publi-fermer"
+              aria-label="Fermer les ressources" title="Fermer (Échap)"></button>
     </div>
     {# Sprint UX-3 fix (2026-06-22) : onglets renommes pour clarte +
        tooltips qui explicitent le scope (projet vs etude). 'Publi' devient
@@ -872,14 +901,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
        Les anciens panes (composants, assemblies, exports, publi) restent
        au DOM (caches) pour compatibilite des loaders JS qui les referencent.
        Les onglets visibles pointent vers des nouveaux meta-panes. #}
-    <div class="rtabs">
-      <button class="rtab active" data-rtab="sources"
-              title="Sources : ce avec quoi je travaille (couches + fichiers + recettes)">
+    <div class="rtabs" role="tablist" aria-label="Ressources de l'étude">
+      <button type="button" class="rtab active" data-rtab="sources" role="tab"
+              id="rtab-sources" aria-controls="rpane-sources" aria-selected="true"
+              title="Ce avec quoi tu travailles : projet, données, recettes">
         <span class="ic-base-donnees ic--sm" aria-hidden="true"></span> Sources
       </button>
-      <button class="rtab" data-rtab="livrables"
-              title="Livrables : storymaps, datasets, agents partagés…">
+      <button type="button" class="rtab" data-rtab="livrables" role="tab"
+              id="rtab-livrables" aria-controls="rpane-livrables" aria-selected="false"
+              tabindex="-1"
+              title="Ce que tu produis : cartes, récits, documents, assistants partagés">
         <span class="ic-article ic--sm" aria-hidden="true"></span> Livrables
+        <span class="rtab-count" id="publi-count-badge"
+              title="Publications de l'étude active">{{ catalog_count }}</span>
       </button>
     </div>
 
@@ -895,29 +929,30 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
        ════════════════════════════════════════════════════════════════════ #}
 
     <!-- ═══ Onglet 1/3 : SOURCES ═══════════════════════════════════════ -->
-    <div class="rpane active" data-rpane="sources">
+    <div class="rpane active" data-rpane="sources" role="tabpanel"
+         id="rpane-sources" aria-labelledby="rtab-sources">
       <style>
       .src-section{padding:8px 12px 6px;border-bottom:1px solid var(--qs-trait)}
       .src-section:last-child{border-bottom:none}
       .src-section-header{display:flex;align-items:center;gap:6px;
-        font-size:10.5px;font-weight:700;color:var(--qs-accent);
-        text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px}
-      .src-section-header.collapsible{width:100%;padding:0;margin:0 0 4px;
+        font-size:11.5px;font-weight:700;color:var(--qs-accent);
+        text-transform:uppercase;letter-spacing:.3px;margin-bottom:6px}
+      .src-section-header.collapsible{width:100%;min-height:32px;padding:0;margin:0 0 4px;
         background:none;border:none;cursor:pointer;text-align:left;font-family:inherit}
       .src-section-header.collapsible .src-chevron{font-size:9px;color:var(--qs-discret);
         width:10px;flex-shrink:0}
-      .src-header-meta{margin-left:auto;font-size:10px;font-weight:500;
+      .src-header-meta{margin-left:auto;font-size:11.5px;font-weight:500;
         color:var(--qs-discret);text-transform:none;letter-spacing:0}
-      .src-section-content{font-size:11px}
+      .src-section-content{font-size:12.5px}
       .src-section-content.collapsed{display:none}
-      .src-hint{margin:0 0 4px;font-size:10px;color:var(--qs-discret);line-height:1.35}
+      .src-hint{margin:0 0 6px;font-size:12px;color:var(--qs-discret);line-height:1.4}
       .src-action{display:block;padding:8px 14px;background:#f4f6fa;
         text-align:center;font-weight:700;font-size:11px;color:var(--qs-accent);
         border-top:1px solid var(--qs-trait);text-decoration:none}
       .src-action:hover{background:var(--qs-accent-pale)}
       .src-actions-row{display:flex;gap:4px;padding:0 0 4px;flex-wrap:wrap}
       .src-actions-row a,.src-actions-row button{
-        flex:1;min-width:100px;padding:4px 6px;font-size:10px;font-weight:600;
+        flex:1;min-width:100px;min-height:32px;padding:6px 8px;font-size:12px;font-weight:600;
         border:1px solid var(--qs-trait);border-radius:3px;background:#fff;
         color:var(--qs-accent);cursor:pointer;text-align:center;text-decoration:none;
         font-family:inherit}
@@ -932,11 +967,11 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       .src-action-discrete{font-weight:500!important;color:var(--qs-encre-2)!important}
       .src-upload{display:flex;flex-direction:column;align-items:center;gap:6px;
         border:1px dashed var(--qs-trait);border-radius:4px;padding:10px 8px;
-        margin-bottom:4px;text-align:center;font-size:10.5px;line-height:1.35;
+        margin-bottom:4px;text-align:center;font-size:12px;line-height:1.4;
         color:var(--qs-discret);background:var(--qs-surface-2)}
       .src-upload-lead,.src-upload-hint{margin:0}
-      .src-upload-hint{font-size:9.5px}
-      .src-upload-status{font-size:10px;color:var(--qs-discret);min-height:14px}
+      .src-upload-hint{font-size:11.5px}
+      .src-upload-status{font-size:12px;color:var(--qs-discret);min-height:14px}
       .src-upload-status.ok{color:var(--qs-succes)}
       .src-upload-status.err{color:var(--qs-alerte)}
       .src-upload.dragover,.rpane[data-rpane=sources].src-dragover .src-upload{
@@ -944,19 +979,23 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       .rpane[data-rpane=sources].src-dragover{outline:2px dashed var(--qs-accent);
         outline-offset:-3px}
       .src-list{max-height:220px;overflow-y:auto;margin:0;padding:0}
-      .src-row{display:flex;align-items:center;gap:5px;padding:2px 0;
-        font-size:10.5px;line-height:1.25;color:var(--qs-encre-2);
+      .src-row{display:flex;align-items:center;gap:6px;padding:3px 0;min-height:30px;
+        font-size:12.5px;line-height:1.3;color:var(--qs-encre-2);
         border-bottom:1px solid var(--qs-surface-2)}
       .src-row:last-child{border-bottom:none}
       .src-row-ic{flex-shrink:0;font-size:11px;opacity:.75}
       .src-row-main{flex:1;min-width:0;display:flex;align-items:baseline;gap:4px}
       .src-row-name{font-weight:600;color:var(--qs-encre);
         white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .src-row-meta{font-size:9.5px;color:var(--qs-discret);white-space:nowrap;flex-shrink:0}
-      .src-row-dl{color:var(--qs-accent);text-decoration:none;font-size:10px;
-        flex-shrink:0;padding:0 2px}
+      .src-row-meta{font-size:11.5px;color:var(--qs-discret);white-space:nowrap;flex-shrink:0}
+      .src-row-dl{color:var(--qs-accent);text-decoration:none;font-size:12px;
+        flex-shrink:0;min-width:28px;min-height:28px;padding:4px;border-radius:3px;
+        display:inline-flex;align-items:center;justify-content:center}
+      .src-row-dl:hover{background:var(--qs-accent-pale)}
+      .src-row-dl.src-row-danger{color:var(--qs-danger)}
+      .src-row-dl.src-row-danger:hover{background:var(--qs-danger-pale)}
       .src-row-dl:hover{text-decoration:underline}
-      .src-empty{padding:8px 0;font-size:10.5px;color:var(--qs-discret);text-align:center}
+      .src-empty{padding:8px 0;font-size:12px;line-height:1.45;color:var(--qs-discret);text-align:center}
       </style>
       <div class="src-section">
         <div class="src-section-header">Projet QGIS</div>
@@ -979,9 +1018,9 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             <a class="src-action-discrete"
                href="/studies/{{ active_study_id }}/project/download"
                title="Le projet seul, sans les couches — pour un ré-import ici">
-              .qgz seul</a>
+              Projet seul (.qgz)</a>
             <button type="button" id="src-upload-qgz-btn"
-                    title="Remplacer le projet actif par un fichier .qgz">
+                    title="Remplacer le projet actif par un fichier .qgz de ton poste">
               <span class="ic-editer ic--sm" aria-hidden="true"></span> Remplacer</button>
             <input type="file" id="src-upload-qgz-input" accept=".qgz,.qgs" hidden>
           </div>
@@ -995,17 +1034,17 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <div class="src-section-content" id="src-files-upload">
           {% if active_study_id %}
           <div class="src-upload" id="src-upload-zone" role="group"
-               aria-label="Importer des fichiers vers data/">
-            <p class="src-upload-lead">Glisser-déposer des couches ou fichiers ici</p>
+               aria-label="Importer des données dans l'étude">
+            <p class="src-upload-lead">Glisser-déposer des couches ou fichiers ici, ou</p>
             <button type="button" class="qs-btn qs-btn--sm qs-btn--secondaire"
-                    id="src-upload-browse-btn">Parcourir…</button>
-            <p class="src-upload-hint">.gpkg · .geojson · .shp/.zip · .tif · .csv · … → <code>data/</code></p>
+                    id="src-upload-browse-btn">Choisir des fichiers…</button>
+            <p class="src-upload-hint">GeoPackage, GeoJSON, Shapefile (zippé), GeoTIFF, CSV…</p>
             <input type="file" id="src-upload-data-input" multiple hidden
                    accept=".gpkg,.geojson,.json,.shp,.zip,.tif,.tiff,.kml,.kmz,.gml,.tab,.sqlite,.csv,.dbf,.prj,.qgz,.qgs,.md,.pdf">
           </div>
           <div id="src-upload-status" class="src-upload-status" role="status" aria-live="polite"></div>
           {% else %}
-          <div class="src-empty">Active une étude pour importer.</div>
+          <div class="src-empty">Choisis une étude (menu du haut) pour importer des données.</div>
           {% endif %}
         </div>
       </div>
@@ -1017,7 +1056,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           <span class="src-header-meta" id="src-files-summary">…</span>
         </button>
         <div class="src-section-content collapsed" id="src-files-content">
-          <p class="src-hint">Télécharger les fichiers présents dans <code>data/</code> et <code>exports/</code>.</p>
+          <p class="src-hint">Données importées et fichiers exportés de l'étude, à télécharger.</p>
           <div class="src-list" id="src-files-list"><div class="src-empty">Chargement…</div></div>
         </div>
       </div>
@@ -1037,15 +1076,16 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         <button type="button" class="src-section-header collapsible" data-src-section="recipes_user"
                 aria-expanded="false" id="src-recipes-user-toggle">
           <span class="src-chevron" aria-hidden="true">▸</span>
-          Recettes user (YAML)
+          Mes recettes
           <span class="src-header-meta" id="src-recipes-user-summary">…</span>
         </button>
         <div class="src-section-content collapsed" id="src-recipes-user-content">
+          <p class="src-hint">Tes enchaînements d'étapes enregistrés, rejouables sur une autre zone.</p>
           <div class="src-list" id="src-recipes-user-list"><div class="src-empty">Chargement…</div></div>
         </div>
       </div>
       <div class="src-section">
-        <div class="src-section-header">Recettes web</div>
+        <div class="src-section-header">Recettes prêtes à l'emploi</div>
         <div class="src-section-content" id="src-recipes-content">
           {# Chantier G4-b-3c : galerie SSR des recipes web disponibles.
              Le contexte `recipes` est alimente par _desk_context() a partir
@@ -1063,17 +1103,17 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                  href="/desk?session={{ r.session_hint }}"
                  data-recipe-id="{{ r.id }}"
                  data-source="{{ r.source }}"
-                 title="Ouvrir la session recipe_run pour cette recette">
+                 title="Lancer cette recette avec l'assistant">
                 <div class="rct-card-title">{{ r.title }}</div>
                 <div class="rct-card-desc">
                   {%- if r.description -%}
                     {{ r.description }}
                   {%- else -%}
-                    Recette deterministe web V0.3.1
+                    Enchaînement d'étapes automatisé.
                   {%- endif -%}
                 </div>
                 <div class="rct-card-meta">
-                  <span class="rct-source">{{ r.source or "?" }}</span>
+                  <span class="rct-source">{{ {'example': 'Exemple', 'user': 'Personnelle'}.get(r.source, 'Recette') }}</span>
                   {# Badge auteur uniquement pour les recipes user. Les
                      recipes example ne portent pas d'estampe institutionnelle
                      (ce ne sont pas des recettes officielles Cerema). #}
@@ -1081,56 +1121,52 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                   <span class="rct-author">{{ r.author }}</span>
                   {% endif %}
                 </div>
-                <div class="rct-card-cta">Executer &rarr;</div>
+                <div class="rct-card-cta">Lancer avec l'assistant &rarr;</div>
               </a>
               {% endfor %}
               {% if not recipes %}
               <p class="rct-empty">
-                Aucune recette disponible. Demande a l'agent :
-                &laquo;&nbsp;cree une recette qui &hellip;&nbsp;&raquo;
+                Aucune recette disponible. Demande à l'assistant :
+                &laquo;&nbsp;crée une recette qui &hellip;&nbsp;&raquo;
               </p>
               {% endif %}
             </div>
           </div>
         </div>
       </div>
-      {% if active_study %}
-      <a href="/studies/{{ active_study_id }}/export"
-         class="src-action" title="Archive complète : project.qgz, data/, exports/, notes">
-        ↓ Télécharger l'étude complète (ZIP)
-      </a>
-      {% endif %}
     </div>
 
     <!-- ═══ Onglet 2/3 : LIVRABLES (vue unifiée) ════════════════════════ -->
-    <div class="rpane" data-rpane="livrables">
+    <div class="rpane" data-rpane="livrables" role="tabpanel"
+         id="rpane-livrables" aria-labelledby="rtab-livrables" hidden>
       <style>
       .liv-list{padding:8px 10px;display:flex;flex-direction:column;gap:8px;
         flex:1;overflow-y:auto}
       .liv-card{background:#fff;border:1px solid var(--qs-trait);
-        border-left:3px solid #ccc;border-radius:4px;padding:9px 11px;
-        font-size:12px;display:flex;flex-direction:column;gap:5px}
+        border-left:3px solid #ccc;border-radius:4px;padding:10px 12px;
+        font-size:13px;display:flex;flex-direction:column;gap:5px}
       .liv-card.is-published{border-left-color:var(--qs-succes)}
       .liv-card.is-draft{border-left-color:var(--qs-alerte)}
       .liv-card.is-shared{border-left-color:var(--qs-accent)}
-      .liv-card-header{display:flex;align-items:center;gap:8px}
+      .liv-card-header{display:flex;align-items:flex-start;gap:8px}
       .liv-card-icon{font-size:18px}
-      .liv-card-title{flex:1;font-weight:700;color:var(--qs-encre);
-        overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .liv-card-state{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600}
+      .liv-card-title{flex:1;margin:0;font-size:13px;font-weight:700;color:var(--qs-encre);min-width:0;
+        overflow:hidden;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;
+        -webkit-box-orient:vertical;line-height:1.3}
+      .liv-card-state{font-size:11px;padding:1px 7px;white-space:nowrap;border-radius:8px;font-weight:600}
       .liv-card-state.published{background:#d1f0d8;color:var(--qs-succes)}
       .liv-card-state.draft{background:var(--qs-alerte-pale);color:var(--qs-alerte)}
       .liv-card-state.shared{background:#e8ecf8;color:var(--qs-accent)}
-      .liv-card-meta{font-size:10px;color:var(--qs-discret);
+      .liv-card-meta{font-size:11.5px;color:var(--qs-discret);
         display:flex;gap:6px;flex-wrap:wrap}
       .liv-card-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:3px}
       .liv-card-actions a, .liv-card-actions button{
-        font-size:10.5px;padding:3px 8px;background:#f4f6fa;border:1px solid #d0d6e0;
-        border-radius:3px;cursor:pointer;color:var(--qs-encre);text-decoration:none}
+        font-size:12px;padding:5px 10px;min-height:30px;background:#f4f6fa;border:1px solid #d0d6e0;
+        border-radius:3px;display:inline-flex;align-items:center;gap:4px;font-family:inherit;cursor:pointer;color:var(--qs-encre);text-decoration:none}
       .liv-card-actions a:hover, .liv-card-actions button:hover{
         background:var(--qs-accent-pale);border-color:var(--qs-accent)}
-      .liv-card-toggle{font-size:10px;color:#666;cursor:pointer;
-        user-select:none}
+      .liv-card-toggle{font-size:11.5px;color:var(--qs-encre-2);cursor:pointer;
+        background:none;border:0;padding:4px 0;min-height:24px;text-align:left;font-family:inherit}
       /* Vague E1 D-QGIS-009 : Assembly Editor modal */
       #assembly-editor-modal{display:none;position:fixed;inset:0;z-index:9999}
       #assembly-editor-backdrop{position:absolute;inset:0;background:rgba(0,0,0,0.45)}
@@ -1181,28 +1217,28 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         margin-top:3px;font-size:10.5px;display:none}
       .liv-card-children.expanded{display:block}
       .liv-child{padding:3px 0;color:#444}
-      .liv-empty{text-align:center;padding:20px 14px;color:#888;font-size:11.5px}
+      .liv-empty{text-align:center;padding:20px 14px;color:var(--qs-discret);font-size:12.5px;line-height:1.5}
       .liv-create-row{padding:10px 14px;border-top:1px solid var(--qs-trait);
         background:var(--qs-accent-pale)}
-      .liv-create-title{font-size:10.5px;color:var(--qs-accent);font-weight:600;margin-bottom:6px}
+      .liv-create-title{font-size:12px;color:var(--qs-accent);font-weight:600;margin-bottom:6px}
       </style>
       {% if active_study %}
       <div class="liv-list" id="liv-list">
         <div class="publi-empty">Chargement…</div>
       </div>
       <div class="liv-create-row">
-        <div class="liv-create-title">Demander à l'assistant V1.5 :</div>
-        <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid var(--qs-trait);border-radius:4px;cursor:pointer;color:var(--qs-encre);line-height:1.35;width:100%"
+        <div class="liv-create-title">Demander à l'assistant :</div>
+        <button type="button" class="quick-action-btn" style="width:100%"
                 data-prompt="J'aimerais créer un nouveau livrable pour cette étude. Quels types sont possibles (storymap interactive, rapport, jeu de données partageable, etc.) ? Propose-moi le plus adapté à ce que j'ai déjà.">
           Créer un nouveau livrable
         </button>
-        <button class="quick-action-btn" style="font-size:11px;padding:6px 10px;text-align:left;background:#fff;border:1px solid var(--qs-trait);border-radius:4px;cursor:pointer;color:var(--qs-encre);line-height:1.35;width:100%;margin-top:5px"
+        <button type="button" class="quick-action-btn" style="width:100%;margin-top:5px"
                 data-prompt="Je voudrais partager cette étude avec mes collègues via un assistant qu'ils peuvent consulter directement. Propose-moi une configuration adaptée et préviens-moi des points d'attention (confidentialité, audience).">
           Créer un agent partagé
         </button>
       </div>
       {% else %}
-      <div class="liv-empty">Active une étude pour voir ses livrables.</div>
+      <div class="liv-empty">Choisis une étude (menu du haut) pour voir ses livrables.</div>
       {% endif %}
     </div>
 
@@ -1379,7 +1415,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
       border:1px dashed #91b0d6}
     .quick-actions-title{font-size:10.5px;color:var(--qs-accent);font-weight:600;
       margin-bottom:2px}
-    .quick-action-btn{font-size:11px;padding:6px 10px;text-align:left;
+    .quick-action-btn{font-size:12.5px;padding:7px 10px;min-height:32px;text-align:left;
       background:#fff;border:1px solid var(--qs-trait);border-radius:4px;
       cursor:pointer;color:var(--qs-encre);line-height:1.35;
       transition:background 0.15s,border-color 0.15s}
@@ -1467,7 +1503,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           await navigator.clipboard.writeText(prompt);
           btn.classList.add('copied');
           setTimeout(() => btn.classList.remove('copied'), 1800);
-          showToast('Prompt copié — colle-le dans le chat (Ctrl+V)');
+          showToast('Demande copiée : colle-la dans la zone de message de l\'assistant (Ctrl+V).');
         } catch (err) {
           /* Fallback ancien navigateur — select + execCommand */
           const ta = document.createElement('textarea');
@@ -1476,7 +1512,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
           ta.select();
           try { document.execCommand('copy'); } catch (e2) {}
           document.body.removeChild(ta);
-          showToast('Prompt copié');
+          showToast('Demande copiée');
         }
       });
     })();
@@ -2082,9 +2118,11 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
         </button>
       </div>
       <div class="re-fields">
-        <input id="recipe-editor-slug" type="text" placeholder="slug (ex: ma_recette)"
+        <input id="recipe-editor-slug" type="text" placeholder="Identifiant (ex. ma_recette)"
+               aria-label="Identifiant de la recette"
                autocomplete="off" spellcheck="false">
         <input id="recipe-editor-name" type="text" placeholder="Nom affiché"
+               aria-label="Nom affiché de la recette"
                autocomplete="off">
         <select id="recipe-editor-format" aria-label="Format">
           <option value="yaml">YAML</option>
@@ -2125,8 +2163,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     {% else %}
     <div class="canvas-empty" id="canvas-empty-wake">
       <div class="ic"><span class="ic-fenetre ic--lg" aria-hidden="true"></span></div>
-      <h3>Bureau QGIS endormi</h3>
-      <p>Le workspace est en mode économie d'énergie (scale 0). Une commande au chat le réveillera, ou clique ci-dessous (~35s).</p>
+      <h3>Bureau QGIS en veille</h3>
+      <p>Il se met en veille quand il ne sert pas, pour économiser les ressources. Réveille-le ci-dessous (environ 35 secondes), ou écris simplement à l'assistant.</p>
       <button type="button" id="wake-btn" class="qs-btn qs-btn--secondaire"
               onclick="wakeWorkspace()">Réveiller le bureau</button>
     </div>
@@ -2136,8 +2174,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
                   border-top-color:var(--qs-accent);border-radius:50%;
                   animation:spin-w 1s linear infinite"></div>
       <h3>Démarrage du bureau QGIS…</h3>
-      <p id="wake-progress">Provisionnement du pod K8s + Xvfb + QGIS (~35s).</p>
-      <p style="font-size:11px;opacity:.7" id="wake-elapsed">0s écoulées</p>
+      <p id="wake-progress" role="status">Démarrage de QGIS (environ 35 secondes).</p>
+      <p style="font-size:12px;opacity:.8" id="wake-elapsed">0 s écoulée</p>
     </div>
     {% endif %}
   </section>
@@ -2157,23 +2195,26 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   <!-- ── STATUS BAR ──────────────────────────────────────────── -->
   <footer class="desk-status">
     {% if session_ready %}
-    <span class="badge ok">● Workspace actif</span>
+    <span class="badge ok"><span aria-hidden="true">●</span> Bureau QGIS prêt</span>
     {% else %}
-    <span class="badge warn">○ Endormi</span>
+    <span class="badge warn"><span aria-hidden="true">○</span> Bureau QGIS en veille</span>
     {% endif %}
-    <span>{{ studies|length }} étude{{ '' if studies|length == 1 else 's' }}</span>
-    <span class="sep">|</span>
-    <span id="footer-publi" title="Livrables publiés dans l'étude active vs sur l'ensemble de ton compte (toutes études confondues)">
+    <span class="sep" aria-hidden="true">|</span>
+    {# Ouvre directement l'onglet Livrables : le compteur etait une
+       information sans suite. #}
+    <button type="button" class="status-lien" id="footer-publi"
+            onclick="ouvrirRessources('livrables')"
+            title="Voir les livrables de l'étude active">
       <span id="footer-publi-count">{{ catalog_count }}</span>
-      livrable<span id="footer-publi-s">{{ '' if catalog_count == 1 else 's' }}</span> ici
-      <small style="opacity:.6" id="footer-publi-total"
+      livrable<span id="footer-publi-s">{{ '' if catalog_count == 1 else 's' }}</span> publié<span id="footer-publi-s2">{{ '' if catalog_count == 1 else 's' }}</span>
+      <small style="opacity:.75" id="footer-publi-total"
         {% if not catalog_total or catalog_total == catalog_count %}style="display:none"{% endif %}>
-        / <span id="footer-publi-total-num">{{ catalog_total }}</span> sur ton compte
+        (<span id="footer-publi-total-num">{{ catalog_total }}</span> au total)
       </small>
-    </span>
+    </button>
     {% if insights|length > 0 %}
     <span class="sep">|</span>
-    <span title="Préférences et notes que l'agent a mémorisées"><span class="ic-memoire ic--sm" aria-hidden="true"></span> <span id="footer-insights-num">{{ insights|length }}</span></span>
+    <span title="Préférences et notes que l'assistant a retenues"><span class="ic-memoire ic--sm" aria-hidden="true"></span> <span id="footer-insights-num">{{ insights|length }}</span> <span class="status-detail">note{{ '' if insights|length == 1 else 's' }} de l'assistant</span></span>
     {% endif %}
     {# Badge divergence session MCP externe — status bar pour ne pas encombrer le menu etude. #}
     <span class="sep" id="mcp-session-sep" style="display:none">|</span>
@@ -2186,22 +2227,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     <!-- Chip GPU/IA : etat du pod geoai-gpu (ready, dormant, off, busy).
          Cliquable pour reveiller le pod a la demande. Polling
          /geoai/status toutes les 20s. Cache si pas deploye (ss_exists=false). -->
-    <span id="gpu-chip" title="État du moteur IA Vision — clic pour réveiller"
-          style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;
-                 padding:2px 8px;border-radius:10px;background:var(--qs-surface-2);
-                 font-size:11px"
+    <button type="button" id="gpu-chip" class="status-lien"
+          title="Analyse d'images par IA (détection de bâtiments, d'arbres…) — cliquer pour la démarrer"
+          style="display:inline-flex;align-items:center;gap:5px;
+                 padding:2px 8px;border-radius:10px;background:var(--qs-surface-2)"
           onclick="wakeGpu()">
-      <span id="gpu-dot"
+      <span id="gpu-dot" aria-hidden="true"
             style="width:8px;height:8px;border-radius:50%;background:#999"></span>
-      <span id="gpu-label">IA Vision</span>
-    </span>
-    {% if recent_treatments %}
-    <span class="sep">|</span>
-    <span style="opacity:.7">Récent :</span>
-    {% for t in recent_treatments[:3] %}
-    <span class="recent-tool">{{ t }}</span>
-    {% endfor %}
-    {% endif %}
+      <span id="gpu-label">Analyse d'images</span>
+    </button>
+    {# « Recent : native:clip -> 54556 entites » retire : identifiant
+       d'algorithme brut, fige au rendu de la page (donc perime des le
+       premier tour de l'assistant), et sans action possible. L'historique
+       des traitements vit dans la conversation. #}
     {# Le nom d'utilisateur a rejoint le bouton de compte, en haut a droite :
        le repeter ici en faisait la seule information de la barre d'etat sans
        lien avec l'etat du bureau. #}
@@ -2563,11 +2601,7 @@ document.getElementById('toggle-chat')?.addEventListener('click', (e) => toggleP
 
 function fermerOverlaysDesk() {
   let closed = false;
-  const dd = document.getElementById('study-dropdown');
-  if (dd?.classList.contains('open')) {
-    dd.classList.remove('open');
-    closed = true;
-  }
+  if (_fermerMenuEtude(false)) closed = true;
   if (layoutState.resources.mode === 'deck' ||
       layoutState.resources.mode === 'panel') {
     layoutState.resources.lastOpenMode = 'deck';
@@ -2639,14 +2673,28 @@ document.querySelectorAll('.handle').forEach(h => {
 });
 
 // ── Dropdown études ────────────────────────────────────────
+function _fermerMenuEtude(rendreFocus) {
+  const dd = document.getElementById('study-dropdown');
+  const trig = document.getElementById('study-trigger');
+  if (!dd || !dd.classList.contains('open')) return false;
+  dd.classList.remove('open');
+  trig?.setAttribute('aria-expanded', 'false');
+  if (rendreFocus) trig?.focus();
+  return true;
+}
 function toggleStudyMenu(e) {
   e.stopPropagation();
   fermerMenuCompte();
-  document.getElementById('study-dropdown').classList.toggle('open');
+  const dd = document.getElementById('study-dropdown');
+  const ouvert = dd.classList.toggle('open');
+  document.getElementById('study-trigger')?.setAttribute('aria-expanded', String(ouvert));
+  // Ouvert au clavier : le focus va a l'element actif de la liste.
+  if (ouvert && e.detail === 0) {
+    (dd.querySelector('.item.active') || dd.querySelector('.item, input'))?.focus();
+  }
 }
 document.addEventListener('click', (e) => {
-  const dd = document.getElementById('study-dropdown');
-  if (!e.target.closest('.study-menu')) dd.classList.remove('open');
+  if (!e.target.closest('.study-menu')) _fermerMenuEtude(false);
   if (!e.target.closest('.qs-compte')) fermerMenuCompte();
 });
 
@@ -2668,9 +2716,10 @@ function basculerMenuCompte(e) {
   const menu = document.getElementById('compte-menu');
   const btn = document.getElementById('compte-btn');
   const ouvert = menu.hidden;
-  document.getElementById('study-dropdown')?.classList.remove('open');
+  _fermerMenuEtude(false);
   menu.hidden = !ouvert;
   btn.setAttribute('aria-expanded', String(ouvert));
+  if (ouvert && e.detail === 0) menu.querySelector('[role="menuitem"]')?.focus();
 }
 
 function ouvrirCompte(section) {
@@ -2698,9 +2747,17 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   const modale = document.getElementById('compte-modale');
   const menu = document.getElementById('compte-menu');
+  if (document.querySelector('.qs-dialogue')) return;  // produit.js s'en charge
   if (modale && !modale.hidden) { fermerCompte(); return; }
-  if (menu && !menu.hidden) { fermerMenuCompte(); return; }
+  if (menu && !menu.hidden) {
+    fermerMenuCompte();
+    document.getElementById('compte-btn')?.focus();
+    return;
+  }
+  if (_fermerMenuEtude(true)) return;
+  const dansRessources = document.activeElement?.closest('#desk-publi-panel');
   fermerOverlaysDesk();
+  if (dansRessources) document.getElementById('toggle-publi')?.focus();
 });
 
 function basculerVisibiliteCle() {
@@ -2906,13 +2963,53 @@ function _signalUiContext(kind) {
    Les anciennes valeurs data-rtab (layers, files, recipes, components,
    assemblies, exports, publi, agents) restent pour la compat retro JS mais
    ne sont plus utilisees par les boutons visibles. */
+/* Motif d'onglets ARIA : un seul onglet dans l'ordre de tabulation
+   (tabindex roulant), les fleches passent de l'un a l'autre, le panneau
+   associe est seul expose (hidden sur les autres). */
+function _activerOnglet(t, avecFocus) {
+  document.querySelectorAll('.rtab').forEach(x => {
+    const actif = x === t;
+    x.classList.toggle('active', actif);
+    x.setAttribute('aria-selected', String(actif));
+    x.tabIndex = actif ? 0 : -1;
+  });
+  const cible = t.dataset.rtab;
+  document.querySelectorAll('.rpane').forEach(p => {
+    const actif = p.dataset.rpane === cible;
+    p.classList.toggle('active', actif);
+    if (p.getAttribute('role') === 'tabpanel') p.hidden = !actif;
+  });
+  if (avecFocus) t.focus();
+}
+document.querySelector('.rtabs')?.addEventListener('keydown', (e) => {
+  const onglets = [...document.querySelectorAll('.rtabs .rtab')];
+  const i = onglets.indexOf(document.activeElement);
+  if (i < 0) return;
+  let j = null;
+  if (e.key === 'ArrowRight') j = (i + 1) % onglets.length;
+  else if (e.key === 'ArrowLeft') j = (i - 1 + onglets.length) % onglets.length;
+  else if (e.key === 'Home') j = 0;
+  else if (e.key === 'End') j = onglets.length - 1;
+  if (j === null) return;
+  e.preventDefault();
+  onglets[j].focus();
+  onglets[j].click();
+});
+/* Ouvre le panneau Ressources sur un onglet donne (barre d'etat, liens). */
+function ouvrirRessources(onglet) {
+  if (layoutState.resources.mode === 'collapsed') togglePanel('publi');
+  const t = document.querySelector(`.rtab[data-rtab="${onglet}"]`);
+  if (t) { t.click(); t.focus(); }
+}
+document.getElementById('publi-fermer')?.addEventListener('click', () => {
+  if (layoutState.resources.mode !== 'collapsed') togglePanel('publi');
+  document.getElementById('toggle-publi')?.focus();
+});
+
 document.querySelectorAll('.rtab').forEach(t => {
   t.addEventListener('click', () => {
-    document.querySelectorAll('.rtab').forEach(x => x.classList.toggle('active', x === t));
+    _activerOnglet(t, false);
     const target = t.dataset.rtab;
-    document.querySelectorAll('.rpane').forEach(p =>
-      p.classList.toggle('active', p.dataset.rpane === target)
-    );
     if (target === 'sources') {
       if (!_src_loaded) {
         loadSources();
@@ -3250,14 +3347,15 @@ async function loadLivrables() {
         children: comps,
         ref: a.aid,
         actions: isPub
-          ? [{label:'Voir',  href: _rewriteS3UrlToHub(a.published_url, a.aid), target:'_blank'},
-             {label:'Métadonnées', onclick: `openAssemblyEditor('${a.aid}')`, title: 'Editer titre/audience/sections (mode expert JSON). Pour edition visuelle, utiliser BlockNote.'},
-             {label:'BlockNote', href:`/editor/${sid}/assembly/${a.aid}`, target:'_blank'}]
-          : [{label:'<span class="ic-oeil ic--sm" aria-hidden="true"></span> Preview', href:`/studies/${sid}/assemblies/${a.aid}/render`, target:'_blank'},
-             {label:'Métadonnées', onclick: `openAssemblyEditor('${a.aid}')`, title: 'Editer titre/audience/sections (mode expert JSON). Pour edition visuelle, utiliser BlockNote.'},
-             {label:'BlockNote', href:`/editor/${sid}/assembly/${a.aid}`, target:'_blank'},
-             {label:'⎘ Cloner', onclick: `cloneAssembly('${a.aid}', '${(a.title || a.aid).replace(/'/g, "\\'")}')`},
-             {label:'Publier', prompt:`Publie cette storymap (« ${a.title || a.aid} ») avec accès réservé à mes collègues. Confirme avec moi l'audience avant publication.`}],
+          ? [{label:'Ouvrir', href: _rewriteS3UrlToHub(a.published_url, a.aid), target:'_blank'},
+             {label:'Copier le lien', copy: _rewriteS3UrlToHub(a.published_url, a.aid)},
+             {label:'Modifier', href:`/editor/${sid}/assembly/${a.aid}`, target:'_blank', title: 'Modifier le contenu et la mise en page (nouvel onglet)'},
+             {label:'Réglages', onclick: `openAssemblyEditor('${a.aid}')`, title: 'Titre, diffusion et ordre des sections'}]
+          : [{label:'<span class="ic-oeil ic--sm" aria-hidden="true"></span> Aperçu', href:`/studies/${sid}/assemblies/${a.aid}/render`, target:'_blank'},
+             {label:'Modifier', href:`/editor/${sid}/assembly/${a.aid}`, target:'_blank', title: 'Modifier le contenu et la mise en page (nouvel onglet)'},
+             {label:'Réglages', onclick: `openAssemblyEditor('${a.aid}')`, title: 'Titre, diffusion et ordre des sections'},
+             {label:'Dupliquer', onclick: `cloneAssembly('${a.aid}', '${(a.title || a.aid).replace(/'/g, "\\'")}')`},
+             {label:'Publier', prompt:`Publie « ${a.title || a.aid} » avec un accès réservé à mes collègues. Confirme avec moi la diffusion avant publication.`}],
       });
     });
 
@@ -3272,14 +3370,15 @@ async function loadLivrables() {
             : it.kind === 'pdf'      ? '<span class="ic-fichier ic--sm" aria-hidden="true"></span>'
             : it.kind === 'dataset'  ? '<span class="ic-courbe ic--sm" aria-hidden="true"></span>'
             : '<span class="ic-archive ic--sm" aria-hidden="true"></span>',
-        title: it.slug,
+        title: it.title || String(it.slug || '').replace(/[_-]+/g, ' ').replace(/^./, c => c.toUpperCase()),
         kind: it.kind,
         state: 'published',
         published_url: it.hub_url || it.url,
         size_kb: it.size_kb,
         children: [],
         ref: it.slug,
-        actions: [{label:'Voir', href: _rewriteS3UrlToHub(it.hub_url || it.url, it.slug), target:'_blank'}],
+        actions: [{label:'Ouvrir', href: _rewriteS3UrlToHub(it.hub_url || it.url, it.slug), target:'_blank'},
+                  {label:'Copier le lien', copy: _rewriteS3UrlToHub(it.hub_url || it.url, it.slug)}],
       });
     });
 
@@ -3292,36 +3391,46 @@ async function loadLivrables() {
         title: a.label || a.id_masked || 'Agent',
         kind: 'agent_partage',
         state: isShared ? 'shared' : 'draft',
-        meta: ['Agent partagé', aud, a.persona || ''].filter(Boolean).join(' · '),
+        meta: ['Assistant partagé', aud].filter(Boolean).join(' · '),
         published_url: a.published_url,
         children: [],
         ref: a.id_masked || a.label,
         actions: isShared
-          ? [{label:'Widget', href: a.published_url, target:'_blank'}]
-          : [{label:'Publier', prompt: `Publie l'agent partagé « ${a.label || a.id_masked} » pour mes collègues. Confirme l'audience avant publication.`}],
+          ? [{label:'Ouvrir', href: a.published_url, target:'_blank'},
+             {label:'Copier le lien', copy: a.published_url}]
+          : [{label:'Publier', prompt: `Publie l'assistant partagé « ${a.label || a.id_masked} » pour mes collègues. Confirme la diffusion avant publication.`}],
       });
     });
 
     if (cards.length === 0) {
       target.innerHTML = `<div class="liv-empty">
         Aucun livrable pour cette étude.<br>
-        <span style="font-size:10.5px;color:#999">
-          Crée une storymap, un dashboard ou un dataset via l'assistant.
-        </span>
+        Demande à l'assistant une carte à partager, un récit ou un document PDF :
+        il apparaîtra ici, avec son lien.
       </div>`;
       return;
     }
 
+    // Correspondance d'affichage : les types techniques restent dans les
+    // donnees, seul le libelle presente a l'utilisateur change.
     const KIND_LABEL = {
-      storymap_narrative_dsfr: 'Storymap DSFR',
-      dashboard: 'Dashboard',
-      sheet_a4: 'Sheet A4',
-      storymap: 'Storymap (legacy)',
-      pdf: 'PDF',
-      flux: 'Flux WMS',
+      storymap_narrative_dsfr: 'Récit illustré',
+      atlas_kpi_dashboard: "Tableau de bord d'indicateurs",
+      carto_pdf: 'Carte imprimable',
+      briefing_note: 'Note de synthèse',
+      dashboard: 'Tableau de bord',
+      sheet_a4: 'Fiche A4',
+      modal_embed: 'Fenêtre intégrable',
+      atlas_immersive: 'Atlas immersif',
+      storymap: 'Récit cartographique',
+      pdf: 'Document PDF',
+      flux: 'Projet cartographique',
       recipe: 'Recette publiée',
-      dataset: 'Dataset',
-      agent_partage: 'Agent partagé',
+      dataset: 'Jeu de données',
+      features: 'Données de carte',
+      features_pmtiles: 'Données de carte',
+      component: 'Élément de page',
+      agent_partage: 'Assistant partagé',
     };
 
     target.innerHTML = cards.map((c, idx) => {
@@ -3329,35 +3438,42 @@ async function loadLivrables() {
         ? '<span class="ic-equipe ic--sm" aria-hidden="true"></span> partagé'
         : c.state === 'published'
           ? '<span class="ic-coche-cercle ic--sm" aria-hidden="true"></span> publié'
-          : '<span class="ic-brouillon ic--sm" aria-hidden="true"></span> draft';
+          : '<span class="ic-brouillon ic--sm" aria-hidden="true"></span> brouillon';
       const meta = c.meta || [
-        KIND_LABEL[c.kind] || c.kind,
+        KIND_LABEL[c.kind] || 'Livrable',
         c.size_kb ? `${c.size_kb} ko` : '',
-        c.children.length ? `${c.children.length} composant${c.children.length>1?'s':''}` : '',
+        c.children.length ? `${c.children.length} élément${c.children.length>1?'s':''}` : '',
       ].filter(Boolean).join(' · ');
       const childrenHtml = c.children.length ? `
-        <div class="liv-card-toggle" onclick="document.getElementById('liv-children-${idx}').classList.toggle('expanded')">
-          ▶ Voir les composants (${c.children.length})
-        </div>
+        <button type="button" class="liv-card-toggle" aria-expanded="false"
+                aria-controls="liv-children-${idx}"
+                onclick="const o=document.getElementById('liv-children-${idx}').classList.toggle('expanded');this.setAttribute('aria-expanded',String(o))">
+          Voir les éléments (${c.children.length})
+        </button>
         <div class="liv-card-children" id="liv-children-${idx}">
           ${c.children.map(comp => `
-            <div class="liv-child">${comp.kind ? '<span class="ic-formes ic--sm" aria-hidden="true"></span> ' + escapeHtml(comp.kind) + ' — ' : ''}${escapeHtml(comp.title || comp.cid || '?')}</div>
+            <div class="liv-child"><span class="ic-formes ic--sm" aria-hidden="true"></span> ${escapeHtml(comp.title || comp.cid || '?')}</div>
           `).join('')}
         </div>
       ` : '';
       const actionsHtml = c.actions.map(a => {
-        if (a.href) return `<a href="${a.href}" target="${a.target||'_self'}">${a.label}</a>`;
-        if (a.prompt) return `<button class="quick-action-btn" data-prompt="${escapeHtml(a.prompt)}">${a.label}</button>`;
+        if (a.href) {
+          const neuf = a.target === '_blank';
+          const titre = a.title || (neuf ? 'Ouvre un nouvel onglet' : '');
+          return `<a href="${escapeHtml(a.href)}" target="${a.target||'_self'}"${neuf ? ' rel="noopener"' : ''}${titre ? ` title="${escapeHtml(titre)}"` : ''}>${a.label}${neuf ? ' <span class="ic-lien-externe ic--sm" aria-hidden="true"></span><span class="qs-sr">(nouvel onglet)</span>' : ''}</a>`;
+        }
+        if (a.copy) return `<button type="button" class="js-copier-lien" data-url="${escapeHtml(a.copy)}"><span class="ic-copier ic--sm" aria-hidden="true"></span> ${a.label}</button>`;
+        if (a.prompt) return `<button type="button" class="quick-action-btn" data-prompt="${escapeHtml(a.prompt)}" title="Copie la demande, à coller dans le chat de l'assistant">${a.label}</button>`;
         if (a.onclick) {
           const titleAttr = a.title ? ` title="${escapeHtml(a.title)}"` : '';
-          return `<button onclick="${a.onclick}"${titleAttr}>${a.label}</button>`;
+          return `<button type="button" onclick="${a.onclick}"${titleAttr}>${a.label}</button>`;
         }
         return '';
       }).join('');
       return `<div class="liv-card is-${c.state}">
         <div class="liv-card-header">
           <span class="liv-card-icon">${c.icon}</span>
-          <span class="liv-card-title">${escapeHtml(c.title)}</span>
+          <h3 class="liv-card-title" title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</h3>
           <span class="liv-card-state ${c.state}">${stateLabel}</span>
         </div>
         <div class="liv-card-meta">${meta}</div>
@@ -3370,6 +3486,16 @@ async function loadLivrables() {
     target.innerHTML = `<div class="liv-empty">Erreur : ${escapeHtml(e.message)}</div>`;
   }
 }
+
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('.js-copier-lien');
+  if (!b || typeof qsCopier !== 'function') return;
+  const url = new URL(b.dataset.url, location.origin).href;
+  const ok = await qsCopier(url);
+  qsToast(ok ? 'Lien copié : tu peux le coller dans un courriel ou un message.'
+             : "Copie impossible : ouvre le livrable et copie l'adresse du navigateur.",
+          {type: ok ? 'succes' : 'erreur'});
+});
 
 // Auto-load Sources au premier affichage (onglet actif par défaut)
 window.addEventListener('DOMContentLoaded', () => {
@@ -3480,8 +3606,13 @@ function initSourcesSections() {
 function _renderSrcLayerRows(layers) {
   return layers.map(l => {
     const name = (l.name || l.id || '?').toString().replace(/</g, '&lt;');
-    const typ = (l.type || l.geom_type || '').toString();
-    const n = (l.feature_count != null) ? `${l.feature_count}` : '';
+    const brut = (l.geom_type || l.type || '').toString();
+    const TYPES = {vector: 'vecteur', raster: 'image', Point: 'points',
+      MultiPoint: 'points', LineString: 'lignes', MultiLineString: 'lignes',
+      Line: 'lignes', Polygon: 'surfaces', MultiPolygon: 'surfaces'};
+    const typ = TYPES[brut] || brut;
+    const n = (l.feature_count != null && l.feature_count >= 0)
+      ? `${Number(l.feature_count).toLocaleString('fr')} objet${l.feature_count > 1 ? 's' : ''}` : '';
     const meta = [typ, n].filter(Boolean).join(' · ');
     return `<div class="src-row" title="${name}">
       <span class="src-row-ic ic-epingle" aria-hidden="true"></span>
@@ -3497,7 +3628,7 @@ function _updateLayersSummary(layers, state) {
   const el = document.getElementById('src-layers-summary');
   if (!el) return;
   if (state === 'workspace_sleeping') {
-    el.textContent = 'workspace endormi';
+    el.textContent = 'bureau en veille';
     return;
   }
   if (state === 'error' || state === 'unknown') {
@@ -3511,11 +3642,10 @@ function _updateLayersSummary(layers, state) {
 function _renderSrcFileRows(files) {
   return files.map(f => {
     const name = (f.name || '?').toString().replace(/</g, '&lt;');
-    const kind = (f.kind || 'file').toString();
-    const size = f.size_kb != null ? `${f.size_kb} ko` : '';
-    const meta = [kind, size].filter(Boolean).join(' · ');
+    const size = f.size_kb != null ? `${Number(f.size_kb).toLocaleString('fr')} ko` : '';
+    const meta = size;
     const dl = f.download_url
-      ? `<a class="src-row-dl" href="${f.download_url}" download title="Télécharger"><span class="ic-telecharger ic--sm" aria-hidden="true"></span></a>`
+      ? `<a class="src-row-dl" href="${f.download_url}" download title="Télécharger" aria-label="Télécharger ${name.replace(/"/g, '&quot;')}"><span class="ic-telecharger ic--sm" aria-hidden="true"></span></a>`
       : '';
     return `<div class="src-row" title="${(f.path || name).replace(/"/g, '&quot;')}">
       <span class="src-row-main">
@@ -3560,7 +3690,7 @@ async function refreshSourcesSummaries() {
       _updateRecipesUserSummary(recipes.length);
       if (_isSrcSectionExpanded('recipes_user')) {
         _renderRecipeUserLists(recipes,
-          '<div class="src-empty">Aucune recette user.</div>');
+          '<div class="src-empty">Aucune recette enregistrée.</div>');
       }
     }
   } catch {}
@@ -3571,7 +3701,7 @@ function _renderLayersList(layers, state) {
          || document.getElementById('resources-layers-list');
   if (!c) return;
   if (state === 'workspace_sleeping') {
-    c.innerHTML = '<div class="src-empty">Workspace endormi — ouvre le canvas QGIS.</div>';
+    c.innerHTML = '<div class="src-empty">Bureau QGIS en veille : réveille-le pour voir ses couches.</div>';
     return;
   }
   if (state === 'error' || state === 'unknown') {
@@ -3580,7 +3710,7 @@ function _renderLayersList(layers, state) {
     return;
   }
   if (!layers.length) {
-    c.innerHTML = '<div class="src-empty">Projet vide — importe des données ci-dessus.</div>';
+    c.innerHTML = '<div class="src-empty">Le projet ne contient encore aucune couche : importe des données ci-dessus, ou demande-en à l\'assistant.</div>';
     return;
   }
   c.innerHTML = _renderSrcLayerRows(layers);
@@ -3591,7 +3721,7 @@ function _renderFilesList(files) {
          || document.getElementById('resources-files-list');
   if (!c) return;
   if (!files.length) {
-    c.innerHTML = '<div class="src-empty">Aucun fichier — glisse des couches dans la zone d\'import.</div>';
+    c.innerHTML = '<div class="src-empty">Aucun fichier pour l\'instant : glisse des couches dans la zone d\'import.</div>';
     return;
   }
   c.innerHTML = _renderSrcFileRows(files);
@@ -3614,8 +3744,8 @@ async function loadResourceLayers() {
     _renderLayersList(layers, state);
   } catch (e) {
     _updateLayersSummary([], 'error');
-    const reason = e?.name === 'AbortError' ? 'délai dépassé (12 s)'
-                                            : 'workspace endormi ou inaccessible';
+    const reason = e?.name === 'AbortError' ? 'Délai dépassé (12 s)'
+                                            : 'Bureau en veille ou injoignable';
     c.innerHTML = `<div class="src-empty">${reason}. ` +
                   `<a href="#" onclick="loadResourceLayers();return false">Réessayer ↻</a></div>`;
   }
@@ -3637,8 +3767,8 @@ async function loadResourceFiles() {
     _renderFilesList(files);
   } catch (e) {
     _updateFilesSummary([]);
-    const reason = e?.name === 'AbortError' ? 'délai dépassé (12 s)'
-                                            : 'workspace endormi ou liste indisponible';
+    const reason = e?.name === 'AbortError' ? 'Délai dépassé (12 s)'
+                                            : 'Bureau en veille ou liste indisponible';
     c.innerHTML = `<div class="src-empty">${reason}. ` +
                   `<a href="#" onclick="loadResourceFiles();return false">Réessayer ↻</a></div>`;
   }
@@ -3661,7 +3791,7 @@ async function _uploadStudyFiles(fileList, target) {
   }
   const files = Array.from(fileList || []);
   if (!files.length) return;
-  _setUploadStatus(`Envoi de ${files.length} fichier(s)…`, null);
+  _setUploadStatus(`Envoi de ${files.length} fichier${files.length > 1 ? 's' : ''}…`, null);
   let ok = 0;
   let lastErr = '';
   for (const file of files) {
@@ -3676,10 +3806,10 @@ async function _uploadStudyFiles(fileList, target) {
         ok++;
       } else {
         const err = await r.json().catch(() => ({}));
-        lastErr = err.detail || `Échec upload (${r.status})`;
+        lastErr = err.detail || `Échec de l'envoi (erreur ${r.status})`;
       }
     } catch (e) {
-      lastErr = 'Upload impossible (workspace injoignable ?)';
+      lastErr = "Envoi impossible : le bureau QGIS est peut-être en veille.";
     }
   }
   if (ok && ok === files.length) {
@@ -3687,7 +3817,7 @@ async function _uploadStudyFiles(fileList, target) {
   } else if (ok) {
     _setUploadStatus(`${ok}/${files.length} fichier(s) enregistré(s). ${lastErr}`, 'err');
   } else {
-    _setUploadStatus(lastErr || 'Échec de l\'upload.', 'err');
+    _setUploadStatus(lastErr || 'Échec de l\'envoi.', 'err');
   }
   _resFilesLoaded = false;
   await refreshSourcesSummaries();
@@ -3782,19 +3912,19 @@ function _renderRecipeUserRows(recipes) {
   return recipes.map(r => {
     const slug = (r.slug || '?').toString();
     const name = (r.name || slug).toString().replace(/</g, '&lt;');
-    const fmt = (r.format || 'yaml').toUpperCase();
-    const v = r.version_num ? `v${r.version_num}` : '—';
-    const sz = r.size != null ? `${Math.round(r.size / 1024 * 10) / 10} ko` : '';
-    const meta = [fmt, v, sz].filter(Boolean).join(' · ');
+    const v = r.version_num ? `version ${r.version_num}` : '';
+    const meta = v;
     return `<div class="src-row" data-slug="${slug.replace(/"/g, '&quot;')}">
       <span class="src-row-main">
         <span class="src-row-name">${name}</span>
         <span class="src-row-meta">${meta}</span>
       </span>
       <button type="button" onclick="openRecipeEditor('${slug.replace(/'/g, '\\\'')}', false)"
-              title="Éditer" class="src-row-dl" style="border:0;background:none;cursor:pointer">✎</button>
+              title="Modifier" aria-label="Modifier la recette ${name.replace(/"/g, '&quot;')}"
+              class="src-row-dl" style="border:0;background:none;cursor:pointer"><span class="ic-editer ic--sm" aria-hidden="true"></span></button>
       <button type="button" onclick="deleteRecipe('${slug.replace(/'/g, '\\\'')}')"
-              title="Archiver" class="src-row-dl" style="border:0;background:none;cursor:pointer">×</button>
+              title="Archiver" aria-label="Archiver la recette ${name.replace(/"/g, '&quot;')}"
+              class="src-row-dl src-row-danger" style="border:0;background:none;cursor:pointer"><span class="ic-supprimer ic--sm" aria-hidden="true"></span></button>
     </div>`;
   }).join('');
 }
@@ -3808,7 +3938,7 @@ function _renderRecipeUserLists(recipes, emptyHtml, errorHtml) {
   _updateRecipesUserSummary(recipes.length);
   const html = recipes.length
     ? _renderRecipeUserRows(recipes)
-    : (emptyHtml || '<div class="src-empty">Aucune recette user.</div>');
+    : (emptyHtml || '<div class="src-empty">Aucune recette enregistrée.</div>');
   targets.forEach(c => { c.innerHTML = html; });
 }
 
@@ -3825,10 +3955,10 @@ async function loadResourceRecipes() {
     const d = await r.json();
     const recipes = (d && d.recipes) || [];
     _renderRecipeUserLists(recipes,
-      '<div class="src-empty">Aucune recette user — demande à l\'agent d\'en créer une.</div>');
+      '<div class="src-empty">Aucune recette enregistrée. Après une analyse réussie, demande à l\'assistant : « enregistre ces étapes en recette ».</div>');
   } catch (e) {
-    const reason = e?.name === 'AbortError' ? 'délai dépassé (12 s)'
-                                            : 'liste indisponible';
+    const reason = e?.name === 'AbortError' ? 'Délai dépassé (12 s)'
+                                            : 'Liste indisponible';
     _updateRecipesUserSummary(0);
     const err = `<div class="src-empty">${reason}. ` +
                 `<a href="#" onclick="loadResourceRecipes();return false">Réessayer ↻</a></div>`;
@@ -3907,12 +4037,12 @@ async function saveRecipeFromEditor() {
   const statusEl = document.getElementById('recipe-editor-status');
   if (!slug.match(/^[a-z0-9_-]+$/i)) {
     statusEl.style.color = 'crimson';
-    statusEl.textContent = 'Slug invalide (a-z, 0-9, _, -)';
+    statusEl.textContent = 'Identifiant invalide : lettres sans accent, chiffres, _ ou - uniquement.';
     return;
   }
   if (!content.trim()) {
     statusEl.style.color = 'crimson';
-    statusEl.textContent = 'Contenu vide';
+    statusEl.textContent = 'La recette est vide.';
     return;
   }
   statusEl.style.color = '#666';
@@ -3932,7 +4062,7 @@ async function saveRecipeFromEditor() {
     }
     const d = await r.json();
     statusEl.style.color = 'green';
-    statusEl.textContent = `✓ Sauvegardé v${d.version_num} (${(d.sha || '').substring(0,8)})`;
+    statusEl.textContent = `Enregistrée (version ${d.version_num}).`;
     setTimeout(() => { closeRecipeEditor(); loadResourceRecipes(); }, 1200);
   } catch (e) {
     statusEl.style.color = 'crimson';
@@ -3941,18 +4071,27 @@ async function saveRecipeFromEditor() {
 }
 
 async function deleteRecipe(slug) {
-  if (!confirm(`Supprimer la recette "${slug}" (archive, restaurable) ?`)) return;
+  // Le serveur archive la recette (restaurable par l'assistant) : le
+  // libelle dit « Archiver », pas « Supprimer ».
+  const ok = await qsConfirmer({
+    titre: `Archiver la recette « ${slug} » ?`,
+    message: "Elle disparaît de ta liste. Son historique est conservé : "
+      + "l'assistant peut la restaurer si tu le lui demandes.",
+    confirmer: 'Archiver',
+  });
+  if (!ok) return;
   try {
     const r = await fetch(`/desk/recipes/${encodeURIComponent(slug)}`, {
       method: 'DELETE', credentials: 'include',
     });
     if (r.ok || r.status === 204) {
       loadResourceRecipes();
+      qsToast(`Recette « ${slug} » archivée.`);
     } else {
-      alert(`Erreur suppression: HTTP ${r.status}`);
+      qsToast(`L'archivage a échoué (erreur ${r.status}).`, {type: 'erreur'});
     }
   } catch (e) {
-    alert(`Erreur: ${e.message}`);
+    qsToast("Connexion perdue : la recette n'a pas été archivée.", {type: 'erreur'});
   }
 }
 
@@ -4069,14 +4208,14 @@ async function wakeWorkspace() {
   const start = Date.now();
   const tick = setInterval(async () => {
     const sec = Math.floor((Date.now() - start) / 1000);
-    elapsed.textContent = `${sec}s écoulées`;
+    elapsed.textContent = `${sec} s écoulée${sec > 1 ? 's' : ''}`;
     if (sec > 30) progress.textContent =
-      'Toujours en cours — Xvfb + QGIS prennent parfois plus de 30s sur node froid.';
+      'Toujours en cours : le premier démarrage de la journée est parfois plus long.';
     if (sec > 90) {
       clearInterval(tick);
       _wakeInProgress = false;
       if (wakeBtn) wakeBtn.disabled = false;
-      progress.textContent = 'Démarrage anormalement long — réessaie ou consulte les logs du pod.';
+      progress.textContent = 'Le démarrage prend anormalement longtemps. Réessaie dans un instant ; si cela persiste, signale le problème.';
       return;
     }
     try {
@@ -4181,6 +4320,8 @@ async function refreshCatalogPanel() {
     const badge = document.getElementById('publi-count-badge');
     if (cnt) cnt.textContent = d.study_count;
     if (s)   s.textContent   = d.study_count === 1 ? '' : 's';
+    const s2 = document.getElementById('footer-publi-s2');
+    if (s2)  s2.textContent  = d.study_count === 1 ? '' : 's';
     if (totN) totN.textContent = d.total_count;
     if (tot) tot.style.display = (d.total_count && d.total_count !== d.study_count) ? '' : 'none';
     if (badge) badge.textContent = d.study_count;
@@ -4262,9 +4403,10 @@ window.addEventListener('message', (e) => {
         return;
       }
       const names = diverging.map(s => s.study_name || s.sid).join(', ');
-      el.textContent = 'MCP: ' + names;
-      el.title = diverging.length + ' session(s) MCP externe(s) sur autre(s) etude(s) : ' + names
-        + '. L\'UI desk affiche l\'etude par defaut du user; les clients MCP ont leur propre contexte session-scoped.';
+      el.textContent = 'Autre session : ' + names;
+      el.title = 'Un outil connecté de l\'extérieur (par exemple un autre assistant) travaille sur '
+        + (diverging.length > 1 ? 'd\'autres études : ' : 'une autre étude : ') + names
+        + '. Le bureau, lui, reste sur l\'étude affichée en haut.';
       el.style.display = 'inline-block';
       if (sep) sep.style.display = '';
     } catch (e) { /* silent */ }
@@ -4294,27 +4436,27 @@ async function refreshGpuChip() {
       return;
     }
     chip.style.display = 'inline-flex';
-    let color = '#999', label = 'GPU ?', title = 'État inconnu';
+    let color = '#999', label = "Analyse d'images", title = 'État inconnu';
     if (!s.bootstrap_done) {
-      color = '#fa5c00'; label = 'GPU init…';
-      title = "Téléchargement modèles IA en cours (~5 min, première fois)";
+      color = '#fa5c00'; label = "Analyse d'images : installation…";
+      title = "Première installation des modèles (environ 5 minutes)";
     } else if (s.replicas === 0) {
-      color = '#ccc'; label = 'GPU dormant';
-      title = "Pod GeoAI dormant — clic pour réveiller (~30s)";
+      color = '#ccc'; label = "Analyse d'images : en veille";
+      title = "En veille — cliquer pour la démarrer (environ 30 secondes)";
     } else if (s.health === 'ready') {
-      color = 'var(--qs-succes)'; label = 'GPU prêt';
-      title = "Pod GeoAI actif — modèles SAM2/DeepForest chargés";
+      color = 'var(--qs-succes)'; label = "Analyse d'images : prête";
+      title = "Prête : l'assistant peut repérer bâtiments et arbres sur les images";
     } else {
-      color = '#0078f0'; label = 'GPU démarre…';
-      title = "Pod en cours de démarrage (~30s)";
+      color = '#0078f0'; label = "Analyse d'images : démarrage…";
+      title = "Démarrage en cours (environ 30 secondes)";
     }
     dot.style.background = color;
     lab.textContent = label;
     chip.title = title;
   } catch (e) {
     dot.style.background = '#ce0500';
-    lab.textContent = 'GPU off';
-    chip.title = 'Erreur de communication avec le hub';
+    lab.textContent = "Analyse d'images : indisponible";
+    chip.title = 'Service injoignable pour le moment';
   }
 }
 
@@ -4323,7 +4465,7 @@ async function wakeGpu() {
   if (_gpuWaking) return;
   _gpuWaking = true;
   const lab = document.getElementById('gpu-label');
-  if (lab) lab.textContent = 'Réveil GPU…';
+  if (lab) lab.textContent = "Analyse d'images : démarrage…";
   // /geoai/health passe par geoai_proxy qui appelle _ensure_geoai_gpu_ready
   // (scale 0->1 + wait pod ready). On envoie le hub_api_key cookie pour
   // l'auth (credentials:include) -- pas besoin d'API key Bearer.
