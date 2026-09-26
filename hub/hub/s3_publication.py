@@ -39,6 +39,8 @@ import urllib.request
 from functools import lru_cache
 from typing import Any
 
+from hub import secrets_pvc
+
 log = logging.getLogger("hub.s3_publication")
 
 _KINDS = {
@@ -127,6 +129,28 @@ def enrich_catalog_item(item: dict, hub_base: str) -> dict:
 
 # Chemin du secret passerelle (creds long-lived service-side)
 _SECRET_NAME = os.getenv("PASSERELLE_S3_SECRET", "passerelle-s3-creds")
+
+# Fichier des identifiants S3 sur le PVC du hub (decision d'exploitation du
+# 2026-09-26 : les secrets du service vivent sur son volume, pas dans Vault).
+# Source prioritaire des qu'il porte des identifiants valides ; alimente par
+# le renouvellement depuis l'interface, et amorce au premier demarrage a
+# partir du Secret passerelle ou de l'environnement du pod.
+_FICHIER_S3 = "s3.env"
+_CLES_S3 = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+            "AWS_S3_ENDPOINT", "AWS_DEFAULT_REGION", "SSPCLOUD_BUCKET")
+
+
+def _amorcer_le_fichier(creds: dict[str, str], origine: str) -> None:
+    """Copie des identifiants valides dans le fichier du PVC s'il est vide.
+
+    Migration sans geste : une installation existante continue de lire son
+    Secret ou son environnement une fois, puis le fichier prend le relais.
+    """
+    if secrets_pvc.lire(_FICHIER_S3).get("AWS_ACCESS_KEY_ID"):
+        return
+    valeurs = {k: creds.get(k, "") for k in _CLES_S3}
+    if secrets_pvc.fusionner(_FICHIER_S3, valeurs):
+        log.info("identifiants S3 recopies sur le PVC (origine : %s)", origine)
 _S3_PREFIX = "qgis-workspace/published"
 _CATALOG_PREFIX = "qgis-workspace/catalog"
 
@@ -199,6 +223,15 @@ def _read_passerelle_s3_creds(owner: str = "") -> dict[str, str]:
     if _creds_cache["data"] and (now - _creds_cache["ts"]) < _CREDS_TTL:
         return _creds_cache["data"]
 
+    # 0) Fichier du PVC (source de verite depuis le 2026-09-26).
+    fichier_creds = secrets_pvc.lire(_FICHIER_S3)
+    if (fichier_creds.get("AWS_ACCESS_KEY_ID")
+            and fichier_creds.get("SSPCLOUD_BUCKET")
+            and _sts_encore_valide(fichier_creds)):
+        _creds_cache["data"] = fichier_creds
+        _creds_cache["ts"] = now
+        return fichier_creds
+
     # 1) Secret K8s passerelle-s3-creds (déploiement avec creds long-lived).
     #
     # Correctif 2026-08-23 : le secret ne l'emporte plus aveuglement. Sur
@@ -224,6 +257,7 @@ def _read_passerelle_s3_creds(owner: str = "") -> dict[str, str]:
             log.warning("secret %s illisible : %s", _SECRET_NAME, exc)
 
     if secret_creds and _sts_encore_valide(secret_creds):
+        _amorcer_le_fichier(secret_creds, _SECRET_NAME)
         _creds_cache["data"] = secret_creds
         _creds_cache["ts"] = now
         return secret_creds
@@ -240,6 +274,8 @@ def _read_passerelle_s3_creds(owner: str = "") -> dict[str, str]:
                 "utilise : kubectl delete secret %s",
                 _SECRET_NAME, _SECRET_NAME,
             )
+        if _sts_encore_valide(env_creds):
+            _amorcer_le_fichier(env_creds, "environnement du pod")
         _creds_cache["data"] = env_creds
         _creds_cache["ts"] = now
         return env_creds
@@ -661,6 +697,9 @@ def _poser_le_secret(creds: dict[str, str | None]) -> dict[str, Any]:
             donnees[cle] = None          # un null en merge patch supprime
     if not any(v for v in donnees.values()):
         return {"ok": False, "erreur": "Aucun identifiant a enregistrer."}
+    # Le fichier du PVC d'abord : c'est lui qui fait foi. Le Secret reste
+    # ecrit pour les versions precedentes du hub (retour arriere possible).
+    fichier_ok = secrets_pvc.fusionner(_FICHIER_S3, dict(creds))
     patch = json.dumps({"data": donnees})
     r = subprocess.run(
         ["kubectl", "patch", "secret", _SECRET_NAME, "--type=merge", "-p", patch],
@@ -671,6 +710,8 @@ def _poser_le_secret(creds: dict[str, str | None]) -> dict[str, Any]:
 
     # Le secret n'existe pas encore : on le cree. Il n'y a donc rien a
     # supprimer, et un `null` y serait refuse par l'API.
+    # (Le fichier du PVC a deja ete ecrit plus haut : si le Secret ne peut
+    # pas l'etre, les acces sont quand meme enregistres.)
     manifeste = json.dumps({
         "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
         "metadata": {"name": _SECRET_NAME},
@@ -680,7 +721,7 @@ def _poser_le_secret(creds: dict[str, str | None]) -> dict[str, Any]:
         ["kubectl", "apply", "-f", "-"],
         input=manifeste, capture_output=True, text=True, timeout=20,
     )
-    if r2.returncode == 0:
+    if r2.returncode == 0 or fichier_ok:
         return {"ok": True}
     return {"ok": False, "erreur": (
         "Les acces ont ete obtenus, mais le service n'a pas pu les "
