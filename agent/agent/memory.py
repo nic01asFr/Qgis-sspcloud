@@ -603,6 +603,34 @@ async def get_session_messages(session_id: str, limit: int = 50) -> list[dict]:
     return [dict(r) for r in reversed(rows)]
 
 
+async def portee_des_messages(message_ids) -> dict[str, dict]:
+    """Portée ACTUELLE de messages : {id: {session_id, study_id, created_at}}.
+
+    Sert au rappel sémantique (défaut D6 du 2026-09-26). L'index vectoriel
+    fige l'étude d'un message au moment où il est indexé : un message
+    antérieur à la colonne study_id, ou indexé avant que sa conversation soit
+    rattachée à une étude, y reste sans étude (NULL), donc « transverse », et
+    remontait dans toutes les études. On relit ici l'étude de la conversation
+    telle qu'elle est maintenant, dans la base des messages qui fait foi.
+    Un id absent du résultat désigne un message supprimé.
+    """
+    ids = [int(i) for i in message_ids if str(i).isdigit()]
+    if not ids:
+        return {}
+    marques = ",".join("?" * len(ids))
+    async with aiosqlite.connect(_DB_PATH) as db:
+        rows = await (await db.execute(
+            f"SELECT m.id, m.session_id, s.study_id, m.created_at "
+            f"FROM messages m LEFT JOIN sessions s ON s.id = m.session_id "
+            f"WHERE m.id IN ({marques})", ids,
+        )).fetchall()
+    return {
+        str(r[0]): {"session_id": r[1], "study_id": r[2] or None,
+                    "created_at": r[3]}
+        for r in rows
+    }
+
+
 async def get_recent_sessions(
     username: str, limit: int = 10, study_id: str | None = None,
 ) -> list[dict]:
