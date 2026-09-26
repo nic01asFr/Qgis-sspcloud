@@ -825,6 +825,85 @@ hr { border: 0; border-top: 1px solid var(--qs-trait); margin: 1.5em 0; }
 .qs-py-4w { padding-block: calc(var(--qs-w) * 4); }
 .qs-py-6w { padding-block: calc(var(--qs-w) * 6); }
 
+/* ── Texte reserve aux lecteurs d'ecran ──────────────────────────────────
+ * Precise ce que l'oeil devine deja (« s'ouvre dans un nouvel onglet »)
+ * sans alourdir l'affichage. */
+.qs-sr {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0);
+  white-space: nowrap; border: 0;
+}
+
+/* Action destructive : rouge, jamais la couleur d'action ordinaire. */
+.qs-btn--danger { background: var(--qs-danger); border-color: var(--qs-danger); color: #fff; }
+.qs-btn--danger:hover { background: #7E221E; border-color: #7E221E; }
+
+/* ── Messages de confirmation (toasts) ─────────────────────────────────
+ * Poses en bas a gauche : le coin droit est occupe par le chat dans le
+ * bureau. Pile de messages, le plus recent en bas. Voir produit.js. */
+.qs-toasts {
+  position: fixed; left: 16px; bottom: 48px; z-index: 1000;
+  display: flex; flex-direction: column; gap: 8px;
+  max-width: min(440px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.qs-toast {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 8px 10px 14px;
+  border-radius: var(--qs-rayon);
+  background: var(--qs-nuit); color: var(--qs-nuit-encre);
+  box-shadow: 0 6px 20px rgba(14, 36, 51, .28);
+  font-size: .875rem; line-height: 1.4;
+  pointer-events: auto;
+  border-left: 4px solid var(--qs-accent-clair);
+  animation: qs-toast-entree .18s ease-out;
+}
+.qs-toast--erreur { border-left-color: #F08A84; }
+.qs-toast--info { border-left-color: var(--qs-nuit-discret); }
+.qs-toast--sortie { opacity: 0; transition: opacity .18s ease; }
+.qs-toast__texte { flex: 1; min-width: 0; }
+.qs-toast__action,
+.qs-toast__fermer {
+  flex: none; min-height: 32px; min-width: 32px;
+  border-radius: var(--qs-rayon-sm);
+  font: inherit; cursor: pointer;
+}
+.qs-toast__action {
+  padding: 4px 12px; font-weight: 600;
+  background: transparent; color: var(--qs-accent-clair);
+  border: 1px solid var(--qs-accent-clair);
+}
+.qs-toast__action:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+.qs-toast__fermer {
+  background: transparent; border: 0; color: var(--qs-nuit-discret);
+  font-size: 1.25rem; line-height: 1;
+}
+.qs-toast__fermer:hover { color: #fff; }
+.qs-toast :focus-visible { outline-color: #fff; }
+@keyframes qs-toast-entree {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+/* ── Boite de confirmation ─────────────────────────────────────────────── */
+.qs-dialogue {
+  position: fixed; inset: 0; z-index: 1100;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(14, 36, 51, .5);
+}
+.qs-dialogue__boite {
+  width: min(440px, 100%);
+  background: var(--qs-surface); color: var(--qs-encre);
+  border-radius: 6px; padding: 20px 20px 16px;
+  box-shadow: 0 12px 40px rgba(14, 36, 51, .3);
+}
+.qs-dialogue__titre { margin: 0 0 8px; font-size: 1.0625rem; font-weight: 600; }
+.qs-dialogue__texte { margin: 0 0 18px; font-size: .9375rem; line-height: 1.5;
+  color: var(--qs-encre-2); white-space: pre-line; }
+.qs-dialogue__pied { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+
 /* ── Impression ─────────────────────────────────────────────────────── */
 
 @media print {
