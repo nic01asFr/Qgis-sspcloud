@@ -197,3 +197,91 @@ aux flèches dans tout `role="menu"`. Styles `.qs-toast*`, `.qs-dialogue*`,
   défilement.
 - Vérifier avec les données réelles que `item.title` est renseigné dans le catalogue
   (sinon le slug humanisé s'affiche).
+
+## Révision 2026-09-26 — panneaux du bureau et Ressources
+
+Équipe T1, branche `ux/panneaux-bureau`. Décision produit de l'utilisateur :
+deux séquences distinctes, deux dispositions distinctes.
+
+### Règles de mise en page
+
+| Panneau | Ouvert | Carte | Voile |
+|---|---|---|---|
+| Chat | colonne à droite (`data-chat="panel"`), < 820 px : bande sous la carte | **décalée / réduite**, reste utilisable | **jamais** |
+| Ressources | calque à gauche (`data-resources="deck"`), 300 px min., 85 vw max. | **immobile** | oui (clic = fermer) |
+
+- La carte garde 640 px à côté du chat quand la fenêtre le permet ; le chat se
+  rétrécit (220 px min.) sans perdre sa largeur choisie à la poignée.
+- Le mode « Ressources en colonne » du lot 3 (au-delà de 1 166 px) est retiré ;
+  le mode « chat en calque » (`data-chat="deck"`, Maj+clic ou écran étroit) aussi.
+  Les états mémorisés `desk-layout-v3` sont migrés (`deck` → `panel` pour le chat).
+- Échap et le voile ferment les Ressources, jamais le chat. Ouvrir les
+  Ressources porte le focus sur l'onglet actif ; les fermer le rend au bouton.
+- Ordre de vérification : 390 × 844, 1366 × 768, 1920 × 1080 (rendu local).
+
+### Glisser-déposer Ressources → bureau
+
+Pendant un glisser parti du panneau, le calque se replie (liseré de 28 px), le
+voile s'efface et deux zones de dépôt nommées couvrent la carte et le chat (ou,
+chat fermé, une bande à droite de la carte). Les iframes avalant les
+événements de glisser, les zones sont posées dans le document du bureau.
+
+| Ressource | Sur la carte | Sur l'assistant | Clavier (boutons de la ligne) |
+|---|---|---|---|
+| Source du catalogue | demande envoyée : « Ajoute à la carte la source … (identifiant …) » | brouillon « À propos de la source … : » | Ajouter à la carte / Envoyer à l'assistant |
+| Fichier de l'étude (formats géo) | demande envoyée : « Ajoute à la carte le fichier … » | brouillon | idem ; notes, PDF, projet : assistant seulement |
+| Couche QGIS | demande envoyée : « Centre la carte sur la couche … » | brouillon | Centrer la carte / Envoyer à l'assistant |
+| Recette prête à l'emploi | lancée (`recipe_run_request`) | lancée | la carte elle-même (clic, sans rechargement) |
+| Mes recettes | brouillon « Relance ma recette … » | idem | Relancer avec l'assistant |
+| Livrable | refusé (zone grisée, explication) | brouillon avec son lien | « À l'assistant » |
+
+Le chargement dans QGIS passe par l'assistant : aucune route du hub ne charge
+une couche directement, et l'agent connaît la zone d'étude et `smart_load`.
+Après l'action, le calque se ferme (on revient au bureau) et un toast le dit.
+
+**Contrat postMessage `desk_compose`** (bureau → chat, même origine, fenêtre
+parente seulement) : `{type, id, texte (2 000 car.), envoyer}` ; accusé
+`desk_compose_recu {id, statut: envoye | brouillon | deja | occupe}`. Le bureau
+réémet toutes les 500 ms jusqu'à l'accusé (20 s max.) ; le chat ignore un `id`
+déjà traité. `recipe_run_request` accepte le même `id`. Documenté dans
+`agent/templates/chat.html`.
+
+### Revue du panneau Ressources
+
+Corrigé par le lot 2 (rappel) : n° 1 à 16 ci-dessus.
+
+Fait dans cette révision :
+
+- **n° 17 Recherche, filtre et tri des livrables** : champ de recherche,
+  filtre (tous / publiés / brouillons / partagés), tri (plus récents / titre),
+  bilan annoncé (`role="status"`) ; choix mémorisé par navigateur (`desk.liv.vue`).
+- **n° 18 Relancer une recette depuis « Mes recettes »** : bouton « Relancer avec
+  l'assistant » (brouillon à valider : une recette relancée par erreur coûte
+  plusieurs minutes de calcul).
+- **n° 19 Demandes à copier-coller** : les `quick-action-btn` déposent la demande
+  dans la zone de message ; le presse-papiers reste le repli si le chat ne répond pas.
+- Section **Catalogue de données** (`/catalog/datasources`), repliable et mémorisée
+  comme les autres, avec recherche insensible aux accents.
+- Les recettes prêtes à l'emploi se lancent sans recharger le bureau (le lien
+  `/desk?session=…` reste le chemin sans JavaScript et pour Ctrl+clic).
+- Emplacement `#src-section-documents` (`data-emplacement="documents-etude"`,
+  masqué) réservé à l'équipe T5 pour « Documents de l'étude ».
+
+Reste à faire :
+
+- **n° 20 Fil d'Ariane** : non traité, à maquetter (place dans la barre à 1366 px).
+- **n° 21 à 25** : inchangés.
+- Recherche/filtre des livrables côté **Mon espace** (workspace) : non traitée.
+- Glisser-déposer au **toucher** : l'API HTML5 ne s'active pas sur mobile ;
+  les boutons de ligne sont le chemin sur téléphone.
+- Charger une source ou un fichier **sans passer par l'assistant** (route hub
+  dédiée, plus rapide et sans tour de LLM) : à décider.
+
+### À valider en live
+
+- Déposer une source du catalogue et un GeoPackage de l'étude sur la carte :
+  l'assistant charge bien la bonne couche sur la zone d'étude.
+- Chat en cours de réponse pendant un dépôt : la demande attend dans la saisie.
+- Lancer une recette prête à l'emploi par glisser et par clic (plus de rechargement).
+- Chat en démarrage (agent lent) : le dépôt aboutit dans les 20 s ou un toast le dit.
+- Téléphone : chat sous la carte, Ressources en calque par-dessus.

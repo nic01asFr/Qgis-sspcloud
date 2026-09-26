@@ -34,30 +34,32 @@ def test_cadre_qgis_au_ratio_du_bureau_distant() -> None:
 
 
 def test_grille_defaut_sans_colonne_chat() -> None:
+    """Revision 2026-09-26 : `data-resources="panel"` (Ressources en colonne,
+    lot 3) n'existe plus -- la decision produit les veut en calque. Le test
+    exigeait sa presence ; il verifie desormais son absence."""
     assert 'grid-template-columns:0 1fr 0 0' in _DESK
     assert 'data-chat="panel"' in _DESK
-    assert 'data-resources="panel"' in _DESK
+    assert 'data-resources="panel"' not in _DESK
 
 
-def test_ressources_colonne_si_place_sinon_calque() -> None:
-    """Regles de priorite 2026-09-26 : la carte garde 640 px ; les Ressources
-    prennent une colonne quand la place le permet, sinon un calque. L'etat
-    memorise reste 'deck' (ouvert) / 'collapsed' ; le rendu decide.
-    Remplace test_ressources_ne_decalent_pas_la_carte : en calque permanent,
-    Ressources + chat ne laissaient qu'une bande de carte d'environ 380 px,
-    voilee et inutilisable."""
-    assert "return 'deck';" in _DESK
+def test_ressources_toujours_en_calque_sans_decaler_la_carte() -> None:
+    """Decision produit 2026-09-26 : les Ressources s'ouvrent en calque, avec
+    voile, a toutes les largeurs, sans jamais decaler la carte. Remplace
+    test_ressources_colonne_si_place_sinon_calque (lot 3), qui figeait la
+    colonne au-dela de 1 166 px : l'utilisateur veut l'inverse."""
     assert "function _defaultResourcesOpenMode()" in _DESK
-    assert "const CARTE_MIN_W = 640" in _DESK
-    assert "const PUBLI_MIN = 300" in _DESK
-    assert "function _modeRessourcesEffectif(vw)" in _DESK
-    assert "const r = _modeRessourcesEffectif(window.innerWidth);" in _DESK
-    # Colonne : largeur calculee, jamais la variable brute du panneau.
-    assert '.desk[data-resources="panel"]{grid-template-columns:var(--publi-col,300px) 1fr 0 0}' in _DESK
-    assert "var(--publi-col,300px) 1fr 6px var(--chat-w,300px)" in _DESK
+    fn = _DESK.split("function _modeRessourcesEffectif()")[1].split("\n}")[0]
+    assert "'collapsed' : 'deck'" in fn
+    assert "panel" not in fn
+    assert "--publi-col" not in _DESK
+    assert "PUBLI_MIN" not in _DESK
+    # Aucune colonne de grille pour les Ressources, chat ouvert ou non.
+    assert '.desk[data-resources="deck"]{grid-template-columns:0 1fr 0 0}' in _DESK
+    assert "grid-template-columns:0 1fr 6px var(--chat-w,300px)" in _DESK
     assert "var(--publi-w,240px) 1fr" not in _DESK
-    # Voile seulement pour le calque, pas pour la colonne.
-    assert '.desk[data-resources="panel"] .desk-backdrop' not in _DESK
+    # Calque fixe par-dessus le bureau, et voile.
+    calque = _DESK.split('.desk[data-resources="deck"] .desk-publi{')[1].split("}")[0]
+    assert "position:fixed" in calque
     assert '.desk[data-resources="deck"] .desk-backdrop' in _DESK
     assert '[data-chat="panel"] .desk-canvas' in _DESK
 
@@ -86,7 +88,9 @@ def test_navbar_flex_toggles_fixes() -> None:
     assert 'aria-controls="desk-publi-panel"' in _DESK
 
 
-def test_modes_deck_css() -> None:
+def test_modes_css_ressources_calque_chat_colonne() -> None:
+    """Le mode calque du chat (`data-chat="deck"`, voile compris) est retire
+    le 2026-09-26 : le chat decale la carte, il ne la recouvre jamais."""
     assert '[data-resources="deck"]' in _DESK
-    assert '[data-chat="deck"]' in _DESK
+    assert '[data-chat="deck"]' not in _DESK
     assert '[data-chat="collapsed"]' in _DESK
