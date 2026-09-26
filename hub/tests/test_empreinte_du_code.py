@@ -59,6 +59,26 @@ def test_l_image_declare_ou_est_son_paquet():
     assert "HUB_CODE_IMAGE=/opt/qgis-hub/hub" in contenu
 
 
+def test_l_empreinte_couvre_gabarits_et_statiques():
+    """Mesure du 2026-09-26 : l'overlay du hub contient `templates/` et
+    `hub/hub/static`. Ce qui est servi doit entrer dans l'empreinte."""
+    cles = [cle for cle, _ in ec._fichiers(_ROOT / "hub")]
+    for attendu in ("../templates/desk.html", "../templates/workspace.html",
+                    "static/produit.css", "static/produit.js", "main.py"):
+        assert attendu in cles
+
+
+def test_un_overlay_au_gabarit_divergent_est_signale(tmp_path):
+    for nom, page in (("image", b"<p>v1</p>"), ("live", b"<p>v2</p>")):
+        (tmp_path / nom / "hub").mkdir(parents=True)
+        (tmp_path / nom / "hub" / "main.py").write_bytes(b"x = 1\n")
+        (tmp_path / nom / "templates").mkdir()
+        (tmp_path / nom / "templates" / "desk.html").write_bytes(page)
+    etat = ec.releve(tmp_path / "live" / "hub", str(tmp_path / "image" / "hub"), None)
+    assert etat["overlay"] is True
+    assert etat["aligne"] is False
+
+
 def _code_sans_docstring(chemin: Path) -> str:
     arbre = ast.parse(chemin.read_text(encoding="utf-8"))
     corps = arbre.body

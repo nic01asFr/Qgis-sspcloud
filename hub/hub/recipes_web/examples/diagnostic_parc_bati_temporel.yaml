@@ -16,7 +16,7 @@
 
 manifest_version: "0.3.1"
 id: diagnostic_parc_bati_temporel
-title: "Diagnostic du parc bati par periode de construction (Marseille 4e)"
+title: "Diagnostic du parc bâti par période de construction (Marseille 4e)"
 version: "1.0"
 author: "exemple"
 use_cases:
@@ -44,7 +44,7 @@ steps:
       target_crs: "EPSG:4326"
     outputs:
       layer_id: batiments_bd_topo
-      layer_name: "Batiments par periode"
+      layer_name: "Bâtiments par période"
       geometry_type: polygon
       classification_field: date_d_apparition
       role: primary
@@ -76,9 +76,9 @@ steps:
     id: render
     target: component
     manifest_defaults:
-      subtitle: "Diagnostic CEREMA - juillet 2026"
+      subtitle: "Diagnostic Cerema - juillet 2026"
       source_text: "BD TOPO IGN 2024 - CEREMA"
-      caveat: "Etude pedagogique, chiffres illustratifs, non exploitables operationnellement."
+      caveat: "Étude pédagogique, chiffres illustratifs, non exploitables opérationnellement."
       projection: mercator
       basemap:
         id: plan-ign-v2-gris
@@ -91,7 +91,7 @@ steps:
         from_layer: batiments_bd_topo
         position: bottom-left
         format: chips
-        title: "Periode de construction"
+        title: "Période de construction"
       scalebar:
         position: bottom-right
         unit: metric

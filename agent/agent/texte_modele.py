@@ -23,7 +23,14 @@ Ce module regroupe trois fonctions pures :
   relancer le modele une fois au lieu de clore le tour sur du vide ;
 - `retirer_emojis` : defaut D5, le modele semait des emojis (triangle
   d'alerte, pastilles de couleur) dans ses reponses a des utilisateurs grand
-  public. Les chiffres ne sont jamais touches.
+  public. Les chiffres ne sont jamais touches ;
+- `NettoyeurSortie` / `humaniser` : garde-fou de sortie du lot 3. Malgre la
+  regle de prompt « aucun nom d'outil », le modele a ecrit a l'utilisateur
+  (mesure live du 2026-09-26, apres le lot 2) « il faut effectuer un
+  decoupage (`clip_to_study_zone`) » et « l'emprise rectangulaire (la
+  `bbox`) ». Les noms d'outils connus deviennent leur libelle courant, le
+  mot « bbox » devient « rectangle de la zone », de facon deterministe et
+  en flux.
 """
 from __future__ import annotations
 
@@ -199,3 +206,295 @@ def retirer_emojis(texte: str) -> str:
     if not texte:
         return texte
     return _EMOJI.sub("", texte)
+
+
+# ── Noms d'outils et jargon dans le texte visible (lot 3) ───────────────────
+
+# Libelle courant de chaque outil, en groupe nominal avec son article : il
+# remplace le nom dans une phrase (« avec `smart_load` » -> « avec le
+# chargement des donnees »). A distinguer de `_LIBELLES_OUTILS` de
+# qgis_agent.py, qui sont des libelles d'etat (« Chargement des données… ») ;
+# un test verifie que tout outil qui a un libelle d'etat a aussi celui-ci.
+LIBELLES_COURANTS = {
+    "clip_to_study_zone":   "le découpage selon les limites de la commune",
+    "smart_load":           "le chargement des données",
+    "get_project_info":     "la lecture du projet",
+    "get_features":         "la lecture des entités",
+    "list_datasources":     "la consultation du catalogue",
+    "add_from_catalog":     "le chargement depuis le catalogue",
+    "add_layer":            "l'ajout de la couche",
+    "remove_layer":         "le retrait de la couche",
+    "execute_python":       "un calcul dans QGIS",
+    "execute_async":        "un calcul long dans QGIS",
+    "poll_job":             "le suivi du calcul",
+    "run_processing":       "un traitement QGIS",
+    "search_algorithms":    "la recherche d'un traitement",
+    "run_recipe":           "l'exécution de la recette",
+    "save_recipe":          "l'enregistrement de la recette",
+    "get_recipe":           "la lecture de la recette",
+    "list_recipes":         "la liste des recettes",
+    "list_recipes_for_study": "la liste des recettes de l'étude",
+    "set_layer_style":      "la mise en forme de la couche",
+    "set_layer_visibility": "l'affichage des couches",
+    "zoom_to":              "le cadrage de la carte",
+    "set_study_zone":       "la définition de la zone d'étude",
+    "get_study_zone":       "la lecture de la zone d'étude",
+    "get_screenshot":       "la capture de la carte",
+    "export_layer":         "l'export de la couche",
+    "export_pdf":           "l'export PDF",
+    "export_web_map":       "la préparation de la carte web",
+    "export_flood_map":     "la carte des zones inondables",
+    "export_temporal_map":  "la carte d'évolution",
+    "publish_artifact":     "la publication du livrable",
+    "save_project":         "l'enregistrement du projet",
+    "memory_search":        "la recherche dans la mémoire",
+    "create_component":     "la création d'une brique de livrable",
+    "create_assembly":      "l'assemblage du livrable",
+    "publish_assembly":     "la publication du livrable",
+    "describe_entity_schema": "la lecture du format attendu",
+    "validate_manifest":    "la vérification du livrable",
+    "upload_file":          "l'envoi du fichier",
+    "download_project":     "le téléchargement du projet",
+}
+# Outil expose mais sans libelle : mieux vaut une formule vague qu'un nom de
+# fonction (meme choix que le libelle d'etat generique).
+_LIBELLE_INCONNU = "l'action correspondante"
+
+# Decorations Markdown qui entourent un nom : code, gras, les deux.
+_DECO = r"(?:\*\*`|`\*\*|\*\*|__|`)"
+
+# « la bbox » -> « le rectangle de la zone » : l'article suit le genre du nom.
+_ARTICLES_BBOX = {
+    "la": "le", "une": "un", "cette": "ce", "sa": "son", "ta": "ton",
+    "ma": "mon", "votre": "votre", "notre": "notre",
+    "de la": "du", "à la": "au",
+}
+
+# Ce que le flux retient en fin de tampon : les deux derniers mots complets,
+# le mot en cours et la ponctuation ouvrante. C'est la plus longue forme a
+# reecrire d'un bloc (« de l'outil `smart_load` », « de la bbox de »).
+# Mesure : ~3 jetons de retard, soit ~0,1 s au debit du modele -- invisible.
+_QUEUE = re.compile(r"[(*`_\s]*(?:\S+\s+){0,2}\S*\Z")
+
+_FENCE = re.compile(r"`{3,}")
+_URL = re.compile(r"(?:https?://|www\.)\S+|\]\([^)\s]*\)")
+_CODE_EN_LIGNE = re.compile(r"`[^`\n]+`")
+_DEBUT_DE_PHRASE = re.compile(r"(?:(?:\A|\n)[ \t]*(?:[-*•>]|\d+[.)])?|[.!?])[ \t]*\Z")
+# Contexte gardé du texte deja emis : de quoi juger un debut de phrase ou un
+# « / » qui precede (URL), pas davantage.
+_CONTEXTE = 40
+
+
+def _backticks_simples(texte: str) -> int:
+    return _FENCE.sub("", texte).count("`")
+
+
+class NettoyeurSortie:
+    """Remplace, dans le texte visible, les noms d'outils et « bbox ».
+
+    Travaille en flux : `pousser(fragment)` rend ce qui peut deja s'afficher,
+    `vider()` le reste en fin de reponse. Un fragment SSE coupe souvent un
+    nom en deux (« clip_to_ » puis « study_zone` ») : on retient la fin du
+    tampon (`_QUEUE`), et on ne coupe jamais au milieu d'une forme a
+    reecrire ni d'un code en ligne ouvert.
+
+    Jamais touches : blocs de code, code en ligne qui n'est pas exactement
+    un nom d'outil (noms de couches comme `batiment_aix_en_provence`), URLs,
+    chiffres, identifiants qui ne sont pas des outils connus. Un nom sans
+    tiret bas (improbable) n'est remplace qu'entre backticks : nu, ce
+    pourrait etre un mot courant.
+    """
+
+    def __init__(self, noms_outils=()):
+        noms = {n for n in (noms_outils or ()) if isinstance(n, str)
+                and re.fullmatch(r"\w+", n)}
+        noms |= set(LIBELLES_COURANTS)
+        alt = "|".join(re.escape(n) for n in sorted(noms, key=len, reverse=True))
+        self._noms = noms
+        self._motif = re.compile(
+            # Glose entre parentheses : « un découpage (`clip_to_study_zone`) »,
+            # « (la `bbox`) ». Elle doublait un mot deja dit : on la retire,
+            # espace qui precede comprise.
+            r"(?P<glose>[ \t]*\(\s*(?:(?:via|avec|par|soit|outil|l['’]outil)\s+)?"
+            r"(?:(?i:la|le|les|une|un)\s+)?" + _DECO + r"?"
+            r"(?:(?<![\w/.\-])(?:" + alt + r")|(?i:bbox))"
+            + _DECO + r"?\s*\))"
+            # Nom d'outil, avec la preposition a contracter et l'annonce a
+            # absorber (« de l'outil `smart_load` » -> « du chargement… »).
+            r"|(?P<outil>(?P<prep>\b(?:[Dd]e|[Àà])\s+)?"
+            r"(?P<intro>(?:[Ll]['’](?:outil|action|appel)|[Ll]a\s+(?:fonction|commande))"
+            r"\s+(?:(?:à|a)\s+)?)?"
+            r"(?P<od>" + _DECO + r")?(?<![\w/.\-:])(?P<nom>" + alt + r")"
+            r"(?P<of>" + _DECO + r")?(?![\w\-/]|\.\w))"
+            # « bbox » en contexte courant, avec son article.
+            r"|(?P<bbox>(?P<bart>\b(?i:de\s+la|à\s+la|la|une|cette|sa|ta|ma|votre|notre)\s+)?"
+            r"(?P<bd>\*\*|`)?(?<![\w/.\-])(?i:bbox)(?P<bf>\*\*|`)?(?![\w=\-/(]|\.\w))"
+        )
+        self._tampon = ""
+        self._contexte = ""
+        self._ligne_emise = ""
+        self._dans_bloc = False
+
+    # -- API ---------------------------------------------------------------
+
+    def pousser(self, fragment: str) -> str:
+        """Ajoute un fragment ; rend le texte transforme deja affichable."""
+        if not fragment:
+            return ""
+        self._tampon += fragment
+        return self._emettre(self._coupe_sure())
+
+    def vider(self) -> str:
+        """Fin de reponse : rend tout ce qui restait retenu."""
+        return self._emettre(len(self._tampon))
+
+    # -- Interne -------------------------------------------------------------
+
+    def _code_est_un_nom(self, code: str) -> bool:
+        interieur = code.strip("`").strip("*_ ")
+        return interieur in self._noms or interieur.lower() == "bbox"
+
+    def _zones_protegees(self, texte: str, debut: int) -> list[tuple[int, int]]:
+        zones: list[tuple[int, int]] = []
+        dans_bloc = self._dans_bloc
+        ouverture = debut
+        for m in _FENCE.finditer(texte, debut):
+            if dans_bloc:
+                zones.append((ouverture, m.end()))
+            else:
+                ouverture = m.start()
+            dans_bloc = not dans_bloc
+        if dans_bloc:
+            zones.append((ouverture, len(texte)))
+        zones += [m.span() for m in _URL.finditer(texte)]
+        # Code en ligne ouvert dans la partie deja emise : protege jusqu'a
+        # sa fermeture.
+        pos = debut
+        if _backticks_simples(self._ligne_emise) % 2:
+            fin = texte.find("`", debut)
+            fin = len(texte) if fin < 0 else fin + 1
+            zones.append((debut, fin))
+            pos = fin
+        zones += [m.span() for m in _CODE_EN_LIGNE.finditer(texte, pos)
+                  if not self._code_est_un_nom(m.group(0))]
+        return zones
+
+    def _coupe_sure(self) -> int:
+        tampon = self._tampon
+        m = _QUEUE.search(tampon)
+        coupe = m.start() if m else len(tampon)
+        texte = self._contexte + tampon
+        base = len(self._contexte)
+        while coupe > 0:
+            recule = coupe
+            for mm in self._motif.finditer(texte, base):
+                if mm.start() - base < recule < mm.end() - base:
+                    recule = mm.start() - base
+            # Ne pas couper un code en ligne ouvert : il serait relu comme
+            # une ouverture au fragment suivant.
+            debut_ligne = tampon.rfind("\n", 0, recule) + 1
+            ligne = (self._ligne_emise if debut_ligne == 0 else "") + tampon[debut_ligne:recule]
+            if not self._dans_bloc and _backticks_simples(ligne) % 2:
+                ouvrant = max((i for i in range(debut_ligne, recule)
+                               if tampon[i] == "`"
+                               and tampon[max(0, i - 2):i + 3].count("`") == 1),
+                              default=-1)
+                if ouvrant >= 0:
+                    recule = ouvrant
+            if recule == coupe:
+                break
+            coupe = recule
+        return max(coupe, 0)
+
+    def _emettre(self, coupe: int) -> str:
+        if coupe <= 0:
+            return ""
+        base = len(self._contexte)
+        texte = self._contexte + self._tampon
+        limite = base + coupe
+        zones = self._zones_protegees(texte, base)
+        morceaux = []
+        pos = base
+        for m in self._motif.finditer(texte, base):
+            if m.end() > limite:
+                break
+            if any(a < m.end() and m.start() < b for a, b in zones):
+                continue
+            morceaux.append(texte[pos:m.start()])
+            morceaux.append(self._remplacer(m, texte))
+            pos = m.end()
+        morceaux.append(texte[pos:limite])
+        sortie = "".join(morceaux)
+
+        emis = self._tampon[:coupe]
+        self._tampon = self._tampon[coupe:]
+        self._dans_bloc = (self._dans_bloc + len(_FENCE.findall(emis))) % 2 == 1
+        self._contexte = (self._contexte + emis)[-_CONTEXTE:]
+        nl = emis.rfind("\n")
+        self._ligne_emise = emis[nl + 1:] if nl >= 0 else self._ligne_emise + emis
+        return sortie
+
+    @staticmethod
+    def _decorer(libelle: str, ouvre: str | None, ferme: str | None) -> str:
+        # Decoration symetrique (`x`, **x**, **`x`**) : retiree avec le nom.
+        # Sinon on la garde, pour ne pas desequilibrer le gras alentour.
+        if ouvre and ferme and ouvre == ferme[::-1]:
+            return libelle
+        return (ouvre or "") + libelle + (ferme or "")
+
+    @staticmethod
+    def _majuscule_si_debut(texte: str, debut: int, remplacement: str) -> str:
+        if remplacement and _DEBUT_DE_PHRASE.search(texte[:debut]):
+            return remplacement[0].upper() + remplacement[1:]
+        return remplacement
+
+    def _remplacer(self, m: re.Match, texte: str) -> str:
+        if m.group("glose") is not None:
+            return ""
+        if m.group("outil") is not None:
+            nom = m.group("nom")
+            if not m.group("od") and "_" not in nom:
+                return m.group(0)
+            libelle = LIBELLES_COURANTS.get(nom, _LIBELLE_INCONNU)
+            prep = (m.group("prep") or "").strip()
+            if prep:
+                p = prep.lower()
+                if libelle.startswith("le "):
+                    libelle = ("du " if p == "de" else "au ") + libelle[3:]
+                elif libelle.startswith("les "):
+                    libelle = ("des " if p == "de" else "aux ") + libelle[4:]
+                else:
+                    libelle = p + " " + libelle
+                if prep[0].isupper():
+                    libelle = libelle[0].upper() + libelle[1:]
+            sortie = self._decorer(libelle, m.group("od"), m.group("of"))
+            # Le mot qui ouvre la forme (preposition, « L'outil ») porte deja
+            # la casse voulue par le modele ; sinon, regle du debut de phrase.
+            intro = m.group("intro")
+            if prep:
+                return sortie
+            if intro:
+                return sortie[0].upper() + sortie[1:] if intro[0].isupper() else sortie
+            return self._majuscule_si_debut(texte, m.start(), sortie)
+        # bbox
+        suite = texte[m.end():m.end() + 6]
+        nom = "rectangle" if re.match(r"\s+(?:de|du|des|d['’])\b", suite) \
+            else "rectangle de la zone"
+        article = m.group("bart")
+        if article:
+            brut = " ".join(article.split())
+            art = _ARTICLES_BBOX.get(brut.lower(), "le")
+            if brut[0].isupper():
+                art = art[0].upper() + art[1:]
+            nom = f"{art} {nom}"
+            return self._decorer(nom, m.group("bd"), m.group("bf"))
+        sortie = self._decorer(nom, m.group("bd"), m.group("bf"))
+        return self._majuscule_si_debut(texte, m.start(), sortie)
+
+
+def humaniser(texte: str | None, noms_outils=()) -> str:
+    """Version d'un bloc de `NettoyeurSortie` (texte deja complet)."""
+    if not texte:
+        return texte or ""
+    n = NettoyeurSortie(noms_outils)
+    return n.pousser(texte) + n.vider()

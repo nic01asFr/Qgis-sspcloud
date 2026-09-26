@@ -246,8 +246,13 @@ def test_gallery_includes_user_recipe(client, tmp_path, monkeypatch):
     assert entry["source"] == "user"
     assert entry["author"] == "marie"
     assert entry["session_hint"] == "study:sid-1:recipe:ma_recette_user"
-    # La description synthetique inclut le use_case declare.
-    assert "diagnostic_temporel" in entry["description"]
+    # La description synthetique traduit le use_case declare en francais
+    # courant ; ni l'identifiant brut ni la version du format ne s'affichent.
+    assert entry["description"] == "Usage : diagnostic dans le temps"
+    assert "diagnostic_temporel" not in entry["description"]
+    assert "V0.3.1" not in entry["description"]
+    # L'identifiant reste disponible pour les usages techniques.
+    assert entry["use_cases"] == ["diagnostic_temporel"]
 
 
 if __name__ == "__main__":

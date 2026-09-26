@@ -88,6 +88,11 @@ PLAFOND_NB_COUCHES_L2 = 15
 # Cibles : un depassement est journalise mais ne casse rien.
 CIBLES: dict[str, int] = {
     "systeme_et_outils": 14_000,
+    # Schemas d'outils exposes au modele (lot L3, paquets par intention).
+    # Mesure du 2026-09-26, profil standard, schemas reels : 19 300 avant
+    # (90 outils) ; socle seul 4 177 ; carte PDF avec lien 5 697 ;
+    # storymap publiee 9 772 (le pire paquet courant, journalise).
+    "outils": 7_000,
 }
 
 MENTION_L3_TRONQUEE = (
@@ -281,12 +286,20 @@ def releve_tour(
     outils: list[dict] | None,
     historique: list[dict] | None,
     message: str | None,
+    outils_profil: list[dict] | None = None,
 ) -> dict[str, int]:
-    """Complete le releve du prompt systeme avec outils, historique et message."""
+    """Complete le releve du prompt systeme avec outils, historique et message.
+
+    ``outils`` : les schemas EXPOSES au modele. ``outils_profil`` (facultatif) :
+    la liste complete du profil, pour journaliser le gain des paquets (lot L3).
+    """
     releve = dict(systeme or {})
     releve.setdefault("systeme", 0)
     releve["outils"] = estimer_tokens_outils(outils)
     releve["n_outils"] = len(outils or [])
+    if outils_profil is not None:
+        releve["outils_profil"] = estimer_tokens_outils(outils_profil)
+        releve["n_outils_profil"] = len(outils_profil)
     releve["historique"] = sum(
         estimer_tokens(m.get("content") or "") for m in (historique or [])
     )
@@ -326,7 +339,12 @@ def ligne_journal(releve: dict[str, int]) -> str:
             continue
         v = f"{cle}={releve[cle]}"
         if cle == "outils" and "n_outils" in releve:
-            v += f"({releve['n_outils']})"
+            if "n_outils_profil" in releve:
+                # « outils=4310(21/90 sur 19300) » : exposes / profil.
+                v += (f"({releve['n_outils']}/{releve['n_outils_profil']} "
+                      f"sur {releve['outils_profil']})")
+            else:
+                v += f"({releve['n_outils']})"
         if cle == "historique" and "n_historique" in releve:
             v += f"({releve['n_historique']})"
         bits.append(v)

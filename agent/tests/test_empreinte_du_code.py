@@ -66,11 +66,91 @@ class TestEmpreinte:
         crlf = _paquet(tmp_path / "crlf", {"a.py": b"x = 1\r\ny = 2\r\n"})
         assert ec.empreinte(lf) == ec.empreinte(crlf)
 
-    def test_seul_le_code_python_compte(self, tmp_path):
+    def test_le_cache_python_ne_compte_pas(self, tmp_path):
         p = _paquet(tmp_path, {"a.py": b"x = 1\n"})
         avant = ec.empreinte(p)
-        _paquet(p, {"static/f.css": b"body{}", "__pycache__/a.cpython-311.py": b"z"})
+        _paquet(p, {"__pycache__/a.cpython-311.py": b"z",
+                    "static/__pycache__/b.pyc": b"z"})
         assert ec.empreinte(p) == avant
+
+    def test_hors_code_seul_ce_qui_est_servi_compte(self, tmp_path):
+        """Un fichier de donnees ou de tests a cote du paquet n'est pas
+        servi : il ne doit pas faire croire a une divergence."""
+        paquet = _paquet(tmp_path / "live" / "agent", {"a.py": b"x = 1\n"})
+        avant = ec.empreinte(paquet)
+        _paquet(paquet, {"notes.txt": b"z"})
+        _paquet(tmp_path / "live", {"tests/t.py": b"z", "README.md": b"z"})
+        assert ec.empreinte(paquet) == avant
+
+
+class TestEmpreinteGabaritsEtStatiques:
+    """Mesure du 2026-09-26 : les overlays contiennent aussi `templates/`
+    et `hub/hub/static`. Une page de chat differente de l'image doit
+    changer l'empreinte, sinon `aligne` ment."""
+
+    def _overlay(self, racine: Path, gabarit: bytes = b"<p>chat</p>\n") -> Path:
+        _paquet(racine, {"templates/chat.html": gabarit})
+        return _paquet(racine / "agent", {"main.py": b"x = 1\n"})
+
+    def test_un_gabarit_modifie_change_l_empreinte(self, tmp_path):
+        paquet = self._overlay(tmp_path)
+        avant = ec.empreinte(paquet)
+        (tmp_path / "templates" / "chat.html").write_bytes(b"<p>autre</p>\n")
+        assert ec.empreinte(paquet) != avant
+
+    def test_un_gabarit_ajoute_change_l_empreinte(self, tmp_path):
+        paquet = self._overlay(tmp_path)
+        avant = ec.empreinte(paquet)
+        _paquet(tmp_path, {"templates/desk.html": b"<p>desk</p>"})
+        assert ec.empreinte(paquet) != avant
+
+    def test_les_statiques_du_paquet_comptent(self, tmp_path):
+        """Le hub sert `hub/hub/static` : dans le paquet, pas a cote."""
+        paquet = _paquet(tmp_path / "hub", {"main.py": b"x = 1\n",
+                                            "static/produit.css": b"a{}"})
+        avant = ec.empreinte(paquet)
+        (paquet / "static" / "produit.css").write_bytes(b"a{color:red}")
+        assert ec.empreinte(paquet) != avant
+
+    def test_les_statiques_a_cote_du_paquet_comptent(self, tmp_path):
+        paquet = self._overlay(tmp_path)
+        avant = ec.empreinte(paquet)
+        _paquet(tmp_path, {"static/produit.css": b"a{}"})
+        assert ec.empreinte(paquet) != avant
+
+    def test_crlf_neutralise_dans_les_gabarits(self, tmp_path):
+        lf = self._overlay(tmp_path / "lf", b"<p>\n</p>\n")
+        crlf = self._overlay(tmp_path / "crlf", b"<p>\r\n</p>\r\n")
+        assert ec.empreinte(lf) == ec.empreinte(crlf)
+
+    def test_un_gabarit_n_est_pas_un_fichier_du_paquet(self, tmp_path):
+        """Les cles sont prefixees : deplacer un fichier entre le paquet et
+        ses gabarits change ce qui est servi, donc l'empreinte."""
+        a = _paquet(tmp_path / "a" / "agent", {"static/x.html": b"z"})
+        _paquet(tmp_path / "a", {"templates/y.html": b"z"})
+        b = _paquet(tmp_path / "b" / "agent", {"static/y.html": b"z"})
+        _paquet(tmp_path / "b", {"templates/x.html": b"z"})
+        assert ec.empreinte(a) != ec.empreinte(b)
+
+    def test_l_ordre_de_creation_ne_compte_pas(self, tmp_path):
+        """Determinisme : meme contenu cree dans un autre ordre."""
+        un = self._overlay(tmp_path / "un")
+        _paquet(tmp_path / "un", {"templates/a.html": b"a", "templates/b.html": b"b"})
+        deux = self._overlay(tmp_path / "deux")
+        _paquet(tmp_path / "deux", {"templates/b.html": b"b", "templates/a.html": b"a"})
+        assert ec.empreinte(un) == ec.empreinte(deux)
+
+    def test_overlay_au_gabarit_divergent_n_est_pas_aligne(self, tmp_path):
+        """Le cas du 2026-09-26 : memes .py, page de chat differente."""
+        image = self._overlay(tmp_path / "image", b"<p>v1</p>\n")
+        live = self._overlay(tmp_path / "live", b"<p>v2</p>\n")
+        etat = ec.releve(live, str(image), "abc1234")
+        assert etat["overlay"] is True
+        assert etat["aligne"] is False
+
+    def test_le_vrai_paquet_couvre_la_page_de_chat(self):
+        cles = [cle for cle, _ in ec._fichiers(_ROOT / "agent")]
+        assert "../templates/chat.html" in cles
 
 
 class TestReleve:
