@@ -10135,7 +10135,32 @@ async def delete_study_endpoint(
 
 
 # Corpus documentaire de l'etude (lot L7) : routes /studies/{sid}/documents.
-app.include_router(documents_api.router)
+#
+# Ajoutees route par route plutot que par `include_router`. Depuis FastAPI
+# 0.141 (Starlette 1.7, installes par la CI et les images faute d'epinglage),
+# `include_router` depose dans `app.routes` un `_IncludedRouter` resolu a la
+# demande, sans attribut `path` : les controles qui parcourent `app.routes`
+# (tests de presence de routes, /version) plantaient. Le routeur n'a ni
+# prefixe ni dependance propre -- chaque route porte les siennes --, l'ajout
+# direct est donc equivalent, et garde l'ordre de resolution a cet endroit
+# (« /recherche » reste avant « /{doc_id} »).
+#
+# Recreees par `add_api_route` et non recopiees : une route construite par un
+# APIRouter garde ce routeur comme fournisseur de `dependency_overrides`, et
+# les surcharges posees sur l'application (auth dans les tests) ne s'y
+# appliquaient plus -- 401 au lieu de la reponse attendue.
+for _route_doc in documents_api.router.routes:
+    app.add_api_route(
+        _route_doc.path, _route_doc.endpoint,
+        methods=list(_route_doc.methods),
+        status_code=_route_doc.status_code,
+        response_model=_route_doc.response_model,
+        tags=list(_route_doc.tags or []),
+        name=_route_doc.name,
+        summary=_route_doc.summary,
+        description=_route_doc.description,
+        include_in_schema=_route_doc.include_in_schema,
+    )
 
 
 @app.get("/studies/{sid}/treatments")
