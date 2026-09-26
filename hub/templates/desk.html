@@ -33,9 +33,20 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
    trois colonnes, on repasse alors en calque (cf. media query). */
 /* Grille composable : colonnes pilotées par data-resources / data-chat.
    Defaut = les deux panels repliés, QGIS pleine largeur.
-   Contrat UX (2026-09-10) : seul le CHAT en mode panel décale la carte.
-   Les ressources sont toujours en calque (deck) — elles n'occupent
-   jamais une colonne de grille. */
+   Contrat UX (2026-09-10) : seul le CHAT en mode panel décale la carte ;
+   les ressources etaient toujours en calque.
+   Regles de priorite (2026-09-26) -- la carte d'abord :
+   1. la carte garde au moins CARTE_MIN_W = 640 px de large, non recouverts ;
+   2. les Ressources ouvertes prennent une COLONNE (data-resources="panel")
+      si la place le permet : 300 px + carte 640 + chat au minimum 220+6,
+      soit 1166 px avec le chat ouvert, 940 px sans ;
+   3. pour tenir, le chat se retrecit temporairement (jusqu'a 220 px) ; sa
+      largeur choisie a la poignee est memorisee et revient avec la place ;
+   4. sinon les Ressources passent en CALQUE (data-resources="deck") par-
+      dessus la carte, avec voile, et se ferment au clic sur la carte ou
+      par Echap -- le chat n'est jamais ferme d'autorite.
+   L'etat memorise reste "ouvert / ferme" ; colonne ou calque est recalcule
+   a chaque redimensionnement (cf. _modeRessourcesEffectif). */
 .desk{display:grid;
   grid-template-columns:0 1fr 0 0;
   grid-template-rows:48px 1fr 32px;
@@ -45,13 +56,15 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     "status status status status";
   height:100vh;width:100vw;background:#f4f4f6;
   transition:grid-template-columns .2s ease}
-/* Ressources ouvertes (panel legacy ou deck) : grille inchangée, calque CSS. */
-.desk[data-resources="panel"],
+/* Ressources en calque (deck) : grille inchangée. En colonne (panel) : la
+   carte se reduit de --publi-col (calcule par le script, >= 300 px). */
 .desk[data-resources="deck"]{grid-template-columns:0 1fr 0 0}
+.desk[data-resources="panel"]{grid-template-columns:var(--publi-col,300px) 1fr 0 0}
 .desk[data-chat="panel"]{grid-template-columns:0 1fr 6px var(--chat-w,300px)}
-.desk[data-resources="panel"][data-chat="panel"],
 .desk[data-resources="deck"][data-chat="panel"]{
   grid-template-columns:0 1fr 6px var(--chat-w,300px)}
+.desk[data-resources="panel"][data-chat="panel"]{
+  grid-template-columns:var(--publi-col,300px) 1fr 6px var(--chat-w,300px)}
 /* Compat legacy (sync depuis applyPanelState) — ressources ne poussent plus. */
 .desk.show-publi:not([data-resources]){grid-template-columns:0 1fr 0 0}
 .desk.no-chat:not([data-chat]){grid-template-columns:0 1fr 0 0}
@@ -347,23 +360,22 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .handle.h1{display:none}
 
 /* ── Canvas (QGIS noVNC iframe) ──────────────────────────────── */
-/* Chat ouvert : trame derrière + cadre UNIQUEMENT autour de QGIS.
-   Pas de fond noir sur le wrap (évite les bandes letterbox noires) :
-   le remote resizeSession remplit le cadre ; la trame reste visible
-   dans le padding autour. */
-.desk-canvas{grid-area:canvas;background:#fff;overflow:hidden;position:relative;
+/* Cadre QGIS au ratio du bureau distant (2026-09-26).
+   Le bureau QGIS a une taille fixe (Xvfb 1920x1080 cote workspace) que
+   x11vnc ne sait pas redimensionner : la demande resizeSession de noVNC
+   reste sans effet. Un cadre qui remplit toute la zone recevait donc
+   l'image reduite a 16:9 et noVNC peignait le reste en gris fonce --
+   les bandes noires au-dessus et au-dessous de la carte.
+   Le cadre prend maintenant le ratio du bureau distant (--qgis-ratio, lu
+   sur le canvas noVNC par le script, 16/9 par defaut) et la plus grande
+   taille qui tient dans la zone (unites de conteneur cqw/cqh). Il est
+   centre en largeur et ancre en haut : la place restante, quand la zone
+   est plus haute que 16:9, reste sous la carte, sur la trame. */
+.desk-canvas{grid-area:canvas;overflow:hidden;position:relative;
   min-width:0;min-height:0;display:flex;flex-direction:column;
-  transition:padding .2s ease,background-color .2s ease}
-.desk-canvas .iframe-fit{
-  flex:1;min-height:0;width:100%;height:100%;
-  position:relative;overflow:hidden;background:transparent;
-  transition:box-shadow .2s ease,border-radius .2s ease}
-.desk-canvas .iframe-fit iframe{
-  position:absolute;inset:0;width:100%;height:100%;
-  border:none;display:block;background:transparent}
-/* Relief quand le chat décale la carte — cadre sur QGIS seulement */
-.desk[data-chat="panel"] .desk-canvas{
-  padding:10px 10px 10px 12px;
+  container-type:size;
+  --qgis-ratio:16/9;
+  transition:padding .2s ease,background-color .2s ease;
   background-color:#e8ebf0;
   background-image:
     linear-gradient(135deg,rgba(255,255,255,.65) 1px,transparent 1px),
@@ -372,9 +384,23 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     linear-gradient(45deg,transparent 48%,rgba(0,0,0,.025) 49%,rgba(0,0,0,.025) 51%,transparent 52%);
   background-size:28px 28px,28px 28px,56px 56px,56px 56px;
   background-position:0 0,0 0,0 0,14px 14px}
+.desk-canvas .iframe-fit{
+  flex:0 0 auto;
+  width:min(100cqw, calc(100cqh * var(--qgis-ratio,16/9)));
+  aspect-ratio:var(--qgis-ratio,16/9);
+  max-height:100cqh;
+  margin:0 auto;
+  position:relative;overflow:hidden;background:#fff;
+  box-shadow:0 0 0 1px rgba(15,23,42,.1),0 6px 18px rgba(15,23,42,.10);
+  transition:box-shadow .2s ease,border-radius .2s ease}
+.desk-canvas .iframe-fit iframe{
+  position:absolute;inset:0;width:100%;height:100%;
+  border:none;display:block;background:transparent}
+/* Relief quand le chat décale la carte — cadre sur QGIS seulement */
+.desk[data-chat="panel"] .desk-canvas{
+  padding:10px 10px 10px 12px}
 .desk[data-chat="panel"] .desk-canvas .iframe-fit{
   border-radius:8px;
-  background:#fff;
   box-shadow:
     0 0 0 1px rgba(15,23,42,.1),
     0 10px 28px rgba(15,23,42,.14),
@@ -482,16 +508,16 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
 .desk-backdrop{display:none;position:fixed;top:48px;right:0;bottom:32px;left:0;
   background:rgba(0,0,0,.25);z-index:25;opacity:0;pointer-events:none;
   transition:opacity .15s ease}
-/* ── Mode deck / panel ressources : toujours calque (ne décale pas la carte) */
-.desk[data-resources="panel"] .desk-publi,
+/* ── Ressources en calque (deck) : par-dessus la carte, avec voile ──── */
 .desk[data-resources="deck"] .desk-publi{
   position:fixed;top:48px;bottom:32px;left:0;z-index:30;
   width:max(300px,var(--publi-w,240px));max-width:85vw;visibility:visible;
   box-shadow:0 0 28px rgba(0,0,0,.18);transform:translateX(0)}
 .desk[data-resources="collapsed"] .desk-publi{
   visibility:hidden;pointer-events:none}
-/* Backdrop : ressources (toujours overlay) ou chat en deck */
-.desk[data-resources="panel"] .desk-backdrop,
+/* ── Ressources en colonne (panel) : la carte reste utilisable a cote ── */
+.desk[data-resources="panel"] .desk-publi{visibility:visible}
+/* Backdrop : ressources en calque ou chat en deck (pas en colonne) */
 .desk[data-resources="deck"] .desk-backdrop,
 .desk[data-chat="deck"] .desk-backdrop{
   display:block;opacity:1;pointer-events:auto}
@@ -2156,7 +2182,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
          Le param `path=workspace/vnc/websockify` indique a noVNC client ou
          se connecter pour le WebSocket (relatif a la racine du browser). #}
       <iframe id="qgis-vnc-frame"
-              src="/workspace/vnc/vnc_lite.html?path=workspace/vnc/websockify&scale=true&resize=true&show_dot=false"
+              src="/workspace/vnc/vnc_lite.html?path=workspace/vnc/websockify&scale=true&show_dot=false"
               allowfullscreen referrerpolicy="no-referrer-when-downgrade"
               title="Bureau QGIS"></iframe>
     </div>
@@ -2325,7 +2351,8 @@ const CHAT_NOMINAL = 300;
 const CHAT_NOMINAL_NARROW = 260;
 const CHAT_MIN = 220;
 const PUBLI_NOMINAL = 240;
-const CANVAS_MIN_W = 320;
+const PUBLI_MIN = 300;     // largeur reelle du panneau : max(300, --publi-w)
+const CARTE_MIN_W = 640;   // largeur de carte garantie, non recouverte
 const HANDLE = 6;
 
 // Flags lazy-load ressources (en tete de script : evite TDZ avec fonctions hoistees).
@@ -2389,14 +2416,36 @@ const layoutState = _loadLayoutState();
 let largeurChatChoisie = layoutState.chat.width || null;
 let _redimensionneChat = false;
 
+// Largeur reelle du panneau Ressources (le CSS impose 300 px minimum).
+function _largeurRessources() {
+  return Math.max(PUBLI_MIN, layoutState.resources.width || PUBLI_NOMINAL);
+}
+
+// Colonne ou calque : recalcule a chaque changement de largeur. L'etat
+// memorise ne dit que "ouvert / ferme" (mode 'deck'), le rendu decide.
+// Colonne si la carte garde CARTE_MIN_W avec le chat reduit a CHAT_MIN.
+function _modeRessourcesEffectif(vw) {
+  if (layoutState.resources.mode === 'collapsed') return 'collapsed';
+  if (surTelephone() || isNarrow()) return 'deck';
+  const chat = layoutState.chat.mode === 'panel' ? CHAT_MIN + HANDLE : 0;
+  return vw >= _largeurRessources() + CARTE_MIN_W + chat ? 'panel' : 'deck';
+}
+
+// Largeur maximale du chat en colonne pour laisser CARTE_MIN_W a la carte.
+function _largeurChatMax(vw) {
+  const ress = desk.dataset.resources === 'panel' ? _largeurRessources() : 0;
+  return Math.max(CHAT_MIN, vw - CARTE_MIN_W - HANDLE - ress);
+}
+
 function applyPanelState() {
-  const r = layoutState.resources.mode;
+  const r = _modeRessourcesEffectif(window.innerWidth);
   const c = layoutState.chat.mode;
   desk.dataset.resources = r;
   desk.dataset.chat = c;
   desk.classList.toggle('show-publi', r !== 'collapsed');
   desk.classList.toggle('no-chat', c === 'collapsed');
   desk.style.setProperty('--publi-w', layoutState.resources.width + 'px');
+  desk.style.setProperty('--publi-col', _largeurRessources() + 'px');
   if (c === 'panel') {
     desk.style.setProperty('--chat-w', layoutState.chat.width + 'px');
   }
@@ -2419,21 +2468,27 @@ function _defaultChatWidth() {
   return isNarrow() ? CHAT_NOMINAL_NARROW : CHAT_NOMINAL;
 }
 
+// Retrecit le chat si la carte passerait sous CARTE_MIN_W. Seul le rendu
+// change : largeurChatChoisie (la largeur voulue) n'est pas touchee et
+// revient des que la place revient (Ressources fermees, fenetre agrandie).
 function clampLayoutToViewport(vw) {
   if (surTelephone() || layoutState.chat.mode !== 'panel') return;
   const chatW = parseInt(getComputedStyle(desk).getPropertyValue('--chat-w') ||
                             String(_defaultChatWidth()), 10);
-  const maxChat = vw - CANVAS_MIN_W - HANDLE;
+  const maxChat = _largeurChatMax(vw);
   if (chatW > maxChat) {
-    const clamped = Math.max(CHAT_MIN, maxChat);
-    desk.style.setProperty('--chat-w', clamped + 'px');
-    if (largeurChatChoisie) largeurChatChoisie = clamped;
+    desk.style.setProperty('--chat-w', maxChat + 'px');
   }
 }
 
 function updateLayout() {
   if (_redimensionneChat) return;
   const vw = window.innerWidth;
+  const ress = _modeRessourcesEffectif(vw);
+  if (desk.dataset.resources !== ress) {
+    desk.dataset.resources = ress;
+    syncToggles();
+  }
   if (layoutState.chat.mode === 'panel') {
     const w = largeurChatChoisie || layoutState.chat.width || _defaultChatWidth();
     desk.style.setProperty('--chat-w', w + 'px');
@@ -2459,6 +2514,31 @@ window.addEventListener('resize', () => {
   new ResizeObserver(() => {
     if (!_redimensionneChat) updateLayout();
   }).observe(canvas);
+})();
+
+// Ratio du bureau QGIS distant, lu sur le canvas noVNC (meme origine grace au
+// proxy /workspace/vnc). Ses attributs width/height sont la taille du bureau
+// (1920x1080 aujourd'hui) ; le cadre CSS en prend le ratio pour ne jamais
+// laisser noVNC peindre de bandes. Sans lecture possible : 16/9 du CSS.
+(function suivreRatioBureauQgis() {
+  const frame = document.getElementById('qgis-vnc-frame');
+  const zone = document.querySelector('.desk-canvas');
+  if (!frame || !zone) return;
+  let ratio = '';
+  const lire = () => {
+    let c = null;
+    try {
+      c = frame.contentDocument && frame.contentDocument.querySelector('#screen canvas');
+    } catch (e) { return; }
+    if (!c || !c.width || !c.height) return;
+    const r = c.width + '/' + c.height;
+    if (r !== ratio) {
+      ratio = r;
+      zone.style.setProperty('--qgis-ratio', r);
+    }
+  };
+  frame.addEventListener('load', lire);
+  setInterval(lire, 2000);
 })();
 
 // Save du projet QGIS de l'étude active lors de la fermeture / navigation.
@@ -2512,7 +2592,8 @@ function saveLayout() {
   layoutState.resources.width = parseInt(
     getComputedStyle(desk).getPropertyValue('--publi-w') || String(PUBLI_NOMINAL), 10);
   if (layoutState.chat.mode === 'panel') {
-    layoutState.chat.width = parseInt(
+    // La largeur choisie, pas celle reduite pour laisser place a la carte.
+    layoutState.chat.width = largeurChatChoisie || parseInt(
       getComputedStyle(desk).getPropertyValue('--chat-w') || String(_defaultChatWidth()), 10);
   }
   localStorage.setItem('desk-layout-v3', JSON.stringify(layoutState));
@@ -2647,7 +2728,7 @@ document.querySelectorAll('.handle').forEach(h => {
       const delta = ev.clientX - startX;
       const newW = target === 'publi'
         ? Math.max(160, Math.min(420, startW + delta))
-        : Math.max(CHAT_MIN, Math.min(600, startW - delta));
+        : Math.max(CHAT_MIN, Math.min(600, _largeurChatMax(window.innerWidth), startW - delta));
       desk.style.setProperty(cssVar, newW + 'px');
       if (isChat) largeurChatChoisie = newW;
     };
