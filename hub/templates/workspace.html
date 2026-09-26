@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#0E2433">
 <title>Mon espace — QGIS Service</title>
 <link rel="stylesheet" href="/static/produit.css">
+<script src="/static/produit.js" defer></script>
 <style>
 /* Workspace A : dashboard 2 colonnes, navbar alignée desk. */
 
@@ -83,7 +84,7 @@
 .study-row__actions .qs-btn{font-size:.75rem;padding:.28rem .65rem}
 .active-badge{display:inline-flex;align-items:center;gap:5px;
   background:var(--qs-alerte);color:#fff;padding:2px 8px;border-radius:10px;
-  font-size:.65rem;font-weight:700;letter-spacing:.4px;flex-shrink:0}
+  font-size:.72rem;font-weight:700;letter-spacing:.2px;flex-shrink:0}
 .active-badge::before{content:"";width:5px;height:5px;border-radius:50%;
   background:#fff;display:inline-block}
 .demo-badge{display:inline-flex;align-items:center;
@@ -117,8 +118,30 @@
 .empty-state .icon{font-size:1.4rem;margin-right:8px;opacity:.65}
 
 /* Livrables / mémoire densifiés */
-.qs-tableau{font-size:.8rem}
-.livrables-intro{font-size:.78rem;color:var(--qs-discret);margin:0 0 8px}
+.qs-tableau{font-size:.8125rem}
+.livrables-intro{font-size:.8125rem;color:var(--qs-discret);margin:0 0 8px}
+/* Trois colonnes seulement : la colonne droite fait ~40 % de 1120 px. Les
+   sept colonnes d'avant (Type, Slug, Étude, Taille, Date, Lien, Actions)
+   defilaient lateralement des 1366 px. */
+.liv-table{width:100%;table-layout:fixed}
+.liv-table th:nth-child(2),.liv-table td:nth-child(2){width:6.5rem}
+.liv-table th:nth-child(3),.liv-table td:nth-child(3){width:8.5rem;text-align:right}
+.liv-titre{font-weight:600;color:var(--qs-encre);overflow:hidden;
+  overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical}
+.liv-sous{display:flex;flex-wrap:wrap;gap:4px 6px;margin-top:3px;align-items:center}
+.liv-date{white-space:nowrap;color:var(--qs-encre-2)}
+.liv-taille{display:block;font-size:.75rem;color:var(--qs-discret)}
+.liv-actions{display:inline-flex;gap:2px;justify-content:flex-end}
+/* Cibles de 32 px minimum (WCAG 2.5.8 demande 24). */
+.liv-actions .qs-btn{min-width:32px;min-height:32px;padding:4px 6px}
+.liv-actions .qs-btn--nu.liv-danger{color:var(--qs-danger)}
+.liv-actions .qs-btn--nu.liv-danger:hover{background:var(--qs-danger-pale)}
+.liv-technique[hidden]{display:none}
+.liv-plus{margin:8px 0 0;font-size:.8125rem}
+.liv-plus button{font:inherit;color:var(--qs-accent);background:none;border:0;
+  padding:4px 0;cursor:pointer;text-decoration:underline;min-height:24px}
+.alerte-action{margin-top:8px}
 .memo-grid{display:grid;grid-template-columns:1fr;gap:8px;margin-top:6px}
 .memo-card{background:var(--qs-surface-2);border-radius:6px;
   padding:10px 12px;font-size:.8rem}
@@ -140,7 +163,9 @@
   .ws-block--studies{order:2}
   .ws-block--livrables{order:3}
   .ws-block--memo{order:4}
-  .ws-dash{display:flex;flex-direction:column}
+  /* align-items:start herite de la grille retrecissait chaque bloc a son
+     contenu : colonnes de largeurs differentes sur telephone. */
+  .ws-dash{display:flex;flex-direction:column;align-items:stretch}
 }
 </style>
 </head>
@@ -194,6 +219,12 @@
 
           <hr class="qs-menu__sep">
 
+          {# Memes entrees, meme ordre que le menu du bureau : seule change
+             la page courante, marquee aria-current au lieu d'etre omise. #}
+          <a class="qs-menu__item ic-grille" role="menuitem" href="/workspace"
+             aria-current="page">
+            Mon espace de travail
+          </a>
           <a class="qs-menu__item ic-fenetre" role="menuitem" href="/desk">
             Bureau de travail
           </a>
@@ -204,6 +235,14 @@
 
           <hr class="qs-menu__sep">
 
+          <a class="qs-menu__item ic-livre" role="menuitem" target="_blank"
+             rel="noopener external"
+             href="https://github.com/nic01asFr/Qgis-sspcloud">
+            Documentation
+            <span class="qs-menu__suffixe ic-lien-externe ic--sm"
+                  aria-hidden="true"></span>
+            <span class="qs-sr">(nouvel onglet)</span>
+          </a>
           <a class="qs-menu__item ic-deconnexion qs-menu__item--danger" role="menuitem"
              href="/auth/logout">
             Se déconnecter
@@ -226,9 +265,13 @@
 
   {% if llm_key_missing %}
   <div class="qs-alerte qs-alerte--attention qs-mb-3w">
-    <h3 class="qs-alerte__titre">Assistant IA en attente de configuration</h3>
-    <p>Ta clé LLM n'est pas renseignée : l'assistant ne peut pas répondre.
-       Ouvre le menu compte → Clé de l'assistant (moins d'une minute).</p>
+    <h2 class="qs-alerte__titre">L'assistant IA n'est pas encore configuré</h2>
+    <p>Sa clé de connexion n'est pas renseignée : il ne peut pas répondre.
+       Cela prend moins d'une minute.</p>
+    <p class="alerte-action">
+      <button type="button" class="qs-btn qs-btn--sm"
+              onclick="ouvrirCompte('assistant')">Renseigner la clé de l'assistant</button>
+    </p>
   </div>
   {% endif %}
 
@@ -239,10 +282,7 @@
       <div class="ws-block ws-block--studies">
         <div class="section-title">
           <h2>Mes études</h2>
-          <span class="count">
-            {{ studies|length }}
-            {% if studies|length == 1 %}en cours{% else %}en cours{% endif %}
-          </span>
+          <span class="count">{{ studies|length }} en cours</span>
         </div>
 
         {% if studies %}
@@ -252,11 +292,11 @@
                role="listitem">
             <h3 class="study-row__name" title="{{ s.name }}">
               {% if s.id == active_study_id %}
-              <a href="/desk"><span class="ic-fenetre ic--sm" aria-hidden="true"></span> {{ s.name }}</a>
+              <a href="/desk" title="Ouvrir « {{ s.name }} » dans le bureau"><span class="ic-fenetre ic--sm" aria-hidden="true"></span> {{ s.name }}</a>
               {% else %}
               <span class="ic-dossier ic--sm" aria-hidden="true"></span> {{ s.name }}
               {% endif %}
-              {% if s.id == active_study_id %}<span class="active-badge">ACTIVE</span>{% endif %}
+              {% if s.id == active_study_id %}<span class="active-badge">Active</span>{% endif %}
               {% if s.origin == 'demo' %}
               <span class="demo-badge" title="Étude créée depuis un modèle de démonstration">DÉMO</span>
               {% endif %}
@@ -274,15 +314,20 @@
             <div class="study-row__actions">
               {% if s.id != active_study_id %}
               <form method="POST" action="/workspace/study/{{ s.id }}/activate?return_to=desk">
-                <button type="submit" class="qs-btn qs-btn--sm" style="font-weight:650">
+                <button type="submit" class="qs-btn qs-btn--sm" style="font-weight:650"
+                        aria-label="Ouvrir « {{ s.name }} » dans le bureau">
                   Ouvrir
                 </button>
               </form>
               {% endif %}
+              {# Confirmation par la boite du produit (produit.js), puis
+                 message « Annuler » au retour sur la page : l'archivage se
+                 defait d'un clic, sans chercher la liste des archives. #}
               <form method="POST" action="/workspace/study/{{ s.id }}/archive"
-                    onsubmit="return confirm('Archiver cette étude ? Vous pourrez toujours en créer une nouvelle.');">
+                    class="js-archiver" data-sid="{{ s.id }}" data-nom="{{ s.name }}">
                 <button type="submit" class="qs-btn qs-btn--tertiaire qs-btn--sm"
-                        title="Archiver cette étude (réversible, le dossier reste sur le PVC)">
+                        aria-label="Archiver « {{ s.name }} »"
+                        title="Archiver : l'étude quitte la liste, rien n'est supprimé">
                   Archiver
                 </button>
               </form>
@@ -293,15 +338,18 @@
         {% else %}
         <div class="empty-state">
           <span class="icon ic-dossier" aria-hidden="true"></span>
-          Aucune étude pour l'instant. Démarrez votre première étude ci-dessous.
+          Aucune étude pour l'instant. Une étude regroupe tes cartes, tes
+          données et tes échanges avec l'assistant sur un même sujet :
+          donne-lui un nom ci-dessous pour commencer.
         </div>
         {% endif %}
 
         <form method="POST" action="/workspace/study/new" class="new-study-form">
           <input id="new-study-name" name="name" type="text" required
                  placeholder="Nouvelle étude (sujet, territoire…)"
-                 class="qs-champ" aria-label="Nom de la nouvelle étude">
-          <button type="submit" class="qs-btn">Créer</button>
+                 class="qs-champ" aria-label="Nom de la nouvelle étude"
+                 autocomplete="off">
+          <button type="submit" class="qs-btn">Créer l'étude</button>
         </form>
 
         {% if archived_studies %}
@@ -319,8 +367,11 @@
               <span class="study-row__meta"></span>
               <span class="study-row__when"></span>
               <div class="study-row__actions">
-                <form method="POST" action="/workspace/study/{{ s.id }}/restore">
-                  <button type="submit" class="qs-btn qs-btn--secondaire qs-btn--sm">Restaurer</button>
+                <form method="POST" action="/workspace/study/{{ s.id }}/restore"
+                      id="restaurer-{{ s.id }}" class="js-restaurer"
+                      data-sid="{{ s.id }}" data-nom="{{ s.name }}">
+                  <button type="submit" class="qs-btn qs-btn--secondaire qs-btn--sm"
+                          aria-label="Restaurer « {{ s.name }} »">Restaurer</button>
                 </form>
               </div>
             </div>
@@ -367,84 +418,181 @@
           <span class="count">{{ catalog_count }}</span>
         </div>
         {% if catalog_items %}
-        <p class="livrables-intro">Cartes, rapports et recettes accessibles publiquement.</p>
+        <p class="livrables-intro">Cartes, documents et données que tu as rendus accessibles par un lien.</p>
         {% if catalog_ailleurs or catalog_tronques %}
         <p class="livrables-intro">
           {% if catalog_ailleurs %}{{ catalog_ailleurs }} autre{{ 's' if catalog_ailleurs > 1 }}
-          publication{{ 's' if catalog_ailleurs > 1 }} hors de cette etude.{% endif %}
-          {% if catalog_tronques %}{{ catalog_tronques }} de plus non affichee{{ 's' if catalog_tronques > 1 }} ici.{% endif %}
+          publication{{ 's' if catalog_ailleurs > 1 }} hors de cette étude.{% endif %}
+          {% if catalog_tronques %}{{ catalog_tronques }} de plus non affichée{{ 's' if catalog_tronques > 1 }} ici.{% endif %}
           <a href="/published/{{ username }}/">Voir toutes mes publications</a>
         </p>
         {% endif %}
         {% set study_names = {} %}
         {% for s in studies %}{% set _ = study_names.update({s.id: s.name}) %}{% endfor %}
+        {# Correspondance d'affichage des types renvoyes par le serveur
+           (s3_publication._KINDS). Le type technique reste dans data-kind
+           pour l'appel de depublication ; seul le libelle change. #}
+        {% set libelles_type = {
+          'storymap': 'Récit cartographique',
+          'assembly': 'Page publiée',
+          'component': 'Élément de page',
+          'dataset': 'Jeu de données',
+          'features': 'Données de carte',
+          'features_pmtiles': 'Données de carte',
+          'pdf': 'Document PDF',
+          'flux': 'Projet cartographique',
+          'recipe': 'Recette',
+        } %}
+        {# Les fichiers de donnees d'une carte publiee (features*) ne sont
+           pas des livrables pour le lecteur : ils sont replies par defaut. #}
+        {% set types_techniques = ['features', 'features_pmtiles'] %}
+        {% set nb_techniques = catalog_items|selectattr('kind', 'in', types_techniques)|list|length %}
         <div class="qs-tableau">
-        <table>
+        <table class="liv-table">
+          <caption class="qs-sr">Livrables publiés de l'étude, avec leurs actions</caption>
           <thead>
-            <tr><th>Type</th><th>Slug</th><th>Étude</th><th>Taille</th><th>Date</th><th>Lien</th><th>Actions</th></tr>
+            <tr><th scope="col">Livrable</th><th scope="col">Publié le</th><th scope="col"><span class="qs-sr">Actions</span></th></tr>
           </thead>
           <tbody>
             {% for item in catalog_items %}
-            <tr data-slug="{{ item.slug }}" data-kind="{{ item.kind }}">
-              <td><span class="qs-pastille qs-pastille--sm qs-pastille--info">{{ item.kind }}</span></td>
-              <td>{{ item.slug }}</td>
+            {% set titre = item.title or (item.slug|replace('_', ' ')|replace('-', ' ')|capitalize) %}
+            {% set technique = item.kind in types_techniques %}
+            <tr data-slug="{{ item.slug }}" data-kind="{{ item.kind }}" data-titre="{{ titre }}"
+                {% if technique %}class="liv-technique" hidden{% endif %}>
               <td>
-                {% if item.study_id and item.study_id in study_names %}
-                  <span class="qs-pastille qs-pastille--sm"
-                        style="background:var(--qs-alerte-pale);color:var(--qs-alerte)"
-                        title="Étude : {{ study_names[item.study_id] }}">
-                    {{ study_names[item.study_id] }}
-                  </span>
-                {% elif item.study_id %}
-                  <span class="qs-texte--sm" style="opacity:.55">{{ item.study_id }}</span>
-                {% else %}
-                  <span class="qs-texte--sm" style="opacity:.55">—</span>
-                {% endif %}
+                <span class="liv-titre" title="{{ titre }}">{{ titre }}</span>
+                <span class="liv-sous">
+                  <span class="qs-pastille qs-pastille--sm qs-pastille--info">{{ libelles_type.get(item.kind, 'Publication') }}</span>
+                  {% if item.study_id and item.study_id != active_study_id and item.study_id in study_names %}
+                  <span class="qs-texte--sm qs-discret">{{ study_names[item.study_id] }}</span>
+                  {% endif %}
+                </span>
               </td>
-              <td>{{ item.size_kb }} ko</td>
-              <td>{{ item.date }}</td>
-              <td><a href="{{ item.hub_url }}" target="_blank" class="qs-lien">Ouvrir →</a></td>
               <td>
-                <button type="button" class="qs-btn qs-btn--nu qs-btn--sm ic-supprimer qs-btn--icone-gauche"
-                        onclick="unpublishArtifact('{{ item.kind }}', '{{ item.slug }}', this)"
-                        title="Dépublier ce livrable (suppression S3 + catalogue). Action irréversible.">
-                  Dépublier
-                </button>
+                <span class="liv-date">{{ item.date }}</span>
+                {% if item.size_kb %}<span class="liv-taille">{{ item.size_kb }} ko</span>{% endif %}
+              </td>
+              <td>
+                <span class="liv-actions">
+                  <a href="{{ item.hub_url }}" target="_blank" rel="noopener"
+                     class="qs-btn qs-btn--nu qs-btn--sm ic-lien-externe"
+                     title="Ouvrir dans un nouvel onglet"
+                     aria-label="Ouvrir « {{ titre }} » (nouvel onglet)"></a>
+                  <button type="button" class="qs-btn qs-btn--nu qs-btn--sm ic-copier js-copier-lien"
+                          data-url="{{ item.hub_url }}"
+                          title="Copier le lien à partager"
+                          aria-label="Copier le lien de « {{ titre }} »"></button>
+                  <button type="button" class="qs-btn qs-btn--nu qs-btn--sm ic-supprimer liv-danger js-depublier"
+                          title="Dépublier : le lien cessera de fonctionner"
+                          aria-label="Dépublier « {{ titre }} »"></button>
+                </span>
               </td>
             </tr>
             {% endfor %}
           </tbody>
         </table>
         </div>
+        {% if nb_techniques %}
+        <p class="liv-plus">
+          <button type="button" id="liv-techniques-btn" aria-expanded="false"
+                  data-libelle="Afficher aussi {{ nb_techniques }} fichier{{ 's' if nb_techniques > 1 }} de données de carte"
+                  onclick="basculerTechniques(this)">
+            Afficher aussi {{ nb_techniques }} fichier{{ 's' if nb_techniques > 1 }} de données de carte
+          </button>
+        </p>
+        {% endif %}
         <script>
-        async function unpublishArtifact(kind, slug, btn) {
-          if (!confirm(`Dépublier « ${slug} » (${kind}) ?\n\nLe fichier sera supprimé du stockage S3 et retiré du catalogue. Cette action est irréversible.`)) {
-            return;
-          }
-          btn.disabled = true;
-          btn.textContent = '⏳ Suppression…';
-          try {
-            const r = await fetch(`/publish/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}`, {
-              method: 'DELETE',
-              credentials: 'include',
-            });
-            if (r.status === 204 || r.ok) {
-              const tr = btn.closest('tr');
-              tr.style.transition = 'opacity .3s';
-              tr.style.opacity = '0';
-              setTimeout(() => tr.remove(), 300);
-            } else {
-              const txt = await r.text();
-              alert(`Échec de la dépublication (HTTP ${r.status}) : ${txt.slice(0, 200)}`);
-              btn.disabled = false;
-              btn.textContent = 'Dépublier';
-            }
-          } catch (e) {
-            alert(`Erreur réseau : ${e.message || e}`);
-            btn.disabled = false;
-            btn.textContent = 'Dépublier';
-          }
+        /* Depublier : confirmation, puis suppression DIFFEREE. La ligne
+           disparait tout de suite et un message propose « Annuler » pendant
+           8 s ; la requete DELETE ne part qu'a l'expiration. Si la page est
+           quittee entre-temps, la depublication est envoyee quand meme
+           (keepalive) : l'utilisateur l'a confirmee. */
+        const _depublicationsEnAttente = new Map();
+
+        function _envoyerDepublication(kind, slug, keepalive) {
+          return fetch(`/publish/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}`, {
+            method: 'DELETE', credentials: 'include', keepalive: !!keepalive,
+          });
         }
+
+        function _techniquesVisibles() {
+          const b = document.getElementById('liv-techniques-btn');
+          return !!b && b.getAttribute('aria-expanded') === 'true';
+        }
+
+        async function depublier(btn) {
+          const tr = btn.closest('tr');
+          const kind = tr.dataset.kind, slug = tr.dataset.slug, titre = tr.dataset.titre;
+          const donnees = kind === 'features' || kind === 'features_pmtiles';
+          const ok = await qsConfirmer({
+            titre: `Dépublier « ${titre} » ?`,
+            message: (donnees
+              ? "Les cartes publiées qui affichent ces données risquent de s'afficher vides.\n"
+              : "Le lien cessera de fonctionner pour toutes les personnes à qui tu l'as transmis.\n")
+              + "Tu pourras annuler pendant quelques secondes.",
+            confirmer: 'Dépublier',
+            danger: true,
+          });
+          if (!ok) return;
+          const cle = kind + '/' + slug;
+          tr.hidden = true;
+          _depublicationsEnAttente.set(cle, {kind, slug});
+          qsToast(`« ${titre} » dépublié.`, {
+            action: 'Annuler',
+            surAction: () => {
+              _depublicationsEnAttente.delete(cle);
+              tr.hidden = tr.classList.contains('liv-technique') && !_techniquesVisibles();
+              qsToast('Dépublication annulée : le lien reste actif.', {type: 'info'});
+              if (!tr.hidden) tr.querySelector('.js-depublier')?.focus();
+            },
+            surFin: async () => {
+              if (!_depublicationsEnAttente.has(cle)) return;
+              _depublicationsEnAttente.delete(cle);
+              try {
+                const r = await _envoyerDepublication(kind, slug, false);
+                if (r.status === 204 || r.ok) {
+                  tr.remove();
+                } else {
+                  tr.hidden = false;
+                  qsToast(`La dépublication de « ${titre} » a échoué (erreur ${r.status}). Le lien reste actif.`, {type: 'erreur'});
+                }
+              } catch (e) {
+                tr.hidden = false;
+                qsToast(`Connexion perdue : « ${titre} » n'a pas été dépublié.`, {type: 'erreur'});
+              }
+            },
+          });
+        }
+
+        window.addEventListener('pagehide', () => {
+          _depublicationsEnAttente.forEach(({kind, slug}) => {
+            try { _envoyerDepublication(kind, slug, true); } catch (e) { /* page en fermeture */ }
+          });
+          _depublicationsEnAttente.clear();
+        });
+
+        function basculerTechniques(btn) {
+          const ouvert = btn.getAttribute('aria-expanded') !== 'true';
+          btn.setAttribute('aria-expanded', String(ouvert));
+          document.querySelectorAll('tr.liv-technique').forEach(tr => {
+            if (_depublicationsEnAttente.has(tr.dataset.kind + '/' + tr.dataset.slug)) return;
+            tr.hidden = !ouvert;
+          });
+          btn.textContent = ouvert ? 'Masquer les fichiers de données de carte' : btn.dataset.libelle;
+        }
+
+        document.addEventListener('click', async (e) => {
+          const dep = e.target.closest('.js-depublier');
+          if (dep) { depublier(dep); return; }
+          const cop = e.target.closest('.js-copier-lien');
+          if (cop) {
+            const url = new URL(cop.dataset.url, location.origin).href;
+            const ok = await qsCopier(url);
+            qsToast(ok ? 'Lien copié : tu peux le coller dans un courriel ou un message.'
+                       : "Copie impossible : ouvre le livrable et copie l'adresse affichée par le navigateur.",
+                    {type: ok ? 'succes' : 'erreur'});
+          }
+        });
         </script>
         {% else %}
         <div class="empty-state">
@@ -454,8 +602,9 @@
           Tu en as {{ catalog_total }} au total —
           <a href="/published/{{ username }}/">voir toutes mes publications</a>.
           {% else %}
-          Aucune publication pour l'instant. Demande à l'agent dans le bureau
-          de publier une storymap ou un PDF pour faire apparaître les livrables ici.
+          Aucune publication pour l'instant. Dans le bureau, demande à
+          l'assistant de publier une carte, un récit ou un document PDF :
+          il apparaîtra ici avec son lien à partager.
           {% endif %}
         </div>
         {% endif %}
@@ -473,7 +622,7 @@
         <div class="memo-grid">
           {% if preferences %}
           <div class="memo-card">
-            <h3><span class="ic-signet ic--sm" aria-hidden="true"></span> Préférences explicites</h3>
+            <h3><span class="ic-signet ic--sm" aria-hidden="true"></span> Tes préférences</h3>
             <ul>
               {% for k, v in preferences.items() %}
               <li><strong>{{ k }}</strong> : {{ v }}</li>
@@ -483,7 +632,7 @@
           {% endif %}
           {% if insights %}
           <div class="memo-card">
-            <h3><span class="ic-ampoule ic--sm" aria-hidden="true"></span> Insights agentiques</h3>
+            <h3><span class="ic-ampoule ic--sm" aria-hidden="true"></span> Ce que l'agent a remarqué</h3>
             <ul>
               {% for ins in insights[:10] %}
               <li><strong>{{ ins.key }}</strong> : {{ ins.value }}</li>
@@ -527,8 +676,8 @@
                     font-size:11.5px;word-break:break-all">
           <div id="hub-api-key-value">{{ hub_api_key }}</div>
         </div>
-        <button type="button" class="qs-btn qs-btn--sm qs-btn--secondaire"
-                onclick="navigator.clipboard.writeText(document.getElementById('hub-api-key-value').textContent).then(()=>this.textContent='Clé copiée')">
+        <button type="button" class="qs-btn qs-btn--sm qs-btn--secondaire ic-copier"
+                onclick="qsCopier(document.getElementById('hub-api-key-value').textContent.trim()).then(ok => qsToast(ok ? 'Clé copiée.' : 'Copie impossible : sélectionne la clé et copie-la.', {type: ok ? 'succes' : 'erreur'}))">
           Copier la clé
         </button>
         <p style="margin:10px 0 0;color:#666;font-size:11px">
@@ -559,7 +708,7 @@
         </form>
         <p style="margin:8px 0 0;color:#666;font-size:11px">
           Récupère-la sur
-          <a href="https://llm.lab.sspcloud.fr" target="_blank" rel="noopener">llm.lab.sspcloud.fr</a>
+          <a href="https://llm.lab.sspcloud.fr" target="_blank" rel="noopener">llm.lab.sspcloud.fr<span class="qs-sr"> (nouvel onglet)</span></a>
           (onglet API keys).
         </p>
       </section>
@@ -581,11 +730,11 @@
     <ul class="qs-pied__liste">
       <li class="qs-pied__item">
         <a class="qs-pied__lien" target="_blank" rel="noopener external"
-           href="https://lab.sspcloud.fr">SSPCloud</a>
+           href="https://lab.sspcloud.fr">SSPCloud<span class="qs-sr"> (nouvel onglet)</span></a>
       </li>
       <li class="qs-pied__item">
         <a class="qs-pied__lien" target="_blank" rel="noopener external"
-           href="https://github.com/nic01asFr/Qgis-sspcloud">GitHub source</a>
+           href="https://github.com/nic01asFr/Qgis-sspcloud">Code source<span class="qs-sr"> (nouvel onglet)</span></a>
       </li>
     </ul>
   </div>
@@ -595,15 +744,16 @@
     <a class="qs-pied__bas-lien" href="/desk">Bureau de travail</a>
   </li>
   <li class="qs-pied__bas-item">
-    <a class="qs-pied__bas-lien" href="{{ agent_url }}" target="_blank" rel="noopener">Agent IA seul ↗</a>
+    <a class="qs-pied__bas-lien" href="{{ agent_url }}" target="_blank" rel="noopener"
+       title="L'assistant en pleine page, sans la carte (nouvel onglet)">Agent IA seul ↗<span class="qs-sr"> (nouvel onglet)</span></a>
   </li>
   <li class="qs-pied__bas-item">
     <a class="qs-pied__bas-lien" target="_blank" rel="noopener external"
-       href="https://github.com/nic01asFr/Qgis-sspcloud/blob/main/LICENSE.md">Licence ouverte 2.0</a>
+       href="https://github.com/nic01asFr/Qgis-sspcloud/blob/main/LICENSE.md">Licence ouverte 2.0<span class="qs-sr"> (nouvel onglet)</span></a>
   </li>
   <li class="qs-pied__bas-item">
     <a class="qs-pied__bas-lien" target="_blank" rel="noopener external"
-       href="https://github.com/nic01asFr/Qgis-sspcloud/issues">Signaler un problème</a>
+       href="https://github.com/nic01asFr/Qgis-sspcloud/issues">Signaler un problème<span class="qs-sr"> (nouvel onglet)</span></a>
   </li>
 </ul></div>
 </div></footer>
@@ -624,24 +774,35 @@ function basculerMenuCompte(e) {
   const ouvert = menu.hidden;
   menu.hidden = !ouvert;
   btn.setAttribute('aria-expanded', String(ouvert));
+  // Ouvert au clavier (detail 0) : le focus entre dans le menu, les fleches
+  // le parcourent (produit.js). A la souris, on ne deplace rien.
+  if (ouvert && e.detail === 0) menu.querySelector('[role="menuitem"]')?.focus();
 }
 
+let _compteOuvertDepuis = null;
 function fermerCompte() {
   const modale = document.getElementById('compte-modale');
-  if (modale) modale.hidden = true;
+  if (!modale || modale.hidden) return;
+  modale.hidden = true;
+  // Le focus revient a l'element qui a ouvert la fenetre (WCAG 2.4.3).
+  (_compteOuvertDepuis || document.getElementById('compte-btn'))?.focus();
+  _compteOuvertDepuis = null;
 }
 
 function ouvrirCompte(section) {
+  const depuis = document.activeElement;
   fermerMenuCompte();
   const modale = document.getElementById('compte-modale');
   if (!modale) return;
+  _compteOuvertDepuis = (depuis && depuis.closest('#compte-menu'))
+    ? document.getElementById('compte-btn') : depuis;
   modale.hidden = false;
   const cible = modale.querySelector(`[data-section="${section}"]`);
-  if (cible) cible.scrollIntoView({behavior: 'smooth', block: 'nearest'});
-  if (section === 'assistant') {
-    const input = document.getElementById('llm_key_input');
-    if (input) setTimeout(() => input.focus(), 50);
-  }
+  if (cible) cible.scrollIntoView({block: 'nearest'});
+  const champ = section === 'assistant'
+    ? document.getElementById('llm_key_input')
+    : modale.querySelector('.qs-modale__fermer');
+  if (champ) setTimeout(() => champ.focus(), 50);
 }
 
 document.addEventListener('click', (e) => {
@@ -649,9 +810,68 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
+  if (e.key !== 'Escape') return;
+  const menu = document.getElementById('compte-menu');
+  if (menu && !menu.hidden) {
     fermerMenuCompte();
-    fermerCompte();
+    document.getElementById('compte-btn')?.focus();
+    return;
+  }
+  fermerCompte();
+});
+
+/* Archiver / restaurer : la boite de confirmation du produit remplace
+   confirm(), et le retour sur la page propose d'annuler. Le formulaire
+   reste un POST classique : sans JavaScript, l'action fonctionne encore. */
+const _CLE_ACTION_ETUDE = 'qs-derniere-action-etude';
+
+document.querySelectorAll('form.js-archiver').forEach((form) => {
+  form.addEventListener('submit', async (e) => {
+    if (form.dataset.confirme === '1') return;
+    e.preventDefault();
+    if (typeof qsConfirmer !== 'function') { form.dataset.confirme = '1'; form.submit(); return; }
+    const nom = form.dataset.nom;
+    const ok = await qsConfirmer({
+      titre: `Archiver « ${nom} » ?`,
+      message: "L'étude quitte ta liste, mais rien n'est supprimé : "
+        + "tu pourras la restaurer à tout moment depuis « Études archivées ».",
+      confirmer: 'Archiver',
+    });
+    if (!ok) return;
+    try {
+      sessionStorage.setItem(_CLE_ACTION_ETUDE,
+        JSON.stringify({action: 'archive', sid: form.dataset.sid, nom}));
+    } catch (err) { /* stockage refuse : pas de message d'annulation */ }
+    form.dataset.confirme = '1';
+    form.submit();
+  });
+});
+
+document.querySelectorAll('form.js-restaurer').forEach((form) => {
+  form.addEventListener('submit', () => {
+    try {
+      sessionStorage.setItem(_CLE_ACTION_ETUDE,
+        JSON.stringify({action: 'restore', sid: form.dataset.sid, nom: form.dataset.nom}));
+    } catch (err) { /* sans consequence */ }
+  });
+});
+
+window.addEventListener('DOMContentLoaded', () => {
+  let derniere = null;
+  try {
+    derniere = JSON.parse(sessionStorage.getItem(_CLE_ACTION_ETUDE) || 'null');
+    sessionStorage.removeItem(_CLE_ACTION_ETUDE);
+  } catch (err) { derniere = null; }
+  if (!derniere || typeof qsToast !== 'function') return;
+  if (new URLSearchParams(location.search).has('error')) return;  // l'alerte parle deja
+  if (derniere.action === 'archive') {
+    const restaurer = document.getElementById('restaurer-' + derniere.sid);
+    qsToast(`« ${derniere.nom} » archivée.`, restaurer ? {
+      action: 'Annuler',
+      surAction: () => restaurer.requestSubmit ? restaurer.requestSubmit() : restaurer.submit(),
+    } : {});
+  } else if (derniere.action === 'restore') {
+    qsToast(`« ${derniere.nom} » est de retour dans tes études.`);
   }
 });
 </script>
