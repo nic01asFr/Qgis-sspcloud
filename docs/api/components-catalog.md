@@ -1,7 +1,16 @@
 # API Catalogue Composants & Assemblages — qgis-sspcloud
 
-> Contrat externe livré pour consommateurs cross-écosystème CEREMA (Atlas
-> widget Grist, ZEBRA, MobSciDat, panoramax3d, Strate, geoai-kit).
+> Contrat externe livré pour consommateurs cross-écosystème CEREMA (ZEBRA,
+> MobSciDat, panoramax3d, Strate, geoai-kit).
+>
+> **Atlas n'est pas un client de ce catalogue** (mise au point 2026-09-26).
+> Atlas (widget Grist, `Widgets-Grist/published/atlas/`, 1.9.0) ne lit que des
+> Scene Manifest 0.2.2 — dans la table `SceneManifest` d'un document Grist, ou
+> par `?scene=<url https>` hors document — et ne présente aucune identité au
+> hub : il ne peut ni appeler `/catalog/*` (authentifié), ni lire une
+> publication non `public`. C'est le hub qui embarque Atlas
+> (`rendering.runtime: "atlas"`), pas l'inverse. Voir
+> `docs/superpowers/specs/2026-09-26-atlas-livrables-diffusion-acces.md`.
 >
 > **Vague E1** (D-QGIS-009, 2026-06-29) — Tag `v1.6.5-vague-e1-composition-libre`
 
@@ -160,7 +169,7 @@ AVANT chaque create_component, l'agent IA DOIT :
    - publish_assembly → URL hub
 ```
 
-### Use case 2 — ZEBRA publie un composant pour Atlas widget Grist
+### Use case 2 — ZEBRA publie un composant, réutilisé dans un livrable
 
 ```
 1. ZEBRA détecte un risque sécurité piétons sur un carrefour
@@ -172,10 +181,16 @@ AVANT chaque create_component, l'agent IA DOIT :
      "source": {"scope": "external", "data_url": "s3://..."},
      "classification": "cerema_internal"
    }
-3. Atlas widget Grist GET /catalog/components?kind=interactive_map
+3. Un agent ou un auteur authentifié GET /catalog/components?kind=interactive_map
    → trouve le composant ZEBRA via cross-étude
-4. Atlas embarque iframe /published/zebra/component/{slug}
+4. Il le référence dans un assemblage ({ref: cid}), ou l'intègre en iframe
+   /published/zebra/component/{slug} — lisible hors session hub seulement
+   si l'audience est `public`.
 ```
+
+Ce cas ne passe pas par Atlas. Pour montrer une scène dans Atlas, on lui
+donne une scène (`?scene=<url https lisible sans connexion>`), pas un
+composant du catalogue.
 
 ### Use case 3 — Marketplace de templates
 
@@ -231,8 +246,10 @@ GET /studies/{sid}/assemblies/{aid}/history
 - Endpoints `/catalog/*` : auth obligatoire (cookie OIDC, Bearer scoped key,
   ou API key)
 - `audience='public'` strict : composants exposés sans login
-- CSP B5 sur `/published/...` : `frame-ancestors *` permet iframe Atlas
-  widget Grist + sites tiers CEREMA
+- CSP B5 sur `/published/...` : `frame-ancestors *` permet l'iframe par
+  une page tierce (site CEREMA, page Grist). L'iframe n'ouvre pas les
+  droits : hors session hub, seule l'audience `public` s'affiche, et seule
+  elle porte `Access-Control-Allow-Origin` (lecture d'une scène par Atlas)
 - Anti-fuite RGPD : default `cerema_internal` partout, discipline système
   prompt v15 anti-publication accidentelle
 

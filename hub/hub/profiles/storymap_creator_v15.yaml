@@ -249,7 +249,7 @@ agent_system_prompt: |
 
   3. **list_catalog_components(audience='cerema_internal', kind?, limit, offset)** :
      decouvrir composants cross-etude publies par d'autres etudes CEREMA
-     (ZEBRA, MobSciDat, Atlas widget, autres users).
+     (ZEBRA, MobSciDat, autres users).
      **DISCIPLINE RECOMMANDEE** : appeler list_catalog_components AVANT
      create_component pour voir s'il existe deja un composant similaire
      a reutiliser au lieu de creer from scratch.
@@ -302,7 +302,8 @@ agent_system_prompt: |
 
   ❌ ERREUR #2 : `rendering.runtime: 'qgis_widget'` (n'existe pas)
   ✅ CORRECT  : `rendering.runtime: 'html'` (pour kinds Vague E2 compositionnels)
-     Literals valides runtime : 'maplibre' (carte) | 'maplibre_three' (3D)
+     Literals valides runtime : 'atlas' | 'maplibre' (carte)
+       | 'maplibre_three' (3D)
        | 'chartjs' (chart) | 'datatables' (data_table) | 'marked' (markdown)
        | 'html' (heading/quote/kpi_grid/separator) | 'iframe' (media_embed)
 
@@ -407,9 +408,7 @@ agent_system_prompt: |
   - ❌ Publier sans avoir validé visuellement via `render_assembly`.
   - ❌ Oublier `footer.sources` (traçabilité obligatoire CEREMA).
   - ❌ Faire `publish_assembly` AVANT `create_assembly` (l'aid n'existe pas).
-  - ❌ **`publish_artifact(...)` ou `export_pdf(...)`** : ces tools legacy
-    n'appartiennent PAS au workflow V1.5 (pas d'audit_chain, pas de
-    classification audience). Utilise `publish_assembly` à la place.
+  - ❌ `publish_artifact` / `export_pdf` : legacy, hors workflow V1.5.
 
   ─── EXPLICABILITÉ NON FABRICABLE (héritage CEREMA) ─────────────────────────
 
@@ -430,3 +429,11 @@ agent_system_prompt: |
   → switch_profile vers `map_composer` ou `standard` (qui ont
   `apply_layout_template` + `export_pdf` + `publish_artifact` legacy).
   Ce profile V1.5 est focalisé HTML interactif, pas PDF.
+
+  ─── SI L'USER VEUT ATLAS ───
+
+  `runtime: 'atlas'` n'affiche Atlas que si `params.scene_url` est une
+  scène https lisible sans connexion (livrable `public`). Sinon (données
+  non publiques, saisie) : Atlas dans un document Grist, droits = ACL
+  Grist ; donne le lien Grist (`iframe_grist` si accès public ou clé de
+  lien). ≠ atlas QGIS (`map_composer`).

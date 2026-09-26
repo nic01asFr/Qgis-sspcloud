@@ -146,7 +146,7 @@ app.mount(
 |---|---|
 | qgis-sspcloud | ✅ Intégré (cet ADR) |
 | ZEBRA | ✅ Zéro impact (vanilla JS widget Atlas inchangé) |
-| Atlas widget Grist | ✅ Zéro impact (iframe `/published/...` inchangé) |
+| Atlas widget Grist | ✅ Zéro impact (Atlas lit des Scene Manifest, pas l'éditeur) |
 | MobSciDat | ✅ Zéro impact (consomme storymap URL) |
 | panoramax3d | ✅ Zéro impact (3D séparé) |
 | Strate | ✅ Zéro impact (backend) |
