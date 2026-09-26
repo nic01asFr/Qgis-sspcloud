@@ -12664,6 +12664,19 @@ async def _proxy_request(
         if obj is not None:
             method = obj.get("method")
             if method == "tools/call":
+                # Le scope s'applique a TOUT appel, avant de savoir qui le sert.
+                #
+                # Constate le 2026-09-26 (audit agents dedies) : le gate n'etait
+                # pose que sur les outils du workspace. Les outils hub
+                # (study_switch, study_create, study_project_*) partaient au
+                # dispatch local sans controle : une cle scopee, emise pour un
+                # agent partage, pouvait changer ou creer des etudes sur le
+                # compte de son proprietaire. tools/list les filtrait deja :
+                # l'outil etait invisible, mais appelable.
+                if whitelist is not None:
+                    denied = _tool_call_denied(obj, whitelist)
+                    if denied is not None:
+                        return denied
                 # Detecter si c'est un hub-tool (study_*) avant de forward workspace
                 try:
                     from hub.mcp_hub_tools import is_hub_tool
@@ -12677,12 +12690,8 @@ async def _proxy_request(
                 except Exception as _hub_import_exc:
                     log.warning("hub_tools import failed : %s", _hub_import_exc)
                 if _hub_tool_dispatch is None:
-                    # Tool workspace normal : gate whitelist + flag rewrite URLs
+                    # Tool workspace normal : rewrite URLs (le gate est en tete).
                     _rewrite_urls_response = True
-                    if whitelist is not None:
-                        denied = _tool_call_denied(obj, whitelist)
-                        if denied is not None:
-                            return denied
             elif method == "tools/list":
                 # Toujours bufferiser pour merger hub-tools + optionnel filter whitelist
                 _merge_hub_tools_in_list = True
