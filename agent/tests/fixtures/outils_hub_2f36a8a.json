@@ -1,0 +1,1290 @@
+[
+ {
+  "name": "qgis_desktop_ui",
+  "description": "Open the interactive QGIS Desktop view. Shows the live QGIS map canvas directly in the conversation. Use this when the user wants to see or interact with the map, validate results visually, or make manual adjustments.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  },
+  "_meta": {
+   "ui": {
+    "resourceUri": "ui://qgisremotemcp/qgis-desktop"
+   }
+  }
+ },
+ {
+  "name": "execute_python",
+  "description": "Execute Python/PyQGIS code inside the running QGIS instance. The script has access to qgis.core.*, iface, processing.run(), project = QgsProject.instance(), canvas = iface.mapCanvas(). A `helpers` module is available with ready-made functions: helpers.geocode(addr), helpers.add_wfs(url, typename, bbox), helpers.add_wms(url, layers), helpers.add_wmts(url, layers), helpers.add_xyz(url, name), helpers.zoom_to(target), helpers.create_point_layer(name, points), helpers.load_catalog_source(id), helpers.bbox_from_canvas(), helpers.search_commune(name), helpers.get_elevation(lon, lat). Store return values in the `result` dict. Read skill://helpers for full reference. Les couches creees par le script recoivent un bloc `verification` (compte, emprise, origine, `lecture` en clair) : lis-le. Avant d'ecrire du code, verifie qu'un outil ne couvre pas le besoin (smart_load, clip_to_study_zone, run_processing).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "code": {
+     "type": "string",
+     "description": "Python code to execute inside QGIS"
+    },
+    "timeout": {
+     "type": "integer",
+     "description": "Execution timeout in seconds (default 60). Increase for long-running spatial operations.",
+     "default": 60
+    }
+   },
+   "required": [
+    "code"
+   ]
+  }
+ },
+ {
+  "name": "execute_async",
+  "description": "Submit a long-running bridge action (typically execute_python) for background execution and return a job_id immediately. Poll with poll_job(job_id) to track progress and retrieve the result. Use this for anything expected to take >30s: heavy native:difference, extractbylocation on 50k+ features, smart_load with large bbox, multi-step scripts. The bridge streams heartbeats so qt_lag_ms and stale heartbeats detect a frozen QGIS main thread without waiting for a timeout.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "action": {
+     "type": "string",
+     "description": "Bridge action to run (default 'execute_python')",
+     "default": "execute_python"
+    },
+    "code": {
+     "type": "string",
+     "description": "Python code when action is execute_python"
+    },
+    "params": {
+     "type": "object",
+     "description": "Params for the action (for non-execute_python actions). Ignored when 'code' is provided.",
+     "default": {}
+    },
+    "timeout": {
+     "type": "integer",
+     "description": "Server-side timeout in seconds (default 600)",
+     "default": 600
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "poll_job",
+  "description": "Check the status of a job submitted with execute_async. Returns status ('queued'|'running'|'qt_frozen'|'done'|'error'|'cancelled'|'dropped'|'bridge_unreachable'), heartbeat_age_s, qt_lag_ms, probably_frozen, stage, and — when status=='done' — the full result. If heartbeat_age_s > 10s, a status probe is run against the bridge to distinguish a frozen Qt thread from a dead bridge.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "job_id": {
+     "type": "string",
+     "description": "Job ID returned by execute_async"
+    }
+   },
+   "required": [
+    "job_id"
+   ]
+  }
+ },
+ {
+  "name": "cancel_job",
+  "description": "Best-effort cancel of a job. Effective only if the job is still queued on the bridge; once it has been dispatched to the Qt main thread it cannot be interrupted and the response will be 'already_dispatched_cannot_cancel'.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "job_id": {
+     "type": "string",
+     "description": "Job ID to cancel"
+    }
+   },
+   "required": [
+    "job_id"
+   ]
+  }
+ },
+ {
+  "name": "get_screenshot",
+  "description": "Capture the current QGIS desktop as a JPEG image (q<=75, <=1MB). Returns the screenshot inline.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "width": {
+     "type": "integer",
+     "description": "Image width (default 800)",
+     "default": 800
+    },
+    "height": {
+     "type": "integer",
+     "description": "Image height (default 600)",
+     "default": 600
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "get_project_info",
+  "description": "Get information about the current QGIS project: title, CRS, layers, print layouts. Chaque couche porte son `origine` : `fichier` (elle est sur disque -- `fichier` donne le chemin, `fichier_present` dit s'il existe encore), `service distant` (rien en local, telecharge avec smart_load avant de traiter), ou `memoire` (elle n'existe SUR AUCUN DISQUE et disparait au prochain redemarrage de QGIS -- typiquement le resultat d'un traitement : si l'utilisateur veut le garder, exporte-le avec export_layer dans les donnees de l'etude). Ne confonds pas une couche avec un fichier : list_files montre les fichiers de l'etude, dont beaucoup ne sont chargés dans aucune couche, et inversement.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "new_project",
+  "description": "Create a new empty QGIS project.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "title": {
+     "type": "string",
+     "default": "New Project"
+    },
+    "crs": {
+     "type": "string",
+     "description": "CRS (default EPSG:2154 Lambert 93)",
+     "default": "EPSG:2154"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "open_project",
+  "description": "Open an existing QGIS project file (.qgz or .qgs).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string",
+     "description": "Path to project file"
+    }
+   },
+   "required": [
+    "path"
+   ]
+  }
+ },
+ {
+  "name": "save_project",
+  "description": "Save the current QGIS project.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string",
+     "description": "Path (empty = current location)",
+     "default": ""
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "list_database_connections",
+  "description": "Liste les connexions de base de donnees ENREGISTREES DANS QGIS (PostGIS, SpatiaLite...). L'utilisateur declare sa base une fois dans QGIS (Couche > Ajouter une couche PostGIS > Nouveau) ; cet outil la lui rend visible et utilisable. Ne renvoie aucun mot de passe. Mettre include_tables=true pour lister aussi les tables.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "include_tables": {
+     "type": "boolean",
+     "description": "Lister aussi schemas et tables (plus lent : ouvre la connexion)",
+     "default": false
+    },
+    "schema": {
+     "type": "string",
+     "description": "Limiter la liste des tables a ce schema",
+     "default": ""
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "add_database_layer",
+  "description": "Charge une table d'une connexion de base enregistree dans QGIS. Utiliser list_database_connections d'abord pour connaitre les noms. Aucun identifiant n'est demande : on reutilise la connexion telle que l'utilisateur l'a declaree.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "connexion": {
+     "type": "string",
+     "description": "Nom de la connexion tel qu'enregistre dans QGIS"
+    },
+    "table": {
+     "type": "string",
+     "description": "Nom de la table"
+    },
+    "schema": {
+     "type": "string",
+     "description": "Schema (PostGIS)",
+     "default": "public"
+    },
+    "fournisseur": {
+     "type": "string",
+     "description": "postgres, spatialite, mssql, oracle, hana",
+     "default": "postgres"
+    },
+    "name": {
+     "type": "string",
+     "description": "Nom d'affichage de la couche",
+     "default": ""
+    }
+   },
+   "required": [
+    "connexion",
+    "table"
+   ]
+  }
+ },
+ {
+  "name": "add_layer",
+  "description": "Add a layer to the QGIS project. Supports vector (GeoJSON, SHP, GPKG), raster (GeoTIFF, COG), WFS, WMS.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "uri": {
+     "type": "string",
+     "description": "Data source URI"
+    },
+    "name": {
+     "type": "string",
+     "description": "Display name",
+     "default": "layer"
+    },
+    "layer_type": {
+     "type": "string",
+     "enum": [
+      "vector",
+      "raster",
+      "wfs",
+      "wms"
+     ],
+     "default": "vector"
+    },
+    "provider": {
+     "type": "string",
+     "description": "Data provider override",
+     "default": ""
+    }
+   },
+   "required": [
+    "uri"
+   ]
+  }
+ },
+ {
+  "name": "remove_layer",
+  "description": "Remove a layer from the project.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "layer_id": {
+     "type": "string",
+     "description": "Layer ID"
+    }
+   },
+   "required": [
+    "layer_id"
+   ]
+  }
+ },
+ {
+  "name": "get_features",
+  "description": "Query features from a vector layer.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "layer_id": {
+     "type": "string"
+    },
+    "filter": {
+     "type": "string",
+     "description": "QGIS expression filter",
+     "default": ""
+    },
+    "limit": {
+     "type": "integer",
+     "default": 100
+    },
+    "include_geometry": {
+     "type": "boolean",
+     "default": true
+    }
+   },
+   "required": [
+    "layer_id"
+   ]
+  }
+ },
+ {
+  "name": "run_processing",
+  "description": "Execute a QGIS Processing algorithm (~730: native, qgis, gdal, grass, 3d; no SAGA). Chaque couche produite recoit un bloc `verification` (compte, emprise, CRS, origine, `lecture`, avertissement). Une sortie TEMPORARY_OUTPUT reste en memoire : export_layer pour la garder. Pour decouper a la commune, prefere clip_to_study_zone.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "algorithm": {
+     "type": "string",
+     "description": "Algorithm ID (e.g. native:buffer)"
+    },
+    "parameters": {
+     "type": "object",
+     "description": "Algorithm parameters"
+    }
+   },
+   "required": [
+    "algorithm",
+    "parameters"
+   ]
+  }
+ },
+ {
+  "name": "search_algorithms",
+  "description": "Search available QGIS Processing algorithms.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "search": {
+     "type": "string",
+     "default": ""
+    },
+    "provider": {
+     "type": "string",
+     "default": ""
+    },
+    "limit": {
+     "type": "integer",
+     "default": 20
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "zoom_to",
+  "description": "Zoom the map canvas to an extent or layer.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "extent": {
+     "type": "array",
+     "items": {
+      "type": "number"
+     },
+     "description": "[xmin, ymin, xmax, ymax]"
+    },
+    "layer_id": {
+     "type": "string",
+     "default": ""
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "export_pdf",
+  "description": "Export a QGIS print layout to PDF. Le PDF est range dans les exports de l'etude active et `download_url` s'ouvre directement depuis le navigateur de l'utilisateur. Pour qu'il figure AUSSI dans ses livrables, enchaine publish_artifact(kind=\"pdf\", slug=...).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "layout": {
+     "type": "string",
+     "description": "Print layout name"
+    },
+    "output_path": {
+     "type": "string",
+     "default": ""
+    }
+   },
+   "required": [
+    "layout"
+   ]
+  }
+ },
+ {
+  "name": "mouse_click",
+  "description": "Click at (x, y) on the QGIS desktop. Coordinates are in display pixels (1920x1080).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "x": {
+     "type": "integer",
+     "description": "X coordinate"
+    },
+    "y": {
+     "type": "integer",
+     "description": "Y coordinate"
+    },
+    "button": {
+     "type": "integer",
+     "description": "1=left, 2=middle, 3=right",
+     "default": 1
+    },
+    "double": {
+     "type": "boolean",
+     "description": "Double-click",
+     "default": false
+    }
+   },
+   "required": [
+    "x",
+    "y"
+   ]
+  }
+ },
+ {
+  "name": "mouse_scroll",
+  "description": "Scroll the mouse wheel at (x, y).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "x": {
+     "type": "integer"
+    },
+    "y": {
+     "type": "integer"
+    },
+    "direction": {
+     "type": "string",
+     "enum": [
+      "up",
+      "down"
+     ],
+     "default": "down"
+    },
+    "clicks": {
+     "type": "integer",
+     "default": 3
+    }
+   },
+   "required": [
+    "x",
+    "y"
+   ]
+  }
+ },
+ {
+  "name": "key_press",
+  "description": "Send a key press to QGIS. Examples: 'Return', 'ctrl+z', 'ctrl+shift+s', 'Delete'.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "key": {
+     "type": "string",
+     "description": "Key combo (xdotool syntax)"
+    }
+   },
+   "required": [
+    "key"
+   ]
+  }
+ },
+ {
+  "name": "mouse_drag",
+  "description": "Drag from (x1,y1) to (x2,y2) on the QGIS desktop.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "x1": {
+     "type": "integer"
+    },
+    "y1": {
+     "type": "integer"
+    },
+    "x2": {
+     "type": "integer"
+    },
+    "y2": {
+     "type": "integer"
+    },
+    "button": {
+     "type": "integer",
+     "default": 1
+    }
+   },
+   "required": [
+    "x1",
+    "y1",
+    "x2",
+    "y2"
+   ]
+  }
+ },
+ {
+  "name": "upload_file",
+  "description": "Upload a file into the QGIS container (/data/). Call with just 'name' to get the direct upload endpoint (multipart POST, any size up to 50MB). The user can then upload via: curl -F 'file=@local_file' <endpoint>. Alternatively provide 'url' for the server to fetch the file itself, or 'content_base64' for tiny inline files (<1MB).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Target filename in /data/ (e.g. 'parcels.geojson')"
+    },
+    "url": {
+     "type": "string",
+     "description": "URL the server will fetch directly. Any public URL, or http://host.docker.internal:<port>/file for local Docker setups."
+    },
+    "content_base64": {
+     "type": "string",
+     "description": "Base64-encoded content — only for tiny files (<1MB). Prefer url or multipart instead."
+    }
+   },
+   "required": [
+    "name"
+   ]
+  }
+ },
+ {
+  "name": "download_file",
+  "description": "Download a file from the QGIS container (/data/). Returns a download_url you can give to the user — they open it in their browser to save locally. Small files (<5MB) also include base64 inline.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string",
+     "description": "File path (e.g. '/data/export.gpkg')"
+    }
+   },
+   "required": [
+    "path"
+   ]
+  }
+ },
+ {
+  "name": "list_files",
+  "description": "List files under /data/. With no `directory`, lists /data AND the active study's data folder (/data/studies/{id}/data) -- what the user calls 'my files'. Crash dumps (core.*) are left out unless the pattern asks for them.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "pattern": {
+     "type": "string",
+     "description": "Glob pattern (default '*')",
+     "default": "*"
+    },
+    "directory": {
+     "type": "string",
+     "description": "Folder to list, must be under /data (e.g. /data/studies/<id>/data)"
+    },
+    "recursive": {
+     "type": "boolean",
+     "description": "Descend into subfolders (default false)",
+     "default": false
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "export_layer",
+  "description": "Export a vector layer to file (GPKG, GeoJSON, Shapefile, CSV). The file is saved to /data/ and can be downloaded.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "layer_id": {
+     "type": "string",
+     "description": "Layer ID to export"
+    },
+    "format": {
+     "type": "string",
+     "enum": [
+      "GPKG",
+      "GeoJSON",
+      "ESRI Shapefile",
+      "CSV"
+     ],
+     "default": "GPKG"
+    },
+    "name": {
+     "type": "string",
+     "description": "Output filename (without extension)",
+     "default": ""
+    }
+   },
+   "required": [
+    "layer_id"
+   ]
+  }
+ },
+ {
+  "name": "download_project",
+  "description": "Save the current QGIS project as .qgz and make it available for download.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Project filename (without .qgz)",
+     "default": "project"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "delete_file",
+  "description": "Delete a file from the QGIS container. Restricted to /data/.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string",
+     "description": "File path (e.g. '/data/export.gpkg')"
+    }
+   },
+   "required": [
+    "path"
+   ]
+  }
+ },
+ {
+  "name": "list_datasources",
+  "description": "List available pre-configured data sources (IGN, OSM, BD TOPO, etc.). All French national sources are free, no API key needed.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "category": {
+     "type": "string",
+     "description": "Filter by category: basemap, imagery, topography, administrative, elevation, environment, api",
+     "default": ""
+    },
+    "search": {
+     "type": "string",
+     "description": "Search in name/description",
+     "default": ""
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "add_from_catalog",
+  "description": "Add a data source from the catalog by ID. Prefer smart_load, which this tool now follows for WFS sources: the features are downloaded as a local GeoPackage limited to the bbox (or the study zone), never served live. Raster sources (WMS/WMTS/XYZ) stream. Use list_datasources to see available IDs.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "Source ID from catalog (e.g. 'osm_xyz', 'bdtopo_batiments')"
+    },
+    "name": {
+     "type": "string",
+     "description": "Override display name",
+     "default": ""
+    },
+    "bbox": {
+     "type": "array",
+     "items": {
+      "type": "number"
+     },
+     "description": "[xmin, ymin, xmax, ymax] in EPSG:4326. Optional: the study zone is used when omitted."
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "set_study_zone",
+  "description": "Define the geographic study area. CALL THIS FIRST before loading WFS data. Geocodes the target, stores bbox in project variables (EPSG:4326 + EPSG:2154), and zooms the canvas. Subsequent smart_load calls auto-use this zone. Pour une commune ou un arrondissement (« Aix-en-Provence », « Marseille 4e »), le contour administratif est aussi memorise : clip_to_study_zone s'en sert. Une adresse, un point ou une emprise ne donnent qu'un rectangle.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "target": {
+     "type": "string",
+     "description": "Place name, address, or commune. Examples: 'Montpellier', 'Gare de Lyon, Paris', 'Sete'"
+    },
+    "buffer_km": {
+     "type": "number",
+     "description": "Buffer around point in km (default 2)",
+     "default": 2
+    }
+   },
+   "required": [
+    "target"
+   ]
+  }
+ },
+ {
+  "name": "get_study_zone",
+  "description": "Get the current study zone (name, bbox in EPSG:4326 and EPSG:2154). Returns the zone set by set_study_zone.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "clip_to_study_zone",
+  "description": "Decoupe une couche vecteur au CONTOUR administratif de la zone d'etude (commune ou arrondissement memorise par set_study_zone), pas au rectangle. Couche designee par layer_id ou par son nom exact (layer). A utiliser avant tout chiffre « dans la commune » : smart_load charge un rectangle qui deborde sur les communes voisines. Le resultat est un GeoPackage dans les donnees de l'etude, ajoute au projet, nomme <couche>_<zone> par defaut. Le retour porte un bloc `verification` (avant, apres, retirees, emprise, contour utilise, avertissement). Echoue en clair si la zone n'a pas de contour (emprise, point ou adresse) : redefinis-la alors avec le nom de la commune.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "layer_id": {
+     "type": "string",
+     "description": "ID de la couche vecteur a decouper"
+    },
+    "layer": {
+     "type": "string",
+     "description": "Ou son nom exact, s'il est unique"
+    },
+    "name": {
+     "type": "string",
+     "description": "Nom de la couche et du fichier produits (defaut : <couche>_<zone>, sans accent ni espace, ex. batiment_aix_en_provence)",
+     "default": ""
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "smart_load",
+  "description": "Load data from the catalog. WFS sources are downloaded as local GeoPackage via ogr2ogr (automatic pagination, R-tree spatial index, fast for Processing). Raster sources (WMS/WMTS/XYZ) stream as usual. Use set_study_zone first to define the area, or provide a bbox. Il gere les grandes emprises : une ville entiere passe (300 551 batiments sur Marseille, mesure), le resultat est mis en cache 24 h et porte un index spatial. N'ecris JAMAIS ton propre telechargement WFS en execute_python : la combinaison `-spat` + `-t_srs` que tu ecrirais naturellement rend ZERO entite sans erreur, et cet outil contourne deja ce piege. Si le retour porte un `avertissement` disant qu'aucune entite n'a ete trouvee, ne poursuis pas l'analyse : verifie l'emprise. Lis le bloc `verification` (compte local, `lecture` : ce que l'emprise compare) avant tout chiffre. Le chargement couvre un rectangle : pour un chiffre dans la commune, clip_to_study_zone ensuite.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "Catalog source ID (e.g. 'bdtopo_batiments', 'osm_xyz'). Use list_datasources to see available IDs."
+    },
+    "bbox": {
+     "type": "array",
+     "items": {
+      "type": "number"
+     },
+     "description": "Optional [xmin,ymin,xmax,ymax] in EPSG:4326. Auto from study zone if not provided."
+    },
+    "max_features": {
+     "type": "integer",
+     "description": "Plafond FACULTATIF du nombre d'entites. Par defaut AUCUN plafond : c'est l'emprise (bbox ou zone d'etude) qui borne le volume, et la pagination ogr2ogr rapatrie tout (52 000 entites / 39 Mo mesures). Ne poser ce parametre que pour brider volontairement un chargement."
+    },
+    "name": {
+     "type": "string",
+     "description": "Override display name",
+     "default": ""
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "set_layer_style",
+  "description": "Apply symbology to a vector layer. Supports single color, categorized (by field values), or graduated (numeric ranges).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "layer_id": {
+     "type": "string",
+     "description": "Layer ID"
+    },
+    "style_type": {
+     "type": "string",
+     "enum": [
+      "single",
+      "categorized",
+      "graduated"
+     ],
+     "default": "single"
+    },
+    "color": {
+     "type": "string",
+     "description": "Color as 'R,G,B,A' (e.g. '255,0,0,180') — for single style",
+     "default": "65,105,225,180"
+    },
+    "field": {
+     "type": "string",
+     "description": "Attribute field — for categorized/graduated",
+     "default": ""
+    },
+    "categories": {
+     "type": "object",
+     "description": "Map of value → {color, label} — for categorized style",
+     "default": {}
+    },
+    "ranges": {
+     "type": "array",
+     "description": "List of {min, max, color, label} — for graduated style",
+     "default": []
+    }
+   },
+   "required": [
+    "layer_id"
+   ]
+  }
+ },
+ {
+  "name": "set_layer_visibility",
+  "description": "Toggle a layer's visibility in the layer tree.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "layer_id": {
+     "type": "string",
+     "description": "Layer ID"
+    },
+    "visible": {
+     "type": "boolean",
+     "description": "Show (true) or hide (false)",
+     "default": true
+    }
+   },
+   "required": [
+    "layer_id"
+   ]
+  }
+ },
+ {
+  "name": "list_layout_templates",
+  "description": "List available print layout templates (A3 landscape, A4 portrait, etc.).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "apply_layout_template",
+  "description": "Apply a pre-configured print layout template (.qpt) with dynamic labels. Variables like title, subtitle are set as project variables and resolved via QGIS expressions [% @title %]. Use export_pdf after this to generate the PDF.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "template": {
+     "type": "string",
+     "description": "Template ID: 'a3_landscape' or 'a4_portrait'"
+    },
+    "variables": {
+     "type": "object",
+     "description": "Variables to set: {title, subtitle, ...}. 'study_zone_name' is auto-set by set_study_zone.",
+     "default": {}
+    },
+    "name": {
+     "type": "string",
+     "description": "Layout name override",
+     "default": ""
+    }
+   },
+   "required": [
+    "template"
+   ]
+  }
+ },
+ {
+  "name": "export_web_map",
+  "description": "Export visible vector layers as an interactive Leaflet HTML page. GeoJSON inline, popup attributes, legend with toggle. La page est rangee dans les exports de l'etude active et `download_url` s'ouvre directement depuis le navigateur de l'utilisateur. Pour qu'elle figure AUSSI dans ses livrables, enchaine publish_artifact(kind=\"storymap\", slug=...).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "title": {
+     "type": "string",
+     "description": "Map title (default: project title)",
+     "default": ""
+    },
+    "max_features": {
+     "type": "integer",
+     "description": "Max features per layer (default 5000)",
+     "default": 5000
+    },
+    "output_path": {
+     "type": "string",
+     "description": "Output path (default: /data/webmap_<timestamp>.html)",
+     "default": ""
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "export_flood_map",
+  "description": "Export an interactive flood simulation as a standalone Leaflet HTML page. Requires ISO_HT (water depth) and building layers loaded. Pre-computes building exposure by spatial intersection. The HTML includes a water height slider with play/pause animation, dynamic statistics, and graduated color legends. Best used after running the risque_inondation recipe. Rangee dans les exports de l'etude active ; `download_url` s'ouvre directement. Pour figurer AUSSI dans les livrables, enchaine publish_artifact(kind=\"storymap\", slug=...).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "title": {
+     "type": "string",
+     "description": "Map title (default: 'Simulation inondation — <zone>')",
+     "default": ""
+    },
+    "max_features": {
+     "type": "integer",
+     "description": "Max features per layer (default 10000)",
+     "default": 10000
+    },
+    "output_path": {
+     "type": "string",
+     "description": "Output path (default: /data/flood_map_<timestamp>.html)",
+     "default": ""
+    },
+    "include_fields": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Field names to include in GeoJSON (reduces file size). Omit to include all fields.",
+     "default": []
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "export_temporal_map",
+  "description": "Export an interactive temporal analysis as a standalone Leaflet HTML page. Shows point data (e.g. property transactions) with a year slider, color-coded by value, with optional spatial bands (e.g. coastal proximity) and animated playback. Pre-computes per-year statistics. Best used after running a temporal recipe (e.g. pression_fonciere_cotiere). Rangee dans les exports de l'etude active ; `download_url` s'ouvre directement. Pour figurer AUSSI dans les livrables, enchaine publish_artifact(kind=\"storymap\", slug=...).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "title": {
+     "type": "string",
+     "description": "Map title",
+     "default": ""
+    },
+    "max_features": {
+     "type": "integer",
+     "description": "Max point features to export",
+     "default": 15000
+    },
+    "output_path": {
+     "type": "string",
+     "description": "Output file path (auto-generated if empty)",
+     "default": ""
+    },
+    "point_layer_keyword": {
+     "type": "string",
+     "description": "Keyword to find point layer",
+     "default": "dvf"
+    },
+    "band_layer_keyword": {
+     "type": "string",
+     "description": "Keyword to find band polygons",
+     "default": "bande"
+    },
+    "extra_polygon_keywords": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Keywords for extra polygon layers",
+     "default": [
+      "submersion"
+     ]
+    },
+    "temporal_field": {
+     "type": "string",
+     "description": "Field name for time dimension",
+     "default": "year"
+    },
+    "value_field": {
+     "type": "string",
+     "description": "Field name for the value to color-code",
+     "default": "price_m2"
+    },
+    "band_field": {
+     "type": "string",
+     "description": "Field name for spatial band assignment",
+     "default": "coastal_band"
+    },
+    "include_fields": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Field names to include in GeoJSON output",
+     "default": []
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "export_qfield",
+  "description": "Export the current QGIS project as a QField-ready package (ZIP). Contains .qgz with relative GPKG sources + all vector layers materialized as individual GPKGs. Optionally includes an editable Observations layer with QField-compatible form widgets (dropdowns, date picker, camera/photo) for field data collection.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "project_name": {
+     "type": "string",
+     "description": "Name for the exported project (default: current project name)"
+    },
+    "include_observations_layer": {
+     "type": "boolean",
+     "description": "Add an editable Observations layer for field data collection (default: true)",
+     "default": true
+    },
+    "max_features_per_layer": {
+     "type": "integer",
+     "description": "Max features per exported layer (default: 50000)",
+     "default": 50000
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "export_grist",
+  "description": "Export as a .grist file (SQLite). Two modes: (1) From QGIS project layers (default) — creates tables, typed columns, map widget, stats, form. (2) From HTML file (html_path) — takes any HTML containing GeoJSON (export_web_map, export_flood_map, export_temporal_map, qgis2web, or any Leaflet HTML), extracts data into Grist tables, and transforms the original map into a Grist custom widget reading from those tables. Same interactive map, but data lives in Grist. Optional: pass output_path to customize the .grist destination (default /data/{doc_name}.grist) and/or scene_manifest_json to embed a Scene Manifest V0.2 as an extra SceneManifest table (cross-runtime style bridge for atlas widgets).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "html_path": {
+     "type": "string",
+     "description": "Path to any HTML file containing GeoJSON data (from export_web_map, export_flood_map, export_temporal_map, qgis2web, or any Leaflet HTML with inline FeatureCollections). Converts it into a .grist document with data in tables and the original map as a Grist custom widget."
+    },
+    "document_name": {
+     "type": "string",
+     "description": "Document name (default: derived from html filename or project name)"
+    },
+    "max_features_per_layer": {
+     "type": "integer",
+     "description": "Max features per layer (default: 50000)",
+     "default": 50000
+    },
+    "include_stats": {
+     "type": "boolean",
+     "description": "Generate stats summary table (default: true)",
+     "default": true
+    },
+    "detect_relationships": {
+     "type": "boolean",
+     "description": "Auto-detect Ref columns between tables (default: true)",
+     "default": true
+    },
+    "timezone": {
+     "type": "string",
+     "description": "Timezone for DateTime columns (default: Europe/Paris)",
+     "default": "Europe/Paris"
+    },
+    "output_path": {
+     "type": "string",
+     "description": "Optional: custom absolute path for the output .grist file. Default: /data/{document_name}.grist. Parent directory is created if missing. Used by external consumers like qgis-sspcloud to write into {sid}/projects/{pid}/exports/."
+    },
+    "scene_manifest_json": {
+     "type": "string",
+     "description": "Optional: JSON-serialized Scene Manifest V0.2 (cf. cerema-offre-de-service/docs/scene-manifest-spec.md) to embed as an extra SceneManifest table inside the .grist. Allows atlas/Grist widgets to read the declarative style cross-runtime. If absent, no SceneManifest table is created."
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "list_recipes",
+  "description": "List available workflow recipes. Recipes are step-by-step guides for common GIS analyses (building density, urban analysis, flood risk, land cover). Execute them by calling get_recipe then following each step.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  }
+ },
+ {
+  "name": "get_recipe",
+  "description": "Get a specific recipe with parameters resolved. Returns ordered steps to execute using existing tools (set_study_zone, smart_load, run_processing, etc.). Follow each step sequentially.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "Recipe ID (e.g. 'densite_bati')"
+    },
+    "zone": {
+     "type": "string",
+     "description": "Study area (commune name or address)",
+     "default": ""
+    },
+    "grid_size": {
+     "type": "number",
+     "description": "Grid cell size in meters (for density recipes)",
+     "default": 500
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
+  "name": "run_recipe",
+  "description": "Execute a complete recipe automatically in one shot. Runs all steps sequentially (zone setup → data loading → analysis → styling → layout → export). Much faster than executing steps manually. Use list_recipes to see available recipes. Returns per-step results and a final screenshot.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "Recipe ID (e.g. 'risque_inondation', 'densite_bati')"
+    },
+    "zone": {
+     "type": "string",
+     "description": "Study area (commune name or address, e.g. 'Béziers', 'Montpellier')"
+    },
+    "grid_size": {
+     "type": "number",
+     "description": "Grid cell size in meters (for density recipes)",
+     "default": 500
+    },
+    "new_project": {
+     "type": "boolean",
+     "description": "Start a fresh project before running (default true)",
+     "default": true
+    }
+   },
+   "required": [
+    "id",
+    "zone"
+   ]
+  }
+ },
+ {
+  "name": "restart_qgis_engine",
+  "description": "Force le respawn du processus QGIS quand le bridge est dégradé/deadlocké (timeouts répétés, erreurs muettes, gateway timeout). À utiliser SEULEMENT en dernier recours quand 2+ tools spatiaux consécutifs échouent avec des erreurs d'infra. NE PAS utiliser pour récupérer d'une erreur de code (NoneType, mauvais args, etc.). QGIS respawne en 5-15s ; les tools spatiaux échoueront pendant cette fenêtre. Toujours expliquer à l'user pourquoi tu redémarres avant d'appeler.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "reason": {
+     "type": "string",
+     "description": "Raison du restart (logged)"
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "publish_artifact",
+  "description": "Publie un livrable (storymap, flux, recipe, dataset, pdf) sur S3 via le hub. POST {HUB_URL}/publish/{kind}/{slug}. Retourne hub_url public stable à donner à l'user. Le fichier doit déjà exister sur le workspace au chemin par défaut /data/studies/{sid}/exports/{kind}/{slug}.{ext} (ou /data/exports/{kind}/{slug}.{ext} hors étude), sauf si tu passes source explicite. Requiert HUB_URL + HUB_API_KEY env. Préfère ce tool plutôt qu'un urllib brut en execute_python.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "kind": {
+     "type": "string",
+     "enum": [
+      "storymap",
+      "flux",
+      "recipe",
+      "dataset",
+      "pdf"
+     ],
+     "description": "Type de livrable"
+    },
+    "slug": {
+     "type": "string",
+     "description": "Identifiant URL-safe (ex: 'inondation_marseille4'). Sans accents ni espaces."
+    },
+    "source": {
+     "type": "string",
+     "description": "Chemin explicite sous /data/ (optionnel). Si omis, utilise le défaut selon kind + étude active."
+    },
+    "hub_url": {
+     "type": "string",
+     "description": "Override HUB_URL (test seulement)"
+    },
+    "api_key": {
+     "type": "string",
+     "description": "Override HUB_API_KEY (test seulement)"
+    }
+   },
+   "required": [
+    "kind",
+    "slug"
+   ]
+  }
+ },
+ {
+  "name": "study_list",
+  "description": "Liste les etudes CEREMA de l'utilisateur courant. Une etude est un workspace geospatial qui regroupe des projets QGIS, des donnees, des livrables et des conversations. Retourne les etudes actives avec leur statut d'activation (l'etude active est celle sur laquelle les autres tools QGIS operent par defaut).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {},
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "study_create",
+  "description": "Cree une nouvelle etude CEREMA + un projet 'principal' par defaut, et active immediatement cette etude. Apres appel, les tools QGIS suivants (add_layer, execute_python, export_pdf...) operent sur ce nouveau projet. Utiliser quand l'utilisateur demande de commencer un nouveau territoire ou une nouvelle analyse.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Nom lisible de l'etude (ex: 'PCRS Sorgues', 'Diagnostic Marseille 4e'). Sera visible dans l'UI desk et les livrables.",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "profile": {
+     "type": "string",
+     "description": "Profil d'etude optionnel (ex: 'standard', 'cadastre_solaire', 'diagnostic_pcrs'). Precharge des recipes et catalogues specialises. Defaut : 'standard'.",
+     "default": "standard"
+    }
+   },
+   "required": [
+    "name"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "study_switch",
+  "description": "Bascule sur une autre etude active. Sauve automatiquement l'etat de l'etude courante avant le switch (dual-write pid-scope + legacy) et charge le projet default de l'etude cible dans QGIS Desktop. Utiliser quand l'utilisateur veut reprendre le travail sur un autre territoire deja cree. IMPORTANT : appeler AVANT les tools QGIS pour s'assurer qu'ils operent sur la bonne etude.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sid": {
+     "type": "string",
+     "description": "Identifiant de l'etude cible (12 hex, obtenu via study_list).",
+     "pattern": "^[0-9a-f]{12}$"
+    }
+   },
+   "required": [
+    "sid"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "study_project_list",
+  "description": "Liste les projets QGIS d'une etude (chaque etude peut avoir plusieurs projets pour separer des analyses distinctes). Retourne les projets avec leur label, statut d'activation et derniere date d'edition. Sans argument, liste les projets de l'etude active.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sid": {
+     "type": "string",
+     "description": "Identifiant de l'etude cible (12 hex). Optionnel : defaut = etude active.",
+     "pattern": "^[0-9a-f]{12}$"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "study_project_create",
+  "description": "Cree un nouveau projet QGIS dans une etude + l'active immediatement. Utile quand l'utilisateur veut faire une analyse separee dans la meme etude (ex: comparaison scenarios). Sans sid, cree dans l'etude active. Le nouveau projet est un .qgz vide, pret a recevoir des layers.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "label": {
+     "type": "string",
+     "description": "Nom lisible du projet (ex: 'Scenario A hausse', 'Comparaison RGA vs inondation').",
+     "minLength": 1,
+     "maxLength": 200
+    },
+    "sid": {
+     "type": "string",
+     "description": "Identifiant de l'etude parent (12 hex). Optionnel : defaut = etude active.",
+     "pattern": "^[0-9a-f]{12}$"
+    }
+   },
+   "required": [
+    "label"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "study_project_switch",
+  "description": "Bascule sur un autre projet QGIS de l'etude courante (ou d'une autre etude). Sauve automatiquement l'etat du projet courant (dual-write) et charge le projet cible dans QGIS Desktop. IMPORTANT : appeler AVANT les tools QGIS pour s'assurer qu'ils operent sur le bon projet. Si le projet est dans une autre etude, l'etude parent est aussi automatiquement activee.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "pid": {
+     "type": "string",
+     "description": "Identifiant du projet cible (12 hex, obtenu via study_project_list).",
+     "pattern": "^[0-9a-f]{12}$"
+    }
+   },
+   "required": [
+    "pid"
+   ],
+   "additionalProperties": false
+  }
+ }
+]

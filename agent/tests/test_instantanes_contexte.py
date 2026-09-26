@@ -6,11 +6,16 @@ reseau : le hub, le pont QGIS et les enrichisseurs sont simules, la memoire
 est une vraie base SQLite temporaire. On verifie ensuite ce que le contexte
 doit contenir, ce qu'il ne doit PAS contenir, et son budget en jetons.
 
+Les schemas d'outils sont ceux du hub reel (instantane de tools/list,
+QgisRemoteMCP 2f36a8a) : depuis le lot L3, le modele n'en voit que le socle
+et les paquets du tour, et le budget porte sur les outils EXPOSES.
+
 Le tableau CAS se lit comme une specification : une ligne par situation.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import sys
@@ -46,6 +51,7 @@ from agent import enrichers  # noqa: E402
 from agent import hub_artifacts  # noqa: E402
 from agent import hub_scope_client  # noqa: E402
 from agent import memory  # noqa: E402
+from agent import paquets_outils as po  # noqa: E402
 from agent import qgis_agent as qa  # noqa: E402
 from agent.qgis_agent import QGISAgent  # noqa: E402
 
@@ -69,19 +75,13 @@ def _briques() -> tuple[list[dict], list[dict]]:
     return lire("global"), lire("forbidden")
 
 
-def _outil(nom: str, description: str = "") -> dict:
-    return {"name": nom, "description": description or f"Outil {nom}.",
-            "inputSchema": {"type": "object", "properties": {}}}
+# Schemas reels du tools/list du hub (55 outils : workspace + study_*), pour
+# que le budget des outils exposes soit celui que le modele paie en live.
+OUTILS_MCP = json.loads(
+    (_ROOT / "tests" / "fixtures" / "outils_hub_2f36a8a.json").read_text(encoding="utf-8"))
 
-
-# Sous-ensemble representatif des outils du pont (les vrais schemas vivent
-# dans le depot du pont ; seul leur filtrage est teste ici).
-OUTILS_MCP = [_outil(n) for n in (
-    "get_project_info", "set_study_zone", "get_study_zone", "smart_load",
-    "list_datasources", "execute_python", "run_processing", "export_pdf",
-    "export_web_map", "publish_artifact", "delete_file",
-    "restart_qgis_engine", "get_screenshot",
-)]
+# Message par defaut des instantanes : un tour courant, servi par le socle.
+MESSAGE_COURANT = "Combien de bâtiments dans ma zone ?"
 
 BBOX_AIX = [5.2694, 43.4583, 5.5122, 43.6043]
 BBOX_MARSEILLE = [5.3748, 43.289, 5.4243, 43.325]
@@ -183,6 +183,11 @@ class Cas:
     ne_doit_pas_contenir: tuple = ()               # chaine ou re.Pattern
     outils_presents: tuple = ()
     outils_absents: tuple = ()
+    # Lot L3 : ce que le modele VOIT (socle + paquets du tour) et son budget.
+    message: str = MESSAGE_COURANT
+    exposes_presents: tuple = ()
+    exposes_absents: tuple = ()
+    outils_max: int = 4_500             # socle seul : 4 177 mesures
 
 
 MINIO = re.compile(r"https?://minio\.lab\.sspcloud\.fr")
@@ -245,10 +250,33 @@ CAS = [
         outils_presents=("get_project_info", "set_study_zone", "smart_load",
                          "memory_search"),
         outils_absents=("execute_python", "delete_file", "restart_qgis_engine",
-                        "save_recipe", "create_component")),
+                        "save_recipe", "create_component"),
+        # Liste blanche explicite : servie telle quelle, sans filet.
+        exposes_presents=("get_project_info", "set_study_zone", "smart_load"),
+        exposes_absents=("execute_python", po.OUTIL_DEMANDER)),
     Cas("profil_complet",
         outils_presents=("execute_python", "delete_file", "save_recipe",
-                         "create_component", "memory_search")),
+                         "create_component", "memory_search"),
+        # 90 outils autorises, le socle seul expose (19 300 -> 4 177 jetons).
+        exposes_presents=("execute_python", "smart_load", "clip_to_study_zone",
+                          "memory_search", po.OUTIL_DEMANDER),
+        exposes_absents=("delete_file", "save_recipe", "create_component",
+                         "mouse_click", "export_grist")),
+    Cas("publication_d_un_livrable",
+        session_id="study:sid42", etude=ETUDE, etat_projet=ETAT_AIX,
+        message="Fais une carte PDF des bâtiments de ma zone et donne-moi le lien.",
+        exposes_presents=("export_pdf", "apply_layout_template", "publish_artifact"),
+        exposes_absents=("create_assembly", "run_recipe"),
+        outils_max=7_000),
+    Cas("storymap_a_publier",
+        session_id="study:sid42", etude=ETUDE, etat_projet=ETAT_AIX,
+        message="Crée une storymap du bâti et publie-la",
+        exposes_presents=("create_assembly", "publish_assembly", "publish_artifact"),
+        outils_max=10_500),
+    Cas("question_sans_outil",
+        message="C'est quoi une bbox ?",
+        exposes_absents=("export_pdf", "publish_artifact", "run_recipe",
+                         "create_component", "study_create")),
     # Chantier G9 : la portee de la session choisit la vue L2.
     Cas("portee_composant",
         session_id="assist:sid42:cid:cmp123", etude=ETUDE, etat_projet=ETAT_AIX,
@@ -257,14 +285,18 @@ CAS = [
                        "Composant actif : cmp123", "v3 · marie · titre revu",
                        "=== Rappel étude (bref) ===", "2 livrables publiés"),
         ne_doit_pas_contenir=("=== Étude en cours ===",
-                              "Couches chargées dans le projet", MINIO)),
+                              "Couches chargées dans le projet", MINIO),
+        exposes_presents=("update_component", "get_component"),
+        outils_max=10_500),
     Cas("portee_recette",
         session_id="study:sid42:recipe:densite_bati", etude=ETUDE,
         etat_projet=ETAT_AIX,
         doit_contenir=("=== Recipe en cours d'exécution ===",
                        "Recipe en exécution : densite_bati",
                        "Use case detecte : recipe_run"),
-        ne_doit_pas_contenir=("=== Étude en cours ===",)),
+        ne_doit_pas_contenir=("=== Étude en cours ===",),
+        # La portee recette expose le paquet recettes sans mot-cle.
+        exposes_presents=("run_recipe", "save_recipe"), outils_max=6_000),
     Cas("portee_bureau",
         session_id="study:sid42", etude=ETUDE, etat_projet=ETAT_AIX,
         doit_contenir=("context_kind=desk", "=== Étude en cours ==="),
@@ -335,7 +367,7 @@ async def _preparer_memoire(cas: Cas) -> None:
         await memory.add_insight(f"cle_{i}", f"valeur {i}", source="explicit")
 
 
-async def _assembler(cas: Cas) -> tuple[str, list[dict], QGISAgent]:
+async def _assembler(cas: Cas) -> tuple[str, list[dict], list[dict], QGISAgent]:
     await _preparer_memoire(cas)
     for k, v in cas.tags.items():
         await memory.set_session_tag(cas.session_id, k, v)
@@ -370,10 +402,11 @@ async def _assembler(cas: Cas) -> tuple[str, list[dict], QGISAgent]:
         for etat in etats:
             with patch.object(agent, "_fetch_project_state",
                               new=AsyncMock(return_value=etat)):
-                prompt = await agent._build_system_prompt(
-                    user_message="Combien de bâtiments dans ma zone ?")
+                prompt = await agent._build_system_prompt(user_message=cas.message)
         outils = await agent._get_tools()
-    return prompt, outils, agent
+        paquets = agent._paquets_du_tour(cas.message, [], {_nom(o) for o in outils})
+        exposes = await agent._outils_exposes(paquets)
+    return prompt, outils, exposes, agent
 
 
 def _nom(o: dict) -> str:
@@ -392,7 +425,7 @@ def base_temporaire(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("cas", CAS, ids=[c.nom for c in CAS])
 def test_instantane_de_contexte(cas: Cas, base_temporaire) -> None:
-    prompt, outils, agent = _run(_assembler(cas))
+    prompt, outils, exposes, agent = _run(_assembler(cas))
 
     for attendu in cas.doit_contenir:
         assert attendu in prompt, f"[{cas.nom}] absent : {attendu!r}"
@@ -411,21 +444,33 @@ def test_instantane_de_contexte(cas: Cas, base_temporaire) -> None:
     for n in cas.outils_absents:
         assert n not in noms, f"[{cas.nom}] outil hors profil expose : {n}"
 
-    # Budget : aucune section au-dela de son plafond dur.
-    releve = cb.releve_tour(agent._releve_systeme, outils, [], "question")
+    # Lot L3 : ce que voit le modele, borne par le profil.
+    vus = {_nom(o) for o in exposes}
+    assert vus - {po.OUTIL_DEMANDER} <= noms, f"[{cas.nom}] expose hors profil"
+    for n in cas.exposes_presents:
+        assert n in vus, f"[{cas.nom}] outil attendu non expose : {n}"
+    for n in cas.exposes_absents:
+        assert n not in vus, f"[{cas.nom}] outil expose sans raison : {n}"
+
+    # Budget : aucune section au-dela de son plafond dur, et les schemas
+    # exposes sous le plafond du cas.
+    releve = cb.releve_tour(agent._releve_systeme, exposes, [], "question",
+                            outils_profil=outils)
     durs = [d for d in cb.depassements(releve) if "(cible)" not in d]
     assert not durs, f"[{cas.nom}] plafonds depasses : {durs} ({cb.ligne_journal(releve)})"
+    assert releve["outils"] <= cas.outils_max, (
+        f"[{cas.nom}] schemas exposes : {cb.ligne_journal(releve)}")
 
 
 def test_la_memoire_longue_est_bornee_au_plafond_l3(base_temporaire) -> None:
     cas = next(c for c in CAS if c.nom == "memoire_utilisateur_longue")
-    _prompt, _outils, agent = _run(_assembler(cas))
+    _prompt, _outils, _exposes, agent = _run(_assembler(cas))
     assert 0 < agent._releve_systeme["l3"] <= cb.PLAFONDS["l3"]
 
 
 def test_le_releve_decompose_le_prompt_par_section(base_temporaire) -> None:
     cas = next(c for c in CAS if c.nom == "zone_aix_trois_couches")
-    prompt, _outils, agent = _run(_assembler(cas))
+    prompt, _outils, _exposes, agent = _run(_assembler(cas))
     r = agent._releve_systeme
     for cle in ("identite", "regles", "essentiels", "l2", "l3", "directives",
                 "structure", "systeme"):
