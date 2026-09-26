@@ -377,6 +377,11 @@ async def _assembler(cas: Cas) -> tuple[str, list[dict], list[dict], QGISAgent]:
     profils = dict(qa._PROFILES_CACHE)
     if cas.whitelist is not None:
         profils[cas.profil] = {"mcp_tools": {"allowed": cas.whitelist}}
+    else:
+        # Sans liste blanche, le profil est connu et ouvert (`allowed: all`),
+        # comme `standard` servi par le hub. Un profil ABSENT du cache n'a
+        # plus aucun outil depuis le repli ferme du 2026-09-26.
+        profils.setdefault(cas.profil, {"mcp_tools": {"allowed": "all"}})
     etats = ([cas.etat_precedent, cas.etat_projet] if cas.etat_precedent
              else [cas.etat_projet])
     sid = (cas.etude or {}).get("id")
