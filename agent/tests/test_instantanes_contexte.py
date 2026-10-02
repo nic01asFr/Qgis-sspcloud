@@ -282,6 +282,15 @@ CAS = [
         message="Crée une storymap du bâti et publie-la",
         exposes_presents=("create_assembly", "publish_assembly", "publish_artifact"),
         outils_max=10_500),
+    # Production 28-30/09 : demande d'action vague, l'agent repondait
+    # « Voici mon plan : 1. … » sans appel. La regle 0 dit d'agir, et les
+    # outils de chargement sont exposes des le premier tour.
+    Cas("demande_d_action_vague",
+        message="Affiche les trames vertes et bleues et les réseaux sur Rousset",
+        doit_contenir=("AGIR D'ABORD — pas de plan à faire valider",
+                       "annonce-les en UNE phrase, et exécute"),
+        ne_doit_pas_contenir=("je lance avec ces défauts",),
+        exposes_presents=("set_study_zone", "smart_load", "clip_to_study_zone")),
     Cas("question_sans_outil",
         message="C'est quoi une bbox ?",
         exposes_absents=("export_pdf", "publish_artifact", "run_recipe",

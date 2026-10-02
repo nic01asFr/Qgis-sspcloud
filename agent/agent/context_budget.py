@@ -67,6 +67,7 @@ PLAFONDS: dict[str, int] = {
     "identite": 4_500,
     # _QGIS_ESSENTIALS mesure 6 939 : le plafond fige l'existant et interdit
     # qu'il grossisse encore. Voir la proposition de decoupage (rapport).
+    # Regle 0 reecrite le 2026-10-02 (agir d'abord) : ~6 810 estimes.
     "essentiels": 7_000,
     # Prompt systeme complet, HORS schemas d'outils : standard au pire cas
     # (essentiels + directives + L2 et L3 pleines + enrichis) ~ 11 000.

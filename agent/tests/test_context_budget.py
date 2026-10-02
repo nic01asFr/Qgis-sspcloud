@@ -46,9 +46,15 @@ def _run(coro):
 
 # ── Estimation ───────────────────────────────────────────────────────────────
 
+# Le texte mesure le 2026-09-24 avec le vrai tokenizer, fige : les essentiels
+# vivants changent (regle 0 reecrite le 2026-10-02), le calibrage non.
+_ESSENTIELS_CALIBRAGE = (Path(__file__).parent / "fixtures"
+                         / "essentiels_calibrage_2026-09-24.txt")
+
+
 def test_estimation_calee_sur_le_tokenizer_qwen() -> None:
     """A +-10 % des 6 939 jetons mesures avec le vrai tokenizer."""
-    n = cb.estimer_tokens(qa.QGISAgent._QGIS_ESSENTIALS)
+    n = cb.estimer_tokens(_ESSENTIELS_CALIBRAGE.read_text(encoding="utf-8"))
     assert 6_939 * 0.9 <= n <= 6_939 * 1.1, n
 
 
