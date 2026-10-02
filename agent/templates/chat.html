@@ -2469,6 +2469,11 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
             // tourne. Rien a afficher, la duree continue d'avancer.
             continue;
           }
+          if (data.tache) {
+            // Traitements en arriere-plan : bloc isole (#taches-fond).
+            if (window.TachesFond) window.TachesFond.evenement(data, responseDiv);
+            continue;
+          }
           if (data.phase) {
             phasesVues = true;
             if (data.phase === 'reflexion') libellePhase = 'Réflexion…';
@@ -2704,6 +2709,316 @@ loadSuggestions(document.getElementById('profile-id').value);
     if (btn.classList.contains('recording')) stop();
     else start();
   });
+})();
+</script>
+<!-- ── Traitements en arriere-plan (spec 2026-10-02) ─────────────────────
+     Bloc isole : styles, proposition de bascule pendant le tour, bandeau des
+     calculs de la conversation, et affichage en direct du compte rendu de
+     fin. Seul point d'accroche dans le flux du tour : les evenements SSE
+     `{"tache": ...}` sont remis a window.TachesFond.evenement(). Il ne touche
+     ni a la session ni a l'historique : il lit #session-id, c'est tout. -->
+<style id="taches-fond-style">
+.tache-proposition{margin:8px 0;padding:10px 12px;border:1px solid var(--qs-trait);
+  border-left:3px solid var(--qs-accent);border-radius:4px;background:var(--qs-accent-pale);
+  font-size:13px;color:var(--qs-encre-2)}
+.tache-proposition p{margin:0 0 8px}
+.tache-proposition .tache-actions{display:flex;flex-wrap:wrap;gap:6px}
+.tache-proposition button,.taches-bandeau button{font:inherit;font-size:12.5px;
+  padding:5px 10px;min-height:32px;border-radius:4px;border:1px solid var(--qs-trait);
+  background:#fff;color:var(--qs-encre-2);cursor:pointer}
+.tache-proposition button.tache-principal{background:var(--qs-accent);color:#fff;
+  border-color:var(--qs-accent)}
+.tache-proposition button:focus-visible,.taches-bandeau button:focus-visible{
+  outline:2px solid var(--qs-accent);outline-offset:2px}
+.tache-proposition .tache-delai{margin:8px 0 0;font-size:11.5px;color:var(--qs-discret)}
+.tache-note{margin:6px 0;font-size:12.5px;color:var(--qs-discret)}
+.taches-bandeau{display:flex;flex-direction:column;gap:4px;padding:6px 14px;
+  border-top:1px solid var(--qs-trait);background:var(--qs-surface-2);font-size:12.5px;
+  color:var(--qs-encre-2)}
+.taches-bandeau[hidden]{display:none}
+.taches-bandeau .tache-ligne{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.taches-bandeau .tache-ligne .tache-texte{flex:1;min-width:12em}
+@media (prefers-reduced-motion: reduce){.tache-proposition{transition:none}}
+</style>
+<script id="taches-fond">
+(function () {
+  'use strict';
+  const LIBELLE_CHOIX = {
+    arriere_plan: 'Continuer en arrière-plan',
+    attendre: 'Attendre',
+    annuler: 'Annuler',
+  };
+  const ACTIFS = new Set(['en_attente', 'en_cours']);
+  const PERIODE_ACTIVE_MS = 8000;
+  const PERIODE_REPOS_MS = 30000;
+
+  function echapper(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g,
+      c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+  }
+  function duree(secondes) {
+    const s = Math.max(0, Math.round(secondes || 0));
+    if (s < 60) return s + ' s';
+    const m = Math.floor(s / 60), r = s % 60;
+    if (m < 60) return r ? m + ' min ' + String(r).padStart(2, '0') + ' s' : m + ' min';
+    return Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0') + ' min';
+  }
+  function dire(texte) {
+    // Region role=status du chat : lue par les lecteurs d'ecran.
+    if (typeof annoncer === 'function') annoncer(texte);
+  }
+  function sessionCourante() {
+    const el = document.getElementById('session-id');
+    return el ? el.value : '';
+  }
+  function prevenirBureau() {
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({type: 'qgis_taches_maj'}, location.origin);
+      }
+    } catch (e) { /* hors bureau */ }
+  }
+
+  // ── Proposition pendant le tour ───────────────────────────────────────
+  const propositions = new Map();  // tache_id -> {el, minuteur, fin}
+
+  function retirerProposition(id, note) {
+    const p = propositions.get(id);
+    if (!p) return;
+    clearInterval(p.minuteur);
+    if (note) {
+      const n = document.createElement('p');
+      n.className = 'tache-note';
+      n.textContent = note;
+      p.el.replaceWith(n);
+    } else {
+      p.el.remove();
+    }
+    propositions.delete(id);
+  }
+
+  async function choisir(id, choix, boutons) {
+    boutons.forEach(b => { b.disabled = true; });
+    try {
+      const r = await fetch('/chat/taches/' + encodeURIComponent(id) + '/decision', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({choix: choix}),
+      });
+      if (r.status === 404 && choix === 'annuler') {
+        // Le tour ne suit plus la tache : on passe par le registre.
+        await fetch('/taches/' + encodeURIComponent(id) + '/annuler', {method: 'POST'});
+      }
+    } catch (e) {
+      boutons.forEach(b => { b.disabled = false; });
+      dire('Le choix n’a pas pu être transmis. Réessaie.');
+    }
+  }
+
+  function afficherProposition(data, bulle) {
+    const id = data.tache_id;
+    if (!id || propositions.has(id) || !bulle) return;
+    const el = document.createElement('div');
+    el.className = 'tache-proposition';
+    el.setAttribute('role', 'group');
+    el.setAttribute('aria-labelledby', 'tache-titre-' + id);
+    const auto = Math.max(0, data.bascule_auto_s || 0);
+    el.innerHTML =
+      '<p id="tache-titre-' + echapper(id) + '">Le calcul « ' + echapper(data.libelle)
+      + ' » prend plus de temps que prévu (déjà <span class="tache-ecoule">'
+      + echapper(duree(data.ecoule_s)) + '</span>).</p>'
+      + '<div class="tache-actions"></div>'
+      + '<p class="tache-delai">Sans réponse, il continuera en arrière-plan dans '
+      + '<span class="tache-reste">' + echapper(duree(auto)) + '</span>.</p>';
+    const actions = el.querySelector('.tache-actions');
+    const boutons = [];
+    (data.choix || ['arriere_plan', 'attendre', 'annuler']).forEach((choix, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = LIBELLE_CHOIX[choix] || choix;
+      if (i === 0) b.className = 'tache-principal';
+      b.dataset.choix = choix;
+      b.addEventListener('click', () => choisir(id, choix, boutons));
+      boutons.push(b);
+      actions.appendChild(b);
+    });
+    const cible = bulle.querySelector('.tour-reponse') || bulle;
+    cible.appendChild(el);
+    const fin = Date.now() + auto * 1000;
+    const minuteur = setInterval(() => {
+      const reste = el.querySelector('.tache-reste');
+      if (reste) reste.textContent = duree((fin - Date.now()) / 1000);
+    }, 1000);
+    propositions.set(id, {el: el, minuteur: minuteur});
+    // Pas de vol du focus : on annonce, les boutons sont au clavier (Tab).
+    dire('Le calcul prend plus de temps que prévu. Trois choix sont proposés : '
+         + 'continuer en arrière-plan, attendre ou annuler.');
+  }
+
+  function evenement(data, bulle) {
+    const id = data.tache_id;
+    switch (data.tache) {
+      case 'proposition':
+        afficherProposition(data, bulle);
+        break;
+      case 'progression': {
+        const p = propositions.get(id);
+        const e = p && p.el.querySelector('.tache-ecoule');
+        if (e) e.textContent = duree(data.ecoule_s);
+        break;
+      }
+      case 'attente': {
+        const p = propositions.get(id);
+        if (p) {
+          clearInterval(p.minuteur);
+          const d = p.el.querySelector('.tache-delai');
+          if (d) d.remove();
+          p.el.querySelectorAll('button').forEach(b => { b.disabled = b.dataset.choix === 'attendre'; });
+        }
+        dire('D’accord, j’attends la fin du calcul.');
+        break;
+      }
+      case 'arriere_plan':
+        retirerProposition(id, '');
+        dire('Le calcul continue en arrière-plan.');
+        prevenirBureau();
+        setTimeout(rafraichir, 1500);
+        break;
+      case 'annulee':
+        retirerProposition(id, data.commence
+          ? 'Annulation demandée : le calcul déjà commencé se termine dans QGIS, son résultat sera ignoré.'
+          : 'Calcul annulé.');
+        prevenirBureau();
+        setTimeout(rafraichir, 1500);
+        break;
+      case 'fin_attente':
+      case 'interrompue':
+        retirerProposition(id, '');
+        break;
+      default:
+        break;
+    }
+  }
+
+  // ── Bandeau et compte rendu de fin ────────────────────────────────────
+  let bandeau = null;
+  let vues = null;          // ids des taches deja rattachees connues
+  let sessionVue = '';
+  let minuteurSuivi = null;
+
+  function assurerBandeau() {
+    if (bandeau) return bandeau;
+    bandeau = document.createElement('div');
+    bandeau.id = 'taches-bandeau';
+    bandeau.className = 'taches-bandeau';
+    bandeau.setAttribute('role', 'status');
+    bandeau.setAttribute('aria-live', 'polite');
+    bandeau.hidden = true;
+    const form = document.getElementById('chat-form');
+    if (form && form.parentNode) form.parentNode.insertBefore(bandeau, form);
+    else document.body.appendChild(bandeau);
+    return bandeau;
+  }
+
+  async function agir(id, action) {
+    try {
+      await fetch('/taches/' + encodeURIComponent(id) + '/' + action, {method: 'POST'});
+    } catch (e) { /* le prochain passage le dira */ }
+    prevenirBureau();
+    rafraichir();
+  }
+
+  function ligne(t, maintenant) {
+    const div = document.createElement('div');
+    div.className = 'tache-ligne';
+    const texte = document.createElement('span');
+    texte.className = 'tache-texte';
+    const depuis = duree((maintenant || Date.now() / 1000) - (t.cree_at || 0));
+    if (ACTIFS.has(t.statut)) {
+      texte.textContent = t.annulation_demandee
+        ? 'Annulation demandée : « ' + t.libelle + ' » se termine dans QGIS (' + depuis + ').'
+        : 'Calcul en arrière-plan : « ' + t.libelle + ' » (depuis ' + depuis + ').';
+      div.appendChild(texte);
+      if (!t.annulation_demandee) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = 'Annuler';
+        b.setAttribute('aria-label', 'Annuler le calcul « ' + t.libelle + ' »');
+        b.addEventListener('click', () => agir(t.id, 'annuler'));
+        div.appendChild(b);
+      }
+    } else {
+      texte.textContent = 'Calcul interrompu : « ' + t.libelle + ' »'
+        + (t.raison ? ' (' + t.raison + ')' : '') + '.';
+      div.appendChild(texte);
+      [['relancer', 'Relancer'], ['annuler', 'Abandonner']].forEach(([action, nom]) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = nom;
+        b.setAttribute('aria-label', nom + ' le calcul « ' + t.libelle + ' »');
+        b.addEventListener('click', () => agir(t.id, action));
+        div.appendChild(b);
+      });
+    }
+    return div;
+  }
+
+  function afficherMessageDeFin(t) {
+    if (typeof creerBulleAssistant !== 'function' || !t.message) return;
+    const msgs = document.getElementById('messages');
+    if (!msgs) return;
+    const suivre = typeof presDuBas === 'function' ? presDuBas() : true;
+    msgs.querySelectorAll('.welcome, .chargement-conv').forEach(n => {
+      (n.closest('.msg') || n).remove();
+    });
+    const msg = creerBulleAssistant();
+    msg.classList.add('msg-tache-fond');
+    const bulle = msg.querySelector('.bubble');
+    const statut = bulle.querySelector('.tour-statut');
+    if (statut) statut.remove();
+    rendreTour(bulle, t.message, '', {etapes: [], enCours: false});
+    terminerTour(bulle, {etapes: [], quand: t.rattachee_at, texteDemande: ''});
+    msgs.appendChild(msg);
+    if (typeof suivreOuSignaler === 'function') suivreOuSignaler(suivre);
+    dire('Calcul terminé : « ' + t.libelle + ' ». Le compte rendu est dans la conversation.');
+  }
+
+  async function rafraichir() {
+    clearTimeout(minuteurSuivi);
+    const sid = sessionCourante();
+    let actives = 0;
+    try {
+      const r = await fetch('/taches?session_id=' + encodeURIComponent(sid) + '&limite=20',
+                            {cache: 'no-store'});
+      if (r.ok) {
+        const d = await r.json();
+        const taches = Array.isArray(d.taches) ? d.taches : [];
+        if (sid !== sessionVue || vues === null) {
+          // Nouvelle conversation affichee : ses comptes rendus deja
+          // rattaches sont dans l'historique charge, on ne les rejoue pas.
+          vues = new Set(taches.filter(t => t.rattachee).map(t => t.id));
+          sessionVue = sid;
+        } else if (!(typeof tourEnCours === 'function' && tourEnCours())) {
+          taches.filter(t => t.rattachee && t.message && !vues.has(t.id))
+            .sort((a, b) => (a.rattachee_at || 0) - (b.rattachee_at || 0))
+            .forEach(t => { vues.add(t.id); afficherMessageDeFin(t); prevenirBureau(); });
+        }
+        const visibles = taches.filter(t =>
+          (ACTIFS.has(t.statut) && t.mode === 'arriere_plan') || t.statut === 'interrompue');
+        actives = taches.filter(t => ACTIFS.has(t.statut)).length;
+        const b = assurerBandeau();
+        b.replaceChildren(...visibles.map(t => ligne(t, d.maintenant)));
+        b.hidden = visibles.length === 0;
+      }
+    } catch (e) { /* agent ou hub injoignable : on reessaie plus tard */ }
+    minuteurSuivi = setTimeout(rafraichir, actives ? PERIODE_ACTIVE_MS : PERIODE_REPOS_MS);
+  }
+
+  window.TachesFond = {evenement: evenement, rafraichir: rafraichir};
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', rafraichir);
+  } else {
+    rafraichir();
+  }
 })();
 </script>
 </body>
