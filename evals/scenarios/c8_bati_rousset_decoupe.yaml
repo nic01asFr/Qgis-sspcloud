@@ -1,0 +1,41 @@
+# Correctif « agir au lieu de decrire » (2026-10-02), production du 28-30/09.
+id: C8-bati-rousset-decoupe
+famille: conversation
+titre: « Charge le bâti de Rousset et découpe-le à la commune »
+source: production 28-30/09 ; correctif agir au lieu de decrire
+description: >
+  Chaine de trois actions sans risque (zone, chargement, decoupage). L'ancienne
+  regle « plan-puis-execute » faisait poser un plan a valider avant toute
+  chaine de deux outils ou plus. Attendu : la chaine executee des le premier
+  tour, sans « Voici mon plan », puis un compte rendu.
+preconditions:
+  vider_projet: true
+tours:
+  - message: charge le bâti de Rousset et découpe-le à la commune
+attentes:
+  trajectoire:
+    outils_attendus:
+      - set_study_zone
+      - un_de: [smart_load, add_from_catalog]
+      - un_de:
+          - clip_to_study_zone
+          - {outil: run_processing, si_arguments: '(?i)clip|decoup'}
+    ordre:
+      - [set_study_zone, {un_de: [smart_load, add_from_catalog]}]
+      - [{un_de: [smart_load, add_from_catalog]}, clip_to_study_zone]
+    max_erreurs_outils: 2
+  etat:
+    zone:
+      nom_contient: Rousset
+    couches:
+      - motif: 'b[aâ]ti'
+        presente: true
+  reponse:
+    ne_doit_pas_contenir:
+      - 'voici\s+(mon|le)\s+plan'
+      - 'je\s+lance\s+avec\s+ces\s+d[ée]fauts'
+      - '(?m)^[ \t]*\[[^\]\n]{3,}\][ \t]*$'
+    chiffres_tracables: true
+  cout:
+    iterations_max: 10
+    duree_max_s: 900

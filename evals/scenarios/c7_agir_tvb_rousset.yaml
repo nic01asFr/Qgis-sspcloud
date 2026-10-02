@@ -1,0 +1,36 @@
+# Correctif « agir au lieu de decrire » (2026-10-02), production du 28-30/09.
+id: C7-agir-tvb-rousset
+famille: conversation
+titre: « Affiche les trames vertes et bleues et les réseaux sur Rousset »
+source: production 28-30/09, 28 tours ; correctif agir au lieu de decrire
+description: >
+  Demande vague mais executable. En production, l'agent repondait « Voici mon
+  plan : 1. ... » ou « [Je lance d'abord la recherche de sources...] » sans
+  aucun appel d'outil, et l'utilisateur devait relancer par « Ok »,
+  « continue », « alors ? ». Attendu : des appels d'outils des le premier
+  tour (zone puis chargement), des choix de sources annonces en une phrase,
+  ni plan a valider ni action narree entre crochets.
+preconditions:
+  vider_projet: true
+tours:
+  - message: Affiche les trames vertes et bleues et les réseaux sur Rousset
+attentes:
+  trajectoire:
+    outils_attendus:
+      - set_study_zone
+      - un_de: [smart_load, add_from_catalog]
+    ordre:
+      - [set_study_zone, {un_de: [smart_load, add_from_catalog]}]
+    max_erreurs_outils: 3
+  etat:
+    zone:
+      nom_contient: Rousset
+  reponse:
+    ne_doit_pas_contenir:
+      - 'voici\s+(mon|le)\s+plan'
+      - 'je\s+lance\s+avec\s+ces\s+d[ée]fauts'
+      - '(?m)^[ \t]*\[[^\]\n]{3,}\][ \t]*$'
+    mots_interdits: [execute_python, smart_load, set_study_zone, pyqgis, mcp, bridge]
+  cout:
+    iterations_max: 12
+    duree_max_s: 900
