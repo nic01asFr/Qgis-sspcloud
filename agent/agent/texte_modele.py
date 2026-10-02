@@ -394,6 +394,8 @@ LIBELLES_COURANTS = {
     "execute_async":        "un calcul long dans QGIS",
     "poll_job":             "le suivi du calcul",
     "run_processing":       "un traitement QGIS",
+    "densite_par_maille":   "le calcul de densité par maille",
+    "compter_par_zone":     "le comptage par zone",
     "search_algorithms":    "la recherche d'un traitement",
     "run_recipe":           "l'exécution de la recette",
     "save_recipe":          "l'enregistrement de la recette",

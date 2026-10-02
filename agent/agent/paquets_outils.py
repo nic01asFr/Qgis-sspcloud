@@ -69,6 +69,9 @@ documents            ~230  document, rapport, pdf, cahier des charges, cctp,
                            compte rendu, note de, selon le..., d'apres le...,
                            que dit ; retire tant que l'etude n'a aucun
                            document indexe (lot L7)
+analyse              ~940  densite, maille, grille, carroyage, carreau,
+                           par quartier / ilot / iris / secteur / zone...,
+                           compter par, statistiques par, carte de chaleur
 =================  ======  ====================================================
 
 (``demander_outils`` compte ~220 jetons dans le socle.)
@@ -231,6 +234,17 @@ PAQUETS: dict[str, Paquet] = {p.nom: p for p in (
         r"\bselon (?:le|la|les|l')", r"\bd'apres (?:le|la|les|l')",
         r"\bque (?:dit|disent)\b", r"\bdeliberations?\b", r"\bdocx?\b", r"\bodt\b",
         r"\bpieces? (?:ecrites?|du dossier)")),
+    # Constat live du 2026-10-02 (Rousset) : faute d'outil, la densite batie
+    # par maille a ete ecrite trois fois en PyQGIS, la derniere au-dela de
+    # 12 minutes. Ces deux outils le font en secondes (algorithmes natifs).
+    _p("analyse", "densite par maille, comptage par zone",
+       ("densite_par_maille", "compter_par_zone"),
+       (r"\bdensit", r"\bmailles?\b", r"\bmaillage", r"\bgrilles?\b", r"\bcarroy",
+        r"\bcarreaux?\b",
+        r"\bpar (?:quartier|ilot|iris|secteur|zone|commune|arrondissement|"
+        r"parcelle|maille|carreau|hexagone)s?\b",
+        r"\bcompt\w* (?:par|dans chaque)\b", r"\bstatistiques? par\b",
+        r"\bnombre de \w+ par\b", r"carte de chaleur", r"\bheat ?map")),
 )}
 
 _PAQUET_DE: dict[str, str] = {

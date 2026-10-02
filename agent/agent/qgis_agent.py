@@ -1074,6 +1074,8 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
         "run_recipe":          1800,  # 20+ min serveur, on prend large
         "smart_load":           600,  # WFS download lourds (BD TOPO commune)
         "clip_to_study_zone":   600,  # decoupe au contour (300 000 batis sur Marseille)
+        "densite_par_maille":   600,  # natif : 100 000 batis en quelques secondes
+        "compter_par_zone":     600,
         "execute_python":       900,  # spatial joins sur 100k+ features
         "set_study_zone":       300,
         "export_flood_map":     600,
@@ -1232,6 +1234,8 @@ def _mcp_tool_to_openai(tool: dict) -> dict:
 _MUTATING_TOOLS: frozenset[str] = frozenset({
     "smart_load",
     "clip_to_study_zone",
+    "densite_par_maille",
+    "compter_par_zone",
     "add_layer",
     "add_from_catalog",
     "remove_layer",
@@ -1682,6 +1686,8 @@ _LIBELLES_OUTILS = {
     "execute_async":        "Calcul long lancé dans QGIS…",
     "poll_job":             "Suivi du calcul en cours…",
     "run_processing":       "Traitement QGIS en cours…",
+    "densite_par_maille":   "Calcul de la densité par maille…",
+    "compter_par_zone":     "Comptage par zone…",
     "search_algorithms":    "Recherche d'un traitement QGIS…",
     "run_recipe":           "Exécution d'une recette…",
     "set_layer_style":      "Mise en forme d'une couche…",
@@ -2229,9 +2235,10 @@ class QGISAgent:
 
 1. ⚙️ **Algo natif d'abord** : avant 30 lignes de PyQGIS, demande-toi
    « existe-t-il un `native:*` ? » Si tu hésites → `search_algorithms("mot-clé")`.
-   Top 5 essentiels pour 80% des cas :
-   - `native:countpointsinpolygon` — densité / count par maille
-   - `native:creategrid` — maillage rectangulaire/hexa
+   Densité, comptage, statistiques par zone : outil dédié
+   (`densite_par_maille`, `compter_par_zone`) ou algorithme natif
+   (`search_algorithms`), JAMAIS une boucle PyQGIS.
+   Autres natifs fréquents :
    - `native:joinattributestable` — jointure attributaire
    - `native:zonalstatistics` — stats raster par zone
    - `native:fieldcalculator` — ajout/transformation champ
@@ -2549,19 +2556,9 @@ layer = project.mapLayersByName("Bâti BDTOPO - Marseille 4e")[0]
 layer = project.mapLayer(layer_id)
 ```
 
-## Joindre une couche au calque maillage (count features)
-```python
-result = processing.run("native:countpointsinpolygon", {
-    "POLYGONS": grid_layer,    # ou layer_id, ou "memory:grille_200m"
-    "POINTS":   bati_layer,    # NB: marche aussi pour des polygones (count)
-    "WEIGHT":   "",
-    "CLASSFIELD": "",
-    "FIELD":    "NUMPOINTS",
-    "OUTPUT":   "memory:densite",
-})
-density_layer = result["OUTPUT"]
-QgsProject.instance().addMapLayer(density_layer)
-```
+## Densité par maille, comptage par zone
+Pas de code : `densite_par_maille(layer, taille_m)` ou
+`compter_par_zone(layer, zones)` (grille, comptage, style, `verification`).
 
 ## Style graduated (choroplèthe) — UTILISER LA FACTORY, JAMAIS LE CONSTRUCTEUR
 ```python
