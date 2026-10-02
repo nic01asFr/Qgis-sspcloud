@@ -14,3 +14,7 @@ os.environ.setdefault("DATA_DIR", tempfile.mkdtemp(prefix="qgis_agent_tests_"))
 os.environ.setdefault("HUB_URL", "https://user-nicolaslaval-qgis.user.lab.sspcloud.fr")
 os.environ.setdefault("HUB_API_KEY", "test-key")
 os.environ.setdefault("QGIS_API_KEY", "test-key")
+# Traitements en arriere-plan (spec 2026-10-02) : les suites existantes
+# simulent les outils par `_call_mcp_tool`, l'appel direct. Elles tournent
+# donc sur ce chemin ; test_arriere_plan*.py active la tache de fond.
+os.environ.setdefault("AGENT_ARRIERE_PLAN", "0")

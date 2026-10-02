@@ -30,6 +30,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
+from agent import arriere_plan
 from agent import memory
 from agent import vector_store
 from agent import embed_worker
@@ -175,6 +176,9 @@ _AGENT_INTER_POD_ROUTES = (
     # arbitraire avec une URL de phishing. On l'ajoute aux inter-pod routes
     # pour exiger Bearer HUB_API_KEY (defense in depth, meme si H1 tombe).
     "/journal/livrables",
+    # Traitements en arriere-plan : le hub signale la fin d'une tache pour
+    # que l'agent en rattache le compte rendu a la conversation.
+    "/internal/taches",
 )
 
 _JWKS_CACHE = None
@@ -384,6 +388,9 @@ async def startup():
     # limites par défaut (20 max/session, 7j max). Permet de garder le PVC
     # propre sans intervention manuelle.
     asyncio.create_task(_checkpoint_purge_loop())
+    # Taches de fond : l'agent apprend du hub celles qui occupent QGIS (une
+    # tache relancee depuis le bureau, ou lancee avant un redemarrage).
+    asyncio.create_task(_veille_taches_loop())
     log.info("QGIS Agent démarré | Hub: %s | Profil: %s", _HUB_URL, _DEFAULT_PROFILE)
 
 
@@ -474,6 +481,21 @@ async def _checkpoint_purge_loop() -> None:
             break
         except Exception as exc:
             log.warning("Purge checkpoints en erreur : %s", exc)
+
+
+async def _veille_taches_loop(periode: float = 30.0) -> None:
+    """Aligne toutes les 30 s la liste locale des taches qui occupent QGIS."""
+    from agent import qgis_agent as _qa
+    while True:
+        try:
+            taches = await _qa._REGISTRE_TACHES.actives(fraicheur_s=0)
+            if taches is not None:
+                arriere_plan.synchroniser(taches)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            log.debug("veille des taches : %s", exc)
+        await asyncio.sleep(periode)
 
 
 @app.on_event("shutdown")
@@ -1280,6 +1302,115 @@ async def chat(
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         }
+    )
+
+
+# ── Traitements en arriere-plan (spec 2026-10-02) ───────────────────────────
+#
+# Contrats documentes dans docs/superpowers/specs/2026-10-02-traitements-
+# arriere-plan.md. Le chat parle a l'agent ; l'agent relaie au registre du
+# hub ; le hub rappelle l'agent a la fin d'une tache.
+
+@app.post("/chat/taches/{tache_id}/decision")
+async def chat_decision_tache(tache_id: str, request: Request):
+    """Choix de l'utilisateur pendant l'attente : arriere_plan, attendre, annuler.
+
+    404 si aucun tour n'attend cette tache (tour deja fini, agent redemarre) :
+    le chat se rabat alors sur /taches/{id}/annuler.
+    """
+    try:
+        corps = await request.json()
+    except Exception:
+        corps = {}
+    choix = str((corps or {}).get("choix") or "")
+    if choix not in arriere_plan.CHOIX:
+        raise HTTPException(400, "choix attendu : arriere_plan, attendre ou annuler")
+    if not arriere_plan.poser_decision(tache_id, choix):
+        raise HTTPException(404, "aucun tour n'attend cette tache")
+    return {"ok": True, "tache_id": tache_id, "choix": choix}
+
+
+async def _relais_registre(methode: str, chemin: str, **kwargs) -> Response:
+    if not (_HUB_URL and _HUB_API_KEY):
+        return JSONResponse({"detail": "hub non configure"}, status_code=503)
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.request(methode, f"{_HUB_URL}{chemin}",
+                                headers={"Authorization": f"Bearer {_HUB_API_KEY}"},
+                                **kwargs)
+    except Exception as exc:
+        return JSONResponse({"detail": f"hub injoignable : {exc}"}, status_code=502)
+    return Response(content=r.content, status_code=r.status_code,
+                    media_type=r.headers.get("content-type", "application/json"))
+
+
+@app.get("/taches")
+async def lister_taches(request: Request):
+    """Taches du registre (relais du hub) : ?session_id=, ?etude=, ?actives=1."""
+    return await _relais_registre("GET", "/taches", params=dict(request.query_params))
+
+
+@app.post("/taches/{tache_id}/annuler")
+async def annuler_tache(tache_id: str):
+    reponse = await _relais_registre("POST", f"/taches/{tache_id}/annuler")
+    arriere_plan.oublier_cache()
+    return reponse
+
+
+@app.post("/taches/{tache_id}/relancer")
+async def relancer_tache(tache_id: str):
+    reponse = await _relais_registre("POST", f"/taches/{tache_id}/relancer")
+    if reponse.status_code < 300:
+        arriere_plan.marquer_active(tache_id)
+    return reponse
+
+
+async def _rediger_par_le_modele(messages: list[dict]) -> str:
+    """Appel court au modele, sans raisonnement, pour le message de fin."""
+    from agent import qgis_agent as _qa
+    modele = await _qa._resolve_model(_DEFAULT_PROFILE)
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = await c.post(
+            f"{_qa._LLM_BASE_URL}/chat/completions",
+            json={"model": modele, "messages": messages, "stream": False,
+                  "max_tokens": 400, **_qa._SANS_REFLEXION},
+            headers={"Authorization": f"Bearer {_qa._llm_api_key()}",
+                     "Content-Type": "application/json"},
+        )
+    r.raise_for_status()
+    texte = r.json()["choices"][0]["message"].get("content") or ""
+    return texte_modele.retirer_emojis(texte)
+
+
+@app.post("/internal/taches/{tache_id}/rattacher")
+async def interne_rattacher_tache(tache_id: str):
+    """Le hub signale la fin d'une tache : le compte rendu rejoint la conversation.
+
+    Idempotent : une tache deja rattachee ne produit pas de second message.
+    """
+    from agent import qgis_agent as _qa
+
+    async def _ajouter(session_id: str, role: str, texte: str, appels):
+        await memory.add_message(session_id, role, texte, tool_calls=appels)
+
+    async def _apres(tache: dict):
+        arriere_plan.marquer_finie(tache_id)
+        if tache.get("statut") != arriere_plan.TERMINEE:
+            return
+        # Ce que le tour n'a pas pu faire pendant le calcul : l'historique
+        # des actions du projet et la sauvegarde de l'etude.
+        await _qa._append_history("user", tache.get("outil") or "",
+                                  {"tache": tache_id},
+                                  (tache.get("resultat") or "")[:200])
+        if (tache.get("outil") in _qa._MUTATING_TOOLS
+                and not arriere_plan.peut_etre_occupe()):
+            agent = QGISAgent(username="user",
+                              session_id=tache.get("session_id") or "",
+                              profile_id=_DEFAULT_PROFILE)
+            await agent._autosave_active_study()
+
+    return await arriere_plan.rattacher(
+        tache_id, _qa._REGISTRE_TACHES, _ajouter, _rediger_par_le_modele, _apres,
     )
 
 
