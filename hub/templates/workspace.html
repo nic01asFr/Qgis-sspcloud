@@ -31,7 +31,12 @@
   letter-spacing:.3px}
 
 /* Contenu principal — dashboard horizontal */
-.ws-main{padding:14px 0 32px}
+/* Pied de page colle en bas de l'ecran quand la page est courte : le corps
+   occupe toute la hauteur et la zone principale prend l'espace restant
+   (signale le 2026-10-02 : bande vide sous le pied). 100dvh tient compte des
+   barres du navigateur mobile ; 100vh reste en repli. */
+body{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}
+.ws-main{padding:14px 0 32px;flex:1 0 auto}
 .ws-main > .qs-conteneur{max-width:1120px}
 
 .ws-dash{display:grid;grid-template-columns:1.5fr 1fr;gap:20px;align-items:start}
