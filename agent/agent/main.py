@@ -30,6 +30,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
+from agent import arriere_plan
 from agent import memory
 from agent import vector_store
 from agent import embed_worker
@@ -175,6 +176,9 @@ _AGENT_INTER_POD_ROUTES = (
     # arbitraire avec une URL de phishing. On l'ajoute aux inter-pod routes
     # pour exiger Bearer HUB_API_KEY (defense in depth, meme si H1 tombe).
     "/journal/livrables",
+    # Traitements en arriere-plan : le hub signale la fin d'une tache pour
+    # que l'agent en rattache le compte rendu a la conversation.
+    "/internal/taches",
 )
 
 _JWKS_CACHE = None
@@ -384,6 +388,9 @@ async def startup():
     # limites par défaut (20 max/session, 7j max). Permet de garder le PVC
     # propre sans intervention manuelle.
     asyncio.create_task(_checkpoint_purge_loop())
+    # Taches de fond : l'agent apprend du hub celles qui occupent QGIS (une
+    # tache relancee depuis le bureau, ou lancee avant un redemarrage).
+    asyncio.create_task(_veille_taches_loop())
     log.info("QGIS Agent démarré | Hub: %s | Profil: %s", _HUB_URL, _DEFAULT_PROFILE)
 
 
@@ -476,6 +483,21 @@ async def _checkpoint_purge_loop() -> None:
             log.warning("Purge checkpoints en erreur : %s", exc)
 
 
+async def _veille_taches_loop(periode: float = 30.0) -> None:
+    """Aligne toutes les 30 s la liste locale des taches qui occupent QGIS."""
+    from agent import qgis_agent as _qa
+    while True:
+        try:
+            taches = await _qa._REGISTRE_TACHES.actives(fraicheur_s=0)
+            if taches is not None:
+                arriere_plan.synchroniser(taches)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            log.debug("veille des taches : %s", exc)
+        await asyncio.sleep(periode)
+
+
 @app.on_event("shutdown")
 async def shutdown():
     global _embed_task, _embed_stop
@@ -532,6 +554,34 @@ async def api_version():
     if not commit:
         etat["note"] = "inconnu — image construite sans l'argument GIT_SHA"
     return etat
+
+
+@app.get("/api/cles-deleguees/{ref}")
+async def remettre_cle_deleguee(ref: str):
+    """Remise unique, a l'utilisateur, de la cle d'un agent partage.
+
+    La cle ne passe plus par le modele (audit securite des acces,
+    2026-09-26) : `create_agent` la range dans le coffre du pod et ne rend
+    au modele qu'une reference. Cette route, derriere le middleware
+    d'authentification de l'agent (proprietaire seulement), la remet une
+    seule fois, dans l'heure. `no-store` : ni le navigateur ni un proxy ne
+    doivent la garder.
+    """
+    from agent import cles_deleguees
+    cle = cles_deleguees.remettre(ref)
+    entetes = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex"}
+    if not cle:
+        return JSONResponse(
+            {"detail": "Clé introuvable, déjà remise ou expirée. Révoque "
+                       "l'agent et recrée-le si la clé a été perdue."},
+            status_code=404, headers=entetes,
+        )
+    return JSONResponse(
+        {"key": cle,
+         "avertissement": "Copiez cette clé maintenant : elle ne sera plus "
+                          "affichée."},
+        headers=entetes,
+    )
 
 
 @app.get("/api/status")
@@ -895,6 +945,56 @@ async def _fetch_active_study_id() -> str | None:
     return None
 
 
+async def _fetch_active_project_id() -> str | None:
+    """Projet actif cote hub (best-effort) : rattachement informatif."""
+    hub_url = os.getenv("HUB_URL", "")
+    api_key = os.getenv("HUB_API_KEY", "")
+    if not (hub_url and api_key):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=5) as c:
+            r = await c.get(
+                f"{hub_url}/projects/active",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if r.status_code == 200 and r.json():
+                return r.json().get("pid") or None
+    except Exception:
+        pass
+    return None
+
+
+_NOMS_ETUDES_LUS_A = {"t": 0.0}
+
+
+async def _noms_des_etudes() -> dict[str, str]:
+    """Noms des etudes de l'utilisateur (hub GET /studies), cache 60 s.
+
+    Sert a afficher l'etude de chaque conversation dans l'historique
+    « toutes les etudes ». Best-effort : hub injoignable, on garde les noms
+    deja connus.
+    """
+    if time.monotonic() - _NOMS_ETUDES_LUS_A["t"] < 60 and _NOMS_ETUDES:
+        return dict(_NOMS_ETUDES)
+    hub_url = os.getenv("HUB_URL", "")
+    api_key = os.getenv("HUB_API_KEY", "")
+    if hub_url and api_key:
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                r = await c.get(
+                    f"{hub_url}/studies", params={"archived": "true"},
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                if r.status_code == 200 and isinstance(r.json(), list):
+                    for etude in r.json():
+                        if isinstance(etude, dict) and etude.get("id") and etude.get("name"):
+                            _NOMS_ETUDES[str(etude["id"])] = str(etude["name"])
+                    _NOMS_ETUDES_LUS_A["t"] = time.monotonic()
+        except Exception:
+            pass
+    return dict(_NOMS_ETUDES)
+
+
 # La page du chat ne s'incruste que dans une page de meme origine : le bureau,
 # qui la sert par le proxy /agent/ du hub. Incrustee ailleurs, elle exposait
 # un chat authentifie -- donc des actions au nom de l'utilisateur -- a une
@@ -928,19 +1028,20 @@ async def index(request: Request):
     # reprise ET l'historique. L'historique melangeait les conversations de
     # toutes les etudes -- et n'en listait que 5, alors que le menu en prevoit
     # 20. Hub injoignable : pas d'etude connue, toutes les conversations.
+    # Conversation par etude (2026-10-02) : seules les conversations du chat
+    # de CETTE etude, la plus recemment active d'abord, sans celles du banc
+    # d'evaluation ni les executions de recette (memory.lister_conversations).
     active_study_id = await _fetch_active_study_id()
-    sessions = await memory.get_recent_sessions(
+    sessions = await memory.lister_conversations(
         "user", limit=20, study_id=active_study_id,
     )
 
-    # Reprise de la derniere session liee a l'etude active (Fix Bug B).
-    # Le query param ?new=1 force une nouvelle session.
+    # Reprise de la derniere conversation de l'etude active, jamais d'une
+    # autre. Le query param ?new=1 force une nouvelle conversation.
     session_id: str | None = None
     session_resumed: bool = False
     if request.query_params.get("new") != "1" and active_study_id:
-        session_id = await memory.get_latest_session_for_study(
-            "user", active_study_id,
-        )
+        session_id = sessions[0]["id"] if sessions else None
         if session_id:
             session_resumed = True
     if not session_id:
@@ -958,6 +1059,9 @@ async def index(request: Request):
         "session_resumed": session_resumed,
         "embed":           embed,
         "etude_active_nom": _NOMS_ETUDES.get(active_study_id or "", ""),
+        # Etude active telle que le serveur l'a lue : le chat s'en sert pour
+        # detecter un changement d'etude (contrat desk_etude_active).
+        "etude_active_id": active_study_id or "",
         # Libelles lisibles des actions, pour nommer les etapes d'une
         # conversation rechargee (le flux en direct les recoit du serveur).
         "libelles_outils": _LIBELLES_OUTILS,
@@ -1133,6 +1237,40 @@ async def _avec_battement(source, periode: float = _PERIODE_BATTEMENT):
             suivant.cancel()
 
 
+# Contextes ou l'interface fixe la persona : seuls ceux-la peuvent verrouiller
+# le profil. Pour les deux contextes d'assistance, le profil est impose par le
+# serveur, quel que soit celui du formulaire.
+_CONTEXTES_VERROUILLABLES: frozenset[str] = frozenset({
+    "editor_freeform", "recipe_create", "assist_component", "assist_assembly",
+})
+_PROFIL_IMPOSE_PAR_CONTEXTE: dict[str, str] = {
+    "assist_component": "component_assist",
+    "assist_assembly": "assembly_assist",
+}
+
+
+def _verrou_de_profil(
+    demande: bool, session_id: str, profile_id: str,
+) -> tuple[bool, str]:
+    """Decide cote serveur du verrou de profil. Rend (verrouille, profil).
+
+    Le verrou n'est accorde que si le client le demande ET que la session
+    est d'un contexte ou l'interface fixe la persona. Une session de bureau
+    ou historique n'est jamais verrouillee : le routeur contextuel et la
+    bascule `<switch_profile>` restent actifs.
+    """
+    if not demande:
+        return False, profile_id
+    contexte = memory.parse_session_id(session_id).get("context_kind", "legacy")
+    if contexte not in _CONTEXTES_VERROUILLABLES:
+        log.info(
+            "profile_locked demande mais refuse (contexte %s, session %s)",
+            contexte, session_id[:40],
+        )
+        return False, profile_id
+    return True, _PROFIL_IMPOSE_PAR_CONTEXTE.get(contexte, profile_id)
+
+
 @app.post("/chat")
 async def chat(
     request:        Request,
@@ -1155,9 +1293,16 @@ async def chat(
       - un tag `profile_locked=true` est pose sur la session (best effort).
     """
     # Parsing tolerant du flag (form data est string). Accepte "true"/"1"/"yes".
-    profile_locked_flag = str(profile_locked).strip().lower() in {
-        "true", "1", "yes", "on",
-    }
+    #
+    # Audit securite des acces (2026-09-26) : le verrou etait un champ de
+    # formulaire pose par le client, donc une commodite d'interface et non
+    # une frontiere. Le client DEMANDE le verrou ; le serveur l'accorde
+    # d'apres le contexte qu'il lit lui-meme dans l'identifiant de session,
+    # et impose le profil quand ce contexte en fixe un.
+    profile_locked_flag, profile_id = _verrou_de_profil(
+        str(profile_locked).strip().lower() in {"true", "1", "yes", "on"},
+        session_id, profile_id,
+    )
 
     # Routeur contextuel : le render actif (sélection livrable dans le desk)
     # ou l'étude active prime sur le form. Cf. CHARTE_AGENT §3 Principe 1.
@@ -1168,8 +1313,35 @@ async def chat(
             profile_id, session_id=session_id,
         )
 
-    # Créer la session en mémoire si nouvelle
-    await memory.create_session(session_id, "user", profile_id)
+    # Conversation par etude (2026-10-02), AVANT toute ecriture. Une
+    # conversation du chat n'accepte un message que si elle appartient a
+    # l'etude active (R3) : sinon l'agent agirait sur l'etude active depuis
+    # une conversation d'une autre etude. Le chat en est prevenu (409) et
+    # bascule sur la conversation de l'etude active (POST /conversations/suivre).
+    portee = await memory.portee_conversation(session_id)
+    etude_active = await _fetch_active_study_id()
+    permis, motif = memory.ecriture_permise(portee, etude_active)
+    if not permis and memory.conversation_du_chat(session_id):
+        log.info("POST /chat refuse : conversation %s (%s, etude %s), etude active %s",
+                 session_id, motif, (portee or {}).get("study_id"), etude_active)
+        return JSONResponse({
+            "detail": "Cette conversation n'appartient pas à l'étude active : "
+                      "rien n'a été envoyé à l'assistant.",
+            "motif": motif,
+            "conversation_study_id": (portee or {}).get("study_id"),
+            "etude_active": etude_active,
+        }, status_code=409)
+    if portee is None:
+        # Rattachement a la creation (R1) : l'etude portee par un identifiant
+        # structure, sinon l'etude active.
+        etude_creation = memory.etude_deduite_de_l_identifiant(session_id) or etude_active
+        projet = (await _fetch_active_project_id()
+                  if etude_creation and etude_creation == etude_active else None)
+        await memory.create_session(session_id, "user", profile_id,
+                                    study_id=etude_creation, project_id=projet)
+    elif motif == "vide" and etude_active:
+        await memory.rattacher_si_vide(session_id, etude_active,
+                                       await _fetch_active_project_id())
 
     # ── Chantier G8 : mode mute recipe_run ─────────────────────────────────
     # Si le session_id encode un contexte recipe_run (study:{sid}:recipe:{rid}),
@@ -1215,16 +1387,12 @@ async def chat(
         title = (message or "").strip().replace("\n", " ")[:80]
         if title:
             await memory.set_session_summary(session_id, title)
-    # Rattachement à l'étude active. On le tente tant que la session n'est
-    # rattachée à AUCUNE étude — pas seulement au premier message : si le hub
-    # était injoignable alors, la session restait orpheline pour toujours
-    # (jamais reprise, absente de l'historique filtré). On ne réécrit jamais
-    # un rattachement existant : changer d'étude en cours de conversation ne
-    # doit pas reclasser silencieusement les échanges déjà tenus.
-    if not await memory.get_session_study(session_id):
-        active_study_id = await _fetch_active_study_id()
-        if active_study_id:
-            await memory.set_session_study(session_id, active_study_id)
+    # Le rattachement a l'etude est fait plus haut, a la creation (R1). Il
+    # n'est plus tente « tant que la session est orpheline » : cette regle
+    # rattachait une conversation ancienne a l'etude active du moment ou on
+    # la rouvrait -- pas forcement la sienne (explication la plus probable du
+    # constat du 2026-10-02 : une conversation de Saint-Privat reprise dans
+    # une autre etude).
     history_formatted = _historique_pour_le_modele(history)
 
     agent = QGISAgent(
@@ -1280,6 +1448,115 @@ async def chat(
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         }
+    )
+
+
+# ── Traitements en arriere-plan (spec 2026-10-02) ───────────────────────────
+#
+# Contrats documentes dans docs/superpowers/specs/2026-10-02-traitements-
+# arriere-plan.md. Le chat parle a l'agent ; l'agent relaie au registre du
+# hub ; le hub rappelle l'agent a la fin d'une tache.
+
+@app.post("/chat/taches/{tache_id}/decision")
+async def chat_decision_tache(tache_id: str, request: Request):
+    """Choix de l'utilisateur pendant l'attente : arriere_plan, attendre, annuler.
+
+    404 si aucun tour n'attend cette tache (tour deja fini, agent redemarre) :
+    le chat se rabat alors sur /taches/{id}/annuler.
+    """
+    try:
+        corps = await request.json()
+    except Exception:
+        corps = {}
+    choix = str((corps or {}).get("choix") or "")
+    if choix not in arriere_plan.CHOIX:
+        raise HTTPException(400, "choix attendu : arriere_plan, attendre ou annuler")
+    if not arriere_plan.poser_decision(tache_id, choix):
+        raise HTTPException(404, "aucun tour n'attend cette tache")
+    return {"ok": True, "tache_id": tache_id, "choix": choix}
+
+
+async def _relais_registre(methode: str, chemin: str, **kwargs) -> Response:
+    if not (_HUB_URL and _HUB_API_KEY):
+        return JSONResponse({"detail": "hub non configure"}, status_code=503)
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.request(methode, f"{_HUB_URL}{chemin}",
+                                headers={"Authorization": f"Bearer {_HUB_API_KEY}"},
+                                **kwargs)
+    except Exception as exc:
+        return JSONResponse({"detail": f"hub injoignable : {exc}"}, status_code=502)
+    return Response(content=r.content, status_code=r.status_code,
+                    media_type=r.headers.get("content-type", "application/json"))
+
+
+@app.get("/taches")
+async def lister_taches(request: Request):
+    """Taches du registre (relais du hub) : ?session_id=, ?etude=, ?actives=1."""
+    return await _relais_registre("GET", "/taches", params=dict(request.query_params))
+
+
+@app.post("/taches/{tache_id}/annuler")
+async def annuler_tache(tache_id: str):
+    reponse = await _relais_registre("POST", f"/taches/{tache_id}/annuler")
+    arriere_plan.oublier_cache()
+    return reponse
+
+
+@app.post("/taches/{tache_id}/relancer")
+async def relancer_tache(tache_id: str):
+    reponse = await _relais_registre("POST", f"/taches/{tache_id}/relancer")
+    if reponse.status_code < 300:
+        arriere_plan.marquer_active(tache_id)
+    return reponse
+
+
+async def _rediger_par_le_modele(messages: list[dict]) -> str:
+    """Appel court au modele, sans raisonnement, pour le message de fin."""
+    from agent import qgis_agent as _qa
+    modele = await _qa._resolve_model(_DEFAULT_PROFILE)
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = await c.post(
+            f"{_qa._LLM_BASE_URL}/chat/completions",
+            json={"model": modele, "messages": messages, "stream": False,
+                  "max_tokens": 400, **_qa._SANS_REFLEXION},
+            headers={"Authorization": f"Bearer {_qa._llm_api_key()}",
+                     "Content-Type": "application/json"},
+        )
+    r.raise_for_status()
+    texte = r.json()["choices"][0]["message"].get("content") or ""
+    return texte_modele.retirer_emojis(texte)
+
+
+@app.post("/internal/taches/{tache_id}/rattacher")
+async def interne_rattacher_tache(tache_id: str):
+    """Le hub signale la fin d'une tache : le compte rendu rejoint la conversation.
+
+    Idempotent : une tache deja rattachee ne produit pas de second message.
+    """
+    from agent import qgis_agent as _qa
+
+    async def _ajouter(session_id: str, role: str, texte: str, appels):
+        await memory.add_message(session_id, role, texte, tool_calls=appels)
+
+    async def _apres(tache: dict):
+        arriere_plan.marquer_finie(tache_id)
+        if tache.get("statut") != arriere_plan.TERMINEE:
+            return
+        # Ce que le tour n'a pas pu faire pendant le calcul : l'historique
+        # des actions du projet et la sauvegarde de l'etude.
+        await _qa._append_history("user", tache.get("outil") or "",
+                                  {"tache": tache_id},
+                                  (tache.get("resultat") or "")[:200])
+        if (tache.get("outil") in _qa._MUTATING_TOOLS
+                and not arriere_plan.peut_etre_occupe()):
+            agent = QGISAgent(username="user",
+                              session_id=tache.get("session_id") or "",
+                              profile_id=_DEFAULT_PROFILE)
+            await agent._autosave_active_study()
+
+    return await arriere_plan.rattacher(
+        tache_id, _qa._REGISTRE_TACHES, _ajouter, _rediger_par_le_modele, _apres,
     )
 
 
@@ -1347,6 +1624,124 @@ async def list_sessions():
 @app.get("/sessions/{session_id}/messages")
 async def get_messages(session_id: str):
     return await memory.get_session_messages(session_id)
+
+
+# ── Conversation par etude (2026-10-02) ──────────────────────────────────
+# Cf. memory (regles R1-R5) et docs/superpowers/specs/
+# 2026-10-02-conversation-par-etude.md. Trois lectures pour le chat :
+#   GET  /conversations                 historique (etude active, ou toutes)
+#   GET  /conversations/{sid}/portee    etude d'une conversation, lecture seule ?
+#   POST /conversations/suivre          l'etude a change : quelle conversation ?
+
+def _etude_affichable(study_id: str | None, noms: dict[str, str]) -> dict | None:
+    if not study_id:
+        return None
+    return {"id": study_id, "nom": noms.get(study_id, "")}
+
+
+@app.get("/conversations")
+async def conversations_liste(toutes: int = 0):
+    """Historique du chat : conversations de l'etude active (ou toutes).
+
+    Chaque conversation porte le nom de son etude (`etude_nom`, vide si non
+    rattachee). Hub injoignable : toutes les conversations, sans filtre.
+    """
+    etude_active = await _fetch_active_study_id()
+    noms = await _noms_des_etudes()
+    voir_tout = bool(toutes) or not etude_active
+    liste = await memory.lister_conversations(
+        "user", study_id=etude_active, toutes=voir_tout,
+        limit=50 if voir_tout else 20,
+    )
+    for c in liste:
+        c["etude_nom"] = noms.get(c.get("study_id") or "", "")
+    return {
+        "etude_active": _etude_affichable(etude_active, noms),
+        "toutes": voir_tout,
+        "conversations": liste,
+    }
+
+
+@app.get("/conversations/{session_id}/portee")
+async def conversation_portee(session_id: str):
+    """Etude d'une conversation et droit d'y ecrire (R3)."""
+    portee = await memory.portee_conversation(session_id)
+    etude_active = await _fetch_active_study_id()
+    noms = await _noms_des_etudes()
+    permis, motif = memory.ecriture_permise(portee, etude_active)
+    return {
+        "id": session_id,
+        "existe": portee is not None,
+        "etude": _etude_affichable((portee or {}).get("study_id"), noms),
+        "project_id": (portee or {}).get("project_id"),
+        "etude_active": _etude_affichable(etude_active, noms),
+        "lecture_seule": not permis,
+        "motif": motif,
+    }
+
+
+@app.post("/conversations/suivre")
+async def conversation_suivre(request: Request):
+    """L'etude active a (peut-etre) change : quelle conversation afficher ?
+
+    Corps JSON : {session_id, apres_tour?: bool}. Reponse :
+    {decision, session_id, etude, conversation_precedente}, decision parmi
+      - « inchangee » : la conversation affichee appartient a l'etude active
+        (ou est vierge, ou aucune etude n'est connue) ;
+      - « suit »      : R5, la conversation (un seul tour, qui a cree ou
+        ouvert l'etude) passe dans l'etude active ;
+      - « reprise »   : derniere conversation de l'etude active ;
+      - « nouvelle »  : aucune ; `session_id` est un identifiant neuf.
+    Jamais une conversation d'une autre etude que l'etude active.
+    """
+    try:
+        corps = await request.json()
+    except Exception:
+        corps = {}
+    session_id = str((corps or {}).get("session_id") or "")
+    apres_tour = bool((corps or {}).get("apres_tour"))
+    # Etude que le chat croyait active (None : inconnue). Sert a reprendre la
+    # conversation de la nouvelle etude quand l'ecran montre une conversation
+    # vierge, qui sinon resterait affichee.
+    etude_connue = (corps or {}).get("etude_connue")
+    etude_active = await _fetch_active_study_id()
+    noms = await _noms_des_etudes()
+    portee = await memory.portee_conversation(session_id) if session_id else None
+    precedente = {
+        "id": session_id or None,
+        "etude": _etude_affichable((portee or {}).get("study_id"), noms),
+    }
+    reponse = {
+        "decision": "inchangee",
+        "session_id": session_id,
+        "etude": _etude_affichable(etude_active, noms),
+        "conversation_precedente": precedente,
+    }
+    if not etude_active:
+        return reponse
+    permis, motif = memory.ecriture_permise(portee, etude_active)
+    etude_changee = etude_connue is not None and str(etude_connue) != etude_active
+    if permis and not (etude_changee and motif in ("nouvelle", "vide")):
+        return reponse
+    if permis:
+        # Conversation vierge a l'ecran et l'etude a change : on reprend la
+        # derniere de la nouvelle etude s'il y en a une, sinon on garde la
+        # vierge (elle sera rattachee a la nouvelle etude au premier message).
+        cible = await memory.get_latest_session_for_study("user", etude_active)
+        if cible and cible != session_id:
+            reponse.update(decision="reprise", session_id=cible)
+        return reponse
+    if (apres_tour and motif == "autre_etude"
+            and await memory.suivre_l_etude(session_id, etude_active,
+                                            await _fetch_active_project_id())):
+        reponse["decision"] = "suit"
+        return reponse
+    cible = await memory.get_latest_session_for_study("user", etude_active)
+    if cible and cible != session_id:
+        reponse.update(decision="reprise", session_id=cible)
+    else:
+        reponse.update(decision="nouvelle", session_id=str(uuid.uuid4()))
+    return reponse
 
 
 # ── Session tags (Chantier G1) ────────────────────────────────────────────────

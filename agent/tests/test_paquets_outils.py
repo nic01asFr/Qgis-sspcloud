@@ -47,7 +47,9 @@ _FIXTURE = _ROOT / "tests" / "fixtures" / "outils_hub_2f36a8a.json"
 
 
 def outils_reels() -> list[dict]:
-    """Les 90 outils du profil standard, au format envoye au modele."""
+    """Les 92 outils du profil standard, au format envoye au modele (les 90
+    mesures en live le 2026-09-26, plus densite_par_maille et
+    compter_par_zone, 2026-10-02)."""
     hub = json.loads(_FIXTURE.read_text(encoding="utf-8"))
     return ([qa._mcp_tool_to_openai(t) for t in hub]
             + list(qa._NATIVE_MEMORY_TOOLS) + list(qa._NATIVE_RECIPE_TOOLS)
@@ -67,15 +69,17 @@ def _exposes(message: str, **etat) -> list[dict]:
 
 def test_la_liste_complete_est_celle_mesuree_en_live() -> None:
     complets = outils_reels()
-    assert len(complets) == 90
-    # 19 300 mesures en live le 2026-09-26 : l'estimateur tombe juste.
-    assert 18_500 <= cb.estimer_tokens_outils(complets) <= 20_000
+    assert len(complets) == 92
+    # 19 300 mesures en live le 2026-09-26 (90 outils) : l'estimateur tombe
+    # juste. Le paquet analyse (2026-10-02) y ajoute ~940 jetons.
+    assert 19_400 <= cb.estimer_tokens_outils(complets) <= 21_000
 
 
 def test_chaque_outil_reel_est_classe() -> None:
     """Un outil non classe reste expose (filet), mais coute des jetons a
     chaque tour : tout outil du workspace doit etre au socle ou en paquet."""
-    non_classes = sorted(n for n in _noms(outils_reels()) if po.paquet_de(n) is None)
+    non_classes = sorted(n for n in _noms(outils_reels())
+                         if po.paquet_de(n) is None and n not in po.OUTILS_MASQUES)
     assert not non_classes, f"a classer dans paquets_outils : {non_classes}"
 
 
@@ -118,7 +122,7 @@ def test_les_tours_courants_n_exposent_que_le_socle(message: str) -> None:
     for n in SOCLE_ATTENDU:
         assert n in noms, f"{n} absent pour {message!r}"
     for n in ("create_component", "export_grist", "mouse_click", "study_create",
-              "publish_artifact", "run_recipe"):
+              "publish_artifact", "run_recipe", "densite_par_maille"):
         assert n not in noms, f"{n} expose sans raison pour {message!r}"
     # Cible du lot : <= ~7 000 jetons de schemas sur les tours courants.
     jetons = cb.estimer_tokens_outils(outils)
@@ -143,6 +147,32 @@ def test_publier_une_storymap_expose_les_livrables() -> None:
     assert cb.estimer_tokens_outils(outils) <= 10_500
 
 
+def test_la_densite_batie_expose_l_outil_de_comptage() -> None:
+    """Constat live du 2026-10-02 (Rousset) : sans outil expose, la densite
+    batie par maille a ete ecrite trois fois en PyQGIS (plus de 12 min)."""
+    outils = _exposes("Sur Rousset, affiche les trames vertes et bleues, "
+                      "la densité bâtie et les réseaux")
+    noms = _noms(outils)
+    assert {"densite_par_maille", "compter_par_zone", "set_study_zone",
+            "smart_load", "clip_to_study_zone"} <= noms
+    assert "create_component" not in noms and "run_recipe" not in noms
+    assert cb.estimer_tokens_outils(outils) <= 5_500
+
+
+@pytest.mark.parametrize("message", [
+    "Affiche les trames vertes et bleues et les réseaux sur Rousset",
+    "Combien de bâtiments dans ma zone ?",
+    "Charge le bâti de ma zone d'étude",
+])
+def test_sans_densite_ni_zones_pas_de_paquet_analyse(message: str) -> None:
+    assert "analyse" not in po.paquets_par_intention(message)
+
+
+def test_demander_outils_trouve_le_comptage() -> None:
+    assert "analyse" in po.paquets_pour_besoin("densite_par_maille")
+    assert "analyse" in po.paquets_pour_besoin("compter par quartier")
+
+
 def test_une_recette_expose_les_outils_de_recette() -> None:
     noms = _noms(_exposes("Lance la recette densité du bâti sur ma zone"))
     assert {"list_recipes", "run_recipe", "save_recipe", "get_recipe"} <= noms
@@ -159,6 +189,11 @@ def test_une_recette_expose_les_outils_de_recette() -> None:
     ("lance le calcul en arrière-plan", "traitement_long"),
     ("tu te souviens de ce qu'on a fait la dernière fois ?", "memoire"),
     ("crée un agent publié pour le service", "agents_publies"),
+    ("Calcule la DENSITÉ du bâti", "analyse"),
+    ("un carroyage de 200 m", "analyse"),
+    ("compte les commerces par quartier", "analyse"),
+    ("nombre de logements par IRIS", "analyse"),
+    ("statistiques par îlot", "analyse"),
 ])
 def test_mots_cles_sans_accents_ni_casse(message: str, paquet: str) -> None:
     assert paquet in po.paquets_par_intention(message)
@@ -222,6 +257,12 @@ def test_un_outil_inconnu_reste_expose() -> None:
     assert "outil_tout_neuf" in _noms(po.selectionner([nouveau], set()))
 
 
+def test_execute_async_n_est_jamais_montre_au_modele() -> None:
+    """La tache de fond est l'affaire de l'agent (live du 2026-10-02)."""
+    soumission = {"type": "function", "function": {"name": "execute_async"}}
+    assert "execute_async" not in _noms(po.selectionner([soumission], set(po.PAQUETS)))
+
+
 def test_l_ordre_du_profil_est_conserve() -> None:
     complets = outils_reels()
     sel = po.selectionner(complets, {"mise_en_page"})
@@ -257,7 +298,8 @@ def test_le_cache_par_signature(monkeypatch) -> None:
 def test_l_interrupteur_rend_la_liste_complete(monkeypatch) -> None:
     monkeypatch.setenv("AGENT_OUTILS_PAR_PAQUETS", "0")
     agent = _agent_hors_ligne("standard", None)
-    assert len(_run(agent._outils_exposes(set()))) == 90
+    # Toute la liste, hors outils masques (execute_async).
+    assert len(_run(agent._outils_exposes(set()))) == 92 - len(po.OUTILS_MASQUES)
 
 
 # ── Filet dans la vraie boucle chat_stream ──────────────────────────────────
@@ -339,7 +381,7 @@ def _reponse_texte(texte: str) -> list[str]:
 
 @pytest.fixture()
 def boucle(monkeypatch):
-    """Agent standard avec les 90 outils reels, modele et hub simules."""
+    """Agent standard avec les 92 outils reels, modele et hub simules."""
     appels: list[str] = []
     chargements = {"n": 0}
 
@@ -402,7 +444,7 @@ def test_le_premier_appel_n_envoie_que_le_socle(boucle) -> None:
     assert po.OUTIL_DEMANDER in envoyes and "smart_load" in envoyes
     assert "create_component" not in envoyes
     r = boucle.dernier_releve_contexte
-    assert r["n_outils_profil"] == 90 and r["outils_profil"] > 18_000
+    assert r["n_outils_profil"] == 92 and r["outils_profil"] > 18_000
     assert r["outils"] <= 4_500
 
 

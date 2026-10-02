@@ -174,7 +174,10 @@ def test_mouvement_reduit_respecte() -> None:
 
 def test_la_page_seule_situe_l_etude_et_mene_au_reste_du_service() -> None:
     entete = _CHAT.split('<header role="banner" class="qs-entete">')[1].split("</header>")[0]
-    assert "{% if etude_active_nom %}" in entete
+    # Toujours present, masque sans etude : le chat le met a jour quand
+    # l'etude active change (conversation par etude, 2026-10-02).
+    assert "{% if not etude_active_nom %}hidden{% endif %}" in entete
+    assert 'id="chat-etude-active-nom"' in entete
     assert "Étude active" in entete
     assert ">Mon espace</a>" in entete
     assert ">Bureau de travail</a>" in entete

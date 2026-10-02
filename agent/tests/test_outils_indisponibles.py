@@ -97,7 +97,9 @@ def hub(monkeypatch):
     monkeypatch.setattr(qa.httpx, "AsyncClient", _Hub)
     monkeypatch.setattr(qa.asyncio, "sleep", _dormir)
     monkeypatch.setattr(qa, "_DERNIERS_OUTILS_MCP", {})
-    monkeypatch.setattr(qa, "_PROFILES_CACHE", {})
+    # Profil declare : depuis l'audit securite, un profil inconnu n'a aucun
+    # outil MCP (repli ferme) ; ces tests portent sur la recuperation.
+    monkeypatch.setattr(qa, "_PROFILES_CACHE", {"standard": {"mcp_tools": {"allowed": "all"}}})
     _Hub.appels = 0
     _Hub.script = []
     return attentes

@@ -53,6 +53,11 @@ s3:
   secretAccessKey: ""
   sessionToken: ""
   workingDirectoryPath: ""
+  # Nom d'un Secret existant portant AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+  # et AWS_SESSION_TOKEN. Vide : le chart cree `<release>-qgis-hub-s3` a
+  # partir des trois valeurs ci-dessus (posees par Onyxia). Dans les deux
+  # cas, le pod les lit par secretKeyRef, plus en clair dans son spec.
+  existingSecret: ""
 
 vault:
   enabled: true
@@ -94,6 +99,19 @@ security:
 global:
   suspend: false
 
+# Signature Ed25519 des bundles publies (export-bundle).
+#
+# La cle est FOURNIE par l'installation, jamais generee ni stockee par le
+# chart. Creer un Secret (hors Git) puis le designer ici :
+#   kubectl create secret generic qgis-bundle-signing \
+#     --from-literal=CEREMA_ED25519_PRIVATE_KEY=<32 octets en hex>
+# Sans cle, les bundles sont produits NON signes et le disent (integrity.txt,
+# README.txt) : il n'y a plus de cle de demonstration.
+publication:
+  signingKey:
+    existingSecret: ""
+    key: CEREMA_ED25519_PRIVATE_KEY
+
 message:
   fr: "**NB:** ce service pourrait être supprimé après 7 jours d'utilisation."
   en: "**Warning:** this service may be deleted after 7 days."
@@ -128,6 +146,15 @@ workspace:
     repository: ghcr.io/nic01asfr/qgisremotemcp
     tag: latest
     pullPolicy: Always
+  # Authentification hub -> workspace (API 8080, MCP 8100, noVNC 6080).
+  #   permissive : le workspace journalise les appels sans jeton et les
+  #                laisse passer (transition, defaut) ;
+  #   enforce    : tout appel non local sans jeton valide est refuse ;
+  #   off        : aucune verification (deconseille).
+  # Sequence : deployer le hub (qui envoie le jeton), verifier les journaux
+  # du workspace, puis passer a `enforce`. Cf.
+  # docs/superpowers/specs/2026-09-26-securite-acces-p0.md.
+  authMode: permissive
   persistence:
     size: 10Gi
   resources:

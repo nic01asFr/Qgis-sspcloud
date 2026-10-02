@@ -2,7 +2,11 @@
 
 Deux transports :
 
-- `PontHttp` : le pont est joignable en HTTP (port-forward, reseau du pod) ;
+- `PontHttp` : le pont est joignable en HTTP (port-forward, reseau du pod).
+  Depuis un autre pod, le workspace exige son jeton (audit securite des
+  acces, 2026-09-26) : il est lu dans `WORKSPACE_TOKEN` et envoye en
+  `X-Workspace-Token`. Un port-forward arrive par la boucle locale du pod et
+  n'en a pas besoin ;
 - `PontCommande` : une commande fournie par l'operateur, qui lit la requete
   JSON sur son entree standard et ecrit la reponse JSON sur sa sortie. C'est
   la voie `kubectl exec`, par exemple :
@@ -21,6 +25,7 @@ Reponse de `execute_python` (BigQgisMCP, src/qgis_bridge.py) :
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import urllib.request
@@ -44,8 +49,12 @@ class PontHttp:
 
     def commande(self, action: str, params: dict, timeout: int = 120) -> dict:
         corps = json.dumps({"action": action, "params": params, "timeout": timeout}).encode()
+        entetes = {"Content-Type": "application/json"}
+        jeton = os.environ.get("WORKSPACE_TOKEN", "").strip()
+        if jeton:
+            entetes["X-Workspace-Token"] = jeton
         req = urllib.request.Request(self.url, data=corps, method="POST",
-                                     headers={"Content-Type": "application/json"})
+                                     headers=entetes)
         try:
             with self._ouvrir(req, timeout=timeout + 15) as resp:
                 return json.loads(resp.read().decode("utf-8"))

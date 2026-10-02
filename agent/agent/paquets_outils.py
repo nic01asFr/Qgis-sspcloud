@@ -69,6 +69,9 @@ documents            ~230  document, rapport, pdf, cahier des charges, cctp,
                            compte rendu, note de, selon le..., d'apres le...,
                            que dit ; retire tant que l'etude n'a aucun
                            document indexe (lot L7)
+analyse              ~940  densite, maille, grille, carroyage, carreau,
+                           par quartier / ilot / iris / secteur / zone...,
+                           compter par, statistiques par, carte de chaleur
 =================  ======  ====================================================
 
 (``demander_outils`` compte ~220 jetons dans le socle.)
@@ -188,8 +191,10 @@ PAQUETS: dict[str, Paquet] = {p.nom: p for p in (
         r"\banimation", r"\bchronolog", r"time ?lapse", r"\bqfield\b",
         r"(?:sur le|releves? de|saisie de|collecte de|collecte sur le) terrain",
         r"\bmobile\b", r"\bgrist\b", r"\btableur")),
+    # execute_async n'y figure plus (2026-10-02) : la tache de fond est
+    # l'affaire de l'agent (arriere_plan), voir OUTILS_MASQUES.
     _p("traitement_long", "traitement long",
-       ("execute_async", "poll_job", "cancel_job"),
+       ("poll_job", "cancel_job"),
        (r"\basync", r"arriere[- ]plan", r"\bjobs?\b", r"tache de fond",
         r"\blourd", r"\bannule")),
     _p("fichiers", "fichiers, couche par URL",
@@ -231,6 +236,17 @@ PAQUETS: dict[str, Paquet] = {p.nom: p for p in (
         r"\bselon (?:le|la|les|l')", r"\bd'apres (?:le|la|les|l')",
         r"\bque (?:dit|disent)\b", r"\bdeliberations?\b", r"\bdocx?\b", r"\bodt\b",
         r"\bpieces? (?:ecrites?|du dossier)")),
+    # Constat live du 2026-10-02 (Rousset) : faute d'outil, la densite batie
+    # par maille a ete ecrite trois fois en PyQGIS, la derniere au-dela de
+    # 12 minutes. Ces deux outils le font en secondes (algorithmes natifs).
+    _p("analyse", "densite par maille, comptage par zone",
+       ("densite_par_maille", "compter_par_zone"),
+       (r"\bdensit", r"\bmailles?\b", r"\bmaillage", r"\bgrilles?\b", r"\bcarroy",
+        r"\bcarreaux?\b",
+        r"\bpar (?:quartier|ilot|iris|secteur|zone|commune|arrondissement|"
+        r"parcelle|maille|carreau|hexagone)s?\b",
+        r"\bcompt\w* (?:par|dans chaque)\b", r"\bstatistiques? par\b",
+        r"\bnombre de \w+ par\b", r"carte de chaleur", r"\bheat ?map")),
 )}
 
 _PAQUET_DE: dict[str, str] = {
@@ -270,6 +286,12 @@ OUTILS_INVALIDANTS: frozenset[str] = frozenset({
     "set_study_zone", "study_switch", "study_project_switch",
     "new_project", "open_project",
 })
+
+
+# Outils que l'agent appelle lui-meme et ne montre jamais au modele, qu'ils
+# soient classes ou non. execute_async : un appel direct du modele echappait
+# au registre des taches de fond (constat live du 2026-10-02).
+OUTILS_MASQUES: frozenset[str] = frozenset({"execute_async"})
 
 
 def paquet_de(nom_outil: str) -> str | None:
@@ -352,6 +374,8 @@ def selectionner(outils: list[dict], paquets: Iterable[str]) -> list[dict]:
     out = []
     for o in outils:
         nom = nom_outil(o)
+        if nom in OUTILS_MASQUES:
+            continue
         if nom in retenus or nom not in _PAQUET_DE:
             out.append(o)
     return out

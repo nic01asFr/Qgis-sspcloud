@@ -584,6 +584,33 @@ async def _validate_api_key(key: str) -> dict | None:
 _SCOPED_PREFIX = "qgisk_"
 _SCOPED_TOOLS_ALL = "all"
 
+# Routes ou une cle scopee (`qgisk_`, dont les jetons OAuth) est recevable.
+#
+# Constate le 2026-09-26 (audit securite des acces, SEC-1) : le middleware
+# laissait passer une cle scopee sur TOUS les prefixes inter-pod (`/studies`,
+# `/publish`, `/admin`, `/internal`...), puis `get_current_user` rendait
+# l'identite complete du proprietaire. Seul `/mcp` appliquait le scope. Une
+# cle deleguee pouvait donc depublier, revoquer, lire la memoire ou appeler
+# `/admin`. Desormais une cle scopee n'est valable que la ou son scope est
+# applique : le proxy `/mcp` (liste blanche d'outils) et la lecture des
+# livrables publies (`/published`, `/p`), dont la porte d'audience lit
+# `identity["scope"]`. Partout ailleurs : 403 explicite.
+_SCOPED_ALLOWED_PREFIXES = ("/mcp", "/published", "/p")
+
+
+def scoped_key_path_allowed(path: str) -> bool:
+    """Vrai si une cle scopee est recevable sur ce chemin."""
+    return any(
+        path == p or path.startswith(p + "/") for p in _SCOPED_ALLOWED_PREFIXES
+    )
+
+
+_SCOPED_REFUS = (
+    "Cette clé déléguée n'est valable que sur le connecteur MCP (/mcp) et la "
+    "lecture des livrables publiés. Utilise ta clé d'accès personnelle pour "
+    "cette route."
+)
+
 
 async def create_scoped_key(
     username: str,
@@ -662,7 +689,9 @@ async def _validate_scoped_key(key: str) -> dict | None:
         tools = _SCOPED_TOOLS_ALL
     return {
         "username": username,
-        "role": "admin" if username in _ADMIN_USERS else "user",
+        # Jamais « admin » : une cle deleguee ne porte pas les droits
+        # d'administration de son proprietaire, quel qu'il soit.
+        "role": "user",
         "source": "scoped",
         "scope": {
             "owner":   username,
@@ -1067,6 +1096,18 @@ async def get_current_user(
     if token.startswith(_SCOPED_PREFIX):
         user = await _validate_scoped_key(token)
         if user:
+            # Defense en profondeur : le middleware refuse deja une cle scopee
+            # hors de ses routes, mais une route publique qui appellerait
+            # get_current_user ne doit pas non plus lui rendre l'identite du
+            # proprietaire. `request` n'est absent que dans les appels directs
+            # (tests unitaires) : aucune route n'est alors en jeu.
+            if request is not None and not scoped_key_path_allowed(
+                request.url.path
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=_SCOPED_REFUS,
+                )
             return user
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1085,7 +1126,7 @@ async def get_current_user(
 
 
 async def require_admin(user: dict = Depends(get_current_user)) -> dict:
-    if user.get("role") != "admin":
+    if user.get("source") == "scoped" or user.get("role") != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Accès admin requis",
@@ -1288,6 +1329,15 @@ _OIDC_MIDDLEWARE_INTER_POD = (
     # Whitelist les endpoints publish top-level et sub-endpoints (component,
     # assembly, livrable, pdf, agent) qui suivent la meme convention.
     "/publish",
+    # Traitements en arriere-plan (2026-10-02) : l'agent inscrit et met a
+    # jour ses taches de fond en Bearer HUB_API_KEY ; Depends(get_current_user)
+    # valide la cle dans l'endpoint.
+    "/taches",
+    # Profils (2026-10-02) : l'agent lit /profiles et /profiles/{id} en Bearer
+    # HUB_API_KEY pour filtrer ses outils. Depuis que le profil inconnu est
+    # ferme (aucun outil, securite T8), le 401 du middleware laissait l'agent
+    # avec 2 outils. Depends(get_current_user) valide la cle dans l'endpoint.
+    "/profiles",
     # NB : /published a ete deplace dans _OIDC_MIDDLEWARE_PUBLIC (vraie
     # whitelist anonyme). Inter-pod ne suffit pas pour acces tiers internet.
 )
@@ -1384,8 +1434,15 @@ async def oidc_auth_middleware(request: "Request", call_next):
         # endpoint de mint n'existe, aucune cle scopee n'est emise -> chemin
         # inerte en prod. La cle superviseur passe deja via _is_inter_pod ci-dessus
         # (== HUB_API_KEY en hub mono-user) -> request.state.scope reste None = total.
+        #
+        # Mise a jour 2026-09-26 : le chemin n'est plus inerte (mint livre, et
+        # les jetons OAuth sont des cles scopees). Une cle scopee n'est donc
+        # recevable que sur les routes ou son scope est applique ; ailleurs,
+        # refus explicite plutot qu'un repli silencieux sur l'OIDC.
         scoped = await _bearer_scope(request)
         if scoped:
+            if not scoped_key_path_allowed(path):
+                return JSONResponse({"detail": _SCOPED_REFUS}, status_code=403)
             request.state.scope = scoped
             return await call_next(request)
         # Sinon on tombe sur le check OIDC ci-dessous (fallback UI)

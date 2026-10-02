@@ -82,7 +82,7 @@ def test_sans_etude_connue_l_historique_montre_tout(monkeypatch, tmp_path) -> No
 def test_l_historique_en_propose_plus_de_cinq() -> None:
     """Le menu prevoit 20 entrees ; le serveur n'en envoyait que 5."""
     source = (_ROOT / "agent" / "main.py").read_text(encoding="utf-8")
-    appel = source.split("sessions = await memory.get_recent_sessions(")[1][:120]
+    appel = source.split("sessions = await memory.lister_conversations(")[1][:120]
     assert "limit=20" in appel
     assert "study_id=active_study_id" in appel
 

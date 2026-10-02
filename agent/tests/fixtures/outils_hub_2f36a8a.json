@@ -731,6 +731,94 @@
   }
  },
  {
+  "name": "densite_par_maille",
+  "description": "Densite d'une couche par maille carree, en quelques secondes par algorithmes natifs (native:creategrid + native:countpointsinpolygon sur les centroides, index spatial) : pour toute densite, grille ou carroyage, JAMAIS une boucle PyQGIS. Couche designee par layer_id ou nom exact (layer). Maille en metres (taille_m, defaut 200), calcul en projection metrique. Emprise : contour de la zone d'etude s'il est connu, sinon son rectangle. Mesure : nombre d'entites (defaut, avec densite_km2), surface (m2) ou part_surface (% de la maille), ces deux-la pour des polygones. Sortie : GeoPackage de l'etude, style gradue applique. Le retour porte un bloc `verification` (mailles, total compte = total dans l'emprise, mailles vides, min/max/mediane, `lecture`).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "layer_id": {
+     "type": "string",
+     "description": "ID de la couche a compter"
+    },
+    "layer": {
+     "type": "string",
+     "description": "Ou son nom exact, s'il est unique"
+    },
+    "taille_m": {
+     "type": "number",
+     "description": "Cote de la maille en metres (10 a 10 000)",
+     "default": 200
+    },
+    "mesure": {
+     "type": "string",
+     "enum": [
+      "nombre",
+      "surface",
+      "part_surface"
+     ],
+     "description": "nombre d'entites (defaut), surface en m2 ou part de la maille couverte en %",
+     "default": "nombre"
+    },
+    "emprise": {
+     "type": "string",
+     "enum": [
+      "zone",
+      "couche"
+     ],
+     "description": "zone : contour de la zone d'etude, a defaut son rectangle (defaut) ; couche : emprise de la couche",
+     "default": "zone"
+    },
+    "name": {
+     "type": "string",
+     "description": "Nom de la couche et du fichier produits (defaut : densite_<couche>_<taille>m)",
+     "default": ""
+    }
+   },
+   "required": []
+  }
+ },
+ {
+  "name": "compter_par_zone",
+  "description": "Compte les entites d'une couche dans chaque polygone d'une autre (par quartier, IRIS, ilot, commune...), en quelques secondes par algorithmes natifs (native:countpointsinpolygon sur les centroides, index spatial) : JAMAIS une boucle PyQGIS. Entites : layer_id ou nom exact (layer) ; zones : zones_id ou nom exact (zones), des polygones. Mesure : nombre (defaut, avec densite_km2), surface (m2) ou part_surface (%). Sortie : copie des zones avec les champs comptes, GeoPackage de l'etude, style gradue applique. Le retour porte un bloc `verification` (zones, total compte, entites hors zones, zones vides, min/max/mediane, `lecture`).",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "layer_id": {
+     "type": "string",
+     "description": "ID de la couche dont on compte les entites"
+    },
+    "layer": {
+     "type": "string",
+     "description": "Ou son nom exact, s'il est unique"
+    },
+    "zones_id": {
+     "type": "string",
+     "description": "ID de la couche de polygones (quartiers, IRIS, ilots...)"
+    },
+    "zones": {
+     "type": "string",
+     "description": "Ou son nom exact, s'il est unique"
+    },
+    "mesure": {
+     "type": "string",
+     "enum": [
+      "nombre",
+      "surface",
+      "part_surface"
+     ],
+     "description": "nombre d'entites (defaut), surface en m2 ou part de la zone couverte en %",
+     "default": "nombre"
+    },
+    "name": {
+     "type": "string",
+     "description": "Nom de la couche et du fichier produits (defaut : <couche>_par_<zones>)",
+     "default": ""
+    }
+   },
+   "required": []
+  }
+ },
+ {
   "name": "smart_load",
   "description": "Load data from the catalog. WFS sources are downloaded as local GeoPackage via ogr2ogr (automatic pagination, R-tree spatial index, fast for Processing). Raster sources (WMS/WMTS/XYZ) stream as usual. Use set_study_zone first to define the area, or provide a bbox. Il gere les grandes emprises : une ville entiere passe (300 551 batiments sur Marseille, mesure), le resultat est mis en cache 24 h et porte un index spatial. N'ecris JAMAIS ton propre telechargement WFS en execute_python : la combinaison `-spat` + `-t_srs` que tu ecrirais naturellement rend ZERO entite sans erreur, et cet outil contourne deja ce piege. Si le retour porte un `avertissement` disant qu'aucune entite n'a ete trouvee, ne poursuis pas l'analyse : verifie l'emprise. Lis le bloc `verification` (compte local, `lecture` : ce que l'emprise compare) avant tout chiffre. Le chargement couvre un rectangle : pour un chiffre dans la commune, clip_to_study_zone ensuite.",
   "inputSchema": {

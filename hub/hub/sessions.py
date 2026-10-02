@@ -546,6 +546,24 @@ def _remove_public_novnc_ingress(owner: str) -> None:
     _kubectl_delete("ingress", f"{_workspace_name(owner)}-novnc")
 
 
+_MODES_AUTH_WORKSPACE = ("off", "permissive", "enforce")
+
+
+def _env_securite_workspace() -> dict[str, str]:
+    """Variables de securite recopiees du hub vers le pod workspace.
+
+    `WORKSPACE_AUTH_MODE` : off | permissive | enforce (defaut permissive,
+    pour un deploiement en deux temps : le hub envoie le jeton d'abord, le
+    workspace l'exige ensuite). Une valeur inconnue retombe sur `enforce` :
+    une faute de frappe ne doit pas ouvrir le workspace.
+    """
+    mode = (os.getenv("WORKSPACE_AUTH_MODE", "permissive") or "permissive").strip().lower()
+    if mode not in _MODES_AUTH_WORKSPACE:
+        print(f"[sessions] WORKSPACE_AUTH_MODE inconnu ({mode!r}) -> enforce")
+        mode = "enforce"
+    return {"WORKSPACE_AUTH_MODE": mode, "STREAM_BIND_HOST": "127.0.0.1"}
+
+
 # ── Interface publique ─────────────────────────────────────────────────────────
 
 async def create_session(owner: str, extra_env: dict | None = None) -> dict:
@@ -571,6 +589,10 @@ async def create_session(owner: str, extra_env: dict | None = None) -> dict:
     )
     if _hub_url:
         extra_env.setdefault("HUB_URL", _hub_url)
+    # Audit securite des acces (2026-09-26, SEC-2) : le workspace applique
+    # l'authentification hub -> workspace selon le mode du hub (chart
+    # `workspace.authMode`), et ne sert le flux MJPEG qu'en local.
+    extra_env.update(_env_securite_workspace())
     # On garantit toutefois que le Secret existe AVANT de creer le workspace,
     # sinon kubelet refuserait de demarrer le pod (secretKeyRef vers Secret
     # absent = pod en CreateContainerConfigError).
@@ -618,7 +640,12 @@ async def create_session(owner: str, extra_env: dict | None = None) -> dict:
         # cohabiter — `auth.create_or_get_api_key` synchronise le Secret a
         # la cle ACTUELLE, donc le publish_artifact du workspace reussit
         # tant que la cle inline correspond a la cle courante.
-        _kubectl_set_env(ws, {"HUB_URL": extra_env["HUB_URL"]} if "HUB_URL" in extra_env else {})
+        _env_a_garantir = _env_securite_workspace()
+        if "HUB_URL" in extra_env:
+            _env_a_garantir["HUB_URL"] = extra_env["HUB_URL"]
+        # `kubectl set env` ne redemarre le pod que si une valeur change :
+        # une fois alignees, ces variables ne provoquent plus de redemarrage.
+        _kubectl_set_env(ws, _env_a_garantir)
         # Toujours s'assurer que la porte publique reste fermee, y compris
         # sur un workspace cree par une version anterieure du hub.
         _remove_public_novnc_ingress(owner)

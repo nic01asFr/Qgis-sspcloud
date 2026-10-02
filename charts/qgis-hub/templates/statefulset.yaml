@@ -91,13 +91,47 @@ spec:
                 secretKeyRef:
                   name: qgis-hub-apikey
                   key: HUB_API_KEY
+            {{- /* Correctif 2026-09-26 (securite des acces, SEC-2) : mode
+                   d'authentification hub -> workspace. Le hub envoie
+                   toujours le jeton ; ce mode est recopie dans le pod
+                   workspace, qui l'applique (off | permissive | enforce). */}}
+            - name: WORKSPACE_AUTH_MODE
+              value: {{ .Values.workspace.authMode | default "permissive" | quote }}
+            {{- /* Correctif 2026-09-26 (LIV-3) : cle de signature des bundles
+                   FOURNIE par l'installation, jamais generee par le chart.
+                   Sans elle, les bundles sont produits non signes (et le
+                   disent), au lieu d'etre signes par une cle de demo
+                   publique. */}}
+            {{- with (.Values.publication).signingKey }}
+            {{- if .existingSecret }}
+            - name: CEREMA_ED25519_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .existingSecret }}
+                  key: {{ .key | default "CEREMA_ED25519_PRIVATE_KEY" }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.s3.enabled }}
+            {{- /* Correctif 2026-09-26 (SEC-4) : les identifiants S3 sont lus
+                   dans un Secret (secret-s3.yaml, ou s3.existingSecret), plus
+                   en `value:` lisible par quiconque lit le StatefulSet. */}}
+            {{- $s3Secret := .Values.s3.existingSecret | default (printf "%s-s3" (include "qgis-hub.fullname" .)) }}
             - name: AWS_ACCESS_KEY_ID
-              value: {{ .Values.s3.accessKeyId | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $s3Secret }}
+                  key: AWS_ACCESS_KEY_ID
             - name: AWS_SECRET_ACCESS_KEY
-              value: {{ .Values.s3.secretAccessKey | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $s3Secret }}
+                  key: AWS_SECRET_ACCESS_KEY
             - name: AWS_SESSION_TOKEN
-              value: {{ .Values.s3.sessionToken | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $s3Secret }}
+                  key: AWS_SESSION_TOKEN
+                  optional: true
             - name: AWS_ENDPOINT_URL
               value: "https://{{ .Values.s3.endpoint }}/"
             - name: AWS_DEFAULT_REGION
@@ -106,10 +140,14 @@ spec:
               value: {{ .Values.s3.workingDirectoryPath | quote }}
             {{- end }}
             {{- if .Values.vault.enabled }}
+            {{- /* Correctif 2026-09-26 (SEC-4) : VAULT_TOKEN n'est plus
+                   injecte. Aucun code du hub ne le lit (verifie par
+                   recherche dans hub/ et agent/) : c'etait un jeton Vault en
+                   clair dans le spec du pod, pour rien. La valeur
+                   `vault.token` reste acceptee par le chart pour ne pas
+                   casser les values d'Onyxia, mais n'est plus rendue. */}}
             - name: VAULT_ADDR
               value: {{ .Values.vault.url | quote }}
-            - name: VAULT_TOKEN
-              value: {{ .Values.vault.token | quote }}
             - name: VAULT_TOP_DIR
               value: {{ .Values.vault.directory | quote }}
             - name: VAULT_MOUNT

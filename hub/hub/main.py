@@ -49,6 +49,8 @@ from pathlib import Path
 
 from hub import auth, sessions
 from hub import empreinte_code
+from hub import activation_etude
+from hub import workspace_auth
 # Alias : une variable locale `scene_layers` (les couches d'une scene)
 # existe deja a deux endroits et masquait le module -- le rendu des cartes
 # echouait sur « 'list' object has no attribute 'origine_donnees' ».
@@ -74,6 +76,7 @@ try:
 except ImportError:
     _STUDIES_AVAILABLE = False
 from hub import documents_api  # noqa: E402  (corpus documentaire, lot L7)
+from hub import taches_fond  # noqa: E402  (traitements en arriere-plan)
 from hub import documents_etude  # noqa: E402
 try:
     from hub import briques_loader
@@ -967,10 +970,24 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         log.warning("startup: session_active_state gc_loop non lance : %s", exc)
         _sas_gc_task = None
+    # Traitements en arriere-plan (spec 2026-10-02) : registre persistant et
+    # surveillance des taches (battement, fin, perte).
+    try:
+        await _REGISTRE_TACHES.init()
+        _surveillance_taches = asyncio.create_task(
+            taches_fond.boucle_de_surveillance(
+                _REGISTRE_TACHES, _sonder_tache, _aviser_agent_fin_tache,
+            )
+        )
+    except Exception as exc:
+        log.warning("startup: surveillance des taches non lancee : %s", exc)
+        _surveillance_taches = None
     yield
     task.cancel()
     if _sas_gc_task is not None:
         _sas_gc_task.cancel()
+    if _surveillance_taches is not None:
+        _surveillance_taches.cancel()
 
 
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -1216,6 +1233,11 @@ async def proxy_workspace_vnc_http(path: str, request: Request):
         k: v for k, v in request.headers.items()
         if k.lower() not in ("host", "cookie", "authorization", "content-length")
     }
+    # Audit securite des acces (2026-09-26, SEC-2) : websockify exige une
+    # authentification Basic en mode `enforce` ; le cookie de l'utilisateur
+    # ne traverse pas, le hub s'authentifie a sa place.
+    fwd_headers = workspace_auth.sans_entete_client(fwd_headers)
+    fwd_headers.update(workspace_auth.entete_basic_vnc())
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
             proxied = await client.request(
@@ -1318,6 +1340,20 @@ async def proxy_workspace_vnc_ws(client_ws: WebSocket):
         connect_kwargs = {}
         if accept_protocol:
             connect_kwargs["subprotocols"] = [accept_protocol]
+        # Audit securite des acces (2026-09-26, SEC-2) : authentification
+        # Basic aupres de websockify. Le nom du parametre a change avec
+        # websockets 14 (`additional_headers`, avant `extra_headers`).
+        _entetes_vnc = workspace_auth.entete_basic_vnc()
+        if _entetes_vnc:
+            import inspect as _inspect
+            try:
+                _params_connect = _inspect.signature(websockets.connect).parameters
+            except (TypeError, ValueError):
+                _params_connect = {}
+            if "additional_headers" in _params_connect:
+                connect_kwargs["additional_headers"] = _entetes_vnc
+            else:
+                connect_kwargs["extra_headers"] = _entetes_vnc
         async with websockets.connect(upstream_url, **connect_kwargs) as upstream:
             async def client_to_upstream():
                 try:
@@ -3610,7 +3646,8 @@ print("<<<TREATMENTS>>>" + json.dumps(out) + "<<<END>>>")
         resp = await client.post(
             _mcp_url(s),
             json=payload,
-            headers={"Authorization": f"Bearer {key}"},
+            headers={"Authorization": f"Bearer {key}",
+                     **workspace_auth.entetes_workspace()},
         )
     data = resp.json()
     content = data.get("result", {}).get("content", [{}])
@@ -3644,7 +3681,10 @@ async def _execute_python_in_workspace(owner: str, code: str, timeout: int = 30)
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(
             _mcp_url(s), json=payload,
-            headers={"Authorization": f"Bearer {api_key}"},
+            # Jeton hub -> workspace : la cle de l'utilisateur n'est pas
+            # forcement HUB_API_KEY, seule acceptee en mode `enforce`.
+            headers={"Authorization": f"Bearer {api_key}",
+                     **workspace_auth.entetes_workspace()},
         )
     import json as _json
     data = resp.json()
@@ -4306,6 +4346,90 @@ async def update_study_endpoint(
     return await studies.update_study(sid, **body)
 
 
+async def _sonde_qgis_executeur(owner: str, code: str) -> str:
+    """Execution courte : savoir si QGIS repond, sans attendre 30 s."""
+    return await _execute_python_in_workspace(
+        owner, code, timeout=activation_etude.DELAI_SONDE_S,
+    )
+
+
+def _reponse_activation_refusee(username: str, sid: str, pid: str | None,
+                                motif: str, nom: str) -> JSONResponse:
+    """409 : l'etude active n'a pas change (regle A2).
+
+    QGIS occupe ou injoignable : l'activation est notee en attente, le bureau
+    l'affiche et la retente. Echec de chargement : pas d'attente (retenter le
+    meme projet echouerait pareil), seulement le message.
+    """
+    attente = None
+    if motif != "echec_chargement":
+        attente = activation_etude.noter_en_attente(username, sid, pid, motif, nom)
+    return JSONResponse({
+        "detail": activation_etude.message(motif, nom),
+        "statut": "en_attente" if attente else "echec",
+        "motif": motif,
+        "attente": activation_etude.resume(attente),
+    }, status_code=409)
+
+
+async def _activer_etude_atomique(username: str, etude: dict, pid: str | None,
+                                  verrou: bool = True):
+    """Regles A1/A2 (cf. hub/activation_etude.py) : QGIS d'abord, base ensuite.
+
+    `pid=None` : projet principal de l'etude (cree s'il manque, comme le flux
+    historique). Rend le dict de succes, ou une JSONResponse 409.
+    """
+    if verrou:
+        async with _active_study_switch_locks[username]:
+            return await _activer_etude_atomique(username, etude, pid, verrou=False)
+    sid = etude["id"]
+    nom = etude.get("name") or sid
+    prev_sid = await studies.get_active_study_id(username)
+    prev_pid = await studies.get_active_project_id(username)
+    if pid is None:
+        projet = await studies.get_default_project(sid)
+        if projet is None:
+            projet = await studies.create_project(
+                sid=sid, owner=username, label="Projet principal", is_default=True,
+            )
+    else:
+        projet = await studies.get_project(pid, username)
+    pid = projet["pid"]
+
+    etat = await activation_etude.sonder_qgis(_sonde_qgis_executeur, username)
+    if etat is None:
+        log.warning("Activation %s/%s : QGIS ne repond pas -> en attente", sid, pid)
+        return _reponse_activation_refusee(username, sid, pid, "qgis_occupe", nom)
+
+    # Le projet sortant est enregistre dans SA propre etude : celle que QGIS a
+    # ouverte (variables hub_sid/hub_pid), a defaut celle de la base.
+    sortant_sid = etat.get("sid") or prev_sid
+    sortant_pid = etat.get("pid") or prev_pid
+    if sortant_sid and (sortant_sid != sid or (sortant_pid and sortant_pid != pid)):
+        try:
+            await _execute_python_in_workspace(
+                username, studies.save_active_project_pod_code(sortant_sid, sortant_pid),
+            )
+        except Exception as exc:
+            log.warning("Save projet sortant %s/%s : %s", sortant_sid, sortant_pid, exc)
+
+    verdict = await activation_etude.charger_dans_qgis(
+        _execute_python_in_workspace, username, sid, pid,
+        changer_etude=(prev_sid != sid or etat.get("sid") != sid),
+    )
+    if not verdict["ok"]:
+        log.warning("Activation %s/%s refusee (%s) : %s", sid, pid, verdict["motif"],
+                    verdict.get("detail", ""))
+        return _reponse_activation_refusee(username, sid, pid, verdict["motif"], nom)
+
+    await studies.set_active_study(username, sid)
+    await studies.touch_study(sid)
+    await studies.set_active_project(username, pid)
+    await studies.touch_project(pid)
+    activation_etude.effacer_attente(username)
+    return {"active_study": sid, "study": etude, "active_project": projet}
+
+
 @app.post("/studies/{sid}/activate")
 async def activate_study(
     sid: str,
@@ -4331,6 +4455,14 @@ async def activate_study(
     # le save n'ecrit que dans le legacy et le projet DB ne persiste pas
     # les modifications au switch.
     prev_sid = await studies.get_active_study_id(user["username"])
+
+    # Activation atomique (2026-10-02, cf. hub/activation_etude.py) : workspace
+    # pret, QGIS charge le projet D'ABORD ; l'etude active n'est ecrite en base
+    # que s'il l'a charge. Sinon 409 et activation en attente, que le bureau
+    # affiche et retente. Workspace endormi : flux historique ci-dessous.
+    if await activation_etude.workspace_pret(user["username"]):
+        return await _activer_etude_atomique(user["username"], s, pid=None)
+
     if prev_sid and prev_sid != sid:
         prev_pid = await studies.get_active_project_id(user["username"])
         try:
@@ -4580,6 +4712,14 @@ async def activate_project_endpoint(
         raise HTTPException(404, "Projet introuvable dans cette étude")
     if p["status"] != "active":
         raise HTTPException(400, f"Projet archivé (status={p['status']})")
+
+    # Activation atomique (2026-10-02) : workspace pret, QGIS charge le
+    # projet avant que la base ne change (cf. _activer_etude_atomique).
+    if await activation_etude.workspace_pret(user["username"]):
+        resultat = await _activer_etude_atomique(user["username"], s, pid=pid)
+        if isinstance(resultat, JSONResponse):
+            return resultat
+        return {"active_project": pid, "project": p, "active_study": sid}
 
     # Si l'etude n'est pas active, l'activer en cascade (mais SANS re-trigger
     # le chained activate de son default project -> on prefere notre pid choisi)
@@ -4924,7 +5064,10 @@ async def _call_mcp_tool_in_workspace(
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(
             _mcp_url(s), json=payload,
-            headers={"Authorization": f"Bearer {api_key}"},
+            # Jeton hub -> workspace : la cle de l'utilisateur n'est pas
+            # forcement HUB_API_KEY, seule acceptee en mode `enforce`.
+            headers={"Authorization": f"Bearer {api_key}",
+                     **workspace_auth.entetes_workspace()},
         )
     import json as _json
     data = resp.json()
@@ -11008,7 +11151,10 @@ else:
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(
             _mcp_url(s), json=payload,
-            headers={"Authorization": f"Bearer {api_key}"},
+            # Jeton hub -> workspace : la cle de l'utilisateur n'est pas
+            # forcement HUB_API_KEY, seule acceptee en mode `enforce`.
+            headers={"Authorization": f"Bearer {api_key}",
+                     **workspace_auth.entetes_workspace()},
         )
     import json as _json
     data = resp.json()
@@ -11966,7 +12112,8 @@ async def _install_audit_trail_safe(session: dict, username: str) -> None:
                             "arguments": {"code": sessions.maximize_qgis_code()},
                         },
                     },
-                    headers={"Authorization": f"Bearer {key}"},
+                    headers={"Authorization": f"Bearer {key}",
+                             **workspace_auth.entetes_workspace()},
                 )
         except Exception as exc:
             log.warning("Maximize QGIS échoué : %s", exc)
@@ -12557,6 +12704,13 @@ def _tool_call_denied(obj: dict, whitelist: list) -> JSONResponse | None:
     """Reponse d'erreur JSON-RPC (HTTP 200) si tools/call vers un tool hors
     whitelist, sinon None (autorise)."""
     name = (obj.get("params") or {}).get("name")
+    if name == "execute_async":
+        # execute_async(tool=X) execute X en arriere-plan : sans ce controle,
+        # une cle scopee autorisee a execute_async atteignait n'importe quel
+        # outil par ce detour.
+        interne = ((obj.get("params") or {}).get("arguments") or {}).get("tool")
+        if interne and interne not in whitelist:
+            name = interne
     if name is not None and name not in whitelist:
         return JSONResponse(
             {
@@ -12673,6 +12827,10 @@ async def _proxy_request(
     """
     _skip_headers = {"host", "connection", "transfer-encoding", "te", "trailers", "upgrade"}
     headers = {k: v for k, v in request.headers.items() if k.lower() not in _skip_headers}
+    # Audit securite des acces (2026-09-26, SEC-2) : le hub s'authentifie
+    # aupres du workspace. Un jeton fourni par le client n'est jamais relaye.
+    headers = workspace_auth.sans_entete_client(headers)
+    headers.update(workspace_auth.entetes_workspace())
     body = await request.body()
     params = dict(request.query_params)
 
@@ -13002,6 +13160,10 @@ async def workspace_page(request: Request):
         "name_required": "Donne un nom à ton étude avant de la créer.",
         "create_failed": "Impossible de créer l'étude. Réessaie dans un instant.",
         "activate_failed": "Impossible d'activer cette étude. Vérifie que le bureau répond.",
+        "activation_en_attente": "QGIS est occupé par un calcul : l'étude sera ouverte "
+                                 "dès qu'il sera libre. L'étude active n'a pas encore changé.",
+        "activation_refusee": "QGIS n'a pas pu charger le projet de cette étude. "
+                              "L'étude active n'a pas changé.",
         "archive_failed": "Impossible d'archiver cette étude.",
         "restore_failed": "Impossible de restaurer cette étude.",
         "exception": "Une erreur inattendue s'est produite. Réessaie.",
@@ -13349,11 +13511,20 @@ async def workspace_activate_study(sid: str, request: Request):
     target = "/desk" if return_to == "desk" else "/workspace"
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
-        async with httpx.AsyncClient(timeout=60, base_url=_SELF_URL) as c:
+        # 120 s : sauvegarde du projet sortant puis chargement du nouveau
+        # (30 s chacun au plus). A 60 s, ce formulaire concluait a l'echec
+        # pendant que l'activation continuait et changeait l'etude active.
+        async with httpx.AsyncClient(timeout=120, base_url=_SELF_URL) as c:
             ar = await c.post(
                 f"/studies/{sid}/activate",
                 headers={"Authorization": f"Bearer {api_key}"},
             )
+            if ar.status_code == 409:
+                # QGIS occupe (ou chargement en echec) : l'etude active n'a
+                # pas change ; le bureau affiche l'attente et la retente.
+                motif = "activation_en_attente" if (
+                    (ar.json() or {}).get("statut") == "en_attente") else "activation_refusee"
+                return RedirectResponse(f"{target}?error={motif}", status_code=302)
             if ar.status_code >= 400:
                 return RedirectResponse(f"{target}?error=activate_failed", status_code=302)
             try:
@@ -13413,13 +13584,17 @@ async def workspace_restore_study(sid: str, request: Request):
 async def workspace_activate_project(sid: str, pid: str, request: Request):
     """UI wrapper : POST form depuis le dropdown desk -> activate project +
     redirect /desk (ou /workspace selon return_to)."""
+    erreur = ""
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
-        async with httpx.AsyncClient(timeout=60, base_url=_SELF_URL) as c:
-            await c.post(
+        async with httpx.AsyncClient(timeout=120, base_url=_SELF_URL) as c:
+            ar = await c.post(
                 f"/studies/{sid}/projects/{pid}/activate",
                 headers={"Authorization": f"Bearer {api_key}"},
             )
+            if ar.status_code == 409:
+                erreur = "activation_en_attente" if (
+                    (ar.json() or {}).get("statut") == "en_attente") else "activation_refusee"
             # Wake si endormi (meme rationale que workspace_activate_study)
             try:
                 await c.post(
@@ -13435,6 +13610,8 @@ async def workspace_activate_project(sid: str, pid: str, request: Request):
         log.warning("workspace_activate_project sid=%s pid=%s: %s", sid, pid, exc)
     return_to = request.query_params.get("return_to", "")
     target = "/desk" if return_to == "desk" else "/workspace"
+    if erreur:
+        target = f"{target}?error={erreur}"
     return RedirectResponse(target, status_code=302)
 
 
@@ -13554,6 +13731,216 @@ async def desk_save_study(sid: str):
         log.warning("Save desk étude %s non effectuee : %s", sid, raison)
         return {"ok": False, "sid": sid, "pid": pid_for_save, "raison": raison}
     return {"ok": True, "sid": sid, "pid": pid_for_save}
+
+
+# ── Traitements en arriere-plan : registre et API (spec 2026-10-02) ─────────
+#
+# Contrats : docs/superpowers/specs/2026-10-02-traitements-arriere-plan.md.
+# L'agent inscrit ici les outils longs qu'il soumet en tache de fond ; le hub
+# les surveille et rappelle l'agent a leur fin. Le bureau lit /desk/taches.
+
+def _dossier_donnees_taches() -> Path:
+    if _STUDIES_AVAILABLE:
+        return studies._DATA_DIR
+    return Path(os.getenv("DATA_DIR") or (
+        "/home/onyxia/work/qgis-mcp/server-data"
+        if Path("/home/onyxia/work").is_dir() else "/tmp/qgis-mcp/server-data"))
+
+
+_REGISTRE_TACHES = taches_fond.Registre(_dossier_donnees_taches() / "taches.db")
+
+
+async def _outil_workspace(username: str, nom: str, arguments: dict,
+                           timeout: float = 20, creer: bool = False) -> dict | None:
+    """`tools/call` sur le workspace de l'utilisateur.
+
+    Sans `creer`, ne reveille pas un workspace endormi : None s'il n'y a pas
+    de session prete (une tache ne survit pas a un workspace arrete).
+    """
+    if creer:
+        s = await _get_or_create_session(username)
+    else:
+        sid = _active_sessions.get(username)
+        s = await sessions.get_session(sid, username) if sid else None
+        if not s or s.get("status") != sessions.SESSION_READY:
+            return None
+    api_key = await auth.create_or_get_api_key(username)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        r = await client.post(
+            _mcp_url(s),
+            json={"jsonrpc": "2.0", "id": f"taches-{nom}", "method": "tools/call",
+                  "params": {"name": nom, "arguments": arguments}},
+            # Jeton hub -> workspace (audit securite des acces) : sans lui,
+            # le suivi des taches serait refuse en mode `enforce`.
+            headers={"Authorization": f"Bearer {api_key}",
+                     **workspace_auth.entetes_workspace()},
+        )
+    return (r.json() or {}).get("result") or {}
+
+
+async def _sonder_tache(tache: dict) -> dict:
+    if not tache.get("job_id"):
+        return {"injoignable": True}
+    try:
+        res = await _outil_workspace(tache["username"], "poll_job",
+                                     {"job_id": tache["job_id"]})
+    except Exception as exc:
+        log.info("sonde tache %s : workspace injoignable (%s)", tache.get("id"), exc)
+        return {"injoignable": True}
+    if res is None:
+        return {"injoignable": True}
+    etat, contenu = taches_fond.lire_suivi(res.get("content"))
+    return {"etat": etat, "contenu": contenu}
+
+
+async def _aviser_agent_fin_tache(tache: dict) -> bool:
+    """Demande a l'agent de rattacher la fin de la tache a sa conversation."""
+    api_key = os.environ.get("HUB_API_KEY", "").strip()
+    if not api_key:
+        api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+    try:
+        async with httpx.AsyncClient(timeout=90, base_url=_AGENT_INTERNAL_URL) as c:
+            r = await c.post(f"/internal/taches/{tache['id']}/rattacher",
+                             headers={"Authorization": f"Bearer {api_key}"})
+        return r.status_code == 200 and bool((r.json() or {}).get("ok"))
+    except Exception as exc:
+        log.info("avis de fin de tache %s : agent injoignable (%s)", tache.get("id"), exc)
+        return False
+
+
+async def _annuler_job_tache(tache: dict) -> dict:
+    res = await _outil_workspace(tache["username"], "cancel_job",
+                                 {"job_id": tache["job_id"]})
+    etat, _ = taches_fond.lire_suivi((res or {}).get("content"))
+    return etat
+
+
+async def _soumettre_tache(tache: dict, client_id: str) -> dict:
+    res = await _outil_workspace(
+        tache["username"], "execute_async",
+        {"tool": tache["outil"], "arguments": tache.get("arguments") or {},
+         "client_id": client_id},
+        timeout=60, creer=True,
+    )
+    etat, _ = taches_fond.lire_suivi((res or {}).get("content"))
+    return etat
+
+
+def _proprietaire_taches(user: dict) -> str:
+    """Une cle scopee (agent partage) n'a pas acces aux taches du compte."""
+    if _scope_tools_whitelist(user.get("scope")) is not None:
+        raise HTTPException(403, "Cle restreinte : registre des taches non accessible")
+    return user["username"]
+
+
+async def _taches_lister(username: str, etude: str, session_id: str,
+                         actives: str, limite: int) -> dict:
+    taches = await _REGISTRE_TACHES.lister(
+        username, sid=etude or None, session_id=session_id or None,
+        actives=str(actives).lower() in ("1", "true", "oui"), limite=limite,
+    )
+    return {
+        "taches": [taches_fond.vue_publique(t) for t in taches],
+        "actives": sum(1 for t in taches if t["statut"] in taches_fond.ACTIFS),
+        "maintenant": time.time(),
+    }
+
+
+async def _taches_annuler(username: str, tache_id: str) -> dict:
+    tache = await _REGISTRE_TACHES.lire(tache_id, username)
+    if tache is None:
+        raise HTTPException(404, "Tache inconnue")
+    doc = await taches_fond.annuler(_REGISTRE_TACHES, tache, _annuler_job_tache)
+    return taches_fond.vue_publique(doc)
+
+
+async def _taches_relancer(username: str, tache_id: str) -> dict:
+    tache = await _REGISTRE_TACHES.lire(tache_id, username)
+    if tache is None:
+        raise HTTPException(404, "Tache inconnue")
+    try:
+        doc = await taches_fond.relancer(_REGISTRE_TACHES, tache, _soumettre_tache)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    except Exception as exc:
+        raise HTTPException(502, f"Relance impossible : {exc}")
+    return taches_fond.vue_publique(doc)
+
+
+@app.post("/taches", status_code=status.HTTP_201_CREATED)
+async def taches_creer(request: Request, user: dict = Depends(auth.get_current_user)):
+    """L'agent inscrit une tache qu'il vient de soumettre au workspace."""
+    username = _proprietaire_taches(user)
+    try:
+        corps = await request.json()
+    except Exception:
+        raise HTTPException(400, "Corps JSON attendu")
+    if not isinstance(corps, dict):
+        raise HTTPException(400, "Corps JSON attendu")
+    try:
+        doc = await _REGISTRE_TACHES.creer(username, corps)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return taches_fond.vue_publique(doc)
+
+
+@app.get("/taches")
+async def taches_lister(etude: str = "", session_id: str = "", actives: str = "",
+                        limite: int = 50, user: dict = Depends(auth.get_current_user)):
+    return await _taches_lister(_proprietaire_taches(user), etude, session_id,
+                                actives, limite)
+
+
+@app.get("/taches/{tache_id}")
+async def taches_lire(tache_id: str, user: dict = Depends(auth.get_current_user)):
+    """Document complet (resultat compris) : sert a l'agent pour rediger la fin."""
+    tache = await _REGISTRE_TACHES.lire(tache_id, _proprietaire_taches(user))
+    if tache is None:
+        raise HTTPException(404, "Tache inconnue")
+    return {k: v for k, v in tache.items() if k != "client_id"}
+
+
+@app.patch("/taches/{tache_id}")
+async def taches_maj(tache_id: str, request: Request,
+                     user: dict = Depends(auth.get_current_user)):
+    username = _proprietaire_taches(user)
+    try:
+        champs = await request.json()
+    except Exception:
+        raise HTTPException(400, "Corps JSON attendu")
+    if not isinstance(champs, dict):
+        raise HTTPException(400, "Corps JSON attendu")
+    doc = await _REGISTRE_TACHES.maj(tache_id, champs, username)
+    if doc is None:
+        raise HTTPException(404, "Tache inconnue")
+    return taches_fond.vue_publique(doc)
+
+
+@app.post("/taches/{tache_id}/annuler")
+async def taches_annuler(tache_id: str, user: dict = Depends(auth.get_current_user)):
+    return await _taches_annuler(_proprietaire_taches(user), tache_id)
+
+
+@app.post("/taches/{tache_id}/relancer")
+async def taches_relancer(tache_id: str, user: dict = Depends(auth.get_current_user)):
+    return await _taches_relancer(_proprietaire_taches(user), tache_id)
+
+
+# Bureau : meme convention que /desk/catalog (proprietaire du pod, le
+# middleware OIDC a deja verifie l'identite).
+@app.get("/desk/taches")
+async def desk_taches(etude: str = "", actives: str = "", limite: int = 20):
+    return await _taches_lister(_ONYXIA_USER, etude, "", actives, limite)
+
+
+@app.post("/desk/taches/{tache_id}/annuler")
+async def desk_taches_annuler(tache_id: str):
+    return await _taches_annuler(_ONYXIA_USER, tache_id)
+
+
+@app.post("/desk/taches/{tache_id}/relancer")
+async def desk_taches_relancer(tache_id: str):
+    return await _taches_relancer(_ONYXIA_USER, tache_id)
 
 
 # ── Proxy mémoire vers l'agent IA ─────────────────────────────────────────────
@@ -14064,6 +14451,93 @@ async def desk_workspace_status():
     except Exception as exc:
         log.warning("Etat du workspace indisponible : %s -> status=error", exc)
         return {"status": "error", "novnc_url": ""}
+
+
+@app.post("/desk/coherence-etude")
+async def desk_coherence_etude():
+    """Accord hub / QGIS au chargement du bureau (regles A2, A4).
+
+    Lit l'etude du projet ouvert dans QGIS (variables hub_sid / hub_pid) et la
+    compare a l'etude active du hub, en tenant compte d'une activation en
+    attente :
+      - accord : rien ;
+      - QGIS a fini par charger l'etude en attente : la base la valide ;
+      - attente et QGIS repond : on retente l'activation ;
+      - desaccord sans attente : le projet ouvert est enregistre dans SA
+        propre etude, puis l'etude active du hub est rechargee dans QGIS.
+    Rend {etat, action, resynchronise, message, hub, qgis, attente}.
+    `resynchronise` non vide : le bureau doit se recharger.
+    """
+    username = _ONYXIA_USER
+    if not _STUDIES_AVAILABLE:
+        return {"etat": "indisponible", "action": "aucune", "resynchronise": ""}
+    if not await activation_etude.workspace_pret(username):
+        return {"etat": "workspace_non_pret", "action": "aucune", "resynchronise": "",
+                "attente": activation_etude.resume(activation_etude.en_attente(username))}
+    async with _active_study_switch_locks[username]:
+        hub_sid = await studies.get_active_study_id(username)
+        hub_pid = await studies.get_active_project_id(username)
+        attente = activation_etude.en_attente(username)
+        etat_qgis = await activation_etude.sonder_qgis(_sonde_qgis_executeur, username)
+        try:
+            from hub import session_active_state as _sas
+            sids_mcp = {e.get("sid") for e in _sas.list_active_by_user(username) if e.get("sid")}
+        except Exception:
+            sids_mcp = set()
+        diag = activation_etude.diagnostic(hub_sid, hub_pid, etat_qgis, attente, sids_mcp)
+        reponse = {**diag, "resynchronise": "", "message": "",
+                   "hub": {"sid": hub_sid, "pid": hub_pid},
+                   "qgis": etat_qgis, "attente": activation_etude.resume(attente)}
+        action = diag["action"]
+
+        if action == "valider_attente":
+            await studies.set_active_study(username, attente["sid"])
+            await studies.touch_study(attente["sid"])
+            if attente.get("pid"):
+                await studies.set_active_project(username, attente["pid"])
+            activation_etude.effacer_attente(username)
+            reponse.update(resynchronise="hub", attente=None,
+                           message=f"L'étude « {attente.get('nom') or attente['sid']} » est ouverte.")
+            log.info("Coherence : attente %s validee (QGIS l'a chargee)", attente["sid"])
+
+        elif action == "retenter":
+            etude = await studies.get_study(attente["sid"], username)
+            if not etude or etude.get("status") != "active":
+                activation_etude.effacer_attente(username)
+                reponse.update(etat="accord" if etat_qgis and etat_qgis.get("sid") == hub_sid
+                               else reponse["etat"], attente=None)
+            else:
+                resultat = await _activer_etude_atomique(
+                    username, etude, attente.get("pid"), verrou=False)
+                if isinstance(resultat, JSONResponse):
+                    corps = json.loads(resultat.body)
+                    reponse.update(attente=corps.get("attente"), message=corps.get("detail", ""))
+                else:
+                    reponse.update(resynchronise="qgis", attente=None,
+                                   message=f"L'étude « {etude.get('name')} » est ouverte.")
+
+        elif action == "resynchroniser":
+            etude = await studies.get_study(hub_sid, username) if hub_sid else None
+            if etude:
+                log.warning("Coherence : QGIS a %s/%s, le hub %s/%s -> resynchronisation",
+                            etat_qgis.get("sid"), etat_qgis.get("pid"), hub_sid, hub_pid)
+                resultat = await _activer_etude_atomique(username, etude, hub_pid, verrou=False)
+                if isinstance(resultat, JSONResponse):
+                    corps = json.loads(resultat.body)
+                    reponse.update(attente=corps.get("attente"), message=corps.get("detail", ""))
+                else:
+                    reponse.update(
+                        resynchronise="qgis",
+                        message=(f"QGIS avait une autre étude ouverte : elle a été enregistrée, "
+                                 f"et l'étude active « {etude.get('name')} » a été rechargée."))
+        return reponse
+
+
+@app.post("/desk/activation-en-attente/annuler")
+async def desk_annuler_activation_en_attente():
+    """L'utilisateur renonce a l'ouverture en attente : l'etude active reste."""
+    activation_etude.effacer_attente(_ONYXIA_USER)
+    return {"ok": True}
 
 
 @app.get("/desk/agent-health")

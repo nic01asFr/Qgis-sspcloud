@@ -233,10 +233,12 @@ s3:
   sessionToken: "${AWS_SESSION_TOKEN:-}"
   workingDirectoryPath: "${AWS_BUCKET_NAME:-$USERNAME}/qgis-hub/"
 
+# Jeton Vault volontairement vide (2026-09-26) : aucun code du service ne lit
+# Vault, et le jeton finissait en clair dans les values Helm et le spec du pod.
 vault:
   enabled: true
   url: "${VAULT_ADDR:-https://vault.lab.sspcloud.fr}"
-  token: "${VAULT_TOKEN:-}"
+  token: ""
   mount: "${VAULT_MOUNT:-onyxia-kv}"
   directory: "${VAULT_TOP_DIR:-$USERNAME}"
 
@@ -292,6 +294,7 @@ for _r in \
     "pvc qgis-hub" \
     "secret qgis-hub-apikey" \
     "secret qgis-llm-apikey" \
+    "secret qgis-hub-s3" \
     "service qgis-hub" \
     "service qgis-agent" \
     "service qgis-agent-svc" \

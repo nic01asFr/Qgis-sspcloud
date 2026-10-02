@@ -74,6 +74,15 @@ spec:
             secretKeyRef:
               name: qgis-hub-apikey
               key: HUB_API_KEY
+        {{- /* Correctif 2026-09-26 (securite des acces, SEC-2) : l'API (8080),
+               le serveur MCP (8100) et noVNC (6080) exigent un jeton derive de
+               HUB_API_KEY (voir BigQgisMCP src/workspace_auth.py) selon ce
+               mode : off | permissive (journalise, laisse passer) | enforce.
+               Le flux MJPEG (8081) n'est servi que sur la boucle locale. */}}
+        - name: WORKSPACE_AUTH_MODE
+          value: {{ .Values.workspace.authMode | default "permissive" | quote }}
+        - name: STREAM_BIND_HOST
+          value: "127.0.0.1"
         volumeMounts:
         - name: data
           mountPath: /data

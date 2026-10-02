@@ -37,6 +37,7 @@ def reasoning_details_html(text: str) -> str:
 from agent import memory
 from agent import native_tools_v2
 from agent import briques_client
+from agent import arriere_plan
 from agent import context_budget
 from agent import documents_etude
 from agent import paquets_outils
@@ -90,6 +91,23 @@ _CONSIGNE_PLAN_NON_EXECUTE = (
     "Tu as décrit ton plan sans l'exécuter : rien n'a été fait. Exécute-le "
     "maintenant avec les outils, sans redemander ni réécrire le plan, puis "
     "rends compte du résultat."
+)
+
+# Consigne de relance quand le modele AFFIRME une action (faite ou en cours)
+# sans aucun appel d'outil. Live du 2026-10-02 : « Script en cours
+# d'exécution en arrière-plan (job_id: 2f10b2787483) », identifiant invente.
+_CONSIGNE_ACTION_AFFIRMEE = (
+    "Tu as annoncé une action comme faite ou en cours, mais tu n'as appelé "
+    "aucun outil : rien n'a été exécuté. Fais-la maintenant réellement avec "
+    "les outils, puis rends compte du résultat obtenu. N'invente jamais un "
+    "résultat ni un identifiant."
+)
+
+# Message a l'utilisateur quand la relance n'agit pas non plus : on retire
+# l'affirmation fausse plutot que de la laisser croire.
+_MESSAGE_ACTION_NON_FAITE = (
+    "Je n'ai pas pu lancer cette action : rien n'a été exécuté. "
+    "Peux-tu reformuler ta demande, ou me la renvoyer ?"
 )
 
 # Consignes posees en cours de conversation (relances, memo des actions,
@@ -400,18 +418,25 @@ def _get_profile_tools_whitelist(profile_id: str) -> list[str] | None:
     """Retourne la whitelist mcp_tools.allowed du profil, ou None.
 
     Convention YAML : `mcp_tools.allowed = "all"` ou `[liste, de, tools]`.
-    Retourne None si le profil est absent du cache OU si allowed="all" :
-    dans ces deux cas, pas de filtrage cote `_get_mcp_tools` (compat
-    arriere). Sinon une liste de noms exacts pour intersection.
+    None (pas de filtrage) seulement si le profil est CONNU et declare
+    `allowed: all` (ou n'a pas de cle `allowed`). Une liste, meme vide, est
+    une liste blanche : `[]` veut dire « aucun outil ».
+
+    Profil absent du cache (inconnu, ou profils pas encore charges) : liste
+    vide, donc aucun outil. Avant le 2026-09-26, ce cas rendait None, c'est a
+    dire TOUS les outils : un repli ouvrant (audit securite des acces).
     """
-    profile = _PROFILES_CACHE.get(profile_id, {})
+    profile = _PROFILES_CACHE.get(profile_id)
+    if profile is None:
+        return []
     mcp_tools_cfg = profile.get("mcp_tools", {}) or {}
     allowed = mcp_tools_cfg.get("allowed")
     if allowed is None or allowed == "all":
         return None
     if isinstance(allowed, list):
         return [str(t) for t in allowed]
-    return None
+    # Valeur inattendue (chaine autre que "all", nombre...) : fermee.
+    return []
 
 
 # ── Outils MCP disponibles ─────────────────────────────────────────────────────
@@ -511,16 +536,35 @@ async def _get_mcp_tools(profile_id: str = "standard") -> list[dict]:
                 raise OutilsIndisponibles(str(e)) from e
 
     # Filtrage par profil : whitelist (allowed) + blacklist (disabled).
-    # Si profil pas dans le cache (fetch initial pas encore reussi, ou
-    # profile_id custom), on revient au comportement legacy (tous les tools).
-    profile = _PROFILES_CACHE.get(profile_id, {})
+    #
+    # Ferme par defaut depuis le 2026-09-26 (audit securite des acces) :
+    #   - `allowed: []` veut dire AUCUN outil MCP. Le test `and allowed`
+    #     sautait le filtre sur une liste vide : les profils d'assistance
+    #     (component_assist, assembly_assist, recipe_analyzer,
+    #     agent_config_analyzer) recevaient les 49 outils, dont
+    #     `execute_python` et `delete_file` (AG-14).
+    #   - un profil absent du cache n'ouvre plus tout. Si le cache est vide
+    #     (hub pas pret au demarrage), on retente le chargement une fois ;
+    #     un profil toujours inconnu n'a aucun outil MCP.
+    if profile_id not in _PROFILES_CACHE and not _PROFILES_CACHE:
+        try:
+            await fetch_profiles_from_hub()
+        except Exception as exc:  # jamais bloquant : on reste ferme
+            log.warning("MCP tools : rechargement des profils echoue : %s", exc)
+    profile = _PROFILES_CACHE.get(profile_id)
+    if profile is None:
+        log.warning(
+            "MCP tools : profil '%s' inconnu -> aucun outil MCP (repli ferme)",
+            profile_id,
+        )
+        return []
     mcp_tools_cfg = profile.get("mcp_tools", {}) or {}
     allowed = mcp_tools_cfg.get("allowed")
     disabled = set(mcp_tools_cfg.get("disabled", []) or [])
 
     filtered = all_tools
-    if isinstance(allowed, list) and allowed:
-        allowed_set = set(allowed)
+    if allowed is not None and allowed != "all":
+        allowed_set = set(allowed) if isinstance(allowed, list) else set()
         filtered = [t for t in filtered if t.get("name") in allowed_set]
     if disabled:
         filtered = [t for t in filtered if t.get("name") not in disabled]
@@ -1074,6 +1118,8 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
         "run_recipe":          1800,  # 20+ min serveur, on prend large
         "smart_load":           600,  # WFS download lourds (BD TOPO commune)
         "clip_to_study_zone":   600,  # decoupe au contour (300 000 batis sur Marseille)
+        "densite_par_maille":   600,  # natif : 100 000 batis en quelques secondes
+        "compter_par_zone":     600,
         "execute_python":       900,  # spatial joins sur 100k+ features
         "set_study_zone":       300,
         "export_flood_map":     600,
@@ -1082,21 +1128,41 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
         "add_from_catalog":     600,
     }
     tool_timeout = _LONG_RUNNING_TOOLS.get(tool_name, 120)
-    # Bug #17a/b fix (cold start workspace MCP) : retry avec backoff sur
-    # erreurs transitoires. Le workspace pod peut etre Ready (Xvfb + QGIS
-    # OK) mais le serveur MCP intra-pod (port 8100) pas encore joignable
-    # pendant les premieres ~90s. Sans retry, l'agent abandonne au premier
-    # essai avec un JSON parse error muet et l'experience premier-tour est
-    # cassee. Ref mémoire project_bug_17_mcp_cold_start_502.
-    #
-    # Conditions de retry :
-    #   - HTTP 502/503/504 (hub/ingress en cours de boot)
-    #   - Body vide (le hub _proxy_request renvoie "" si pod KO)
-    #   - JSON parse failure (le body est du HTML d'erreur ingress)
-    # Pas de retry sur 4xx (bug applicatif, retry ne resout pas).
-    _RETRY_DELAYS = [2.0, 5.0, 10.0]  # cumul 17s = max acceptable UX
+    appel = await _appel_mcp_jsonrpc(
+        tool_name, arguments, tool_timeout,
+        relance_permise=arriere_plan.relance_permise(tool_name, arguments),
+    )
+    if "erreur" in appel:
+        return json.dumps({"error": appel["erreur"]})
+    return _contenu_en_texte(tool_name, appel["result"])
+
+
+# Bug #17a/b fix (cold start workspace MCP) : retry avec backoff sur erreurs
+# transitoires. Le workspace pod peut etre Ready (Xvfb + QGIS OK) mais le
+# serveur MCP intra-pod (port 8100) pas encore joignable pendant les premieres
+# ~90s. Ref memoire project_bug_17_mcp_cold_start_502.
+_RETRY_DELAYS = [2.0, 5.0, 10.0]  # cumul 17s = max acceptable UX
+
+
+async def _appel_mcp_jsonrpc(
+    tool_name: str, arguments: dict, timeout: float, relance_permise: bool,
+) -> dict:
+    """POST `tools/call` au hub. Rend {"result": ...} ou {"erreur": str}.
+
+    Reponse ambigue (HTTP 502/503/504, corps vide, JSON illisible) : la requete
+    a pu etre executee. On ne la rejoue que si `relance_permise` -- lecture
+    seule, outil idempotent, ou soumission portant un `client_id`.
+
+    Constat du 2026-10-02 : apres un `execute_python` de plus de 12 min, la
+    reponse n'a pas pu etre lue (« MCP JSON parse fail -> retry 1/3 », puis
+    2/3). Chaque relance REEXECUTAIT le script : un calcul long, ou un script
+    qui modifie des donnees, pouvait s'appliquer trois fois.
+
+    Une connexion refusee (`ConnectError`) se rejoue toujours : rien n'est
+    parti, rien n'a pu s'executer.
+    """
     try:
-        async with httpx.AsyncClient(timeout=tool_timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             data = None
             last_error = None
             for attempt in range(len(_RETRY_DELAYS) + 1):
@@ -1111,46 +1177,37 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
                         },
                         headers={"Authorization": f"Bearer {_HUB_KEY}"},
                     )
-                    # Status 5xx ou body vide -> transient, retry
                     if resp.status_code in (502, 503, 504):
                         last_error = f"HTTP {resp.status_code} (transient)"
-                        if attempt < len(_RETRY_DELAYS):
-                            log.warning(
-                                "MCP cold start? %s -> retry %d/%d in %.0fs",
-                                last_error, attempt + 1, len(_RETRY_DELAYS),
-                                _RETRY_DELAYS[attempt],
-                            )
-                            await asyncio.sleep(_RETRY_DELAYS[attempt])
-                            continue
+                    else:
+                        body_text = resp.text
+                        if not body_text.strip():
+                            last_error = "body vide (cold start?)"
+                        else:
+                            try:
+                                data = resp.json()
+                                break  # success
+                            except (json.JSONDecodeError, ValueError):
+                                last_error = f"JSON parse fail: body[:80]={body_text[:80]!r}"
+                    if not relance_permise:
+                        log.warning(
+                            "MCP %s : %s -> pas de relance (l'outil a pu "
+                            "s'executer ; le rejouer le referait)",
+                            tool_name, last_error,
+                        )
                         break
-                    body_text = resp.text
-                    if not body_text.strip():
-                        last_error = "body vide (cold start?)"
-                        if attempt < len(_RETRY_DELAYS):
-                            log.warning(
-                                "MCP body vide -> retry %d/%d in %.0fs",
-                                attempt + 1, len(_RETRY_DELAYS),
-                                _RETRY_DELAYS[attempt],
-                            )
-                            await asyncio.sleep(_RETRY_DELAYS[attempt])
-                            continue
-                        break
-                    try:
-                        data = resp.json()
-                        break  # success
-                    except (json.JSONDecodeError, ValueError) as je:
-                        last_error = f"JSON parse fail: body[:80]={body_text[:80]!r}"
-                        if attempt < len(_RETRY_DELAYS):
-                            log.warning(
-                                "MCP JSON parse fail -> retry %d/%d in %.0fs",
-                                attempt + 1, len(_RETRY_DELAYS),
-                                _RETRY_DELAYS[attempt],
-                            )
-                            await asyncio.sleep(_RETRY_DELAYS[attempt])
-                            continue
-                        break
+                    if attempt < len(_RETRY_DELAYS):
+                        log.warning(
+                            "MCP %s : %s -> retry %d/%d in %.0fs",
+                            tool_name, last_error, attempt + 1,
+                            len(_RETRY_DELAYS), _RETRY_DELAYS[attempt],
+                        )
+                        await asyncio.sleep(_RETRY_DELAYS[attempt])
+                        continue
+                    break
                 except httpx.ConnectError as ce:
-                    # Reseau pas pret (pod en cours de scale up)
+                    # Reseau pas pret (pod en cours de scale up) : la requete
+                    # n'est jamais partie, la rejouer ne double rien.
                     last_error = f"ConnectError: {ce}"
                     if attempt < len(_RETRY_DELAYS):
                         log.warning(
@@ -1162,49 +1219,116 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
                         continue
                     raise
             if data is None:
-                return json.dumps({
-                    "error": (
+                if relance_permise:
+                    return {"erreur": (
                         f"MCP cold start ou hub down apres {len(_RETRY_DELAYS)+1} essais : "
                         f"{last_error}. Attends ~30s et reessaye."
-                    )
-                })
-            result = data.get("result", {})
-            content = result.get("content", [])
-            if content and isinstance(content, list):
-                # Concatène texte + image (en data URL markdown) — l'image
-                # est rendue inline par marked.parse côté chat.
-                parts: list[str] = []
-                for c in content:
-                    ctype = c.get("type")
-                    if ctype == "text":
-                        parts.append(c.get("text", ""))
-                    elif ctype == "image":
-                        b64 = c.get("data", "")
-                        mime = c.get("mimeType", "image/png")
-                        if b64:
-                            parts.append(
-                                f"![{tool_name}](data:{mime};base64,{b64})"
-                            )
-                joined = "\n".join(p for p in parts if p)
-                return _rewrite_workspace_urls(joined)
-            # Branche fallback : `content` vide ou non-liste (certains tools
-            # comme `upload_file` retournent un JSON structuré direct dans
-            # `result`). Sans réécriture ici, l'URL localhost:8080 remontait
-            # nue à l'agent puis au navigateur user -> lien mort.
-            return _rewrite_workspace_urls(json.dumps(result))
+                    )}
+                return {"erreur": (
+                    f"Reponse illisible du service QGIS pour `{tool_name}` "
+                    f"({last_error}). L'outil a pu s'executer quand meme : "
+                    "verifie l'etat du projet (get_project_info) avant de le "
+                    "relancer."
+                )}
+            return {"result": data.get("result", {})}
     except httpx.TimeoutException as e:
         # Erreur de timeout explicite (au lieu de str(e)="" muet sur certaines
         # exceptions httpx) — l'agent et le détecteur infra peuvent réagir.
-        return json.dumps({
-            "error": f"MCP client timeout après {tool_timeout}s sur tool `{tool_name}` "
-                     f"(httpx.{type(e).__name__})"
-        })
+        return {"erreur": (
+            f"MCP client timeout après {timeout}s sur tool `{tool_name}` "
+            f"(httpx.{type(e).__name__})"
+        )}
     except Exception as e:
         # Fallback class name si str(e) est vide (cas observé : SSE coupé,
         # certaines RemoteProtocolError, etc. → "" empêchait l'agent et le
         # détecteur infra de classifier l'erreur).
         msg = str(e) or f"{type(e).__name__} (no message)"
-        return json.dumps({"error": f"MCP call failed: {msg}"})
+        return {"erreur": f"MCP call failed: {msg}"}
+
+
+def _contenu_en_texte(tool_name: str, result: dict | None) -> str:
+    """Contenu MCP -> texte rendu au modele (texte + images en Markdown)."""
+    result = result if isinstance(result, dict) else {}
+    content = result.get("content", [])
+    if content and isinstance(content, list):
+        return _elements_en_texte(tool_name, content)
+    # Branche fallback : `content` vide ou non-liste (certains tools
+    # comme `upload_file` retournent un JSON structuré direct dans
+    # `result`). Sans réécriture ici, l'URL localhost:8080 remontait
+    # nue à l'agent puis au navigateur user -> lien mort.
+    return _rewrite_workspace_urls(json.dumps(result))
+
+
+def _elements_en_texte(tool_name: str, content: list) -> str:
+    """Concatène texte + image (en data URL markdown) — l'image est rendue
+    inline par marked.parse côté chat."""
+    parts: list[str] = []
+    for c in content:
+        if not isinstance(c, dict):
+            continue
+        ctype = c.get("type")
+        if ctype == "text":
+            parts.append(c.get("text", ""))
+        elif ctype == "image":
+            b64 = c.get("data", "")
+            mime = c.get("mimeType", "image/png")
+            if b64:
+                parts.append(f"![{tool_name}](data:{mime};base64,{b64})")
+    joined = "\n".join(p for p in parts if p)
+    return _rewrite_workspace_urls(joined)
+
+
+# ── Taches de fond (spec 2026-10-02-traitements-arriere-plan) ─────────────────
+
+
+def _resume_pour_registre(resultat: str, limite: int = 20000) -> str:
+    """Resultat garde au registre du hub : sans images, borne."""
+    sans_image = re.sub(r"!\[[^\]]*\]\(data:[^)]+\)", "", resultat or "").strip()
+    return sans_image[:limite]
+
+_REGISTRE_TACHES = arriere_plan.Registre(_HUB_URL, _HUB_KEY)
+
+
+async def _soumettre_outil(tool_name: str, arguments: dict, client_id: str) -> dict:
+    """Soumet un outil en tache de fond. Rend {"job_id"}, {"non_supporte"}
+    (workspace sans taches d'outils) ou {"erreur"}."""
+    if not _HUB_URL or not _HUB_KEY:
+        return {"non_supporte": True}
+    appel = await _appel_mcp_jsonrpc(
+        "execute_async",
+        {"tool": tool_name, "arguments": arguments, "client_id": client_id},
+        60, relance_permise=True,  # idempotent : le client_id rend la meme tache
+    )
+    if "erreur" in appel:
+        return {"erreur": appel["erreur"]}
+    contenu = (appel["result"] or {}).get("content") or []
+    etat, _ = arriere_plan.lire_suivi(contenu)
+    if etat.get("job_id"):
+        return {"job_id": etat["job_id"], "etat": etat}
+    texte = json.dumps(contenu, ensure_ascii=False)[:400]
+    # QgisRemoteMCP d'avant les taches d'outils : `tool` est ignore et
+    # l'outil reclame `code`. On repasse alors en appel direct.
+    if "'code' is required" in texte:
+        return {"non_supporte": True}
+    return {"erreur": etat.get("error") or texte}
+
+
+async def _suivre_tache(job_id: str) -> tuple[dict, list]:
+    """Etat d'une tache et, une fois finie, le contenu de l'outil."""
+    appel = await _appel_mcp_jsonrpc("poll_job", {"job_id": job_id}, 30,
+                                     relance_permise=True)
+    if "erreur" in appel:
+        return {"suivi_impossible": appel["erreur"]}, []
+    return arriere_plan.lire_suivi((appel["result"] or {}).get("content") or [])
+
+
+async def _annuler_tache(job_id: str) -> dict:
+    appel = await _appel_mcp_jsonrpc("cancel_job", {"job_id": job_id}, 30,
+                                     relance_permise=True)
+    if "erreur" in appel:
+        return {"error": appel["erreur"]}
+    etat, _ = arriere_plan.lire_suivi((appel["result"] or {}).get("content") or [])
+    return etat
 
 
 # ── Conversion outils MCP → format OpenAI function calling ────────────────────
@@ -1232,6 +1356,8 @@ def _mcp_tool_to_openai(tool: dict) -> dict:
 _MUTATING_TOOLS: frozenset[str] = frozenset({
     "smart_load",
     "clip_to_study_zone",
+    "densite_par_maille",
+    "compter_par_zone",
     "add_layer",
     "add_from_catalog",
     "remove_layer",
@@ -1682,6 +1808,8 @@ _LIBELLES_OUTILS = {
     "execute_async":        "Calcul long lancé dans QGIS…",
     "poll_job":             "Suivi du calcul en cours…",
     "run_processing":       "Traitement QGIS en cours…",
+    "densite_par_maille":   "Calcul de la densité par maille…",
+    "compter_par_zone":     "Comptage par zone…",
     "search_algorithms":    "Recherche d'un traitement QGIS…",
     "run_recipe":           "Exécution d'une recette…",
     "set_layer_style":      "Mise en forme d'une couche…",
@@ -1872,7 +2000,9 @@ class QGISAgent:
         """
         complets = await self._get_tools()
         if not self._filtrage_par_paquets():
-            return self._sans_documents_absents(complets)
+            return self._sans_documents_absents(
+                [o for o in complets
+                 if paquets_outils.nom_outil(o) not in paquets_outils.OUTILS_MASQUES])
         avec_documents = bool((self._documents_etude or {}).get("indexes"))
         cle = (self._outils_version, frozenset(paquets), avec_documents)
         sel = self._cache_selection.get(cle)
@@ -2191,6 +2321,11 @@ class QGISAgent:
         Best-effort : si l'appel échoue (workspace endormi, MCP injoignable),
         renvoie None et l'agent fonctionne sans cette info.
         """
+        # Une tache de fond tient le fil principal de QGIS : la lecture du
+        # projet attendrait sa fin (jusqu'a plusieurs minutes) et figerait le
+        # tour avant meme le premier mot (spec arriere-plan §6).
+        if arriere_plan.actif() and await arriere_plan.taches_qui_occupent(_REGISTRE_TACHES):
+            return None
         try:
             result = await _call_mcp_tool("get_project_info", {})
             if not result:
@@ -2229,9 +2364,10 @@ class QGISAgent:
 
 1. ⚙️ **Algo natif d'abord** : avant 30 lignes de PyQGIS, demande-toi
    « existe-t-il un `native:*` ? » Si tu hésites → `search_algorithms("mot-clé")`.
-   Top 5 essentiels pour 80% des cas :
-   - `native:countpointsinpolygon` — densité / count par maille
-   - `native:creategrid` — maillage rectangulaire/hexa
+   Densité, comptage, statistiques par zone : outil dédié
+   (`densite_par_maille`, `compter_par_zone`) ou algorithme natif
+   (`search_algorithms`), JAMAIS une boucle PyQGIS.
+   Autres natifs fréquents :
    - `native:joinattributestable` — jointure attributaire
    - `native:zonalstatistics` — stats raster par zone
    - `native:fieldcalculator` — ajout/transformation champ
@@ -2549,19 +2685,9 @@ layer = project.mapLayersByName("Bâti BDTOPO - Marseille 4e")[0]
 layer = project.mapLayer(layer_id)
 ```
 
-## Joindre une couche au calque maillage (count features)
-```python
-result = processing.run("native:countpointsinpolygon", {
-    "POLYGONS": grid_layer,    # ou layer_id, ou "memory:grille_200m"
-    "POINTS":   bati_layer,    # NB: marche aussi pour des polygones (count)
-    "WEIGHT":   "",
-    "CLASSFIELD": "",
-    "FIELD":    "NUMPOINTS",
-    "OUTPUT":   "memory:densite",
-})
-density_layer = result["OUTPUT"]
-QgsProject.instance().addMapLayer(density_layer)
-```
+## Densité par maille, comptage par zone
+Pas de code : `densite_par_maille(layer, taille_m)` ou
+`compter_par_zone(layer, zones)` (grille, comptage, style, `verification`).
 
 ## Style graduated (choroplèthe) — UTILISER LA FACTORY, JAMAIS LE CONSTRUCTEUR
 ```python
@@ -2826,6 +2952,199 @@ ne vient pas d'un outil cette session, la supprimer.
         )
         return prompt
 
+    async def _executer_en_fond(
+        self, fn_name: str, fn_args: dict, appel_id: str,
+        stop_signal: "asyncio.Event | None",
+    ) -> AsyncGenerator["dict | arriere_plan.Issue", None]:
+        """Execute un outil long en tache de fond (spec 2026-10-02).
+
+        Generateur : rend les evenements SSE `{"tache": ...}` du suivi puis,
+        en dernier, une `arriere_plan.Issue` (resultat pour le modele, et
+        bascule eventuelle). Fini avant le seuil : le resultat est celui de
+        l'outil en direct, le modele ne voit pas la difference.
+        """
+        boucle = asyncio.get_event_loop()
+        client_id = f"{self.session_id}:{appel_id or '-'}:{uuid.uuid4().hex[:8]}"
+        soumis = await _soumettre_outil(fn_name, fn_args, client_id)
+        if soumis.get("non_supporte"):
+            log.info("Taches de fond non supportees par le workspace : %s en direct",
+                     fn_name)
+            yield arriere_plan.Issue(resultat=await _call_mcp_tool(
+                fn_name, fn_args, username=self.username))
+            return
+        if "erreur" in soumis:
+            yield arriere_plan.Issue(resultat=json.dumps(
+                {"error": soumis["erreur"]}, ensure_ascii=False))
+            return
+
+        job_id = soumis["job_id"]
+        tache = {
+            "id":         "tf-" + uuid.uuid4().hex[:12],
+            "job_id":     job_id,
+            "client_id":  client_id,
+            "outil":      fn_name,
+            "arguments":  fn_args,
+            "libelle":    arriere_plan.libelle(fn_name, fn_args),
+            "session_id": self.session_id,
+            "sid":        await _resolve_active_sid(self.username),
+            "statut":     arriere_plan.EN_ATTENTE,
+            "mode":       "tour",
+            "cree_at":    time.time(),
+        }
+        await _REGISTRE_TACHES.creer(tache)
+        arriere_plan.marquer_active(tache["id"])
+        arriere_plan.ouvrir_attente(tache["id"])
+        base = {"tache_id": tache["id"], "libelle": tache["libelle"]}
+        # Suivi en cours (poll_job), tourne a part : voir la boucle.
+        suivi: "asyncio.Future | None" = None
+        try:
+            yield {"tache": "soumise", **base}
+            if arriere_plan.lancement_direct(fn_name, fn_args):
+                await _REGISTRE_TACHES.maj(tache["id"], mode="arriere_plan")
+                yield {"tache": "arriere_plan", **base, "automatique": False,
+                       "direct": True}
+                yield arriere_plan.Issue(
+                    resultat=arriere_plan.resultat_bascule(tache), bascule=True,
+                    tache=tache, direct=True)
+                return
+
+            debut = boucle.time()
+            dernier_vu = debut
+            propose_a: float | None = None
+            attendre = False
+            echecs_suivi = 0
+            seuil = arriere_plan.seuil_attente_s()
+            delai_auto = arriere_plan.delai_bascule_auto_s()
+            # Le suivi tourne a part : un script PyQGIS occupe le fil principal
+            # de QGIS, et poll_job ne repond qu'a la fin (live du 2026-10-02 :
+            # aucune proposition a 45 s pour un calcul de 70 s). Le seuil, la
+            # bascule automatique et « Arreter » ne doivent pas l'attendre.
+            while True:
+                if suivi is None:
+                    suivi = asyncio.ensure_future(_suivre_tache(job_id))
+                await asyncio.wait({suivi}, timeout=arriere_plan.periode_suivi_s())
+                if suivi.done():
+                    try:
+                        etat, contenu = suivi.result()
+                    except Exception as exc:
+                        etat, contenu = {"suivi_impossible": str(exc) or type(exc).__name__}, []
+                    suivi = None
+                else:
+                    etat, contenu = {"suivi_en_attente": True}, []
+                maintenant = boucle.time()
+                ecoule = maintenant - debut
+                if "suivi_en_attente" in etat:
+                    classe = arriere_plan.EN_COURS
+                elif "suivi_impossible" in etat:
+                    echecs_suivi += 1
+                    classe = arriere_plan.EN_COURS
+                else:
+                    echecs_suivi = 0
+                    classe = arriere_plan.classer(etat)
+
+                if classe in (arriere_plan.TERMINEE, arriere_plan.ECHOUEE,
+                              arriere_plan.ANNULEE):
+                    if contenu:
+                        resultat = _elements_en_texte(fn_name, contenu)
+                    elif classe == arriere_plan.ANNULEE:
+                        resultat = arriere_plan.resultat_annule(tache, False)
+                    else:
+                        resultat = json.dumps({"error": etat.get("error") or
+                                               "le calcul a echoue sans message"},
+                                              ensure_ascii=False)
+                    await _REGISTRE_TACHES.maj(
+                        tache["id"], statut=classe, rattachee=True,
+                        resultat=_resume_pour_registre(resultat),
+                        erreur=etat.get("error"), fini_at=time.time())
+                    arriere_plan.marquer_finie(tache["id"])
+                    if propose_a is not None:
+                        yield {"tache": "fin_attente", **base}
+                    yield arriere_plan.Issue(resultat=resultat)
+                    return
+
+                if classe == arriere_plan.INTERROMPUE:
+                    raison = ("le service QGIS ne connaît plus ce calcul "
+                              "(redémarrage probable)"
+                              if "Unknown job_id" in str(etat.get("error") or "")
+                              else "QGIS ne donne plus signe de vie")
+                    await _REGISTRE_TACHES.maj(
+                        tache["id"], statut=arriere_plan.INTERROMPUE,
+                        raison=raison, rattachee=True, fini_at=time.time())
+                    arriere_plan.marquer_finie(tache["id"])
+                    yield {"tache": "interrompue", **base, "raison": raison}
+                    yield arriere_plan.Issue(
+                        resultat=arriere_plan.resultat_interrompu(tache, raison))
+                    return
+
+                if maintenant - dernier_vu >= 15:
+                    # Le hub sait que le tour suit encore la tache.
+                    await _REGISTRE_TACHES.maj(tache["id"], statut=classe,
+                                               vu_at=time.time())
+                    dernier_vu = maintenant
+
+                if propose_a is None and ecoule >= seuil:
+                    propose_a = maintenant
+                    yield {"tache": "proposition", **base,
+                           "ecoule_s": int(ecoule),
+                           "bascule_auto_s": int(delai_auto),
+                           "choix": list(arriere_plan.CHOIX)}
+
+                decision = arriere_plan.prendre_decision(tache["id"])
+                automatique = False
+                if decision is None and stop_signal is not None and stop_signal.is_set():
+                    # « Arreter » : le calcul ne peut pas etre interrompu dans
+                    # QGIS ; on rend la main, il continue en arriere-plan.
+                    decision = "arriere_plan"
+                if decision is None and echecs_suivi >= 10:
+                    # Plus de nouvelles du workspace : le hub prend le relais.
+                    decision, automatique = "arriere_plan", True
+                if (decision is None and propose_a is not None and not attendre
+                        and maintenant - propose_a >= delai_auto):
+                    decision, automatique = "arriere_plan", True
+
+                if decision == "attendre":
+                    attendre = True
+                    yield {"tache": "attente", **base}
+                elif decision == "annuler":
+                    reponse = await _annuler_tache(job_id)
+                    commence = not (reponse.get("success")
+                                    and reponse.get("status") in ("cancelled",
+                                                                  "cancel_pending"))
+                    if commence:
+                        # QGIS finira le calcul : il occupe toujours le moteur.
+                        # Le hub notera « annulee » a la fin et le dira.
+                        await _REGISTRE_TACHES.maj(
+                            tache["id"], mode="arriere_plan",
+                            annulation_demandee=True)
+                    else:
+                        await _REGISTRE_TACHES.maj(
+                            tache["id"], statut=arriere_plan.ANNULEE,
+                            rattachee=True, fini_at=time.time())
+                        arriere_plan.marquer_finie(tache["id"])
+                    yield {"tache": "annulee", **base, "commence": commence}
+                    yield arriere_plan.Issue(
+                        resultat=arriere_plan.resultat_annule(tache, commence))
+                    return
+                elif decision == "arriere_plan":
+                    await _REGISTRE_TACHES.maj(tache["id"], mode="arriere_plan",
+                                               vu_at=time.time())
+                    yield {"tache": "arriere_plan", **base,
+                           "automatique": automatique, "direct": False}
+                    yield arriere_plan.Issue(
+                        resultat=arriere_plan.resultat_bascule(tache),
+                        bascule=True, tache=tache, automatique=automatique)
+                    return
+                else:
+                    yield {"tache": "progression", **base,
+                           "ecoule_s": int(ecoule), "statut": classe}
+                if suivi is None:
+                    await arriere_plan.patienter(tache["id"],
+                                                 arriere_plan.periode_suivi_s())
+        finally:
+            if suivi is not None and not suivi.done():
+                suivi.cancel()
+            arriere_plan.fermer_attente(tache["id"])
+
     async def chat_stream(
         self,
         user_message: str,
@@ -2899,6 +3218,14 @@ ne vient pas d'un outil cette session, la supprimer.
                         continue
                 history_for_llm.append({**msg, "content": content})
             messages.extend(history_for_llm)
+        # Une tache de fond occupe QGIS : le modele le sait des le debut du
+        # tour, pour repondre « je le ferai des que le calcul sera termine »
+        # au lieu de tenter une action sur la carte (spec arriere-plan §6).
+        taches_actives = (await arriere_plan.taches_qui_occupent(_REGISTRE_TACHES)
+                          if arriere_plan.actif() else [])
+        if taches_actives:
+            messages.append({"role": "system",
+                             "content": arriere_plan.note_occupe(taches_actives)})
         messages.append({"role": "user", "content": user_message})
 
         # Releve du budget de contexte, une ligne par tour. Garde sur l'agent
@@ -2937,6 +3264,7 @@ ne vient pas d'un outil cette session, la supprimer.
         # texte du plan reste affiche tant que la relance n'a pas agi : il
         # n'est retire (`retirer_texte`) que si elle emet un appel d'outil.
         relance_plan_faite = False
+        motif_relance: str | None = None
         plan_a_retirer: str | None = None
         # Tous les outils du profil, exposes ou non : un appel ecrit en texte
         # vers un outil masque par les paquets est aussi un appel manque.
@@ -2948,6 +3276,9 @@ ne vient pas d'un outil cette session, la supprimer.
         # patcher en fin de turn les liens fantomes [undefined](undefined)
         # que le LLM genere parfois (cf. hotfix infra ci-dessous).
         last_publish_info: dict = {}
+        # Tache passee en arriere-plan pendant ce tour : le tour se termine
+        # proprement juste apres (spec arriere-plan §2).
+        tache_basculee: "arriere_plan.Issue | None" = None
 
         # Boucle agent : LLM → tool calls → LLM → ...
         # 20 itérations = budget pour analyse multi-étapes + construction
@@ -3207,7 +3538,17 @@ ne vient pas d'un outil cette session, la supprimer.
                              "(session=%s)", self.session_id)
                 elif not tool_call_data:
                     log.warning("Plan non execute : la relance n'agit pas non plus "
-                                "(session=%s)", self.session_id)
+                                "(%s, session=%s)", motif_relance, self.session_id)
+                    if motif_relance == "action affirmee":
+                        # Ne jamais laisser une action fausse affichee.
+                        yield {"retirer_texte": plan_a_retirer + chunk_text}
+                        yield _MESSAGE_ACTION_NON_FAITE
+                        pos_plan = full_response.rfind(plan_a_retirer)
+                        if pos_plan >= 0:
+                            full_response = full_response[:pos_plan]
+                        full_response += _MESSAGE_ACTION_NON_FAITE
+                        chunk_brut = chunk_text = ""
+                        texte_emis = True
                 plan_a_retirer = None
             # Pas de tool calls → fin du turn LLM.
             # NB : on n'utilise PAS finish_reason="stop" pour break car Gemma4
@@ -3253,6 +3594,7 @@ ne vient pas d'un outil cette session, la supprimer.
                               else texte_modele.plan_non_execute(chunk_brut, user_message))
                 if motif_plan:
                     relance_plan_faite = True
+                    motif_relance = motif_plan
                     plan_a_retirer = chunk_text
                     log.warning(
                         "Plan decrit sans execution (%s, iter=%d, session=%s) : relance",
@@ -3261,7 +3603,9 @@ ne vient pas d'un outil cette session, la supprimer.
                     yield {"phase": "relance", "label": "Je passe à l'action…"}
                     messages.append({"role": "assistant", "content": chunk_brut})
                     messages.append({"role": "system",
-                                     "content": _CONSIGNE_PLAN_NON_EXECUTE})
+                                     "content": (_CONSIGNE_ACTION_AFFIRMEE
+                                                 if motif_plan == "action affirmee"
+                                                 else _CONSIGNE_PLAN_NON_EXECUTE)})
                     continue
                 # Budget du tour epuise par la reflexion, avant toute reponse.
                 #
@@ -3392,6 +3736,12 @@ ne vient pas d'un outil cette session, la supprimer.
                     fn_args = json.loads(tc["function"]["arguments"] or "{}")
                 except Exception:
                     fn_args = {}
+                # execute_async emis par le modele : ramene a l'outil reel,
+                # pour passer par le registre des taches de fond.
+                if fn_name == "execute_async":
+                    fn_name, fn_args = arriere_plan.soumission_du_modele(fn_name, fn_args)
+                    log.info("execute_async du modele ramene a %s (session=%s)",
+                             fn_name, self.session_id)
 
                 # ── Filet des paquets d'outils (lot L3) ──────────────────
                 # demander_outils : traite ici, sans hub ni affichage ; il
@@ -3439,6 +3789,16 @@ ne vient pas d'un outil cette session, la supprimer.
                 # ÉMIS AVANT le blockquote markdown pour que le commentaire HTML
                 # apparaisse comme prev-sibling du blockquote dans le DOM,
                 # ce que `attachRollbackButtons` côté JS attend.
+                # ── QGIS occupe par une tache de fond (spec arriere-plan §6) ──
+                # Jamais d'appel concurrent : l'action est refusee avec une
+                # consigne, le modele le dit a l'utilisateur.
+                occupe_par: dict | None = None
+                if (arriere_plan.actif()
+                        and fn_name not in arriere_plan.OUTILS_HORS_QGIS
+                        and fn_name not in native_tools_v2.NATIVE_TOOLS_V2):
+                    _actives = await arriere_plan.taches_qui_occupent(_REGISTRE_TACHES)
+                    occupe_par = _actives[0] if _actives else None
+
                 current_ckpt_id: str | None = None
                 current_ckpt_study: str | None = None
                 # Sprint Composants Phase 3b : invalidation cache L2c
@@ -3449,7 +3809,8 @@ ne vient pas d'un outil cette session, la supprimer.
                     self._artifacts_force_refresh = True
                 if fn_name == "publish_artifact":
                     self._artifacts_force_refresh = True
-                if fn_name in _MUTATING_TOOLS and _HUB_URL and _HUB_KEY:
+                if (fn_name in _MUTATING_TOOLS and _HUB_URL and _HUB_KEY
+                        and occupe_par is None):
                     try:
                         ckpt_id = uuid.uuid4().hex[:12]
                         # Index du DERNIER message persisté en DB au moment du
@@ -3540,7 +3901,26 @@ ne vient pas d'un outil cette session, la supprimer.
                 # si problème, fiable".
                 # Pour les tools NON mutating (lecture seule), pas de rollback
                 # possible/nécessaire — on attend juste la fin du tool.
-                if (fn_name in _MUTATING_TOOLS and stop_signal is not None):
+                if occupe_par is not None:
+                    log.info("%s non lance : QGIS occupe par la tache %s",
+                             fn_name, occupe_par.get("id"))
+                    result = arriere_plan.resultat_occupe(occupe_par, fn_name)
+                elif arriere_plan.actif() and arriere_plan.est_long(fn_name):
+                    # Outil long : tache de fond sous le capot, meme resultat
+                    # pour le modele s'il finit avant le seuil.
+                    issue: arriere_plan.Issue | None = None
+                    async for evenement in self._executer_en_fond(
+                        fn_name, fn_args, tc.get("id") or "", stop_signal,
+                    ):
+                        if isinstance(evenement, arriere_plan.Issue):
+                            issue = evenement
+                        else:
+                            yield evenement
+                    result = issue.resultat if issue else json.dumps(
+                        {"error": "tache de fond sans issue"})
+                    if issue is not None and issue.bascule:
+                        tache_basculee = issue
+                elif (fn_name in _MUTATING_TOOLS and stop_signal is not None):
                     tool_task = asyncio.create_task(
                         _call_mcp_tool(fn_name, fn_args, username=self.username)
                     )
@@ -3661,9 +4041,10 @@ ne vient pas d'un outil cette session, la supprimer.
                 # Sprint UX-3 (2026-06-21) : append history.jsonl du projet
                 # actif (fire-and-forget). Source primaire pour macros futures.
                 # Skip silencieux si pas de projet actif ou pod endormi.
-                await _append_history(
-                    self.username, fn_name, fn_args, result[:200],
-                )
+                if occupe_par is None and tache_basculee is None:
+                    await _append_history(
+                        self.username, fn_name, fn_args, result[:200],
+                    )
 
                 # Capter hub_url des publish_artifact reussis pour le hotfix
                 # `[undefined](undefined)` applique en fin de turn.
@@ -3790,6 +4171,9 @@ ne vient pas d'un outil cette session, la supprimer.
                     "tool_call_id": tc["id"],
                     "content":      llm_content,
                 })
+                if tache_basculee is not None:
+                    # Les appels suivants du meme lot trouveraient QGIS occupe.
+                    break
 
                 # Détection bridge dégradé : 2+ tools différents qui échouent
                 # sur des symptômes infra consécutifs → l'agent doit escalader,
@@ -3866,6 +4250,18 @@ ne vient pas d'un outil cette session, la supprimer.
                                 "ce que tu lui suggères. NE BOUCLE PAS."
                             ),
                         })
+            if tache_basculee is not None:
+                # Bascule en arriere-plan : le tour se termine proprement, sur
+                # un message fixe (ce qui tourne, ce qui se passera). Pas de
+                # nouvel appel au modele : il chercherait a suivre le calcul.
+                texte = arriere_plan.texte_bascule(
+                    tache_basculee.tache or {}, tache_basculee.automatique,
+                    tache_basculee.direct,
+                )
+                full_response += texte
+                texte_emis = True
+                yield texte
+                break
         else:
             # max_iterations atteint sans break : forcer un dernier appel LLM
             # de conclusion pour ne JAMAIS laisser l'user devant une conv figée.
@@ -4073,6 +4469,8 @@ ne vient pas d'un outil cette session, la supprimer.
             any_visual = bool(tool_names_called & _VISUAL_TOOLS)
             if (not already_screenshot
                     and any_visual
+                    and tache_basculee is None
+                    and not arriere_plan.peut_etre_occupe()
                     and self.profile_id not in non_visual_profiles):
                 shot = await _call_mcp_tool_raw(
                     "get_screenshot", {}, username=self.username,
@@ -4144,7 +4542,11 @@ ne vient pas d'un outil cette session, la supprimer.
         # etat desync. Cf. CHARTE Principe 2 (audit honnete) + Principe 4
         # (snapshots bloquants). Optimisation async = phase ulterieure
         # documentee si la latence devient un probleme observable.
-        if any(c["tool"] in _MUTATING_TOOLS for c in tool_calls_made):
+        # Pendant une tache de fond, la sauvegarde attendrait QGIS : elle est
+        # faite au rattachement du resultat (main.py, /internal/taches).
+        if (any(c["tool"] in _MUTATING_TOOLS for c in tool_calls_made)
+                and tache_basculee is None
+                and not arriere_plan.peut_etre_occupe()):
             try:
                 await self._autosave_active_study()
             except Exception as exc:

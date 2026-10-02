@@ -75,7 +75,7 @@ def _briques() -> tuple[list[dict], list[dict]]:
     return lire("global"), lire("forbidden")
 
 
-# Schemas reels du tools/list du hub (55 outils : workspace + study_*), pour
+# Schemas reels du tools/list du hub (57 outils : workspace + study_*), pour
 # que le budget des outils exposes soit celui que le modele paie en live.
 OUTILS_MCP = json.loads(
     (_ROOT / "tests" / "fixtures" / "outils_hub_2f36a8a.json").read_text(encoding="utf-8"))
@@ -258,7 +258,7 @@ CAS = [
     Cas("profil_complet",
         outils_presents=("execute_python", "delete_file", "save_recipe",
                          "create_component", "memory_search"),
-        # 90 outils autorises, le socle seul expose (19 300 -> 4 177 jetons).
+        # 92 outils autorises, le socle seul expose (20 200 -> 4 200 jetons).
         exposes_presents=("execute_python", "smart_load", "clip_to_study_zone",
                           "memory_search", po.OUTIL_DEMANDER),
         exposes_absents=("delete_file", "save_recipe", "create_component",
@@ -291,6 +291,19 @@ CAS = [
                        "annonce-les en UNE phrase, et exécute"),
         ne_doit_pas_contenir=("je lance avec ces défauts",),
         exposes_presents=("set_study_zone", "smart_load", "clip_to_study_zone")),
+    # Constat live du 2026-10-02 : la densite batie par maille ecrite trois
+    # fois en PyQGIS (plus de 12 min). L'outil dedie est expose, et la regle
+    # 1 interdit la boucle.
+    Cas("densite_batie_par_maille",
+        message=("Sur Rousset, affiche les trames vertes et bleues, la densité "
+                 "bâtie et les réseaux"),
+        doit_contenir=("(`densite_par_maille`, `compter_par_zone`)",
+                       "JAMAIS une boucle PyQGIS"),
+        ne_doit_pas_contenir=('"FIELD":    "NUMPOINTS"',),
+        exposes_presents=("densite_par_maille", "compter_par_zone",
+                          "set_study_zone", "smart_load", "clip_to_study_zone"),
+        exposes_absents=("create_component", "run_recipe"),
+        outils_max=5_500),
     Cas("question_sans_outil",
         message="C'est quoi une bbox ?",
         exposes_absents=("export_pdf", "publish_artifact", "run_recipe",
@@ -416,6 +429,11 @@ async def _assembler(cas: Cas) -> tuple[str, list[dict], list[dict], QGISAgent]:
     profils = dict(qa._PROFILES_CACHE)
     if cas.whitelist is not None:
         profils[cas.profil] = {"mcp_tools": {"allowed": cas.whitelist}}
+    else:
+        # Sans liste blanche, le profil est connu et ouvert (`allowed: all`),
+        # comme `standard` servi par le hub. Un profil ABSENT du cache n'a
+        # plus aucun outil depuis le repli ferme du 2026-09-26.
+        profils.setdefault(cas.profil, {"mcp_tools": {"allowed": "all"}})
     etats = ([cas.etat_precedent, cas.etat_projet] if cas.etat_precedent
              else [cas.etat_projet])
     sid = (cas.etude or {}).get("id")

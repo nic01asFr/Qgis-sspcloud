@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 # test `test_outils_mutateurs_couvrent_l_agent` signale une divergence.
 OUTILS_MUTATEURS: frozenset[str] = frozenset({
     "smart_load", "clip_to_study_zone", "add_layer", "add_from_catalog", "remove_layer",
+    "densite_par_maille", "compter_par_zone",
     "set_layer_style", "set_layer_visibility", "run_processing", "run_recipe",
     "execute_python", "apply_layout_template", "set_study_zone", "new_project",
     "open_project", "save_project", "upload_file", "zoom_to",
