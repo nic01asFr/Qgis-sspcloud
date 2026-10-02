@@ -1333,6 +1333,11 @@ _OIDC_MIDDLEWARE_INTER_POD = (
     # jour ses taches de fond en Bearer HUB_API_KEY ; Depends(get_current_user)
     # valide la cle dans l'endpoint.
     "/taches",
+    # Profils (2026-10-02) : l'agent lit /profiles et /profiles/{id} en Bearer
+    # HUB_API_KEY pour filtrer ses outils. Depuis que le profil inconnu est
+    # ferme (aucun outil, securite T8), le 401 du middleware laissait l'agent
+    # avec 2 outils. Depends(get_current_user) valide la cle dans l'endpoint.
+    "/profiles",
     # NB : /published a ete deplace dans _OIDC_MIDDLEWARE_PUBLIC (vraie
     # whitelist anonyme). Inter-pod ne suffit pas pour acces tiers internet.
 )
