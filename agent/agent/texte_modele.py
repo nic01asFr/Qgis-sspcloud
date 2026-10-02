@@ -15,10 +15,11 @@ Il imitait ce format.
 
 Ce module regroupe trois fonctions pures :
 
-- `contenu_assistant_pour_le_modele` : le texte final destine a
-  l'utilisateur, precede d'un memo factuel des actions du tour, redige pour
-  ne ressembler a aucune syntaxe d'appel. Ce qui est stocke pour l'affichage
-  ne change pas : la transformation se fait en construisant les messages ;
+- `messages_assistant_pour_le_modele` : le texte final destine a
+  l'utilisateur, suivi d'un message systeme court qui dit les actions du
+  tour (memo), redige pour ne ressembler a aucune syntaxe d'appel ni de
+  reponse. Ce qui est stocke pour l'affichage ne change pas : la
+  transformation se fait en construisant les messages ;
 - `appel_ecrit_en_texte` : reconnait un appel d'outil ecrit en texte, pour
   relancer le modele une fois au lieu de clore le tour sur du vide ;
 - `retirer_emojis` : defaut D5, le modele semait des emojis (triangle
@@ -68,7 +69,17 @@ _LIGNES_VIDES = re.compile(r"\n{3,}")
 
 # Debut du memo des actions : sert aussi a reconnaitre un memo recopie par le
 # modele au lieu d'agir (cf. `appel_ecrit_en_texte`).
-MEMO_PREFIXE = "[Mémo interne, non affiché"
+#
+# Jusqu'au 2026-10-02, le memo etait prefixe au contenu ASSISTANT, entre
+# crochets (« [Mémo interne, non affiché à l'utilisateur. Actions déjà
+# exécutées…] »). Le modele relisait ses propres messages sous cette forme et
+# l'imitait : en production (28-30/09) il « racontait » ses actions entre
+# crochets au lieu de les faire (« [Je lance d'abord la recherche…] »,
+# « [Capture de la carte] »). Le memo est desormais un message SYSTEME a part,
+# pose juste apres le message assistant concerne, sans crochets.
+MEMO_PREFIXE = "Actions exécutées pendant ta réponse précédente"
+# Ancienne forme, encore reconnue si le modele la recopie.
+_ANCIEN_MEMO_PREFIXE = "[Mémo interne, non affiché"
 
 
 def texte_final(contenu: str | None) -> str:
@@ -104,15 +115,18 @@ def _resultat_cle(resultat: str) -> str:
         m = _MESSAGE_ERREUR.search(resultat)
         return "échec" + (f" ({m.group(1)})" if m else "")
     faits = [f"{k} {v.strip(chr(34))}" for k, v in _FAIT_CLE.findall(resultat or "")[:2]]
-    return "réussi" + (f", {', '.join(faits)}" if faits else "")
+    return "réussi" + (f" ({', '.join(faits)})" if faits else "")
 
 
 def memo_outils(tool_calls) -> str:
-    """Une ligne qui dit ce qui a ete execute, sans forme d'appel.
+    """Une phrase qui dit ce qui a ete execute, sans forme d'appel.
 
-    Pas de backtick, pas de gras, pas de parenthese apres un nom, pas de
-    citation : rien que le modele puisse prendre pour un gabarit d'appel.
-    `tool_calls` est la colonne de la base (JSON) ou la liste deja decodee.
+    Pas de crochet, de backtick, de gras, de parenthese collee a un nom, ni
+    de citation : rien que le modele puisse prendre pour un gabarit de
+    reponse ou d'appel. `tool_calls` est la colonne de la base (JSON) ou la
+    liste deja decodee. Exemple : « Actions exécutées pendant ta réponse
+    précédente : set_study_zone réussi ; smart_load réussi (feature_count
+    112816). »
     """
     if isinstance(tool_calls, str):
         try:
@@ -125,23 +139,40 @@ def memo_outils(tool_calls) -> str:
     for appel in tool_calls:
         if not isinstance(appel, dict) or not appel.get("tool"):
             continue
-        actions.append(f"{appel['tool']} : {_resultat_cle(str(appel.get('result') or ''))}")
+        actions.append(f"{appel['tool']} {_resultat_cle(str(appel.get('result') or ''))}")
     if not actions:
         return ""
-    return (f"{MEMO_PREFIXE} à l'utilisateur. Actions déjà exécutées à ce tour "
-            f"par de vrais appels d'outils : {' ; '.join(actions)}.]")
+    return f"{MEMO_PREFIXE} : {' ; '.join(actions)}."
 
 
 def contenu_assistant_pour_le_modele(contenu: str | None, tool_calls=None) -> str:
-    """Le message assistant tel que le modele doit le relire.
+    """Le texte du message assistant tel que le modele doit le relire.
 
-    Memo des actions d'abord (ordre chronologique : les outils precedent la
-    reponse), puis le texte final. Vide si le tour n'a rien produit de
-    visible ni d'action : l'appelant saute alors le message.
+    Le texte final seulement : le memo des actions n'est plus melange au
+    contenu assistant (cf. `messages_assistant_pour_le_modele`).
+    `tool_calls` est accepte pour compatibilite et ignore. Vide si le tour
+    n'a rien produit de visible : l'appelant saute alors le message.
     """
-    memo = memo_outils(tool_calls)
+    return texte_final(contenu)
+
+
+def messages_assistant_pour_le_modele(contenu: str | None, tool_calls=None) -> list[dict]:
+    """Le tour assistant relu par le modele : texte final, puis memo.
+
+    Rend au plus deux messages, dans l'ordre : le message assistant (texte
+    final, s'il en reste un) et un message systeme court qui dit les actions
+    reellement executees a ce tour. Le memo suit la reponse, comme les
+    outils l'ont precedee : il renseigne le tour suivant sans jamais
+    apparaitre dans un contenu assistant que le modele pourrait imiter.
+    """
+    messages = []
     texte = texte_final(contenu)
-    return "\n\n".join(p for p in (memo, texte) if p)
+    if texte:
+        messages.append({"role": "assistant", "content": texte})
+    memo = memo_outils(tool_calls)
+    if memo:
+        messages.append({"role": "system", "content": memo})
+    return messages
 
 
 # ── Appel d'outil ecrit en texte ────────────────────────────────────────────
@@ -163,7 +194,8 @@ def appel_ecrit_en_texte(texte: str | None, noms_outils) -> str | None:
     """
     if not texte:
         return None
-    if texte.lstrip().startswith(MEMO_PREFIXE):
+    debut = texte.lstrip()
+    if debut.startswith(MEMO_PREFIXE) or debut.startswith(_ANCIEN_MEMO_PREFIXE):
         return "memo recopie"
     if _APPEL_GENERIQUE.search(texte):
         return "tool_call"

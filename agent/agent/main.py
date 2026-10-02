@@ -1042,10 +1042,14 @@ _IMAGE_ENCODEE = re.compile(r"!\[[^\]]*\]\(data:[^)]+\)")
 
 def _alleger_message(contenu: str) -> str:
     """Retire les images encodees, puis borne la longueur."""
-    allege = _IMAGE_ENCODEE.sub("[capture de la carte]", contenu or "")
+    # Pas de marque entre crochets a la place de l'image : le modele la
+    # recopiait telle quelle (« [Capture de la carte] », production 28-30/09).
+    allege = contenu or ""
+    if _IMAGE_ENCODEE.search(allege):
+        allege = _IMAGE_ENCODEE.sub("", allege).strip()
     if len(allege) > _MESSAGE_MAX:
         garde = _MESSAGE_MAX // 2
-        allege = (allege[:garde] + "\n[…partie centrale omise…]\n"
+        allege = (allege[:garde] + "\n… (partie centrale omise) …\n"
                   + allege[-garde:])
     return allege
 
@@ -1060,28 +1064,36 @@ def _historique_pour_le_modele(messages: list[dict]) -> list[dict]:
     """
     retenus: list[dict] = []
     total = 0
+    gardes = 0  # messages de la base retenus (un memo n'en est pas un)
     for m in reversed(messages):
-        contenu = m.get("content", "") or ""
         # Un message assistant stocke est le RENDU du chat : raisonnement,
         # lignes `> **`outil`**`, blocs de resultat. Relu tel quel, le modele
         # l'imitait et ecrivait ses appels en texte au lieu de les emettre
         # (mesure live du 2026-09-26, defaut D1). On ne lui rend que le texte
-        # final, precede d'un memo factuel des actions du tour.
+        # final ; le memo factuel des actions du tour le suit, en message
+        # systeme a part (jamais dans le contenu assistant : le modele imitait
+        # aussi ce memo entre crochets, production du 28-30/09).
         if m.get("role") == "assistant":
-            contenu = texte_modele.contenu_assistant_pour_le_modele(
-                contenu, m.get("tool_calls"),
+            tour = texte_modele.messages_assistant_pour_le_modele(
+                m.get("content", "") or "", m.get("tool_calls"),
             )
-        contenu = _alleger_message(contenu)
-        if not contenu.strip():
+        else:
+            tour = [{"role": m["role"], "content": m.get("content", "") or ""}]
+        tour = [{**t, "content": _alleger_message(t["content"])} for t in tour]
+        tour = [t for t in tour if t["content"].strip()]
+        if not tour:
             continue
-        if total + len(contenu) > _BUDGET_HISTORIQUE and retenus:
+        taille = sum(len(t["content"]) for t in tour)
+        if total + taille > _BUDGET_HISTORIQUE and retenus:
             break
-        retenus.append({"role": m["role"], "content": contenu})
-        total += len(contenu)
+        # Liste construite a rebours : le memo (dernier du tour) d'abord.
+        retenus.extend(reversed(tour))
+        total += taille
+        gardes += 1
     retenus.reverse()
-    if len(retenus) < len([m for m in messages if (m.get("content") or "").strip()]):
+    if gardes < len([m for m in messages if (m.get("content") or "").strip()]):
         log.info("historique compacte : %d messages sur %d, %d caracteres",
-                 len(retenus), len(messages), total)
+                 gardes, len(messages), total)
     return retenus
 
 

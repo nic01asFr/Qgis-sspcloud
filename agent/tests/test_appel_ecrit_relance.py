@@ -246,3 +246,27 @@ def test_l_historique_relu_par_le_modele_est_nettoye(agent):
     envoye = _ClientModele.envois[0]["messages"]
     assistant = [m for m in envoye if m["role"] == "assistant"]
     assert assistant == [{"role": "assistant", "content": "Zone définie."}]
+
+
+def test_le_memo_des_actions_ne_parvient_jamais_en_contenu_assistant(agent):
+    """Le memo suit le tour en message systeme ; servi au modele, il devient
+    une note prefixee dans le message utilisateur suivant, jamais un contenu
+    assistant que le modele imiterait (production 28-30/09)."""
+    from agent import main as agent_main
+    appels = [{"tool": "set_study_zone", "result": '{"success": true}'},
+              {"tool": "smart_load",
+               "result": '{"success": true, "feature_count": 112816}'}]
+    historique = agent_main._historique_pour_le_modele([
+        {"role": "user", "content": "charge le bâti de Rousset"},
+        {"role": "assistant", "content": "Le bâti est chargé.", "tool_calls": appels},
+    ])
+    _tour(agent, [_reponse_texte("D'accord.")], history=historique)
+    envoye = _ClientModele.envois[0]["messages"]
+    assert [m["role"] for m in envoye] == ["system", "user", "assistant", "user"]
+    assert envoye[2] == {"role": "assistant", "content": "Le bâti est chargé."}
+    note = envoye[3]["content"]
+    assert note.startswith(qa._PREFIXE_CONSIGNE + texte_modele.MEMO_PREFIXE)
+    assert "smart_load réussi (feature_count 112816)" in note
+    assert note.endswith("uniquement le bâti dans la commune")
+    assert not any("[" in (m.get("content") or "") for m in envoye
+                   if m["role"] == "assistant")

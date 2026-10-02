@@ -1775,10 +1775,11 @@ class QGISAgent:
         precedents_user = [m for m in recents if m.get("role") == "user"][-1:]
         for m in precedents_user:
             paquets |= paquets_outils.paquets_par_intention(m.get("content") or "")
-        # Usage : le memo des actions de l'historique cite les outils appeles.
+        # Usage : le memo des actions de l'historique (message systeme qui
+        # suit le tour assistant) cite les outils appeles.
         cites = paquets_outils.outils_cites(
             ((m.get("content") or "") for m in recents
-             if m.get("role") in ("assistant", "tool")),
+             if m.get("role") in ("assistant", "tool", "system")),
             noms_connus,
         )
         paquets |= paquets_outils.paquets_par_usage(cites)
@@ -2788,7 +2789,9 @@ ne vient pas d'un outil cette session, la supprimer.
             # touche que les bulles assistant avec markdown image.
             _IMG_RE = re.compile(r'!\[[^\]]*\]\(data:image/[^)]+\)')
             history_for_llm = []
-            for msg in history[-20:]:
+            # 30 messages : ~10 echanges, chaque tour avec outils etant suivi
+            # de son memo d'actions (message systeme court, cf. texte_modele).
+            for msg in history[-30:]:
                 content = msg.get("content", "") or ""
                 # Filet de securite si l'appelant n'a pas deja nettoye (la
                 # fonction est idempotente) : le modele ne doit pas relire le
@@ -2798,10 +2801,11 @@ ne vient pas d'un outil cette session, la supprimer.
                     if not content:
                         continue
                 if "data:image/" in content:
-                    content = _IMG_RE.sub(
-                        '[image affichée précédemment à l\'utilisateur]',
-                        content,
-                    )
+                    # Retiree sans marque entre crochets : le modele recopiait
+                    # ces marques comme des actions (production 28-30/09).
+                    content = _IMG_RE.sub("", content).strip()
+                    if not content:
+                        continue
                 history_for_llm.append({**msg, "content": content})
             messages.extend(history_for_llm)
         messages.append({"role": "user", "content": user_message})

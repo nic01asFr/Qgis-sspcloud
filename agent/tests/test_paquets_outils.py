@@ -186,8 +186,7 @@ def test_le_profil_metier_appelle_ses_paquets() -> None:
 
 
 def test_l_usage_recent_garde_le_paquet() -> None:
-    memo = ("[Mémo interne, non affiché à l'utilisateur. Actions déjà exécutées "
-            "à ce tour par de vrais appels d'outils : export_pdf : réussi.]")
+    memo = "Actions exécutées pendant ta réponse précédente : export_pdf réussi."
     cites = po.outils_cites([memo], _noms(outils_reels()))
     assert "export_pdf" in cites
     assert "mise_en_page" in po.paquets_par_usage(cites)
