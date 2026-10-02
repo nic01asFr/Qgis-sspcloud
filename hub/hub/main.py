@@ -3646,7 +3646,8 @@ print("<<<TREATMENTS>>>" + json.dumps(out) + "<<<END>>>")
         resp = await client.post(
             _mcp_url(s),
             json=payload,
-            headers={"Authorization": f"Bearer {key}"},
+            headers={"Authorization": f"Bearer {key}",
+                     **workspace_auth.entetes_workspace()},
         )
     data = resp.json()
     content = data.get("result", {}).get("content", [{}])
@@ -3680,7 +3681,10 @@ async def _execute_python_in_workspace(owner: str, code: str, timeout: int = 30)
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(
             _mcp_url(s), json=payload,
-            headers={"Authorization": f"Bearer {api_key}"},
+            # Jeton hub -> workspace : la cle de l'utilisateur n'est pas
+            # forcement HUB_API_KEY, seule acceptee en mode `enforce`.
+            headers={"Authorization": f"Bearer {api_key}",
+                     **workspace_auth.entetes_workspace()},
         )
     import json as _json
     data = resp.json()
@@ -5060,7 +5064,10 @@ async def _call_mcp_tool_in_workspace(
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(
             _mcp_url(s), json=payload,
-            headers={"Authorization": f"Bearer {api_key}"},
+            # Jeton hub -> workspace : la cle de l'utilisateur n'est pas
+            # forcement HUB_API_KEY, seule acceptee en mode `enforce`.
+            headers={"Authorization": f"Bearer {api_key}",
+                     **workspace_auth.entetes_workspace()},
         )
     import json as _json
     data = resp.json()
@@ -11144,7 +11151,10 @@ else:
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(
             _mcp_url(s), json=payload,
-            headers={"Authorization": f"Bearer {api_key}"},
+            # Jeton hub -> workspace : la cle de l'utilisateur n'est pas
+            # forcement HUB_API_KEY, seule acceptee en mode `enforce`.
+            headers={"Authorization": f"Bearer {api_key}",
+                     **workspace_auth.entetes_workspace()},
         )
     import json as _json
     data = resp.json()
@@ -12102,7 +12112,8 @@ async def _install_audit_trail_safe(session: dict, username: str) -> None:
                             "arguments": {"code": sessions.maximize_qgis_code()},
                         },
                     },
-                    headers={"Authorization": f"Bearer {key}"},
+                    headers={"Authorization": f"Bearer {key}",
+                             **workspace_auth.entetes_workspace()},
                 )
         except Exception as exc:
             log.warning("Maximize QGIS échoué : %s", exc)
