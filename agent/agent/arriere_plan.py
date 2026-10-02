@@ -466,8 +466,10 @@ def resultat_occupe(tache: dict, outil: str) -> str:
         "consigne": (
             "QGIS est occupé par un calcul en arrière-plan. Ne relance pas cet "
             "outil et n'en essaie pas un autre sur la carte. Dis simplement à "
-            "l'utilisateur que tu le feras dès que le calcul en cours sera "
-            "terminé ; le résultat du calcul s'affichera dans la conversation."
+            "l'utilisateur que la carte est occupée et qu'il pourra redemander "
+            "cette action dès que le calcul en cours sera terminé ; le résultat "
+            "du calcul s'affichera dans la conversation. Ne promets pas de la "
+            "faire de toi-même : tu n'agis qu'à sa demande."
         ),
     }, ensure_ascii=False)
 
@@ -480,8 +482,9 @@ def note_occupe(taches: list) -> str:
         f"Un calcul tourne en arrière-plan dans QGIS : « {t.get('libelle') or 'calcul'} », "
         f"depuis {duree_lisible(ecoule)}. QGIS est occupé : n'appelle aucun outil "
         "sur la carte avant la fin de ce calcul. Si l'utilisateur demande une "
-        "action sur la carte, dis-lui que tu la feras dès que le calcul en cours "
-        "sera terminé. Le résultat sera ajouté à la conversation automatiquement."
+        "action sur la carte, dis-lui qu'il pourra la redemander dès que le "
+        "calcul en cours sera terminé, sans promettre de la faire de toi-même. "
+        "Le résultat sera ajouté à la conversation automatiquement."
     )
 
 

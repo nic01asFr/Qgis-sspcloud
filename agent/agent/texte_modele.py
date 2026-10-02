@@ -245,13 +245,15 @@ _PLAN_ANNONCE = re.compile(r"\b(?:voici (?:mon|le) plan|mon plan ?:)")
 # Action donnee pour faite ou en cours, au passe compose ou au present. Constat
 # live du 2026-10-02 : « Script en cours d'execution en arriere-plan (job_id:
 # 2f10b2787483) » sans aucun appel d'outil, identifiant invente (imite du tour
-# precedent). Texte normalise.
+# precedent), puis « Le zoom a été effectué » de meme. « En cours d'execution »
+# seul n'en est pas : « le calcul est toujours en cours d'execution » est une
+# reponse juste quand QGIS est occupe. Texte normalise.
 _ACTION_AFFIRMEE = re.compile(
-    r"\ben cours d'execution\b|\bjob[_ ]?id\b"
-    r"|\btourne (?:en|a l')arriere[- ]plan\b"
+    r"\bjob[_ ]?id\b"
+    r"|\b(?:tourne|lancee?s?) (?:en |a l')arriere[- ]plan\b"
     r"|\b(?:j'ai|je viens d'|je viens de)\s*(?:lanc|execut|charg|calcul|cree|decoup"
-    r"|export|demarr|appliqu|ajout)"
-    r"|\b(?:est|sont|a ete|ont ete)\s+(?:lance|execute|demarre)",
+    r"|export|demarr|appliqu|ajout|zoom|effectu)"
+    r"|\b(?:est|sont|a ete|ont ete)\s+(?:lance|execute|demarre|effectue)",
 )
 # Une etape de liste numerotee : « 1. », « 2) », « **3.** ».
 _ETAPE_NUMEROTEE = re.compile(r"^[ \t>]*(?:\*\*)?\d{1,2}[.)](?:\*\*)?[ \t]+\S", re.MULTILINE)

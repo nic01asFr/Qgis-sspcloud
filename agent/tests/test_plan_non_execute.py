@@ -162,9 +162,18 @@ DEMANDE_SCRIPT = ("Exécute dans QGIS ce script Python : import time; "
     ("J'ai lancé le calcul de densité, il tourne en arrière-plan.", "calcule la densité"),
     ("Je viens de charger le bâti de Rousset.", "charge le bâti de Rousset"),
     ("Le découpage a été lancé.", "découpe le bâti à la commune"),
+    ("Le zoom a été effectué sur la couche des bâtiments de Rousset.",
+     "Zoome sur la couche du bâti de Rousset"),
+    ("Script lancé en arrière-plan, je te préviens à la fin.", DEMANDE_SCRIPT),
 ])
 def test_une_action_affirmee_sans_outil_est_reconnue(texte, demande):
     assert tm.plan_non_execute(texte, demande) == "action affirmee"
+
+
+def test_dire_que_qgis_est_occupe_n_est_pas_une_action_affirmee():
+    texte = ("Je ne peux pas encore effectuer le zoom. Le calcul en arrière-plan "
+             "est toujours en cours d'exécution dans QGIS.")
+    assert tm.plan_non_execute(texte, "Zoome sur la couche du bâti de Rousset") is None
 
 
 def test_une_action_affirmee_relance_avec_sa_consigne_et_disparait(agent):
