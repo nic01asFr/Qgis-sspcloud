@@ -247,6 +247,74 @@ def test_c6_url_inventee(etat_aix_reussi):
     assert "reponse.urls_autorisees" in _echecs(r)
 
 
+# ── C7, C8 : agir au lieu de decrire (production 28-30/09) ─────────────────
+
+def _etat_rousset(*couches: tuple[str, int]) -> dict:
+    bbox = [5.5539, 43.4436, 5.6704, 43.5215]
+    return {
+        "zone": {"nom": "Rousset", "bbox_4326": bbox},
+        "couches": [{"id": f"c{i}", "nom": nom, "valide": True, "crs": "EPSG:2154",
+                     "fournisseur": "ogr", "memoire": False, "source_type": "gpkg",
+                     "type": "vecteur", "nombre_entites": n, "emprise_4326": bbox}
+                    for i, (nom, n) in enumerate(couches)],
+        "inspections": {},
+    }
+
+
+_PLAN_PRODUCTION = ("Voici mon plan :\n1. Lister les sources disponibles\n"
+                    "2. Charger les couches\n3. Découper à la commune\n\n"
+                    "Tu veux ajuster un paramètre, ou je lance avec ces défauts ?")
+
+
+def test_c7_agir_des_le_premier_tour_reussit():
+    s = _scenario("C7-agir-tvb-rousset")
+    appels = [AppelOutil("set_study_zone", {"target": "Rousset"}, resultat='{"success": true}'),
+              AppelOutil("smart_load", {"source": "bdtopo_cours_eau"},
+                         resultat='{"success": true, "feature_count": 214}'),
+              AppelOutil("smart_load", {"source": "bdtopo_troncons_routes"},
+                         resultat='{"success": true, "feature_count": 1873}')]
+    ok = _tour(s.messages()[0], "J'ai pris les cours d'eau et les routes de la BD TOPO : "
+                                "214 cours d'eau et 1873 tronçons sont affichés sur Rousset.", appels, 4)
+    etat = _etat_rousset(("cours_eau_rousset", 214), ("routes_rousset", 1873))
+    r = evaluer(s, _execution(s.id, [ok], etat), BLANCHE)
+    assert r.reussi, [c for c in r.criteres if not c.ok]
+
+
+@pytest.mark.parametrize("reponse", [
+    _PLAN_PRODUCTION,
+    "[Je lance d'abord la recherche de sources disponibles pour la TVB (eau, bois) et les routes.]",
+])
+def test_c7_plan_ou_action_entre_crochets_sans_outil_echoue(reponse):
+    s = _scenario("C7-agir-tvb-rousset")
+    r = evaluer(s, _execution(s.id, [_tour(s.messages()[0], reponse, [], 1)],
+                              {"zone": None, "couches": [], "inspections": {}}), BLANCHE)
+    echecs = _echecs(r)
+    assert "reponse.ne_doit_pas_contenir" in echecs
+    assert any(e.startswith("trajectoire.attendu") for e in echecs), echecs
+
+
+def test_c8_chaine_executee_sans_plan_reussit():
+    s = _scenario("C8-bati-rousset-decoupe")
+    appels = [AppelOutil("set_study_zone", {"target": "Rousset"}, resultat='{"success": true}'),
+              AppelOutil("smart_load", {"source": "bdtopo_batiments"},
+                         resultat='{"success": true, "feature_count": 5120}'),
+              AppelOutil("clip_to_study_zone", {"layer_id": "bati_rousset"},
+                         resultat='{"success": true, "feature_count": 4812}')]
+    ok = _tour(s.messages()[0], "Le bâti de Rousset est chargé et découpé à la commune : "
+                                "4812 bâtiments.", appels, 4)
+    etat = _etat_rousset(("bati_rousset_decoupe", 4812))
+    r = evaluer(s, _execution(s.id, [ok], etat), BLANCHE)
+    assert r.reussi, [c for c in r.criteres if not c.ok]
+
+
+def test_c8_plan_a_valider_echoue():
+    s = _scenario("C8-bati-rousset-decoupe")
+    r = evaluer(s, _execution(s.id, [_tour(s.messages()[0], _PLAN_PRODUCTION, [], 1)],
+                              {"zone": None, "couches": [], "inspections": {}}), BLANCHE)
+    assert not r.reussi
+    assert "reponse.ne_doit_pas_contenir" in _echecs(r)
+
+
 # ── Cout, banc ─────────────────────────────────────────────────────────────
 
 def test_erreur_de_flux_et_coupure(etat_aix_reussi):

@@ -68,12 +68,15 @@ def test_le_nettoyage_est_idempotent():
 def test_le_memo_dit_ce_qui_a_ete_fait_sans_forme_d_appel():
     memo = tm.memo_outils(json.dumps(_APPELS))  # colonne de la base : JSON
     assert memo.startswith(tm.MEMO_PREFIXE)
-    assert "set_study_zone : réussi" in memo
-    assert "clip_to_study_zone : réussi" in memo
+    assert "set_study_zone réussi" in memo
+    assert "clip_to_study_zone réussi" in memo
     assert "feature_count 54557" in memo
     assert "layer_id batiments_aix" in memo
-    # Rien qui ressemble a un appel : pas de backtick, de gras, de citation,
-    # ni de parenthese collee a un nom d'outil.
+    # Rien qui ressemble a un appel ni a une reponse narree : pas de crochet
+    # (production 28-30/09 : le modele imitait « [Mémo interne…] » en
+    # racontant ses actions entre crochets), de backtick, de gras, de
+    # citation, ni de parenthese collee a un nom d'outil.
+    assert "[" not in memo and "]" not in memo
     assert "`" not in memo and "**" not in memo and not memo.startswith(">")
     assert tm.appel_ecrit_en_texte(memo.replace(tm.MEMO_PREFIXE, "x"), _OUTILS) is None
 
@@ -81,12 +84,32 @@ def test_le_memo_dit_ce_qui_a_ete_fait_sans_forme_d_appel():
 def test_le_memo_signale_un_echec():
     memo = tm.memo_outils([{"tool": "smart_load",
                             "result": '{"success": false, "error": "source inconnue"}'}])
-    assert "smart_load : échec (source inconnue)" in memo
+    assert "smart_load échec (source inconnue)" in memo
 
 
-def test_le_memo_precede_le_texte():
+def test_le_memo_n_est_plus_dans_le_contenu_assistant():
     contenu = tm.contenu_assistant_pour_le_modele(_STOCKE, _APPELS)
-    assert contenu.index(tm.MEMO_PREFIXE) < contenu.index("Je définis")
+    assert tm.MEMO_PREFIXE not in contenu and "Mémo interne" not in contenu
+    assert contenu.startswith("Je définis")
+
+
+def test_le_memo_suit_le_message_assistant_en_message_systeme():
+    tour = tm.messages_assistant_pour_le_modele(_STOCKE, json.dumps(_APPELS))
+    assert [m["role"] for m in tour] == ["assistant", "system"]
+    assert tour[0]["content"].startswith("Je définis")
+    assert tm.MEMO_PREFIXE not in tour[0]["content"]
+    assert tour[1]["content"] == tm.memo_outils(_APPELS)
+
+
+def test_un_tour_sans_texte_garde_son_memo():
+    """Outils executes, aucun texte : le memo seul dit ce qui a ete fait."""
+    tour = tm.messages_assistant_pour_le_modele("", _APPELS)
+    assert [m["role"] for m in tour] == ["system"]
+
+
+def test_un_tour_sans_outil_n_a_pas_de_memo():
+    tour = tm.messages_assistant_pour_le_modele("Bonjour !", None)
+    assert tour == [{"role": "assistant", "content": "Bonjour !"}]
 
 
 def test_un_tour_qui_n_a_fait_qu_ecrire_un_faux_appel_disparait():
@@ -117,11 +140,33 @@ def test_l_historique_envoye_au_modele_est_nettoye():
         {"role": "user", "content": "combien à Aix ?"},
     ]
     compacte = agent_main._historique_pour_le_modele(messages)
-    assistant = [m for m in compacte if m["role"] == "assistant"][0]["content"]
+    assert [m["role"] for m in compacte] == ["user", "assistant", "system", "user"]
+    assistant = compacte[1]["content"]
     assert "**`" not in assistant and "agent-reasoning" not in assistant
-    assert "54 557" in assistant and tm.MEMO_PREFIXE in assistant
+    assert "54 557" in assistant and tm.MEMO_PREFIXE not in assistant
+    # Le memo suit le tour concerne, en message systeme.
+    assert compacte[2]["content"].startswith(tm.MEMO_PREFIXE)
+    assert "clip_to_study_zone réussi" in compacte[2]["content"]
     # Les messages utilisateur ne sont pas touches.
     assert compacte[0]["content"] == "Oui, uniquement le bâti dans la commune"
+
+
+def test_l_historique_n_imite_plus_de_marque_entre_crochets():
+    """« [capture de la carte] » remplacait l'image : le modele l'a recopiee
+    telle quelle en production (« [Capture de la carte] »)."""
+    image = "![carte](data:image/jpeg;base64," + "A" * 200 + ")"
+    compacte = agent_main._historique_pour_le_modele([
+        {"role": "user", "content": "affiche le bâti"},
+        {"role": "assistant", "content": "Voici la carte.\n\n" + image},
+    ])
+    assistant = compacte[-1]["content"]
+    assert assistant == "Voici la carte."
+    assert "[" not in assistant
+
+
+def test_un_memo_recopie_est_reconnu_dans_les_deux_formes():
+    assert tm.appel_ecrit_en_texte(tm.MEMO_PREFIXE + " : smart_load réussi.", _OUTILS) == "memo recopie"
+    assert tm.appel_ecrit_en_texte("[Mémo interne, non affiché…]", _OUTILS) == "memo recopie"
 
 
 # ── Appel ecrit en texte ────────────────────────────────────────────────────

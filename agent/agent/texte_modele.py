@@ -15,10 +15,11 @@ Il imitait ce format.
 
 Ce module regroupe trois fonctions pures :
 
-- `contenu_assistant_pour_le_modele` : le texte final destine a
-  l'utilisateur, precede d'un memo factuel des actions du tour, redige pour
-  ne ressembler a aucune syntaxe d'appel. Ce qui est stocke pour l'affichage
-  ne change pas : la transformation se fait en construisant les messages ;
+- `messages_assistant_pour_le_modele` : le texte final destine a
+  l'utilisateur, suivi d'un message systeme court qui dit les actions du
+  tour (memo), redige pour ne ressembler a aucune syntaxe d'appel ni de
+  reponse. Ce qui est stocke pour l'affichage ne change pas : la
+  transformation se fait en construisant les messages ;
 - `appel_ecrit_en_texte` : reconnait un appel d'outil ecrit en texte, pour
   relancer le modele une fois au lieu de clore le tour sur du vide ;
 - `retirer_emojis` : defaut D5, le modele semait des emojis (triangle
@@ -36,6 +37,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 
 # ── Nettoyage du rendu de l'interface ───────────────────────────────────────
 
@@ -67,7 +69,17 @@ _LIGNES_VIDES = re.compile(r"\n{3,}")
 
 # Debut du memo des actions : sert aussi a reconnaitre un memo recopie par le
 # modele au lieu d'agir (cf. `appel_ecrit_en_texte`).
-MEMO_PREFIXE = "[Mémo interne, non affiché"
+#
+# Jusqu'au 2026-10-02, le memo etait prefixe au contenu ASSISTANT, entre
+# crochets (« [Mémo interne, non affiché à l'utilisateur. Actions déjà
+# exécutées…] »). Le modele relisait ses propres messages sous cette forme et
+# l'imitait : en production (28-30/09) il « racontait » ses actions entre
+# crochets au lieu de les faire (« [Je lance d'abord la recherche…] »,
+# « [Capture de la carte] »). Le memo est desormais un message SYSTEME a part,
+# pose juste apres le message assistant concerne, sans crochets.
+MEMO_PREFIXE = "Actions exécutées pendant ta réponse précédente"
+# Ancienne forme, encore reconnue si le modele la recopie.
+_ANCIEN_MEMO_PREFIXE = "[Mémo interne, non affiché"
 
 
 def texte_final(contenu: str | None) -> str:
@@ -103,15 +115,18 @@ def _resultat_cle(resultat: str) -> str:
         m = _MESSAGE_ERREUR.search(resultat)
         return "échec" + (f" ({m.group(1)})" if m else "")
     faits = [f"{k} {v.strip(chr(34))}" for k, v in _FAIT_CLE.findall(resultat or "")[:2]]
-    return "réussi" + (f", {', '.join(faits)}" if faits else "")
+    return "réussi" + (f" ({', '.join(faits)})" if faits else "")
 
 
 def memo_outils(tool_calls) -> str:
-    """Une ligne qui dit ce qui a ete execute, sans forme d'appel.
+    """Une phrase qui dit ce qui a ete execute, sans forme d'appel.
 
-    Pas de backtick, pas de gras, pas de parenthese apres un nom, pas de
-    citation : rien que le modele puisse prendre pour un gabarit d'appel.
-    `tool_calls` est la colonne de la base (JSON) ou la liste deja decodee.
+    Pas de crochet, de backtick, de gras, de parenthese collee a un nom, ni
+    de citation : rien que le modele puisse prendre pour un gabarit de
+    reponse ou d'appel. `tool_calls` est la colonne de la base (JSON) ou la
+    liste deja decodee. Exemple : « Actions exécutées pendant ta réponse
+    précédente : set_study_zone réussi ; smart_load réussi (feature_count
+    112816). »
     """
     if isinstance(tool_calls, str):
         try:
@@ -124,23 +139,40 @@ def memo_outils(tool_calls) -> str:
     for appel in tool_calls:
         if not isinstance(appel, dict) or not appel.get("tool"):
             continue
-        actions.append(f"{appel['tool']} : {_resultat_cle(str(appel.get('result') or ''))}")
+        actions.append(f"{appel['tool']} {_resultat_cle(str(appel.get('result') or ''))}")
     if not actions:
         return ""
-    return (f"{MEMO_PREFIXE} à l'utilisateur. Actions déjà exécutées à ce tour "
-            f"par de vrais appels d'outils : {' ; '.join(actions)}.]")
+    return f"{MEMO_PREFIXE} : {' ; '.join(actions)}."
 
 
 def contenu_assistant_pour_le_modele(contenu: str | None, tool_calls=None) -> str:
-    """Le message assistant tel que le modele doit le relire.
+    """Le texte du message assistant tel que le modele doit le relire.
 
-    Memo des actions d'abord (ordre chronologique : les outils precedent la
-    reponse), puis le texte final. Vide si le tour n'a rien produit de
-    visible ni d'action : l'appelant saute alors le message.
+    Le texte final seulement : le memo des actions n'est plus melange au
+    contenu assistant (cf. `messages_assistant_pour_le_modele`).
+    `tool_calls` est accepte pour compatibilite et ignore. Vide si le tour
+    n'a rien produit de visible : l'appelant saute alors le message.
     """
-    memo = memo_outils(tool_calls)
+    return texte_final(contenu)
+
+
+def messages_assistant_pour_le_modele(contenu: str | None, tool_calls=None) -> list[dict]:
+    """Le tour assistant relu par le modele : texte final, puis memo.
+
+    Rend au plus deux messages, dans l'ordre : le message assistant (texte
+    final, s'il en reste un) et un message systeme court qui dit les actions
+    reellement executees a ce tour. Le memo suit la reponse, comme les
+    outils l'ont precedee : il renseigne le tour suivant sans jamais
+    apparaitre dans un contenu assistant que le modele pourrait imiter.
+    """
+    messages = []
     texte = texte_final(contenu)
-    return "\n\n".join(p for p in (memo, texte) if p)
+    if texte:
+        messages.append({"role": "assistant", "content": texte})
+    memo = memo_outils(tool_calls)
+    if memo:
+        messages.append({"role": "system", "content": memo})
+    return messages
 
 
 # ── Appel d'outil ecrit en texte ────────────────────────────────────────────
@@ -162,7 +194,8 @@ def appel_ecrit_en_texte(texte: str | None, noms_outils) -> str | None:
     """
     if not texte:
         return None
-    if texte.lstrip().startswith(MEMO_PREFIXE):
+    debut = texte.lstrip()
+    if debut.startswith(MEMO_PREFIXE) or debut.startswith(_ANCIEN_MEMO_PREFIXE):
         return "memo recopie"
     if _APPEL_GENERIQUE.search(texte):
         return "tool_call"
@@ -179,6 +212,139 @@ def appel_ecrit_en_texte(texte: str | None, noms_outils) -> str | None:
         m = re.search(motif, texte, re.MULTILINE)
         if m:
             return m.group(1)
+    return None
+
+
+# ── Plan decrit sans etre execute ───────────────────────────────────────────
+#
+# Production du 28 au 30/09 (28 tours) : le modele DECRIVAIT ce qu'il allait
+# faire au lieu de le faire, sans aucun appel d'outil :
+#   « Voici mon plan : 1. Lister les sources… 2. Charger… » puis arret ;
+#   « [Je lance d'abord la recherche de sources disponibles pour la TVB…] » ;
+#   « [Capture de la carte] », « [Code d'exécution] ».
+# L'utilisateur devait repondre « Ok », « continue », « alors ? », parfois
+# quatre fois. `plan_non_execute` reconnait ces reponses pour que la boucle
+# relance une fois le modele, comme pour un appel ecrit en texte (D1).
+
+
+def _normaliser(texte: str | None) -> str:
+    """Minuscules, sans accents, apostrophes droites, espaces simples."""
+    t = unicodedata.normalize("NFKD", texte or "")
+    t = "".join(c for c in t if not unicodedata.combining(c))
+    t = t.lower().replace("’", "'").replace("‘", "'")
+    return re.sub(r"\s+", " ", t).strip()
+
+
+# Intention future a la premiere personne, ou plan annonce. Les deux motifs
+# s'appliquent au texte normalise (minuscules, sans accents).
+_INTENTION = re.compile(
+    r"\b(?:voici (?:mon|le) plan|je vais|je lance|je commence par"
+    r"|je m'apprete a|je procede a)\b",
+)
+_PLAN_ANNONCE = re.compile(r"\b(?:voici (?:mon|le) plan|mon plan ?:)")
+# Une etape de liste numerotee : « 1. », « 2) », « **3.** ».
+_ETAPE_NUMEROTEE = re.compile(r"^[ \t>]*(?:\*\*)?\d{1,2}[.)](?:\*\*)?[ \t]+\S", re.MULTILINE)
+# Un segment entre crochets qui ouvre une ligne ou suit une fin de phrase,
+# et n'est pas un lien Markdown (`[texte](url)`) ni une case a cocher.
+_SEGMENT_CROCHETS = re.compile(
+    r"(?:^|(?<=[.!?:])[ \t]+)[ \t>*_-]*\[([^\[\]\n]{3,})\](?!\()", re.MULTILINE,
+)
+# Une question qui demande la permission d'agir n'est pas une clarification.
+_DEMANDE_D_ACCORD = re.compile(
+    r"(?:veux|voulez|souhaites|souhaitez)[- ](?:tu|vous)\s+(?:que\s+je|ajuster|valider"
+    r"|que\s+l'on|qu'on)|je\s+(?:lance|continue|commence|procede|m'y\s+mets)\s*\?"
+    r"|on\s+y\s+va|ou\s+je\s+lance|c'est\s+bon\s+pour\s+(?:toi|vous)"
+    r"|(?:tu\s+es|vous\s+etes)\s+d'accord|je\s+peux\s+(?:lancer|y\s+aller|commencer)",
+)
+
+# Demande qui appelle une action (apres normalisation : sans accents).
+_VERBES_ACTION = re.compile(
+    r"\b(?:affich|charg|decoup|clip|calcul|lanc|execut|fai[st]\b|fair|cre[ea]|ajout"
+    r"|montr|cartograph|analys|trac|export|telecharg|recherch|cherch|trouv|defini"
+    r"|import|styl|colori|zoom|centr|superpos|compt|mesur|extrai|filtr|selectionn"
+    r"|gener|produi|prepar|met[s]?\b|mettre|refai|relanc|continu|recharg|activ"
+    r"|appliqu|construi|dessin|visualis|recupere|ouvr|isol|croise|intersect"
+    r"|traite|traitement)",
+)
+# Relance d'un tour precedent : « Ok », « continue », « alors ? ».
+_ACQUIESCEMENT = re.compile(
+    r"^(?:ok|okay|oui|ouais|vas[- ]y|go|d'accord|daccord|alors|continue|lance"
+    r"|parfait|super|valide|c'est bon|allez|et alors|on y va|fais[- ]le)\b",
+)
+# Question de connaissance : on y repond, sans outil.
+_QUESTION_CONNAISSANCE = re.compile(
+    r"^(?:c'est quoi|qu'est[- ]ce|comment\b|pourquoi|que (?:signifie|veut dire)"
+    r"|quelle? (?:est|sont) la difference|explique|definis|definition|a quoi sert"
+    r"|quel(?:le)?s? (?:est|sont) (?:le|la|les) (?:role|interet|principe))",
+)
+# Actions a risque (regle 0 des essentiels) : le plan et la confirmation y
+# sont VOULUS, on ne relance jamais.
+_ACTION_A_RISQUE = re.compile(
+    r"\b(?:publi|partag|diffus|audience|supprim|effac|ecras|detrui|vider\b"
+    r"|run_recipe|recette|geoai|detection|segmentation|inference"
+    r"|t10\b|t100\b|t1000\b|scenario\s+(?:t|centennal|millennal|extreme))",
+)
+
+
+def demande_appelle_une_action(demande: str | None) -> bool:
+    """Vrai si l'utilisateur demande d'agir (et non une explication)."""
+    t = _normaliser(demande)
+    if not t:
+        return False
+    if _QUESTION_CONNAISSANCE.match(t):
+        return False
+    return bool(_ACQUIESCEMENT.match(t) or _VERBES_ACTION.search(t))
+
+
+def action_a_risque(*textes: str | None) -> bool:
+    """Vrai si une publication, une suppression, une recette lourde ou un
+    parametre metier sensible est en jeu dans l'un des textes."""
+    return any(_ACTION_A_RISQUE.search(_normaliser(t)) for t in textes if t)
+
+
+def _actions_entre_crochets(texte: str) -> list[str]:
+    """Segments « [Je lance…] » qui decrivent une action (deux mots au moins)."""
+    out = []
+    for m in _SEGMENT_CROCHETS.finditer(texte):
+        interieur = m.group(1).strip()
+        if len(interieur.split()) >= 2:
+            out.append(interieur)
+    return out
+
+
+def _question_de_clarification(texte: str) -> bool:
+    """Une seule question explicite, qui ne demande pas la permission d'agir."""
+    if texte.count("?") != 1:
+        return False
+    return not _DEMANDE_D_ACCORD.search(_normaliser(texte))
+
+
+def plan_non_execute(texte: str | None, demande: str | None) -> str | None:
+    """Motif de relance si le modele a decrit son action sans la faire.
+
+    A appeler sur la reponse d'un tour qui n'a emis AUCUN appel d'outil.
+    Rend « plan numerote », « action entre crochets » ou « intention », ou
+    None quand il ne faut pas relancer :
+    - la demande n'appelle pas d'action (question de connaissance) ;
+    - une action a risque est en jeu (publication, suppression ou
+      ecrasement, recette lourde, GeoAI, parametre metier) : le plan et la
+      confirmation y sont voulus par la regle 0 ;
+    - la reponse est une vraie question de clarification (une seule
+      question, sans plan numerote ni action entre crochets).
+    """
+    if not texte or not texte.strip():
+        return None
+    if not demande_appelle_une_action(demande):
+        return None
+    if action_a_risque(demande, texte):
+        return None
+    t = _normaliser(texte)
+    if len(_ETAPE_NUMEROTEE.findall(texte)) >= 2 or _PLAN_ANNONCE.search(t):
+        return "plan numerote"
+    if _actions_entre_crochets(texte):
+        return "action entre crochets"
+    if _INTENTION.search(t) and not _question_de_clarification(texte):
+        return "intention"
     return None
 
 

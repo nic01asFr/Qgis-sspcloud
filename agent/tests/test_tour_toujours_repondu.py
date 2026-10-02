@@ -213,7 +213,8 @@ def test_la_relance_demande_une_reponse_directe(agent):
               _paquets(reflexion="…", motif="length"),
               _paquets(texte="Voici.", motif="stop"))
     derniere = _ClientModele.appels[1]["messages"][-1]
-    assert derniere["role"] == "system"
+    assert derniere["role"] == "user"
+    assert qa._PREFIXE_CONSIGNE in derniere["content"]
     assert "Réponds" in derniere["content"] and "MAINTENANT" in derniere["content"]
 
 

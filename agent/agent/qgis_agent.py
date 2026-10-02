@@ -51,6 +51,17 @@ _ARTIFACT_MUTATING_TOOLS: frozenset[str] = native_tools_v2.NATIVE_TOOLS_V2_MUTAT
 # ── Config SSPCloud LLM ────────────────────────────────────────────────────────
 _LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://llm.lab.sspcloud.fr/api")
 
+# Budget de sortie d'un appel au modele, raisonnement compris.
+#
+# Mesure en production (28-30/09) : 7 tours sur 37 ont epuise le plafond de
+# 4 096 jetons a reflechir, sans appeler d'outil ni ecrire un mot ; mesure
+# directe : pour « 17 fois 23 », 400 jetons de reflexion et aucune reponse.
+_MAX_TOKENS_TOUR = int(os.getenv("AGENT_MAX_TOKENS", "12288"))
+# Desactive le raisonnement de qwen3 pour un appel (accepte par la
+# passerelle, verifie le 2026-10-02 : « 391 » en 0,2 s et 4 jetons au lieu
+# d'un budget epuise). Sert aux appels qui n'ont qu'a rediger ou agir.
+_SANS_REFLEXION = {"chat_template_kwargs": {"enable_thinking": False}}
+
 # Silence maximal tolere du modele pendant qu'il stream, en secondes.
 #
 # Le read timeout de httpx ne protege pas de ce cas : il se rearme au moindre
@@ -70,6 +81,53 @@ _CONSIGNE_APPEL_ECRIT = (
     "call), sans le recopier en texte. Si aucune action n'est nécessaire, "
     "réponds simplement à l'utilisateur en langage courant."
 )
+
+# Consigne de relance quand le modele DECRIT son action au lieu de la faire
+# (plan numerote, « je vais… », action entre crochets), sans aucun appel
+# d'outil. Production du 28 au 30/09 : « Voici mon plan : 1. … » puis arret,
+# l'utilisateur devait repondre « Ok », « continue », « alors ? ».
+_CONSIGNE_PLAN_NON_EXECUTE = (
+    "Tu as décrit ton plan sans l'exécuter : rien n'a été fait. Exécute-le "
+    "maintenant avec les outils, sans redemander ni réécrire le plan, puis "
+    "rends compte du résultat."
+)
+
+# Consignes posees en cours de conversation (relances, memo des actions,
+# boucle d'erreur, conclusion forcee) : la boucle les ecrit en messages
+# `system`, mais le gabarit de conversation de Qwen3.6 (chat_template.jinja
+# de Qwen/Qwen3.6-35B-A3B, verifie le 2026-10-02) leve « System message must
+# be at the beginning. » pour tout message systeme qui n'est pas le premier.
+# Servies telles quelles, elles font echouer l'appel (HTTP 400 cote vLLM).
+# `_messages_pour_le_gabarit` les rend en message utilisateur, prefixe de
+# cette mention pour que le modele ne les prenne pas pour une demande.
+_PREFIXE_CONSIGNE = "Consigne du système (ce n'est pas l'utilisateur qui écrit) : "
+
+
+def _messages_pour_le_gabarit(messages: list[dict]) -> list[dict]:
+    """Les messages tels que le modele peut les recevoir.
+
+    Le premier message systeme reste en place ; chaque message systeme
+    suivant devient un message utilisateur prefixe de `_PREFIXE_CONSIGNE`.
+    Deux messages utilisateur consecutifs (texte) sont fusionnes : certains
+    gabarits exigent l'alternance des roles. La liste d'origine n'est pas
+    modifiee : la boucle garde ses roles, les tests et le journal aussi.
+    """
+    sortie: list[dict] = []
+    for i, msg in enumerate(messages):
+        if msg.get("role") == "system" and i > 0:
+            msg = {"role": "user",
+                   "content": _PREFIXE_CONSIGNE + str(msg.get("content") or "")}
+        precedent = sortie[-1] if sortie else None
+        if (precedent is not None and msg.get("role") == "user"
+                and precedent.get("role") == "user"
+                and isinstance(precedent.get("content"), str)
+                and isinstance(msg.get("content"), str)):
+            sortie[-1] = {**precedent,
+                          "content": f"{precedent['content']}\n\n{msg['content']}"}
+            continue
+        sortie.append(msg)
+    return sortie
+
 
 # Ce que lit l'utilisateur quand un tour se termine sans rien de visible
 # (raisonnement masque et lignes d'outils retires). Avant, la bulle restait
@@ -357,6 +415,52 @@ def _get_profile_tools_whitelist(profile_id: str) -> list[str] | None:
 
 
 # ── Outils MCP disponibles ─────────────────────────────────────────────────────
+#
+# Production du 28-30/09 : le hub redemarrait (`fetch_profiles : /profiles
+# HTTP 503`), `tools/list` a echoue une fois, et `_get_mcp_tools` a rendu une
+# liste vide sans retenter. Le tour est parti au modele avec 2 outils natifs
+# sur 36 (`outils exposes … n=2/36`) : il ne pouvait que decrire ce qu'il
+# aurait fait. Desormais : deux essais rapproches, puis la derniere liste
+# valide du profil (avec son age), et a defaut une erreur explicite qui
+# arrete le tour avant le modele (cf. MESSAGE_OUTILS_INDISPONIBLES).
+
+_ESSAIS_OUTILS = max(1, int(os.getenv("MCP_OUTILS_ESSAIS", "2")))
+_DELAI_ESSAI_OUTILS_S = float(os.getenv("MCP_OUTILS_DELAI_S", "1.5"))
+# Une liste d'outils change avec une version du hub, pas d'un tour a l'autre :
+# une liste de quelques heures vaut mieux qu'aucune.
+_AGE_MAX_OUTILS_S = float(os.getenv("MCP_OUTILS_AGE_MAX_S", str(24 * 3600)))
+# profil -> (horodatage monotone, liste filtree) de la derniere reussite.
+_DERNIERS_OUTILS_MCP: dict[str, tuple[float, list[dict]]] = {}
+
+MESSAGE_OUTILS_INDISPONIBLES = (
+    "Les outils QGIS sont momentanément indisponibles : je n'ai rien pu "
+    "faire pour cette demande. Réessaie dans un instant ; si cela dure, le "
+    "service QGIS est probablement en train de redémarrer."
+)
+
+
+class OutilsIndisponibles(RuntimeError):
+    """Aucune liste d'outils du hub : ni a l'instant, ni en cache."""
+
+
+async def _lister_outils_hub() -> list[dict]:
+    """`tools/list` du hub ; leve si la reponse n'est pas une liste utile."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            f"{_HUB_URL}/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            headers={"Authorization": f"Bearer {_HUB_KEY}"},
+        )
+    statut = getattr(resp, "status_code", 200)
+    if statut != 200:
+        raise RuntimeError(f"tools/list HTTP {statut}")
+    data = resp.json()
+    outils = ((data or {}).get("result") or {}).get("tools") or []
+    if not outils:
+        erreur = (data or {}).get("error")
+        raise RuntimeError("tools/list vide" + (f" ({erreur})" if erreur else ""))
+    return outils
+
 
 async def _get_mcp_tools(profile_id: str = "standard") -> list[dict]:
     """Récupère la liste des outils MCP du hub, filtrée selon le profil.
@@ -369,21 +473,42 @@ async def _get_mcp_tools(profile_id: str = "standard") -> list[dict]:
     Egalement applique `mcp_tools.disabled = [...]` (blacklist additionnelle)
     si declare. Permet : risk_analyst exclut explicitement `delete_file`,
     storymap_creator exclut `restart_qgis_engine`, etc.
+
+    Echec du hub : `_ESSAIS_OUTILS` essais espaces de
+    `_DELAI_ESSAI_OUTILS_S`, puis la derniere liste valide du profil si
+    elle a moins de `_AGE_MAX_OUTILS_S`. Sinon `OutilsIndisponibles` : le
+    tour ne doit pas partir au modele sans ses outils.
     """
     if not _HUB_URL or not _HUB_KEY:
         return []
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                f"{_HUB_URL}/mcp",
-                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-                headers={"Authorization": f"Bearer {_HUB_KEY}"},
-            )
-            data = resp.json()
-            all_tools = data.get("result", {}).get("tools", [])
-    except Exception as e:
-        log.warning("MCP tools non récupérés: %s", e)
-        return []
+    all_tools: list[dict] = []
+    for essai in range(1, _ESSAIS_OUTILS + 1):
+        try:
+            all_tools = await _lister_outils_hub()
+            break
+        except Exception as e:
+            log.warning("MCP tools non récupérés (essai %d/%d) : %s",
+                        essai, _ESSAIS_OUTILS, e)
+            if essai < _ESSAIS_OUTILS:
+                await asyncio.sleep(_DELAI_ESSAI_OUTILS_S)
+            else:
+                derniere = _DERNIERS_OUTILS_MCP.get(profile_id)
+                age = time.monotonic() - derniere[0] if derniere else None
+                if derniere and age <= _AGE_MAX_OUTILS_S:
+                    log.warning(
+                        "MCP tools : derniere liste valide reutilisee "
+                        "(profil=%s, age=%ds, n=%d)",
+                        profile_id, int(age), len(derniere[1]),
+                    )
+                    return list(derniere[1])
+                log.error(
+                    "MCP tools indisponibles (profil=%s, %s) : le tour ne part "
+                    "pas au modele sans outils",
+                    profile_id,
+                    "aucune liste en cache" if derniere is None
+                    else f"liste en cache trop ancienne ({int(age)}s)",
+                )
+                raise OutilsIndisponibles(str(e)) from e
 
     # Filtrage par profil : whitelist (allowed) + blacklist (disabled).
     # Si profil pas dans le cache (fetch initial pas encore reussi, ou
@@ -409,6 +534,7 @@ async def _get_mcp_tools(profile_id: str = "standard") -> list[dict]:
         )
     else:
         log.info("MCP tools (profil '%s', non filtre) : %d", profile_id, len(filtered))
+    _DERNIERS_OUTILS_MCP[profile_id] = (time.monotonic(), list(filtered))
     return filtered
 
 
@@ -1728,10 +1854,11 @@ class QGISAgent:
         precedents_user = [m for m in recents if m.get("role") == "user"][-1:]
         for m in precedents_user:
             paquets |= paquets_outils.paquets_par_intention(m.get("content") or "")
-        # Usage : le memo des actions de l'historique cite les outils appeles.
+        # Usage : le memo des actions de l'historique (message systeme qui
+        # suit le tour assistant) cite les outils appeles.
         cites = paquets_outils.outils_cites(
             ((m.get("content") or "") for m in recents
-             if m.get("role") in ("assistant", "tool")),
+             if m.get("role") in ("assistant", "tool", "system")),
             noms_connus,
         )
         paquets |= paquets_outils.paquets_par_usage(cites)
@@ -2080,45 +2207,25 @@ class QGISAgent:
     _QGIS_ESSENTIALS = """
 # ⛔ AVANT TOUTE CHAÎNE DE TOOLS — RÉFLEXES OBLIGATOIRES
 
-0. 🧭 **PLAN-PUIS-EXECUTE** (discipline générale, Sprint Composants Phase 3c) :
+0. ▶️ **AGIR D'ABORD — pas de plan à faire valider** :
+   Une demande d'action (zone, recherche au catalogue, chargement,
+   découpage, traitement, style, analyse, export dans l'étude) s'EXÉCUTE
+   tout de suite : enchaîne les appels d'outils jusqu'au résultat, PUIS
+   rends compte. Jamais « Voici mon plan… » ni « je vais… » sans appel
+   d'outil ; jamais d'action décrite entre crochets (« [Je lance…] ») :
+   seul un appel d'outil agit. Demande vague mais faisable (« affiche les
+   trames vertes et bleues, la densité bâtie, les réseaux ») : choisis des
+   sources raisonnables, annonce-les en UNE phrase, et exécute.
 
-   Pour TOUTE chaîne de >= 2 tools AVEC IMPACT, tu POSES ton plan AVANT
-   d'agir. Cette discipline transforme un agent réactif en agent réfléchi.
-
-   TRIGGERS qui obligent le plan-puis-execute :
-   - Livrable composite (storymap, dashboard, sheet_a4, export PDF)
-   - Action non-réversible (publish_assembly, save_recipe modification)
-   - Action coûteuse (run_recipe lourd, GeoAI inference)
-   - Choix de paramètres avec impact métier (T100 vs T1000, audience RGPD)
-
-   EXCEPTIONS (pas de plan) :
-   - 1 tool atomique sans impact (set_study_zone simple, zoom_to)
-   - Lecture seule (list_*, get_*, describe_*)
-
-   FORMAT du plan posé :
-   ```
-   Voici mon plan :
-   1. tool1(params) — impact court (1 ligne)
-   2. tool2(params) — impact si non-trivial
-   ...
-   N. publish_X(audience=cerema_internal) — IMPACT MAJEUR : ...
-
-   Paramètres ajustables AVANT lancement :
-   - param `scenario` (default: T100, alternatives: T10/T50/T1000)
-     impact : T100 = scénario réglementaire, T1000 = extrême
-   - param `audience` (default: cerema_internal RGPD)
-     impact : public = exposition externe, IRRÉVERSIBLE
-
-   Tu veux ajuster un paramètre, ou je lance avec ces défauts ?
-   ```
-
-   SOURCE des params + impact : appelle `analyze_recipe(slug)` AVANT le
-   run_recipe. Cache HIT instantané si recipe déjà analysée. Le tool retourne
-   params_analysis (impact métier) + quality_checks (warnings techniques).
-
-   Si analyse révèle quality_check.severity='error' → signale à l'user
-   AVANT lancement (« Cette recipe a 1 erreur QVariant ligne 42 — voulez-vous
-   voir le fix avant de lancer ? »).
+   Plan court + confirmation AVANT d'agir, UNIQUEMENT pour :
+   - publication ou partage (publish_*, choix de l'audience) ;
+   - suppression ou écrasement de données de l'utilisateur ;
+   - recette lourde ou coûteuse (run_recipe, GeoAI) : `analyze_recipe(slug)`
+     d'abord, puis paramètres et impact, puis « Je lance ? » (erreur
+     signalée par l'analyse : dis-le avant) ;
+   - paramètre à fort impact métier réellement ambigu (ex. T100 ou T1000).
+   Une question de clarification n'est permise que si la demande est
+   inexécutable sans la réponse : une seule question, sans plan.
 
 1. ⚙️ **Algo natif d'abord** : avant 30 lignes de PyQGIS, demande-toi
    « existe-t-il un `native:*` ? » Si tu hésites → `search_algorithms("mot-clé")`.
@@ -2352,7 +2459,8 @@ résultat dans la session.
 
 Interdit :
 - ❌ « Je vais maintenant exécuter ce script : ```python ...``` »
-- ❌ « J'attends la confirmation pour ... » (n'attends rien, appelle l'outil)
+- ❌ « J'attends la confirmation pour ... » (n'attends rien, appelle l'outil ;
+  seuls les cas à risque de la règle 0 attendent un accord)
   **exception republish** : livrable déjà au catalogue → coller `hub_url`,
   ne PAS appeler `publish_artifact` même si l'user dit « maintenant ».
 - ❌ « Comme je n'ai pas la connaissance préalable, je vais d'abord ... »
@@ -2736,11 +2844,23 @@ ne vient pas d'un outil cette session, la supprimer.
         # Sauvegarder le message user
         await memory.add_message(self.session_id, "user", user_message)
 
+        # Outils d'abord : sans eux, inutile de construire le prompt. Un tour
+        # parti au modele sans ses outils QGIS ne peut que decrire ce qu'il
+        # ferait (production 28-30/09, n=2/36) : on previent l'utilisateur.
+        try:
+            outils_profil = await self._get_tools()
+        except OutilsIndisponibles as exc:
+            log.error("Tour arrete avant le modele : outils QGIS indisponibles "
+                      "(session=%s, profil=%s) : %s",
+                      self.session_id, self.profile_id, exc)
+            yield MESSAGE_OUTILS_INDISPONIBLES
+            await memory.add_message(self.session_id, "assistant",
+                                     MESSAGE_OUTILS_INDISPONIBLES)
+            return
         system_prompt = await self._build_system_prompt(user_message=user_message)
         # Lot L3 : le modele voit le socle et les paquets du tour, pas les 90
         # outils du profil (19 300 jetons mesures le 2026-09-26). La liste
         # complete reste la borne du filet d'execution.
-        outils_profil = await self._get_tools()
         noms_profil = {paquets_outils.nom_outil(t) for t in (outils_profil or [])
                        if isinstance(t, dict)}
         self._paquets_tour = self._paquets_du_tour(user_message, history, noms_profil)
@@ -2760,7 +2880,9 @@ ne vient pas d'un outil cette session, la supprimer.
             # touche que les bulles assistant avec markdown image.
             _IMG_RE = re.compile(r'!\[[^\]]*\]\(data:image/[^)]+\)')
             history_for_llm = []
-            for msg in history[-20:]:
+            # 30 messages : ~10 echanges, chaque tour avec outils etant suivi
+            # de son memo d'actions (message systeme court, cf. texte_modele).
+            for msg in history[-30:]:
                 content = msg.get("content", "") or ""
                 # Filet de securite si l'appelant n'a pas deja nettoye (la
                 # fonction est idempotente) : le modele ne doit pas relire le
@@ -2770,10 +2892,11 @@ ne vient pas d'un outil cette session, la supprimer.
                     if not content:
                         continue
                 if "data:image/" in content:
-                    content = _IMG_RE.sub(
-                        '[image affichée précédemment à l\'utilisateur]',
-                        content,
-                    )
+                    # Retiree sans marque entre crochets : le modele recopiait
+                    # ces marques comme des actions (production 28-30/09).
+                    content = _IMG_RE.sub("", content).strip()
+                    if not content:
+                        continue
                 history_for_llm.append({**msg, "content": content})
             messages.extend(history_for_llm)
         messages.append({"role": "user", "content": user_message})
@@ -2805,8 +2928,16 @@ ne vient pas d'un outil cette session, la supprimer.
         # Une seule relance quand la reflexion epuise le budget du tour : au
         # dela, on previent l'utilisateur plutot que de le faire attendre encore.
         relance_budget_faite = False
+        # Apres un budget epuise par la reflexion, l'appel suivant se fait
+        # sans raisonnement : relancer avec la meme reflexion la reepuiserait.
+        couper_reflexion = False
         # Une seule relance quand le modele ecrit un appel en texte (D1).
         relance_appel_ecrit_faite = False
+        # Une seule relance quand le modele decrit son plan sans agir. Le
+        # texte du plan reste affiche tant que la relance n'a pas agi : il
+        # n'est retire (`retirer_texte`) que si elle emet un appel d'outil.
+        relance_plan_faite = False
+        plan_a_retirer: str | None = None
         # Tous les outils du profil, exposes ou non : un appel ecrit en texte
         # vers un outil masque par les paquets est aussi un appel manque.
         noms_outils = noms_profil | {
@@ -2841,10 +2972,13 @@ ne vient pas d'un outil cette session, la supprimer.
             model = await _resolve_model(self.profile_id)
             payload = {
                 "model":      model,
-                "messages":   messages,
+                "messages":   _messages_pour_le_gabarit(messages),
                 "stream":     True,
-                "max_tokens": 4096,
+                "max_tokens": _MAX_TOKENS_TOUR,
             }
+            if couper_reflexion:
+                payload.update(_SANS_REFLEXION)
+                couper_reflexion = False
             if tools:
                 payload["tools"] = tools
                 # Laisser le modèle décider : auto sur 1ère itération,
@@ -3055,6 +3189,26 @@ ne vient pas d'un outil cette session, la supprimer.
             _flush_reasoning()
 
             final_finish_reason = finish_reason
+            # Iteration qui suit une relance « plan non execute » : si elle
+            # agit, le plan deja affiche disparait de la bulle et de la
+            # persistance ; le chat ne retire qu'un texte qui termine la
+            # bulle, on retire donc plan + texte de la relance, puis on
+            # reemet ce dernier.
+            if plan_a_retirer is not None:
+                if tool_call_data and plan_a_retirer:
+                    yield {"retirer_texte": plan_a_retirer + chunk_text}
+                    if chunk_text:
+                        yield chunk_text
+                    pos_plan = full_response.rfind(plan_a_retirer)
+                    if pos_plan >= 0:
+                        full_response = (full_response[:pos_plan]
+                                         + full_response[pos_plan + len(plan_a_retirer):])
+                    log.info("Plan non execute : la relance agit, plan retire "
+                             "(session=%s)", self.session_id)
+                elif not tool_call_data:
+                    log.warning("Plan non execute : la relance n'agit pas non plus "
+                                "(session=%s)", self.session_id)
+                plan_a_retirer = None
             # Pas de tool calls → fin du turn LLM.
             # NB : on n'utilise PAS finish_reason="stop" pour break car Gemma4
             # renvoie souvent "stop" même quand des tool_calls sont présents.
@@ -3089,6 +3243,26 @@ ne vient pas d'un outil cette session, la supprimer.
                     # Deuxieme echec : on sort, le garde-fou de fin de tour
                     # donnera un message clair a l'utilisateur.
                     break
+                # Plan DECRIT sans etre execute (production 28-30/09) : plan
+                # numerote, « je vais… », action entre crochets, alors que la
+                # demande appelle une action sans risque. Une relance par tour,
+                # seulement si aucun outil n'a tourne ; jamais pour une
+                # publication, une suppression, une recette lourde ni une
+                # vraie question de clarification (cf. regle 0).
+                motif_plan = (None if (relance_plan_faite or tool_calls_made or not tools)
+                              else texte_modele.plan_non_execute(chunk_brut, user_message))
+                if motif_plan:
+                    relance_plan_faite = True
+                    plan_a_retirer = chunk_text
+                    log.warning(
+                        "Plan decrit sans execution (%s, iter=%d, session=%s) : relance",
+                        motif_plan, iteration, self.session_id,
+                    )
+                    yield {"phase": "relance", "label": "Je passe à l'action…"}
+                    messages.append({"role": "assistant", "content": chunk_brut})
+                    messages.append({"role": "system",
+                                     "content": _CONSIGNE_PLAN_NON_EXECUTE})
+                    continue
                 # Budget du tour epuise par la reflexion, avant toute reponse.
                 #
                 # Les jetons de raisonnement comptent dans `max_tokens`. Un
@@ -3101,6 +3275,7 @@ ne vient pas d'un outil cette session, la supprimer.
                 if (not chunk_text.strip() and final_finish_reason == "length"
                         and not relance_budget_faite):
                     relance_budget_faite = True
+                    couper_reflexion = True
                     log.warning(
                         "Budget epuise par la reflexion (iter=%d, session=%s) : relance",
                         iteration, self.session_id,
@@ -3140,9 +3315,10 @@ ne vient pas d'un outil cette session, la supprimer.
                                     f"{_LLM_BASE_URL}/chat/completions",
                                     json={
                                         "model": model,
-                                        "messages": messages,
+                                        "messages": _messages_pour_le_gabarit(messages),
                                         "stream": True,
                                         "max_tokens": 600,
+                                        **_SANS_REFLEXION,
                                     },
                                     headers={
                                         "Authorization": f"Bearer {_llm_api_key()}",
@@ -3712,9 +3888,10 @@ ne vient pas d'un outil cette session, la supprimer.
                         f"{_LLM_BASE_URL}/chat/completions",
                         json={
                             "model": model,
-                            "messages": messages,
+                            "messages": _messages_pour_le_gabarit(messages),
                             "stream": True,
                             "max_tokens": 1024,
+                            **_SANS_REFLEXION,
                         },
                         headers={
                             "Authorization": f"Bearer {_llm_api_key()}",
