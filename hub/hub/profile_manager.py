@@ -162,15 +162,59 @@ def _default_profile() -> dict:
     }
 
 
+# Identifiant du profil ferme rendu pour un identifiant inconnu. Aucun YAML
+# ne le porte, et `/profiles/{id}` compare l'id rendu a l'id demande : la
+# route repond donc toujours 404 pour un profil inconnu.
+PROFIL_INCONNU_ID = "_profil_inconnu"
+
+
+def _profil_ferme() -> dict:
+    """Profil sans aucun outil, rendu pour un identifiant inconnu.
+
+    Constate le 2026-09-26 (audit securite des acces, AG-14 / agents dedies
+    §1.2 point 4) : un profil inconnu retombait sur `standard`, qui autorise
+    TOUS les outils. Une faute de frappe, un profil supprime apres la
+    publication d'un agent, ou une valeur forgee ouvraient donc tout. Le
+    repli est desormais ferme : aucun outil MCP, aucun outil natif.
+    """
+    return {
+        "id": PROFIL_INCONNU_ID,
+        "name": "Profil inconnu",
+        "description": "Profil introuvable : aucun outil n'est autorisé.",
+        "image_variant": "standard",
+        "requires_geoai": False,
+        "mcp_tools": {"allowed": [], "disabled": []},
+        "native_tools": {"allowed": []},
+        "geoai_watcher": {"enabled": False},
+        "agent_system_prompt": "",
+    }
+
+
 def get_profile(profile_id: str | None = None) -> dict:
-    """Retourne un profil par ID. Fallback sur standard si introuvable."""
+    """Retourne un profil par ID.
+
+    Sans identifiant, rend le profil par defaut (`QGIS_DEFAULT_PROFILE`,
+    `standard`). Un identifiant INCONNU rend un profil ferme (aucun outil),
+    jamais `standard` : un repli ne doit pas ouvrir plus que ce qui etait
+    demande.
+    """
     if not _profiles:
         _load_profiles()
-    pid = profile_id or _DEFAULT_PROFILE_ID
-    p = _profiles.get(pid)
+    if not profile_id:
+        pid = _DEFAULT_PROFILE_ID
+        p = _profiles.get(pid)
+        if p:
+            return p
+        # Profil par defaut mal configure : on garde le comportement
+        # historique (standard), c'est la configuration de l'installation.
+        log.warning("Profil par defaut '%s' introuvable — standard", pid)
+        return _profiles.get("standard", _default_profile())
+    p = _profiles.get(profile_id)
     if not p:
-        log.warning("Profil '%s' introuvable — fallback standard", pid)
-        p = _profiles.get("standard", _default_profile())
+        log.warning(
+            "Profil '%s' introuvable — profil ferme (aucun outil)", profile_id,
+        )
+        return _profil_ferme()
     return p
 
 

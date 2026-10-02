@@ -50,6 +50,7 @@ from pathlib import Path
 from hub import auth, sessions
 from hub import empreinte_code
 from hub import activation_etude
+from hub import workspace_auth
 # Alias : une variable locale `scene_layers` (les couches d'une scene)
 # existe deja a deux endroits et masquait le module -- le rendu des cartes
 # echouait sur « 'list' object has no attribute 'origine_donnees' ».
@@ -1232,6 +1233,11 @@ async def proxy_workspace_vnc_http(path: str, request: Request):
         k: v for k, v in request.headers.items()
         if k.lower() not in ("host", "cookie", "authorization", "content-length")
     }
+    # Audit securite des acces (2026-09-26, SEC-2) : websockify exige une
+    # authentification Basic en mode `enforce` ; le cookie de l'utilisateur
+    # ne traverse pas, le hub s'authentifie a sa place.
+    fwd_headers = workspace_auth.sans_entete_client(fwd_headers)
+    fwd_headers.update(workspace_auth.entete_basic_vnc())
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
             proxied = await client.request(
@@ -1334,6 +1340,20 @@ async def proxy_workspace_vnc_ws(client_ws: WebSocket):
         connect_kwargs = {}
         if accept_protocol:
             connect_kwargs["subprotocols"] = [accept_protocol]
+        # Audit securite des acces (2026-09-26, SEC-2) : authentification
+        # Basic aupres de websockify. Le nom du parametre a change avec
+        # websockets 14 (`additional_headers`, avant `extra_headers`).
+        _entetes_vnc = workspace_auth.entete_basic_vnc()
+        if _entetes_vnc:
+            import inspect as _inspect
+            try:
+                _params_connect = _inspect.signature(websockets.connect).parameters
+            except (TypeError, ValueError):
+                _params_connect = {}
+            if "additional_headers" in _params_connect:
+                connect_kwargs["additional_headers"] = _entetes_vnc
+            else:
+                connect_kwargs["extra_headers"] = _entetes_vnc
         async with websockets.connect(upstream_url, **connect_kwargs) as upstream:
             async def client_to_upstream():
                 try:
@@ -12796,6 +12816,10 @@ async def _proxy_request(
     """
     _skip_headers = {"host", "connection", "transfer-encoding", "te", "trailers", "upgrade"}
     headers = {k: v for k, v in request.headers.items() if k.lower() not in _skip_headers}
+    # Audit securite des acces (2026-09-26, SEC-2) : le hub s'authentifie
+    # aupres du workspace. Un jeton fourni par le client n'est jamais relaye.
+    headers = workspace_auth.sans_entete_client(headers)
+    headers.update(workspace_auth.entetes_workspace())
     body = await request.body()
     params = dict(request.query_params)
 
@@ -13735,7 +13759,10 @@ async def _outil_workspace(username: str, nom: str, arguments: dict,
             _mcp_url(s),
             json={"jsonrpc": "2.0", "id": f"taches-{nom}", "method": "tools/call",
                   "params": {"name": nom, "arguments": arguments}},
-            headers={"Authorization": f"Bearer {api_key}"},
+            # Jeton hub -> workspace (audit securite des acces) : sans lui,
+            # le suivi des taches serait refuse en mode `enforce`.
+            headers={"Authorization": f"Bearer {api_key}",
+                     **workspace_auth.entetes_workspace()},
         )
     return (r.json() or {}).get("result") or {}
 

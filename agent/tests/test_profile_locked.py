@@ -238,7 +238,9 @@ def test_post_chat_sets_profile_locked_tag(monkeypatch):
         return profile_id
     monkeypatch.setattr(agent_main, "_resolve_active_profile", _resolve)
 
-    sid = "chat_locked_sess"
+    # Le verrou est accorde par le serveur selon le contexte de la session
+    # (audit securite des acces, 2026-09-26) : un editeur libre le permet.
+    sid = "study:abcdefabcdef:draft:d1"
     with TestClient(agent_main.app) as client:
         # Court-circuit auth OIDC via user-agent kube-probe (cf. middleware
         # agent_oidc_middleware, etape 2).

@@ -55,6 +55,18 @@ def test_pont_http_corps_et_url():
     assert corps["action"] == "execute_python" and corps["params"] == {"code": "result['n'] = 1"}
 
 
+def test_pont_http_jeton_du_workspace(monkeypatch):
+    """Depuis un autre pod, le workspace exige X-Workspace-Token (2026-09-26)."""
+    monkeypatch.delenv("WORKSPACE_TOKEN", raising=False)
+    ouvreur = Ouvreur([b'{"success": true, "result": {}}'] * 2)
+    pont = PontHttp("http://ws:8080", ouvrir=ouvreur)
+    executer_python(pont, "x")
+    assert ouvreur.requetes[0].get_header("X-workspace-token") is None
+    monkeypatch.setenv("WORKSPACE_TOKEN", "jeton")
+    executer_python(pont, "x")
+    assert ouvreur.requetes[1].get_header("X-workspace-token") == "jeton"
+
+
 def test_pont_commande_passe_la_requete_sur_stdin():
     vus = {}
 

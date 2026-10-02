@@ -243,9 +243,17 @@ class TestF16BundleZipModule:
         assert "sha256:cafebabe" in integrity
         assert "SIGNATURE" in integrity or "signature" in integrity.lower()
 
-    def test_build_zip_bundle_fallback_demo_key(self, tmp_path, monkeypatch):
-        """Sans CEREMA_ED25519_PRIVATE_KEY -> cle demo (tests OK, non-prod)."""
+    def test_build_zip_bundle_sans_cle_non_signe(self, tmp_path, monkeypatch):
+        """Sans CEREMA_ED25519_PRIVATE_KEY -> bundle NON signe, et qui le dit.
+
+        Avant le 2026-09-26, une cle de demo publique (`bytes(range(32))`)
+        signait : n'importe qui pouvait forger la signature (LIV-3).
+        """
+        import io
         from hub.publish import bundle
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PrivateKey,
+        )
         monkeypatch.delenv("CEREMA_ED25519_PRIVATE_KEY", raising=False)
         zip_bytes = bundle.build_zip_bundle(
             manifest={"id": "a" * 12, "sid": "b" * 12, "title": "T"},
@@ -257,6 +265,45 @@ class TestF16BundleZipModule:
             slug="demo",
         )
         assert zip_bytes[:2] == b"PK"
+        z = zipfile.ZipFile(io.BytesIO(zip_bytes), "r")
+        integrity = z.read("integrity.txt").decode("utf-8")
+        assert "SIGNED:         false" in integrity
+        assert "SIGNATURE_HEX" not in integrity
+        assert "N'EST PAS SIGNE" in z.read("README.txt").decode("utf-8")
+        demo_pub = Ed25519PrivateKey.from_private_bytes(
+            bytes(range(32))).public_key().public_bytes_raw().hex()
+        assert demo_pub not in integrity
+
+    def test_cle_invalide_non_signe_sans_repli(self, monkeypatch):
+        import pytest as _pytest
+        from hub.publish import bundle
+        monkeypatch.setenv("CEREMA_ED25519_PRIVATE_KEY", "pas-une-cle")
+        assert bundle._load_private_key() is None
+        with _pytest.raises(bundle.SignatureIndisponible):
+            bundle.sign_integrity(b"sha256:x")
+
+    def test_cle_fournie_signe(self, monkeypatch):
+        import io
+        from hub.publish import bundle
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PrivateKey,
+        )
+        priv = Ed25519PrivateKey.generate()
+        monkeypatch.setenv("CEREMA_ED25519_PRIVATE_KEY",
+                           priv.private_bytes_raw().hex())
+        zip_bytes = bundle.build_zip_bundle(
+            manifest={"id": "a" * 12}, rendered_html="<p>x</p>",
+            audit_chain={"integrity_hash": "sha256:ok"}, components={},
+            assets={}, version_num=1, slug="s",
+        )
+        z = zipfile.ZipFile(io.BytesIO(zip_bytes), "r")
+        lignes = dict(
+            ligne.split(":", 1)
+            for ligne in z.read("integrity.txt").decode().splitlines()
+        )
+        sig = bytes.fromhex(lignes["SIGNATURE_HEX"].strip())
+        assert bundle.verify_signature(
+            b"sha256:ok", sig, lignes["PUBLIC_KEY_HEX"].strip())
 
 
 class TestF16Endpoint:
