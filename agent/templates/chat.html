@@ -542,12 +542,13 @@ body:not(.embed) .chat-app{flex:none;height:calc(100vh - var(--entete-h, 70px));
      retrouver le reste du service. Libelles alignes sur le bureau et
      « Mon espace ». #}
   <div class="entete-chat">
-    {% if etude_active_nom %}
-    <p class="etude-active" title="Étude active : {{ etude_active_nom }}">
+    {# Toujours present (masque sans etude) : le chat le met a jour quand
+       l'etude active change (conversation par etude, 2026-10-02). #}
+    <p class="etude-active" id="chat-etude-active" title="Étude active : {{ etude_active_nom }}"
+       {% if not etude_active_nom %}hidden{% endif %}>
       <span class="ic-dossier ic--sm" aria-hidden="true"></span>
-      <span>Étude active :</span> <strong>{{ etude_active_nom }}</strong>
+      <span>Étude active :</span> <strong id="chat-etude-active-nom">{{ etude_active_nom }}</strong>
     </p>
-    {% endif %}
     <nav aria-label="Navigation du service">
       <ul>
         <li><a href="{{ hub_url ~ '/workspace' if hub_url else '/workspace' }}">Mon espace</a></li>
@@ -590,11 +591,12 @@ body:not(.embed) .chat-app{flex:none;height:calc(100vh - var(--entete-h, 70px));
     {% endif %}
 
     {% if sessions %}
-    <div class="sidebar-section" style="flex:1;overflow-y:auto;border-bottom:none">
+    <div class="sidebar-section" id="historique-lateral" style="flex:1;overflow-y:auto;border-bottom:none">
       <div class="sidebar-label">{{ "Conversations de l'étude" if historique_etude else "Conversations récentes" }}</div>
       {% for s in sessions[:8] %}
       <button type="button" class="sidebar-item conv-lien" data-session="{{ s.id }}"
-              onclick="loadSession('{{ s.id }}')"
+              data-etude="{{ s.study_id or '' }}"
+              onclick="ouvrirConversation('{{ s.id }}')"
               title="{{ s.summary or 'Conversation sans titre' }}">
         <span class="ic ic-discussion" aria-hidden="true"></span>
         <span class="lbl">{{ s.summary or 'Conversation sans titre' }}</span>
@@ -681,14 +683,24 @@ body:not(.embed) .chat-app{flex:none;height:calc(100vh - var(--entete-h, 70px));
       </div>
       <div id="history-popover" class="history-popover" aria-hidden="true">
         <div class="history-popover-header">
-          <span style="font-weight:700"><span class="ic-horloge ic--sm" aria-hidden="true"></span> {{ "Conversations de l'étude" if historique_etude else "Conversations récentes" }}</span>
+          <span style="font-weight:700"><span class="ic-horloge ic--sm" aria-hidden="true"></span> <span id="historique-titre">{{ "Conversations de l'étude" if historique_etude else "Conversations récentes" }}</span></span>
           <button type="button" class="close" onclick="toggleHistoryPopover(null,false)" aria-label="Fermer"><span class="ic-fermer ic--sm" aria-hidden="true"></span></button>
         </div>
-        <div class="history-popover-body">
+        {# Conversation par etude : l'etude affichee, et l'option secondaire
+           « toutes les etudes » (chaque conversation porte alors son etude). #}
+        <div class="historique-portee">
+          <span class="historique-etude" id="historique-etude"
+                {% if not etude_active_nom %}hidden{% endif %}>Étude : <strong id="historique-etude-nom">{{ etude_active_nom }}</strong></span>
+          <button type="button" class="historique-bascule" id="historique-toutes"
+                  aria-pressed="false" onclick="basculerHistoriqueToutes()"
+                  {% if not historique_etude %}hidden{% endif %}>Toutes les études</button>
+        </div>
+        <div class="history-popover-body" id="historique-liste">
           {% if sessions %}
           {% for s in sessions[:20] %}
           <button type="button" class="history-item conv-lien" data-session="{{ s.id }}"
-                  onclick="loadSession('{{ s.id }}');toggleHistoryPopover(null,false)"
+                  data-etude="{{ s.study_id or '' }}"
+                  onclick="ouvrirConversation('{{ s.id }}');toggleHistoryPopover(null,false)"
                   title="{{ s.summary or 'Conversation sans titre' }}">
             <span class="ic ic-discussion" aria-hidden="true"></span>
             <span class="lbl">{{ s.summary or 'Conversation sans titre' }}</span>
@@ -1013,6 +1025,15 @@ body:not(.embed) .chat-app{flex:none;height:calc(100vh - var(--entete-h, 70px));
          seconde. #}
       <div id="status-bar" class="status-bar" role="status" aria-live="polite">
         <span id="status-text"></span>
+      </div>
+      {# Conversation par etude : une conversation d'une autre etude (ou non
+         rattachee) s'ouvre en lecture seule. On ne peut pas y ecrire : l'agent
+         agirait sur l'etude active depuis la conversation d'une autre. #}
+      <div id="conversation-lecture-seule" class="lecture-seule" role="status" hidden>
+        <p id="lecture-seule-texte"></p>
+        <button type="button" class="qs-btn qs-btn--sm" onclick="revenirAEtudeActive()">
+          Revenir à l'étude active
+        </button>
       </div>
       <form id="chat-form" class="chat-form">
         <input type="hidden" name="session_id" id="session-id" value="{{ session_id }}">
@@ -1724,9 +1745,11 @@ function loadSession(sid) {
   // milieu melangerait les deux.
   if (tourEnCours()) {
     showChatToast('Attends la fin de la réponse en cours, ou arrête-la.');
-    return;
+    return Promise.resolve(false);
   }
-  fetch('/sessions/' + encodeURIComponent(sid) + '/messages')
+  // Rend une promesse : la conversation par etude attend le chargement pour
+  // poser (ou lever) la lecture seule.
+  return fetch('/sessions/' + encodeURIComponent(sid) + '/messages')
     .then(r => {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
@@ -2312,6 +2335,12 @@ function _messageErreurHttp(statut) {
   if (statut === 401 || statut === 403) {
     return 'Ta session a expiré. Recharge la page pour te reconnecter, puis relance ta demande.';
   }
+  if (statut === 409) {
+    // Conversation par etude : la conversation n'appartient pas a l'etude
+    // active (changee ailleurs). Le chat bascule a la fin de ce tour.
+    return "Cette conversation n'appartient pas à l'étude active : ta demande n'a pas été "
+      + "envoyée. Le chat passe sur l'étude active ; renvoie-la depuis là.";
+  }
   if (statut === 502 || statut === 503 || statut === 504) {
     return "L'agent ne répond pas pour le moment (" + statut + ") : il redémarre peut-être. "
       + 'Réessaie dans quelques secondes.';
@@ -2704,6 +2733,296 @@ loadSuggestions(document.getElementById('profile-id').value);
     if (btn.classList.contains('recording')) stop();
     else start();
   });
+})();
+</script>
+{# ── Conversation par etude (2026-10-02) ───────────────────────────────────
+   Bloc isole : la conversation affichee appartient toujours a l'etude
+   active, sauf consultation explicite en lecture seule. Regles et contrat
+   bureau <-> chat : docs/superpowers/specs/2026-10-02-conversation-par-etude.md.
+   Contrat postMessage (meme origine, fenetre parente) :
+     bureau -> chat : {type: 'desk_etude_active', etude: {id, nom}}
+     chat -> bureau : {type: 'chat_etude_suivie', etude: {id, nom} | null,
+                       decision: 'inchangee'|'suit'|'reprise'|'nouvelle',
+                       session_id}
+#}
+<style>
+.historique-portee{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:6px 12px;border-bottom:1px solid var(--qs-trait);font-size:12px;color:var(--qs-encre-2)}
+.historique-portee strong{font-weight:600}
+.historique-etude{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.historique-bascule{background:transparent;border:1px solid var(--qs-trait);border-radius:4px;
+  padding:2px 8px;font:inherit;font-size:11.5px;color:var(--qs-accent);cursor:pointer;flex:none}
+.historique-bascule[aria-pressed="true"]{background:var(--qs-accent-pale)}
+.conv-lien .conv-etude{display:block;font-size:10.5px;color:var(--qs-discret);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lecture-seule{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 8px;
+  padding:8px 10px;border-left:3px solid var(--qs-accent);background:var(--qs-accent-pale);
+  font-size:12.5px;color:var(--qs-encre-2)}
+.lecture-seule[hidden]{display:none}
+.lecture-seule p{margin:0;flex:1 1 200px}
+</style>
+<script>
+const _etudeChat = {
+  // Etude active connue du chat (lue par le serveur au rendu de la page).
+  active: {{ {'id': etude_active_id or '', 'nom': etude_active_nom or ''} | tojson }},
+  // Conversation d'une autre etude ouverte explicitement : lecture seule.
+  lectureSeule: false,
+  toutes: false,
+  enCours: false,
+};
+
+function _etudeNom(etude) {
+  return (etude && (etude.nom || etude.id)) || '';
+}
+
+function _majEtudeAffichee() {
+  const nom = _etudeNom(_etudeChat.active);
+  const entete = document.getElementById('chat-etude-active');
+  if (entete) {
+    entete.hidden = !nom;
+    entete.title = 'Étude active : ' + nom;
+    const n = document.getElementById('chat-etude-active-nom');
+    if (n) n.textContent = nom;
+  }
+  const h = document.getElementById('historique-etude');
+  if (h) {
+    h.hidden = !nom;
+    const n = document.getElementById('historique-etude-nom');
+    if (n) n.textContent = nom;
+  }
+  const bascule = document.getElementById('historique-toutes');
+  if (bascule) bascule.hidden = !_etudeChat.active.id;
+}
+
+// Lecture seule : ni saisie ni envoi ; le bandeau dit pourquoi.
+function _poserLectureSeule(actif, etude, motif) {
+  _etudeChat.lectureSeule = !!actif;
+  const bandeau = document.getElementById('conversation-lecture-seule');
+  const saisie = document.getElementById('message-input');
+  const envoi = document.getElementById('send-btn');
+  if (bandeau) {
+    bandeau.hidden = !actif;
+    const texte = document.getElementById('lecture-seule-texte');
+    if (texte && actif) {
+      texte.textContent = motif === 'non_rattachee'
+        ? 'Conversation non rattachée à une étude : lecture seule.'
+        : 'Conversation de l’étude « ' + _etudeNom(etude) + ' » : lecture seule. '
+          + 'Pour la poursuivre, ouvre cette étude depuis le bureau.';
+    }
+  }
+  if (saisie) saisie.readOnly = !!actif;
+  if (envoi && !tourEnCours()) envoi.disabled = !!actif;
+}
+
+// Garde d'envoi, en capture sur le document : elle passe avant le
+// gestionnaire d'envoi du formulaire, qu'elle ne modifie pas.
+document.addEventListener('submit', (e) => {
+  if (!e.target || e.target.id !== 'chat-form' || !_etudeChat.lectureSeule) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  showChatToast('Conversation en lecture seule : reviens à l’étude active pour écrire.');
+}, true);
+
+// Ouverture depuis l'historique : la conversation d'une autre etude (ou non
+// rattachee) s'ouvre en lecture seule.
+async function ouvrirConversation(sid) {
+  if (tourEnCours()) {
+    showChatToast('Attends la fin de la réponse en cours, ou arrête-la.');
+    return;
+  }
+  let portee = null;
+  try {
+    const r = await fetch('/conversations/' + encodeURIComponent(sid) + '/portee',
+                          {cache: 'no-store'});
+    if (r.ok) portee = await r.json();
+  } catch {}
+  await loadSession(sid);
+  if (document.getElementById('session-id').value !== sid) return;
+  // Sans reponse du serveur, prudence : lecture seule si l'etude differe.
+  const lien = document.querySelector('.conv-lien[data-session="' + CSS.escape(sid) + '"]');
+  const lecture = portee ? !!portee.lecture_seule
+    : ((lien ? lien.dataset.etude : '') !== (_etudeChat.active.id || ''));
+  _poserLectureSeule(lecture, portee && portee.etude, portee && portee.motif);
+  if (lecture) showChatToast('Conversation d’une autre étude : lecture seule.');
+}
+
+// La nouvelle conversation appartient toujours a l'etude active.
+(function () {
+  const base = window.startNewConversation;
+  if (typeof base !== 'function') return;
+  window.startNewConversation = function () {
+    base.apply(this, arguments);
+    if (!tourEnCours()) _poserLectureSeule(false);
+  };
+})();
+
+async function revenirAEtudeActive() {
+  _poserLectureSeule(false);
+  await suivreEtudeActive({forcer: true});
+}
+
+function _signalerAuBureau(decision) {
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        type: 'chat_etude_suivie',
+        etude: _etudeChat.active.id ? _etudeChat.active : null,
+        decision: decision,
+        session_id: document.getElementById('session-id').value,
+      }, location.origin);
+    }
+  } catch {}
+}
+
+// Demande au serveur la conversation de l'etude active et y bascule.
+// forcer : bascule meme si l'etude n'a pas change (sortie de lecture seule).
+// apresTour : fin d'un tour, l'assistant a pu changer d'etude (R5).
+async function suivreEtudeActive(options) {
+  const opts = options || {};
+  if (_etudeChat.enCours || tourEnCours()) return;
+  _etudeChat.enCours = true;
+  try {
+    const sid = document.getElementById('session-id').value;
+    const r = await fetch('/conversations/suivre', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({session_id: sid, apres_tour: !!opts.apresTour,
+                            etude_connue: _etudeChat.active.id || ''}),
+    });
+    if (!r.ok) return;
+    const d = await r.json();
+    const avant = _etudeChat.active.id || '';
+    const etude = d.etude || {id: '', nom: ''};
+    const changee = (etude.id || '') !== avant;
+    _etudeChat.active = {id: etude.id || '', nom: etude.nom || ''};
+    _majEtudeAffichee();
+    if (changee || opts.forcer) rafraichirHistorique();
+    if (d.decision === 'inchangee' || d.decision === 'suit') {
+      if (d.decision === 'suit') {
+        showChatToast('Étude : ' + _etudeNom(etude) + ' — la conversation suit l’étude.');
+        _poserLectureSeule(false);
+      }
+      if (changee || d.decision === 'suit') _signalerAuBureau(d.decision);
+      return;
+    }
+    // Consultation explicite en lecture seule, etude inchangee : on reste.
+    if (_etudeChat.lectureSeule && !changee && !opts.forcer && !opts.apresTour) return;
+    if (d.decision === 'reprise') {
+      await loadSession(d.session_id);
+      if (document.getElementById('session-id').value !== d.session_id) return;
+      showChatToast('Étude : ' + _etudeNom(etude) + ' — conversation reprise.');
+    } else {
+      document.getElementById('session-id').value = d.session_id;
+      marquerConversationCourante(d.session_id);
+      afficherAccueil();
+      showChatToast('Étude : ' + _etudeNom(etude) + ' — nouvelle conversation.');
+    }
+    _poserLectureSeule(false);
+    _signalerAuBureau(d.decision);
+  } catch {
+    // Hors ligne : on garde l'etat ; la garde serveur (409) protege l'envoi.
+  } finally {
+    _etudeChat.enCours = false;
+  }
+}
+
+function _ligneConversation(c, classe, avecEtude) {
+  const titre = c.summary || 'Conversation sans titre';
+  const etude = avecEtude
+    ? '<span class="conv-etude">' + escapeHtml(c.etude_nom || c.study_id || 'Non rattachée') + '</span>'
+    : '';
+  return '<button type="button" class="' + classe + ' conv-lien" data-session="' + escapeHtml(c.id)
+    + '" data-etude="' + escapeHtml(c.study_id || '') + '" title="' + escapeHtml(titre) + '">'
+    + '<span class="ic ic-discussion" aria-hidden="true"></span>'
+    + '<span class="lbl">' + escapeHtml(titre) + etude + '</span>'
+    + '<span class="quand" data-debut="' + escapeHtml(c.started_at || '') + '"></span></button>';
+}
+
+// Historique : conversations de l'etude active, ou toutes (option secondaire).
+async function rafraichirHistorique() {
+  let d;
+  try {
+    const r = await fetch('/conversations?toutes=' + (_etudeChat.toutes ? 1 : 0), {cache: 'no-store'});
+    if (!r.ok) return;
+    d = await r.json();
+  } catch { return; }
+  const liste = d.conversations || [];
+  const titre = document.getElementById('historique-titre');
+  if (titre) {
+    titre.textContent = d.toutes ? 'Conversations de toutes les études'
+                                 : 'Conversations de l’étude';
+  }
+  const pop = document.getElementById('historique-liste');
+  if (pop) {
+    pop.innerHTML = liste.length
+      ? liste.slice(0, 50).map(c => _ligneConversation(c, 'history-item', d.toutes)).join('')
+      : '<p class="history-empty">' + (d.toutes ? 'Aucune conversation pour l’instant.'
+          : 'Aucune conversation sur cette étude pour l’instant.')
+        + ' Elles apparaissent ici dès ton premier message.</p>';
+  }
+  const lateral = document.getElementById('historique-lateral');
+  if (lateral) {
+    const label = lateral.querySelector('.sidebar-label');
+    lateral.querySelectorAll('.conv-lien').forEach(el => el.remove());
+    if (label) label.textContent = d.toutes ? 'Conversations de toutes les études'
+                                            : 'Conversations de l’étude';
+    lateral.insertAdjacentHTML('beforeend',
+      liste.slice(0, 8).map(c => _ligneConversation(c, 'sidebar-item', d.toutes)).join(''));
+  }
+  afficherDatesConversations();
+  marquerConversationCourante(document.getElementById('session-id').value);
+}
+
+function basculerHistoriqueToutes() {
+  _etudeChat.toutes = !_etudeChat.toutes;
+  const b = document.getElementById('historique-toutes');
+  if (b) {
+    b.setAttribute('aria-pressed', String(_etudeChat.toutes));
+    b.textContent = _etudeChat.toutes ? 'Étude active seulement' : 'Toutes les études';
+  }
+  rafraichirHistorique();
+}
+
+// Clic sur une conversation rendue cote client (delegation ; celles rendues
+// par le serveur portent leur onclick).
+document.addEventListener('click', (e) => {
+  const lien = e.target.closest && e.target.closest(
+    '#historique-liste .conv-lien:not([onclick]), #historique-lateral .conv-lien:not([onclick])');
+  if (!lien) return;
+  ouvrirConversation(lien.dataset.session);
+  toggleHistoryPopover(null, false);
+});
+
+// Declencheurs. 1) Le bureau annonce l'etude active (au chargement du chat,
+// et quand il voit l'etude changer).
+window.addEventListener('message', (e) => {
+  if (!_messageDuBureau(e)) return;
+  const data = e.data;
+  if (!data || data.type !== 'desk_etude_active') return;
+  const id = String((data.etude && data.etude.id) || '');
+  if (id === (_etudeChat.active.id || '')) {
+    _signalerAuBureau('inchangee');
+    return;
+  }
+  suivreEtudeActive({});
+});
+
+// 2) Retour sur l'onglet : l'etude a pu changer ailleurs (autre onglet,
+// Mon espace). Vaut aussi pour la page « Agent IA seul ».
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') suivreEtudeActive({});
+});
+
+// 3) Fin de tour : l'assistant a pu ouvrir ou creer une etude (outils
+// d'etudes), ou le serveur a refuse l'envoi (409). On observe l'etat du tour
+// sans toucher a la boucle d'envoi.
+(function () {
+  let precedent = false;
+  setInterval(() => {
+    const maintenant = tourEnCours();
+    if (precedent && !maintenant) suivreEtudeActive({apresTour: true});
+    precedent = maintenant;
+  }, 700);
 })();
 </script>
 </body>

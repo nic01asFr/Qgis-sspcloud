@@ -61,7 +61,10 @@ async def init() -> None:
                 -- NULL = exploration libre (pas d'etude). CHARTE §2 : "L'etude est
                 -- l'unite qui traverse tout le cycle". Permet de retrouver la
                 -- derniere conversation d'une etude au reload du desk.
-                study_id    TEXT
+                study_id    TEXT,
+                -- Projet actif a la creation de la conversation (informatif :
+                -- la conversation appartient a l'etude, pas au projet).
+                project_id  TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_sessions_username_study
                 ON sessions(username, study_id, started_at DESC);
@@ -220,8 +223,14 @@ async def init() -> None:
                 "ON sessions(username, study_id, started_at DESC)"
             )
             log.info("Migration : sessions.study_id ajoute (DB pre-existante)")
+        if "project_id" not in cols:
+            await db.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT")
+            log.info("Migration : sessions.project_id ajoute (DB pre-existante)")
 
         await db.commit()
+        bilan = await _migrer_rattachement_conversations(db)
+        if any(bilan.values()):
+            log.info("Migration conversation par etude : %s", bilan)
     log.info("Mémoire initialisée : %s", _DB_PATH)
 
 
@@ -269,14 +278,257 @@ async def get_latest_session_for_study(
     """
     if not study_id:
         return None
+    conversations = await lister_conversations(username, study_id=study_id, limit=1)
+    return conversations[0]["id"] if conversations else None
+
+
+# ── Conversation par etude (2026-10-02) ───────────────────────────────────
+#
+# Constat : apres un changement d'etude dans le bureau, le chat a rouvert une
+# conversation d'une autre etude. Regles (cf. docs/superpowers/specs/
+# 2026-10-02-conversation-par-etude.md) :
+#
+#   R1  Une conversation appartient a UNE etude, fixee a sa creation (et au
+#       projet actif d'alors, a titre informatif). Ce rattachement n'est
+#       jamais reecrit, sauf R5.
+#   R2  « Non rattachee » (study_id NULL) : conversation anterieure dont
+#       l'etude n'a pas pu etre deduite. Lisible, pas continuable tant
+#       qu'une etude est active.
+#   R3  On n'ecrit dans une conversation que si elle appartient a l'etude
+#       active (garde serveur de POST /chat).
+#   R4  Seules les conversations du chat comptent pour l'historique et la
+#       reprise : ni les executions de recette, ni les tiroirs d'assistance,
+#       ni les conversations du banc d'evaluation.
+#   R5  Une conversation dont le PREMIER tour a cree ou ouvert une etude via
+#       l'assistant suit cette etude (elle n'a rien echange d'autre).
+
+# Les conversations du chat : identifiant libre (UUID) ou `study:{sid}`.
+# Exclut `study:{sid}:recipe:…`, `study:{sid}:draft:…`, `assist:…`.
+_SQL_CONVERSATION_DU_CHAT = (
+    "(instr(s.id, ':') = 0 OR "
+    "(s.id LIKE 'study:%' AND instr(substr(s.id, 7), ':') = 0))"
+)
+_SQL_HORS_BANC = (
+    "NOT EXISTS (SELECT 1 FROM session_tags t WHERE t.session_id = s.id "
+    "AND t.key = 'origine' AND t.value = 'banc_evaluation')"
+)
+# Outils de l'assistant qui changent l'etude active (R5).
+OUTILS_QUI_CHANGENT_L_ETUDE = frozenset({"study_create", "study_switch"})
+# Au-dela de cet ecart entre le premier message et la pose du rattachement,
+# celui-ci a ete fait apres coup (ancienne regle « rattacher tant que la
+# session est orpheline ») : il est douteux.
+_ECART_RATTACHEMENT_TARDIF_S = 300
+# Marque (table user_profile) : l'etape « rattachements douteux » est faite.
+_CLE_MIGRATION_RATTACHEMENT = "migration_conversation_par_etude"
+
+
+def conversation_du_chat(session_id: str) -> bool:
+    """Vrai pour une conversation du chat (UUID ou `study:{sid}`)."""
+    if not session_id or not isinstance(session_id, str):
+        return False
+    return ":" not in session_id or parse_session_id(session_id).get(
+        "context_kind") == "desk"
+
+
+def etude_deduite_de_l_identifiant(session_id: str) -> str | None:
+    """Etude portee par un identifiant structure (`study:{sid}…`, `assist:{sid}…`)."""
+    return parse_session_id(session_id).get("sid") or None
+
+
+async def lister_conversations(
+    username: str, study_id: str | None = None, toutes: bool = False,
+    limit: int = 20,
+) -> list[dict]:
+    """Conversations du chat, la plus recemment active d'abord (R4).
+
+    `study_id` : celles de cette etude. `toutes=True` : toutes les etudes,
+    non rattachees comprises. Ni l'un ni l'autre : toutes (hub injoignable,
+    aucune etude connue).
+    Chaque ligne : id, summary, started_at, derniere_activite, study_id,
+    project_id.
+    """
+    clauses = ["s.username = ?", _SQL_CONVERSATION_DU_CHAT, _SQL_HORS_BANC]
+    params: list[Any] = [username]
+    if study_id and not toutes:
+        clauses.append("s.study_id = ?")
+        params.append(study_id)
+    params.append(int(limit))
+    sql = (
+        "SELECT s.id, s.summary, s.started_at, s.study_id, s.project_id, "
+        "COALESCE((SELECT MAX(m.created_at) FROM messages m "
+        "          WHERE m.session_id = s.id), s.started_at) AS derniere_activite "
+        f"FROM sessions s WHERE {' AND '.join(clauses)} "
+        "ORDER BY derniere_activite DESC, s.started_at DESC LIMIT ?"
+    )
+    async with aiosqlite.connect(_DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(sql, params)).fetchall()
+    return [dict(r) for r in rows]
+
+
+async def portee_conversation(session_id: str) -> dict | None:
+    """Rattachement d'une conversation : None si elle n'existe pas encore.
+
+    {"id", "study_id", "project_id", "n_messages", "n_demandes"}
+    (`n_demandes` : messages de l'utilisateur).
+    """
+    async with aiosqlite.connect(_DB_PATH) as db:
+        row = await (await db.execute(
+            "SELECT s.id, s.study_id, s.project_id, "
+            "(SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id), "
+            "(SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id "
+            " AND m.role = 'user') "
+            "FROM sessions s WHERE s.id = ?", (session_id,),
+        )).fetchone()
+    if not row:
+        return None
+    return {"id": row[0], "study_id": row[1] or None, "project_id": row[2] or None,
+            "n_messages": int(row[3] or 0), "n_demandes": int(row[4] or 0)}
+
+
+def ecriture_permise(portee: dict | None, etude_active: str | None) -> tuple[bool, str]:
+    """Peut-on ecrire dans cette conversation, l'etude active etant celle-ci ? (R3)
+
+    Rend (permis, motif) ; motif parmi « nouvelle », « meme_etude »,
+    « etude_inconnue », « vide », « autre_etude », « non_rattachee ».
+    """
+    if portee is None:
+        return True, "nouvelle"
+    if not etude_active:
+        # Hub injoignable ou aucune etude : rien a comparer. Les outils
+        # d'etude passent eux-memes par le hub.
+        return True, "etude_inconnue"
+    if portee.get("study_id") == etude_active:
+        return True, "meme_etude"
+    if not portee.get("study_id"):
+        if not portee.get("n_messages"):
+            return True, "vide"
+        return False, "non_rattachee"
+    return False, "autre_etude"
+
+
+async def rattacher_si_vide(session_id: str, study_id: str,
+                            project_id: str | None = None) -> bool:
+    """Rattache une conversation existante SANS message ni etude (cas « vide »)."""
     async with aiosqlite.connect(_DB_PATH) as db:
         cur = await db.execute(
-            "SELECT id FROM sessions WHERE username = ? AND study_id = ? "
-            "ORDER BY started_at DESC LIMIT 1",
-            (username, study_id),
+            "UPDATE sessions SET study_id = ?, project_id = ? "
+            "WHERE id = ? AND study_id IS NULL "
+            "AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = ?)",
+            (study_id, project_id, session_id, session_id),
         )
-        row = await cur.fetchone()
-        return row[0] if row else None
+        fait = cur.rowcount == 1
+        await db.commit()
+    if fait:
+        await set_session_tag(session_id, "sid", study_id)
+    return fait
+
+
+async def premier_tour_a_change_d_etude(session_id: str) -> bool:
+    """Le seul tour de la conversation a-t-il cree ou ouvert une etude ? (R5)"""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        rows = await (await db.execute(
+            "SELECT role, tool_calls FROM messages WHERE session_id = ? "
+            "ORDER BY created_at, id", (session_id,),
+        )).fetchall()
+    if sum(1 for r in rows if r[0] == "user") != 1:
+        return False
+    for role, brut in rows:
+        if role != "assistant" or not brut:
+            continue
+        try:
+            appels = json.loads(brut)
+        except (TypeError, ValueError):
+            continue
+        for appel in appels if isinstance(appels, list) else []:
+            if isinstance(appel, dict) and appel.get("tool") in OUTILS_QUI_CHANGENT_L_ETUDE:
+                return True
+    return False
+
+
+async def suivre_l_etude(session_id: str, study_id: str,
+                         project_id: str | None = None) -> bool:
+    """Applique R5 : la conversation fondatrice passe dans la nouvelle etude."""
+    if not await premier_tour_a_change_d_etude(session_id):
+        return False
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "UPDATE sessions SET study_id = ?, project_id = ? WHERE id = ?",
+            (study_id, project_id, session_id),
+        )
+        await db.commit()
+    await set_session_tag(session_id, "sid", study_id)
+    await set_session_tag(session_id, "rattachement", "suit_l_etude")
+    return True
+
+
+async def _migrer_rattachement_conversations(db) -> dict[str, int]:
+    """Migration douce, idempotente (etape 1 jouee une seule fois, marquee
+    dans user_profile ; etape 2 a chaque demarrage).
+
+    1. Rattachement douteux : une conversation UUID rattachee plus de
+       `_ECART_RATTACHEMENT_TARDIF_S` apres son premier message l'a ete par
+       l'ancienne regle « rattacher tant que la session est orpheline », a
+       l'etude active du moment -- pas forcement la sienne. Elle redevient
+       « non rattachee » ; l'ancienne valeur est gardee dans le tag
+       `rattachement_tardif` (reversible).
+    2. Conversation sans etude : etude deduite du tag `sid` ou de
+       l'identifiant structure (`study:{sid}…`, `assist:{sid}…`).
+    3. Sinon : reste « non rattachee » (study_id NULL).
+    """
+    bilan = {"detachees": 0, "deduites": 0}
+    maintenant = int(time.time())
+    # L'etape 1 ne se joue qu'une fois : elle juge les rattachements faits
+    # sous l'ancienne regle. Rejouee, elle prendrait pour douteux un tag `sid`
+    # repose plus tard pour une autre raison.
+    deja = await (await db.execute(
+        "SELECT 1 FROM user_profile WHERE key = ?", (_CLE_MIGRATION_RATTACHEMENT,),
+    )).fetchone()
+    douteuses = [] if deja else await (await db.execute(
+        "SELECT s.id, s.study_id, t.created_at, "
+        "(SELECT MIN(m.created_at) FROM messages m WHERE m.session_id = s.id "
+        " AND m.role = 'user') "
+        "FROM sessions s JOIN session_tags t "
+        "  ON t.session_id = s.id AND t.key = 'sid' "
+        "WHERE s.study_id IS NOT NULL AND instr(s.id, ':') = 0 "
+        "AND NOT EXISTS (SELECT 1 FROM session_tags r WHERE r.session_id = s.id "
+        "                AND r.key = 'rattachement')"
+    )).fetchall()
+    for sid_conv, etude, pose, premier in douteuses:
+        if premier is None or pose is None:
+            continue
+        if int(pose) - int(premier) <= _ECART_RATTACHEMENT_TARDIF_S:
+            continue
+        await db.execute("UPDATE sessions SET study_id = NULL WHERE id = ?", (sid_conv,))
+        await db.execute(
+            "DELETE FROM session_tags WHERE session_id = ? AND key = 'sid'", (sid_conv,))
+        await db.execute(
+            "INSERT OR REPLACE INTO session_tags (session_id, key, value, created_at) "
+            "VALUES (?, 'rattachement_tardif', ?, ?)", (sid_conv, etude, maintenant))
+        bilan["detachees"] += 1
+
+    orphelines = await (await db.execute(
+        "SELECT s.id, (SELECT t.value FROM session_tags t "
+        "              WHERE t.session_id = s.id AND t.key = 'sid') "
+        "FROM sessions s WHERE s.study_id IS NULL"
+    )).fetchall()
+    for sid_conv, tag_sid in orphelines:
+        etude = tag_sid or etude_deduite_de_l_identifiant(sid_conv)
+        if not etude:
+            continue
+        await db.execute(
+            "UPDATE sessions SET study_id = ? WHERE id = ? AND study_id IS NULL",
+            (etude, sid_conv))
+        await db.execute(
+            "INSERT OR REPLACE INTO session_tags (session_id, key, value, created_at) "
+            "VALUES (?, 'rattachement', 'deduit', ?)", (sid_conv, maintenant))
+        bilan["deduites"] += 1
+    if not deja:
+        await db.execute(
+            "INSERT OR REPLACE INTO user_profile (key, value, updated_at) VALUES (?, ?, ?)",
+            (_CLE_MIGRATION_RATTACHEMENT, json.dumps(bilan), maintenant))
+    await db.commit()
+    return bilan
 
 
 # ── Phase 4 : Insights agentiques (couche 3) ──────────────────────────────────
@@ -537,13 +789,28 @@ async def get_full_profile() -> dict:
 
 # ── Sessions ───────────────────────────────────────────────────────────────────
 
-async def create_session(session_id: str, username: str, profile_id: str = "standard") -> None:
+async def create_session(session_id: str, username: str, profile_id: str = "standard",
+                         study_id: str | None = None,
+                         project_id: str | None = None) -> None:
+    """Cree la session si elle n'existe pas (sans effet sinon).
+
+    `study_id` / `project_id` : rattachement des la creation (conversation
+    par etude, 2026-10-02). Une session existante garde son rattachement.
+    """
     async with aiosqlite.connect(_DB_PATH) as db:
-        await db.execute("""
-            INSERT OR IGNORE INTO sessions (id, username, profile_id, started_at)
-            VALUES (?, ?, ?, ?)
-        """, (session_id, username, profile_id, int(time.time())))
+        cur = await db.execute("""
+            INSERT OR IGNORE INTO sessions
+                (id, username, profile_id, started_at, study_id, project_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (session_id, username, profile_id, int(time.time()),
+              study_id or None, project_id or None))
+        creee = cur.rowcount == 1
         await db.commit()
+    if study_id and creee:
+        try:
+            await set_session_tag(session_id, "sid", study_id)
+        except Exception:
+            log.exception("tag sid a la creation echoue pour %s", session_id)
     # Chantier G1 : auto-tag depuis la convention session_id structuree.
     # Best-effort — n'echoue jamais : parse_session_id est defensif et set
     # tag idempotent. Une session legacy (UUID) recoit context_kind=legacy.
