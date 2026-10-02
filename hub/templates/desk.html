@@ -5293,6 +5293,13 @@ setInterval(refreshGpuChip, 20000);
         etat = await r.json();
       } catch (e) { return; }
       if (etat.valides !== false) return;
+      // Les livrables sont servis par le disque du hub, qui n'expire pas ;
+      // S3 n'en garde qu'une copie de secours. Demander a l'utilisateur de
+      // recoller des identifiants tous les sept jours pour cette seule copie
+      // n'a plus lieu d'etre (decision du 2026-10-02). L'annonce ne reste que
+      // si le depot local est lui-meme indisponible : la, les livrables
+      // dependent vraiment du stockage.
+      if (etat.livrables_servis) return;
 
       reposerLeBandeau();
       // Depuis le depot local, une expiration n'est plus une panne : le hub
