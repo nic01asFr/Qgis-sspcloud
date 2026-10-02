@@ -404,6 +404,52 @@ def _get_profile_tools_whitelist(profile_id: str) -> list[str] | None:
 
 
 # ── Outils MCP disponibles ─────────────────────────────────────────────────────
+#
+# Production du 28-30/09 : le hub redemarrait (`fetch_profiles : /profiles
+# HTTP 503`), `tools/list` a echoue une fois, et `_get_mcp_tools` a rendu une
+# liste vide sans retenter. Le tour est parti au modele avec 2 outils natifs
+# sur 36 (`outils exposes … n=2/36`) : il ne pouvait que decrire ce qu'il
+# aurait fait. Desormais : deux essais rapproches, puis la derniere liste
+# valide du profil (avec son age), et a defaut une erreur explicite qui
+# arrete le tour avant le modele (cf. MESSAGE_OUTILS_INDISPONIBLES).
+
+_ESSAIS_OUTILS = max(1, int(os.getenv("MCP_OUTILS_ESSAIS", "2")))
+_DELAI_ESSAI_OUTILS_S = float(os.getenv("MCP_OUTILS_DELAI_S", "1.5"))
+# Une liste d'outils change avec une version du hub, pas d'un tour a l'autre :
+# une liste de quelques heures vaut mieux qu'aucune.
+_AGE_MAX_OUTILS_S = float(os.getenv("MCP_OUTILS_AGE_MAX_S", str(24 * 3600)))
+# profil -> (horodatage monotone, liste filtree) de la derniere reussite.
+_DERNIERS_OUTILS_MCP: dict[str, tuple[float, list[dict]]] = {}
+
+MESSAGE_OUTILS_INDISPONIBLES = (
+    "Les outils QGIS sont momentanément indisponibles : je n'ai rien pu "
+    "faire pour cette demande. Réessaie dans un instant ; si cela dure, le "
+    "service QGIS est probablement en train de redémarrer."
+)
+
+
+class OutilsIndisponibles(RuntimeError):
+    """Aucune liste d'outils du hub : ni a l'instant, ni en cache."""
+
+
+async def _lister_outils_hub() -> list[dict]:
+    """`tools/list` du hub ; leve si la reponse n'est pas une liste utile."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            f"{_HUB_URL}/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            headers={"Authorization": f"Bearer {_HUB_KEY}"},
+        )
+    statut = getattr(resp, "status_code", 200)
+    if statut != 200:
+        raise RuntimeError(f"tools/list HTTP {statut}")
+    data = resp.json()
+    outils = ((data or {}).get("result") or {}).get("tools") or []
+    if not outils:
+        erreur = (data or {}).get("error")
+        raise RuntimeError("tools/list vide" + (f" ({erreur})" if erreur else ""))
+    return outils
+
 
 async def _get_mcp_tools(profile_id: str = "standard") -> list[dict]:
     """Récupère la liste des outils MCP du hub, filtrée selon le profil.
@@ -416,21 +462,42 @@ async def _get_mcp_tools(profile_id: str = "standard") -> list[dict]:
     Egalement applique `mcp_tools.disabled = [...]` (blacklist additionnelle)
     si declare. Permet : risk_analyst exclut explicitement `delete_file`,
     storymap_creator exclut `restart_qgis_engine`, etc.
+
+    Echec du hub : `_ESSAIS_OUTILS` essais espaces de
+    `_DELAI_ESSAI_OUTILS_S`, puis la derniere liste valide du profil si
+    elle a moins de `_AGE_MAX_OUTILS_S`. Sinon `OutilsIndisponibles` : le
+    tour ne doit pas partir au modele sans ses outils.
     """
     if not _HUB_URL or not _HUB_KEY:
         return []
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                f"{_HUB_URL}/mcp",
-                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-                headers={"Authorization": f"Bearer {_HUB_KEY}"},
-            )
-            data = resp.json()
-            all_tools = data.get("result", {}).get("tools", [])
-    except Exception as e:
-        log.warning("MCP tools non récupérés: %s", e)
-        return []
+    all_tools: list[dict] = []
+    for essai in range(1, _ESSAIS_OUTILS + 1):
+        try:
+            all_tools = await _lister_outils_hub()
+            break
+        except Exception as e:
+            log.warning("MCP tools non récupérés (essai %d/%d) : %s",
+                        essai, _ESSAIS_OUTILS, e)
+            if essai < _ESSAIS_OUTILS:
+                await asyncio.sleep(_DELAI_ESSAI_OUTILS_S)
+            else:
+                derniere = _DERNIERS_OUTILS_MCP.get(profile_id)
+                age = time.monotonic() - derniere[0] if derniere else None
+                if derniere and age <= _AGE_MAX_OUTILS_S:
+                    log.warning(
+                        "MCP tools : derniere liste valide reutilisee "
+                        "(profil=%s, age=%ds, n=%d)",
+                        profile_id, int(age), len(derniere[1]),
+                    )
+                    return list(derniere[1])
+                log.error(
+                    "MCP tools indisponibles (profil=%s, %s) : le tour ne part "
+                    "pas au modele sans outils",
+                    profile_id,
+                    "aucune liste en cache" if derniere is None
+                    else f"liste en cache trop ancienne ({int(age)}s)",
+                )
+                raise OutilsIndisponibles(str(e)) from e
 
     # Filtrage par profil : whitelist (allowed) + blacklist (disabled).
     # Si profil pas dans le cache (fetch initial pas encore reussi, ou
@@ -456,6 +523,7 @@ async def _get_mcp_tools(profile_id: str = "standard") -> list[dict]:
         )
     else:
         log.info("MCP tools (profil '%s', non filtre) : %d", profile_id, len(filtered))
+    _DERNIERS_OUTILS_MCP[profile_id] = (time.monotonic(), list(filtered))
     return filtered
 
 
@@ -2765,11 +2833,23 @@ ne vient pas d'un outil cette session, la supprimer.
         # Sauvegarder le message user
         await memory.add_message(self.session_id, "user", user_message)
 
+        # Outils d'abord : sans eux, inutile de construire le prompt. Un tour
+        # parti au modele sans ses outils QGIS ne peut que decrire ce qu'il
+        # ferait (production 28-30/09, n=2/36) : on previent l'utilisateur.
+        try:
+            outils_profil = await self._get_tools()
+        except OutilsIndisponibles as exc:
+            log.error("Tour arrete avant le modele : outils QGIS indisponibles "
+                      "(session=%s, profil=%s) : %s",
+                      self.session_id, self.profile_id, exc)
+            yield MESSAGE_OUTILS_INDISPONIBLES
+            await memory.add_message(self.session_id, "assistant",
+                                     MESSAGE_OUTILS_INDISPONIBLES)
+            return
         system_prompt = await self._build_system_prompt(user_message=user_message)
         # Lot L3 : le modele voit le socle et les paquets du tour, pas les 90
         # outils du profil (19 300 jetons mesures le 2026-09-26). La liste
         # complete reste la borne du filet d'execution.
-        outils_profil = await self._get_tools()
         noms_profil = {paquets_outils.nom_outil(t) for t in (outils_profil or [])
                        if isinstance(t, dict)}
         self._paquets_tour = self._paquets_du_tour(user_message, history, noms_profil)
