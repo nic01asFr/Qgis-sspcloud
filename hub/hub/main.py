@@ -74,6 +74,7 @@ try:
 except ImportError:
     _STUDIES_AVAILABLE = False
 from hub import documents_api  # noqa: E402  (corpus documentaire, lot L7)
+from hub import taches_fond  # noqa: E402  (traitements en arriere-plan)
 from hub import documents_etude  # noqa: E402
 try:
     from hub import briques_loader
@@ -967,10 +968,24 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         log.warning("startup: session_active_state gc_loop non lance : %s", exc)
         _sas_gc_task = None
+    # Traitements en arriere-plan (spec 2026-10-02) : registre persistant et
+    # surveillance des taches (battement, fin, perte).
+    try:
+        await _REGISTRE_TACHES.init()
+        _surveillance_taches = asyncio.create_task(
+            taches_fond.boucle_de_surveillance(
+                _REGISTRE_TACHES, _sonder_tache, _aviser_agent_fin_tache,
+            )
+        )
+    except Exception as exc:
+        log.warning("startup: surveillance des taches non lancee : %s", exc)
+        _surveillance_taches = None
     yield
     task.cancel()
     if _sas_gc_task is not None:
         _sas_gc_task.cancel()
+    if _surveillance_taches is not None:
+        _surveillance_taches.cancel()
 
 
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -12557,6 +12572,13 @@ def _tool_call_denied(obj: dict, whitelist: list) -> JSONResponse | None:
     """Reponse d'erreur JSON-RPC (HTTP 200) si tools/call vers un tool hors
     whitelist, sinon None (autorise)."""
     name = (obj.get("params") or {}).get("name")
+    if name == "execute_async":
+        # execute_async(tool=X) execute X en arriere-plan : sans ce controle,
+        # une cle scopee autorisee a execute_async atteignait n'importe quel
+        # outil par ce detour.
+        interne = ((obj.get("params") or {}).get("arguments") or {}).get("tool")
+        if interne and interne not in whitelist:
+            name = interne
     if name is not None and name not in whitelist:
         return JSONResponse(
             {
@@ -13554,6 +13576,213 @@ async def desk_save_study(sid: str):
         log.warning("Save desk étude %s non effectuee : %s", sid, raison)
         return {"ok": False, "sid": sid, "pid": pid_for_save, "raison": raison}
     return {"ok": True, "sid": sid, "pid": pid_for_save}
+
+
+# ── Traitements en arriere-plan : registre et API (spec 2026-10-02) ─────────
+#
+# Contrats : docs/superpowers/specs/2026-10-02-traitements-arriere-plan.md.
+# L'agent inscrit ici les outils longs qu'il soumet en tache de fond ; le hub
+# les surveille et rappelle l'agent a leur fin. Le bureau lit /desk/taches.
+
+def _dossier_donnees_taches() -> Path:
+    if _STUDIES_AVAILABLE:
+        return studies._DATA_DIR
+    return Path(os.getenv("DATA_DIR") or (
+        "/home/onyxia/work/qgis-mcp/server-data"
+        if Path("/home/onyxia/work").is_dir() else "/tmp/qgis-mcp/server-data"))
+
+
+_REGISTRE_TACHES = taches_fond.Registre(_dossier_donnees_taches() / "taches.db")
+
+
+async def _outil_workspace(username: str, nom: str, arguments: dict,
+                           timeout: float = 20, creer: bool = False) -> dict | None:
+    """`tools/call` sur le workspace de l'utilisateur.
+
+    Sans `creer`, ne reveille pas un workspace endormi : None s'il n'y a pas
+    de session prete (une tache ne survit pas a un workspace arrete).
+    """
+    if creer:
+        s = await _get_or_create_session(username)
+    else:
+        sid = _active_sessions.get(username)
+        s = await sessions.get_session(sid, username) if sid else None
+        if not s or s.get("status") != sessions.SESSION_READY:
+            return None
+    api_key = await auth.create_or_get_api_key(username)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        r = await client.post(
+            _mcp_url(s),
+            json={"jsonrpc": "2.0", "id": f"taches-{nom}", "method": "tools/call",
+                  "params": {"name": nom, "arguments": arguments}},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+    return (r.json() or {}).get("result") or {}
+
+
+async def _sonder_tache(tache: dict) -> dict:
+    if not tache.get("job_id"):
+        return {"injoignable": True}
+    try:
+        res = await _outil_workspace(tache["username"], "poll_job",
+                                     {"job_id": tache["job_id"]})
+    except Exception as exc:
+        log.info("sonde tache %s : workspace injoignable (%s)", tache.get("id"), exc)
+        return {"injoignable": True}
+    if res is None:
+        return {"injoignable": True}
+    etat, contenu = taches_fond.lire_suivi(res.get("content"))
+    return {"etat": etat, "contenu": contenu}
+
+
+async def _aviser_agent_fin_tache(tache: dict) -> bool:
+    """Demande a l'agent de rattacher la fin de la tache a sa conversation."""
+    api_key = os.environ.get("HUB_API_KEY", "").strip()
+    if not api_key:
+        api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
+    try:
+        async with httpx.AsyncClient(timeout=90, base_url=_AGENT_INTERNAL_URL) as c:
+            r = await c.post(f"/internal/taches/{tache['id']}/rattacher",
+                             headers={"Authorization": f"Bearer {api_key}"})
+        return r.status_code == 200 and bool((r.json() or {}).get("ok"))
+    except Exception as exc:
+        log.info("avis de fin de tache %s : agent injoignable (%s)", tache.get("id"), exc)
+        return False
+
+
+async def _annuler_job_tache(tache: dict) -> dict:
+    res = await _outil_workspace(tache["username"], "cancel_job",
+                                 {"job_id": tache["job_id"]})
+    etat, _ = taches_fond.lire_suivi((res or {}).get("content"))
+    return etat
+
+
+async def _soumettre_tache(tache: dict, client_id: str) -> dict:
+    res = await _outil_workspace(
+        tache["username"], "execute_async",
+        {"tool": tache["outil"], "arguments": tache.get("arguments") or {},
+         "client_id": client_id},
+        timeout=60, creer=True,
+    )
+    etat, _ = taches_fond.lire_suivi((res or {}).get("content"))
+    return etat
+
+
+def _proprietaire_taches(user: dict) -> str:
+    """Une cle scopee (agent partage) n'a pas acces aux taches du compte."""
+    if _scope_tools_whitelist(user.get("scope")) is not None:
+        raise HTTPException(403, "Cle restreinte : registre des taches non accessible")
+    return user["username"]
+
+
+async def _taches_lister(username: str, etude: str, session_id: str,
+                         actives: str, limite: int) -> dict:
+    taches = await _REGISTRE_TACHES.lister(
+        username, sid=etude or None, session_id=session_id or None,
+        actives=str(actives).lower() in ("1", "true", "oui"), limite=limite,
+    )
+    return {
+        "taches": [taches_fond.vue_publique(t) for t in taches],
+        "actives": sum(1 for t in taches if t["statut"] in taches_fond.ACTIFS),
+        "maintenant": time.time(),
+    }
+
+
+async def _taches_annuler(username: str, tache_id: str) -> dict:
+    tache = await _REGISTRE_TACHES.lire(tache_id, username)
+    if tache is None:
+        raise HTTPException(404, "Tache inconnue")
+    doc = await taches_fond.annuler(_REGISTRE_TACHES, tache, _annuler_job_tache)
+    return taches_fond.vue_publique(doc)
+
+
+async def _taches_relancer(username: str, tache_id: str) -> dict:
+    tache = await _REGISTRE_TACHES.lire(tache_id, username)
+    if tache is None:
+        raise HTTPException(404, "Tache inconnue")
+    try:
+        doc = await taches_fond.relancer(_REGISTRE_TACHES, tache, _soumettre_tache)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    except Exception as exc:
+        raise HTTPException(502, f"Relance impossible : {exc}")
+    return taches_fond.vue_publique(doc)
+
+
+@app.post("/taches", status_code=status.HTTP_201_CREATED)
+async def taches_creer(request: Request, user: dict = Depends(auth.get_current_user)):
+    """L'agent inscrit une tache qu'il vient de soumettre au workspace."""
+    username = _proprietaire_taches(user)
+    try:
+        corps = await request.json()
+    except Exception:
+        raise HTTPException(400, "Corps JSON attendu")
+    if not isinstance(corps, dict):
+        raise HTTPException(400, "Corps JSON attendu")
+    try:
+        doc = await _REGISTRE_TACHES.creer(username, corps)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return taches_fond.vue_publique(doc)
+
+
+@app.get("/taches")
+async def taches_lister(etude: str = "", session_id: str = "", actives: str = "",
+                        limite: int = 50, user: dict = Depends(auth.get_current_user)):
+    return await _taches_lister(_proprietaire_taches(user), etude, session_id,
+                                actives, limite)
+
+
+@app.get("/taches/{tache_id}")
+async def taches_lire(tache_id: str, user: dict = Depends(auth.get_current_user)):
+    """Document complet (resultat compris) : sert a l'agent pour rediger la fin."""
+    tache = await _REGISTRE_TACHES.lire(tache_id, _proprietaire_taches(user))
+    if tache is None:
+        raise HTTPException(404, "Tache inconnue")
+    return {k: v for k, v in tache.items() if k != "client_id"}
+
+
+@app.patch("/taches/{tache_id}")
+async def taches_maj(tache_id: str, request: Request,
+                     user: dict = Depends(auth.get_current_user)):
+    username = _proprietaire_taches(user)
+    try:
+        champs = await request.json()
+    except Exception:
+        raise HTTPException(400, "Corps JSON attendu")
+    if not isinstance(champs, dict):
+        raise HTTPException(400, "Corps JSON attendu")
+    doc = await _REGISTRE_TACHES.maj(tache_id, champs, username)
+    if doc is None:
+        raise HTTPException(404, "Tache inconnue")
+    return taches_fond.vue_publique(doc)
+
+
+@app.post("/taches/{tache_id}/annuler")
+async def taches_annuler(tache_id: str, user: dict = Depends(auth.get_current_user)):
+    return await _taches_annuler(_proprietaire_taches(user), tache_id)
+
+
+@app.post("/taches/{tache_id}/relancer")
+async def taches_relancer(tache_id: str, user: dict = Depends(auth.get_current_user)):
+    return await _taches_relancer(_proprietaire_taches(user), tache_id)
+
+
+# Bureau : meme convention que /desk/catalog (proprietaire du pod, le
+# middleware OIDC a deja verifie l'identite).
+@app.get("/desk/taches")
+async def desk_taches(etude: str = "", actives: str = "", limite: int = 20):
+    return await _taches_lister(_ONYXIA_USER, etude, "", actives, limite)
+
+
+@app.post("/desk/taches/{tache_id}/annuler")
+async def desk_taches_annuler(tache_id: str):
+    return await _taches_annuler(_ONYXIA_USER, tache_id)
+
+
+@app.post("/desk/taches/{tache_id}/relancer")
+async def desk_taches_relancer(tache_id: str):
+    return await _taches_relancer(_ONYXIA_USER, tache_id)
 
 
 # ── Proxy mémoire vers l'agent IA ─────────────────────────────────────────────
