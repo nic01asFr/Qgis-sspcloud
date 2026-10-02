@@ -627,8 +627,21 @@ _CONSIGNE_REDACTION = (
     "liste, sans code, sans nom de fonction ni jargon technique. Dis ce qui a "
     "été produit (couches, nombre d'entités, contrôle de vérification) et un "
     "éventuel point d'attention. N'utilise AUCUN chiffre absent du résultat "
-    "fourni. Ne propose pas d'autre action que de poursuivre."
+    "fourni. Ne décris que ce que le résultat montre : n'affirme aucune "
+    "action qui n'y figure pas. Ne propose pas d'autre action que de "
+    "poursuivre."
 )
+
+# Bloc ajoute par le workspace a chaque resultat (QgisRemoteMCP main_mcp :
+# etat du projet et « Suite : » conseillee a l'agent). Live du 2026-10-02 :
+# « Suite : Exporte « bati_rousset_clip »… » est devenu « la couche a ete
+# exportee » dans le message de fin d'un simple time.sleep.
+_MARQUEUR_CONTEXTE = "\n--- Contexte :"
+
+
+def resultat_sans_contexte(resultat: str) -> str:
+    """Le resultat de l'outil seul, sans l'etat du projet ni la suite conseillee."""
+    return (resultat or "").split(_MARQUEUR_CONTEXTE, 1)[0].rstrip()
 
 
 async def rediger_message_fin(
@@ -641,7 +654,7 @@ async def rediger_message_fin(
     """
     if tache.get("statut") != TERMINEE or appel_modele is None:
         return message_fin_deterministe(tache)
-    resultat = (tache.get("resultat") or "")[:6000]
+    resultat = resultat_sans_contexte(tache.get("resultat") or "")[:6000]
     messages = [
         {"role": "system", "content": _CONSIGNE_REDACTION},
         {"role": "user", "content": (

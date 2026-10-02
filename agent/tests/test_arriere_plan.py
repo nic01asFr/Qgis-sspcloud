@@ -663,6 +663,23 @@ def _tache_finie(**extra):
     return base
 
 
+def test_le_redacteur_ne_voit_pas_la_suite_conseillee_par_le_workspace():
+    """Live du 2026-10-02 : « Suite : Exporte « bati_rousset_clip »… » est
+    devenu « la couche a ete exportee » pour un simple time.sleep."""
+    resultat = (json.dumps({"success": True, "result": {"valeur": "ok"}})
+                + "\n\n--- Contexte : Zone : Aix | 20 couche(s)"
+                + "\n    Suite : Exporte « bati_rousset_clip » (export_layer) pour la garder.")
+    recus = []
+
+    async def _modele(messages):
+        recus.append(messages[-1]["content"])
+        return "Le script a renvoyé « ok »."
+
+    _run(ap.rediger_message_fin(_tache_finie(resultat=resultat), _modele))
+    assert '"valeur": "ok"' in recus[0]
+    assert "Suite :" not in recus[0] and "bati_rousset_clip" not in recus[0]
+
+
 def test_le_message_de_fin_est_rattache_une_seule_fois():
     registre = _RegistreMemoire(_tache_finie())
     ajoutes = []
