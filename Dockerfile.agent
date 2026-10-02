@@ -10,7 +10,11 @@ COPY agent/ .
 # Le chat est servi soit en iframe via le proxy du hub (ou /static/
 # resout sur le hub), soit en direct sur son propre domaine -- d'ou le
 # montage cote agent, pour que les deux chemins fonctionnent.
-COPY hub/hub/static/produit.css agent/static/produit.css
+# Destination : /opt/qgis-agent/static, la ou agent/main.py la cherche
+# (Path(__file__).parent.parent / "static"). Elle etait copiee dans
+# agent/static, a l'interieur du paquet : le chat en acces direct s'affichait
+# sans style (constate le 2026-09-26, journal « Feuille du produit absente »).
+COPY hub/hub/static/produit.css static/produit.css
 
 RUN pip install -e . --quiet --no-cache-dir
 
