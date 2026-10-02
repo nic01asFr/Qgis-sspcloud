@@ -182,7 +182,10 @@ def test_un_appel_ecrit_relance_le_modele_une_fois(agent):
     ])
     assert len(_ClientModele.envois) == 3, "une relance, puis la suite normale"
     relance = _ClientModele.envois[1]["messages"]
-    assert relance[-1] == {"role": "system", "content": qa._CONSIGNE_APPEL_ECRIT}
+    # Consigne en cours de tour : servie en message utilisateur prefixe, le
+    # gabarit de Qwen3.6 refuse un message systeme qui n'est pas le premier.
+    assert relance[-1] == {"role": "user",
+                           "content": qa._PREFIXE_CONSIGNE + qa._CONSIGNE_APPEL_ECRIT}
     assert relance[-2] == {"role": "assistant", "content": _FAUX_APPEL}
     # Le faux appel est retire de l'affichage et de la persistance. Le
     # retrait porte sur le texte AFFICHE, deja passe par le garde-fou de

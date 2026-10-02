@@ -71,6 +71,43 @@ _CONSIGNE_APPEL_ECRIT = (
     "réponds simplement à l'utilisateur en langage courant."
 )
 
+# Consignes posees en cours de conversation (relances, memo des actions,
+# boucle d'erreur, conclusion forcee) : la boucle les ecrit en messages
+# `system`, mais le gabarit de conversation de Qwen3.6 (chat_template.jinja
+# de Qwen/Qwen3.6-35B-A3B, verifie le 2026-10-02) leve « System message must
+# be at the beginning. » pour tout message systeme qui n'est pas le premier.
+# Servies telles quelles, elles font echouer l'appel (HTTP 400 cote vLLM).
+# `_messages_pour_le_gabarit` les rend en message utilisateur, prefixe de
+# cette mention pour que le modele ne les prenne pas pour une demande.
+_PREFIXE_CONSIGNE = "Consigne du système (ce n'est pas l'utilisateur qui écrit) : "
+
+
+def _messages_pour_le_gabarit(messages: list[dict]) -> list[dict]:
+    """Les messages tels que le modele peut les recevoir.
+
+    Le premier message systeme reste en place ; chaque message systeme
+    suivant devient un message utilisateur prefixe de `_PREFIXE_CONSIGNE`.
+    Deux messages utilisateur consecutifs (texte) sont fusionnes : certains
+    gabarits exigent l'alternance des roles. La liste d'origine n'est pas
+    modifiee : la boucle garde ses roles, les tests et le journal aussi.
+    """
+    sortie: list[dict] = []
+    for i, msg in enumerate(messages):
+        if msg.get("role") == "system" and i > 0:
+            msg = {"role": "user",
+                   "content": _PREFIXE_CONSIGNE + str(msg.get("content") or "")}
+        precedent = sortie[-1] if sortie else None
+        if (precedent is not None and msg.get("role") == "user"
+                and precedent.get("role") == "user"
+                and isinstance(precedent.get("content"), str)
+                and isinstance(msg.get("content"), str)):
+            sortie[-1] = {**precedent,
+                          "content": f"{precedent['content']}\n\n{msg['content']}"}
+            continue
+        sortie.append(msg)
+    return sortie
+
+
 # Ce que lit l'utilisateur quand un tour se termine sans rien de visible
 # (raisonnement masque et lignes d'outils retires). Avant, la bulle restait
 # sur « Rédaction de la réponse… 5 s », figee, sans un mot.
@@ -2841,7 +2878,7 @@ ne vient pas d'un outil cette session, la supprimer.
             model = await _resolve_model(self.profile_id)
             payload = {
                 "model":      model,
-                "messages":   messages,
+                "messages":   _messages_pour_le_gabarit(messages),
                 "stream":     True,
                 "max_tokens": 4096,
             }
@@ -3140,7 +3177,7 @@ ne vient pas d'un outil cette session, la supprimer.
                                     f"{_LLM_BASE_URL}/chat/completions",
                                     json={
                                         "model": model,
-                                        "messages": messages,
+                                        "messages": _messages_pour_le_gabarit(messages),
                                         "stream": True,
                                         "max_tokens": 600,
                                     },
@@ -3712,7 +3749,7 @@ ne vient pas d'un outil cette session, la supprimer.
                         f"{_LLM_BASE_URL}/chat/completions",
                         json={
                             "model": model,
-                            "messages": messages,
+                            "messages": _messages_pour_le_gabarit(messages),
                             "stream": True,
                             "max_tokens": 1024,
                         },
