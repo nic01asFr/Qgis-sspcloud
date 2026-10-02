@@ -648,6 +648,38 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   color:var(--qs-discret);border-radius:3px;line-height:1}
 #recipe-editor-overlay .re-close:hover{background:var(--qs-surface-2);color:var(--qs-encre)}
 </style>
+<style id="taches-fond-style">
+/* Traitements en arriere-plan : pastille, liste, notification. */
+.desk-status .taches-pastille{display:inline-flex;align-items:center;gap:5px;
+  padding:2px 8px;border-radius:10px;background:var(--qs-accent-pale);color:var(--qs-accent)}
+.desk-status .taches-pastille[hidden]{display:none}
+.taches-point{width:8px;height:8px;border-radius:50%;background:var(--qs-accent)}
+.taches-pastille.interrompue{background:#fff1e6;color:#b04400}
+.taches-pastille.interrompue .taches-point{background:#b04400}
+@media (prefers-reduced-motion: no-preference){
+  .taches-pastille:not(.interrompue) .taches-point{animation:taches-pouls 1.6s ease-in-out infinite}
+}
+@keyframes taches-pouls{50%{opacity:.35}}
+.taches-panneau{position:fixed;right:14px;bottom:40px;z-index:60;width:min(420px,calc(100vw - 28px));
+  max-height:50vh;overflow:auto;background:#fff;border:1px solid var(--qs-trait);border-radius:6px;
+  box-shadow:0 6px 24px rgba(0,0,0,.12);padding:10px 12px;font-size:13px}
+.taches-panneau[hidden]{display:none}
+.taches-panneau__tete{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.taches-liste{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.taches-liste li{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.taches-liste .taches-texte{flex:1;min-width:14em}
+.taches-panneau button{font:inherit;font-size:12.5px;padding:4px 10px;min-height:30px;
+  border:1px solid var(--qs-trait);border-radius:4px;background:#fff;cursor:pointer}
+.taches-panneau button:focus-visible,.taches-pastille:focus-visible{
+  outline:2px solid var(--qs-accent);outline-offset:2px}
+.taches-aide{margin:8px 0 0;font-size:11.5px;color:var(--qs-discret)}
+.taches-annonce{position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:61;
+  max-width:min(520px,calc(100vw - 28px));padding:8px 14px;border-radius:6px;
+  background:var(--qs-encre-2,#222);color:#fff;font-size:13px;opacity:0;pointer-events:none;
+  transition:opacity .2s}
+.taches-annonce.visible{opacity:.95}
+@media (prefers-reduced-motion: reduce){.taches-annonce{transition:none}}
+</style>
 </head>
 <body>
 
@@ -2351,6 +2383,16 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
             style="width:8px;height:8px;border-radius:50%;background:#999"></span>
       <span id="gpu-label">Analyse d'images</span>
     </button>
+    {# Traitements en arriere-plan (spec 2026-10-02) : pastille « N calculs
+       en cours », detail au clic, notification discrete a la fin. Script
+       isole en bas de page (#taches-fond-bureau). #}
+    <span class="sep" id="taches-sep" aria-hidden="true" hidden>|</span>
+    <button type="button" class="status-lien taches-pastille" id="taches-pastille" hidden
+            aria-expanded="false" aria-controls="taches-panneau"
+            title="Calculs lancés en arrière-plan par l'assistant">
+      <span class="taches-point" aria-hidden="true"></span>
+      <span id="taches-pastille-texte"></span>
+    </button>
     {# « Recent : native:clip -> 54556 entites » retire : identifiant
        d'algorithme brut, fige au rendu de la page (donc perime des le
        premier tour de l'assistant), et sans action possible. L'historique
@@ -2359,6 +2401,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
        le repeter ici en faisait la seule information de la barre d'etat sans
        lien avec l'etat du bureau. #}
   </footer>
+
+  <div id="taches-panneau" class="taches-panneau" role="region"
+       aria-label="Calculs en arrière-plan" hidden>
+    <div class="taches-panneau__tete">
+      <strong>Calculs en arrière-plan</strong>
+      <button type="button" class="taches-fermer" id="taches-fermer"
+              aria-label="Fermer la liste des calculs">Fermer</button>
+    </div>
+    <ul id="taches-liste" class="taches-liste"></ul>
+    <p class="taches-aide">QGIS fait une chose à la fois : les actions sur la carte
+      attendent la fin du calcul en cours. Le résultat s'affiche dans la conversation.</p>
+  </div>
+  <div id="taches-annonce" class="taches-annonce" role="status" aria-live="polite"></div>
 
   {# ── Panneau de compte ───────────────────────────────────────────────
      Ouvert par-dessus le bureau : consulter sa cle ou configurer
@@ -5366,6 +5421,156 @@ setInterval(refreshGpuChip, 20000);
       if (document.visibilityState === 'visible') veiller();
     });
   })();
+</script>
+
+<script id="taches-fond-bureau">
+/* Traitements en arriere-plan (spec 2026-10-02) : pastille de la barre
+   d'etat, liste des calculs, notification discrete a la fin d'un calcul.
+   Lit /desk/taches ; le chat previent par postMessage 'qgis_taches_maj'. */
+(function () {
+  'use strict';
+  const ACTIFS = new Set(['en_attente', 'en_cours']);
+  const pastille = document.getElementById('taches-pastille');
+  const texte = document.getElementById('taches-pastille-texte');
+  const sep = document.getElementById('taches-sep');
+  const panneau = document.getElementById('taches-panneau');
+  const liste = document.getElementById('taches-liste');
+  const annonce = document.getElementById('taches-annonce');
+  if (!pastille || !panneau) return;
+  let connus = null;      // id -> statut au passage precedent
+  let minuteur = null;
+  let masquer = null;
+
+  function duree(s) {
+    s = Math.max(0, Math.round(s || 0));
+    if (s < 60) return s + ' s';
+    const m = Math.floor(s / 60);
+    return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0');
+  }
+  function notifier(message) {
+    annonce.textContent = message;
+    annonce.classList.add('visible');
+    clearTimeout(masquer);
+    masquer = setTimeout(() => annonce.classList.remove('visible'), 6000);
+  }
+  async function agir(id, action) {
+    try {
+      await fetch('/desk/taches/' + encodeURIComponent(id) + '/' + action,
+                  {method: 'POST', credentials: 'include'});
+    } catch (e) { /* le prochain passage le dira */ }
+    rafraichir();
+  }
+  function bouton(nom, etiquette, action) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = nom;
+    b.setAttribute('aria-label', etiquette);
+    b.addEventListener('click', action);
+    return b;
+  }
+  function rendre(taches, maintenant) {
+    const actives = taches.filter(t => ACTIFS.has(t.statut));
+    const interrompues = taches.filter(t => t.statut === 'interrompue');
+    const n = actives.length;
+    if (n) {
+      texte.textContent = n + ' calcul' + (n > 1 ? 's' : '') + ' en cours';
+    } else if (interrompues.length) {
+      texte.textContent = interrompues.length + ' calcul'
+        + (interrompues.length > 1 ? 's' : '') + ' interrompu'
+        + (interrompues.length > 1 ? 's' : '');
+    }
+    pastille.classList.toggle('interrompue', !n && interrompues.length > 0);
+    const visible = n > 0 || interrompues.length > 0;
+    pastille.hidden = !visible;
+    sep.hidden = !visible;
+    if (!visible && !panneau.hidden) fermer();
+    liste.replaceChildren(...actives.concat(interrompues).map(t => {
+      const li = document.createElement('li');
+      const span = document.createElement('span');
+      span.className = 'taches-texte';
+      const depuis = duree((maintenant || Date.now() / 1000) - (t.cree_at || 0));
+      if (ACTIFS.has(t.statut)) {
+        span.textContent = t.annulation_demandee
+          ? '« ' + t.libelle + ' » : annulation demandée, se termine dans QGIS (' + depuis + ')'
+          : '« ' + t.libelle + ' » : ' + (t.statut === 'en_attente' ? 'en attente' : 'en cours')
+            + ' depuis ' + depuis;
+        li.appendChild(span);
+        if (!t.annulation_demandee) {
+          li.appendChild(bouton('Annuler', 'Annuler le calcul « ' + t.libelle + ' »',
+                                () => agir(t.id, 'annuler')));
+        }
+      } else {
+        span.textContent = '« ' + t.libelle + ' » : interrompu'
+          + (t.raison ? ' (' + t.raison + ')' : '');
+        li.appendChild(span);
+        li.appendChild(bouton('Relancer', 'Relancer le calcul « ' + t.libelle + ' »',
+                              () => agir(t.id, 'relancer')));
+        li.appendChild(bouton('Abandonner', 'Abandonner le calcul « ' + t.libelle + ' »',
+                              () => agir(t.id, 'annuler')));
+      }
+      return li;
+    }));
+  }
+  function annoncerLesFins(taches) {
+    const avant = connus;
+    connus = new Map(taches.map(t => [t.id, t.statut]));
+    if (avant === null) return;  // premier passage : rien de neuf a annoncer
+    taches.forEach(t => {
+      if (!ACTIFS.has(avant.get(t.id)) || ACTIFS.has(t.statut)) return;
+      if (t.statut === 'terminee') {
+        notifier('Calcul terminé : « ' + t.libelle + ' ». Le résultat est dans la conversation.');
+      } else if (t.statut === 'echouee') {
+        notifier('Le calcul « ' + t.libelle + ' » s\'est terminé en erreur. Détails dans la conversation.');
+      } else if (t.statut === 'interrompue') {
+        notifier('Le calcul « ' + t.libelle + ' » s\'est interrompu. Vous pouvez le relancer.');
+      }
+      if (typeof refreshSourcesSummaries === 'function') {
+        try { refreshSourcesSummaries(); } catch (e) { /* panneau absent */ }
+      }
+    });
+  }
+  async function rafraichir() {
+    clearTimeout(minuteur);
+    let actives = 0;
+    try {
+      const r = await fetch('/desk/taches?limite=20', {credentials: 'include', cache: 'no-store'});
+      if (r.ok) {
+        const d = await r.json();
+        const taches = Array.isArray(d.taches) ? d.taches : [];
+        actives = taches.filter(t => ACTIFS.has(t.statut)).length;
+        annoncerLesFins(taches);
+        rendre(taches, d.maintenant);
+      }
+    } catch (e) { /* hub momentanement injoignable */ }
+    minuteur = setTimeout(rafraichir, actives ? 8000 : 30000);
+  }
+  function ouvrir() {
+    panneau.hidden = false;
+    pastille.setAttribute('aria-expanded', 'true');
+    const premier = panneau.querySelector('button');
+    if (premier) premier.focus();
+  }
+  function fermer() {
+    panneau.hidden = true;
+    pastille.setAttribute('aria-expanded', 'false');
+  }
+  pastille.addEventListener('click', () => (panneau.hidden ? ouvrir() : fermer()));
+  document.getElementById('taches-fermer').addEventListener('click', () => {
+    fermer();
+    pastille.focus();
+  });
+  panneau.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { fermer(); pastille.focus(); }
+  });
+  window.addEventListener('message', (e) => {
+    if (e.origin !== location.origin) return;
+    const d = e.data;
+    if (d && (d.type === 'qgis_taches_maj' || d.type === 'qgis_agent_turn_done')) {
+      rafraichir();
+    }
+  });
+  rafraichir();
+})();
 </script>
 
 <!-- Chantier G4-b-3d : bouton « Publier » sur event SSE recipe_done -->

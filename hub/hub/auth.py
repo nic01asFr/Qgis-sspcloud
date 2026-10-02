@@ -1288,6 +1288,10 @@ _OIDC_MIDDLEWARE_INTER_POD = (
     # Whitelist les endpoints publish top-level et sub-endpoints (component,
     # assembly, livrable, pdf, agent) qui suivent la meme convention.
     "/publish",
+    # Traitements en arriere-plan (2026-10-02) : l'agent inscrit et met a
+    # jour ses taches de fond en Bearer HUB_API_KEY ; Depends(get_current_user)
+    # valide la cle dans l'endpoint.
+    "/taches",
     # NB : /published a ete deplace dans _OIDC_MIDDLEWARE_PUBLIC (vraie
     # whitelist anonyme). Inter-pod ne suffit pas pour acces tiers internet.
 )
