@@ -683,6 +683,24 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
     </div>
   </div>
 
+  <!-- ── BANDEAU : etude active (2026-10-02) ──────────────────────
+       Ouverture d'etude en attente (QGIS occupe), resynchronisation hub /
+       QGIS, etude changee par l'assistant. Cf. hub/activation_etude.py et
+       docs/superpowers/specs/2026-10-02-conversation-par-etude.md. -->
+  <div class="bandeau-maj bandeau-etude" id="bandeau-etude" role="status" hidden>
+    <span class="ic ic-dossier ic--sm" aria-hidden="true"></span>
+    <p class="bandeau-maj__texte" id="bandeau-etude-texte"></p>
+    <button type="button" class="bandeau-maj__action" id="bandeau-etude-recharger" hidden>
+      Recharger le bureau
+    </button>
+    <button type="button" class="bandeau-maj__plus-tard" id="bandeau-etude-annuler" hidden>
+      Annuler l'ouverture
+    </button>
+    <button type="button" class="bandeau-maj__plus-tard" id="bandeau-etude-fermer">
+      Fermer
+    </button>
+  </div>
+
 <div class="desk" id="desk" data-resources="collapsed" data-chat="collapsed">
 
   {# Sprint UX-3 (2026-06-21) : navbar globale retiree (cf. workspace.html
@@ -2643,6 +2661,8 @@ async function _rafraichirEtudeActive() {
     if (d && d.id && d.id !== _activeStudyId) {
       _activeStudyId = d.id;
       _cachedActiveSid = d.id;
+      // Conversation par etude : le chat et le bandeau suivent (bloc plus bas).
+      if (typeof _etudeActiveChangee === 'function') _etudeActiveChangee(d);
     }
   } catch (e) { /* hors ligne : on garde la derniere valeur connue */ }
 }
@@ -5366,6 +5386,124 @@ setInterval(refreshGpuChip, 20000);
       if (document.visibilityState === 'visible') veiller();
     });
   })();
+</script>
+
+<!-- ── Etude active : chat, attente d'ouverture, accord hub / QGIS (2026-10-02)
+     Contrat postMessage avec le chat (meme origine, iframe du chat) :
+       bureau -> chat : {type: 'desk_etude_active', etude: {id, nom}}
+         envoye au chargement de l'iframe et quand le bureau voit l'etude
+         changer (retour sur l'onglet) ;
+       chat -> bureau : {type: 'chat_etude_suivie', etude: {id, nom} | null,
+                         decision, session_id}
+         le chat a suivi l'etude active ; si elle differe de celle du bureau
+         (l'assistant a ouvert ou cree une etude), le bureau propose de se
+         recharger.
+     Cf. docs/superpowers/specs/2026-10-02-conversation-par-etude.md. -->
+<style>
+.bandeau-etude{z-index:41}
+.bandeau-etude[hidden]{display:none}
+</style>
+<script>
+(function () {
+  const ETUDE_RENDUE = {{ {'id': active_study.id if active_study else '', 'nom': active_study.name if active_study else ''} | tojson }};
+  const bandeau = document.getElementById('bandeau-etude');
+  const texte = document.getElementById('bandeau-etude-texte');
+  const btnRecharger = document.getElementById('bandeau-etude-recharger');
+  const btnAnnuler = document.getElementById('bandeau-etude-annuler');
+  const btnFermer = document.getElementById('bandeau-etude-fermer');
+  let minuteurAttente = null;
+
+  function afficher(message, options) {
+    const o = options || {};
+    if (!bandeau || !texte) return;
+    texte.textContent = message;
+    btnRecharger.hidden = !o.recharger;
+    btnAnnuler.hidden = !o.annuler;
+    bandeau.hidden = false;
+  }
+  function masquer() { if (bandeau) bandeau.hidden = true; }
+  btnFermer?.addEventListener('click', masquer);
+  btnRecharger?.addEventListener('click', () => location.replace('/desk'));
+  btnAnnuler?.addEventListener('click', async () => {
+    try { await fetch('/desk/activation-en-attente/annuler', {method: 'POST'}); } catch (e) {}
+    clearTimeout(minuteurAttente);
+    afficher('Ouverture annulée : l’étude active n’a pas changé.');
+  });
+
+  // Chat : on lui annonce l'etude du bureau.
+  function annoncerAuChat(etude) {
+    const iframe = typeof _iframeChat === 'function' ? _iframeChat() : null;
+    try {
+      iframe?.contentWindow?.postMessage({type: 'desk_etude_active', etude: etude},
+                                         location.origin);
+    } catch (e) { /* chat pas encore charge : il lit l'etude lui-meme */ }
+  }
+  const iframe = typeof _iframeChat === 'function' ? _iframeChat() : null;
+  iframe?.addEventListener('load', () => annoncerAuChat(ETUDE_RENDUE));
+
+  // Appele par _rafraichirEtudeActive quand l'etude a change ailleurs.
+  window._etudeActiveChangee = function (d) {
+    annoncerAuChat({id: d.id, nom: d.name || ''});
+    afficher('L’étude active est maintenant « ' + (d.name || d.id)
+             + ' ». Le bureau affiche encore l’ancienne.', {recharger: true});
+  };
+
+  window.addEventListener('message', (e) => {
+    if (e.origin !== location.origin) return;
+    const chat = typeof _iframeChat === 'function' ? _iframeChat() : null;
+    if (!chat || e.source !== chat.contentWindow) return;
+    const d = e.data;
+    if (!d || typeof d !== 'object' || d.type !== 'chat_etude_suivie') return;
+    const id = (d.etude && d.etude.id) || '';
+    if (id && id !== (ETUDE_RENDUE.id || '')) {
+      afficher('L’étude active est maintenant « ' + (d.etude.nom || id)
+               + ' » (ouverte depuis l’assistant). Recharge le bureau pour la voir.',
+               {recharger: true});
+    }
+  });
+
+  // Retour d'une ouverture d'etude (Mon espace ou menu du bureau).
+  const params = new URLSearchParams(location.search);
+  const erreur = params.get('error') || '';
+  const MESSAGES_ERREUR = {
+    activation_en_attente: 'QGIS est occupé par un calcul : l’étude sera ouverte dès qu’il sera libre. L’étude active n’a pas encore changé.',
+    activation_refusee: 'QGIS n’a pas pu charger le projet de cette étude. L’étude active n’a pas changé.',
+    activate_failed: 'Impossible d’ouvrir cette étude : le bureau ne répond pas. L’étude active n’a pas changé.',
+  };
+  if (MESSAGES_ERREUR[erreur]) {
+    afficher(MESSAGES_ERREUR[erreur], {annuler: erreur === 'activation_en_attente'});
+    params.delete('error');
+    const reste = params.toString();
+    history.replaceState(null, '', location.pathname + (reste ? '?' + reste : '') + location.hash);
+  }
+
+  // Accord hub / QGIS : verifie au chargement, puis retente tant qu'une
+  // ouverture est en attente (QGIS occupe).
+  async function verifierAccord(essai) {
+    let d;
+    try {
+      const r = await fetch('/desk/coherence-etude', {method: 'POST', cache: 'no-store'});
+      if (!r.ok) return;
+      d = await r.json();
+    } catch (e) { return; }
+    if (d.etat === 'workspace_non_pret') {
+      if (essai < 20) minuteurAttente = setTimeout(() => verifierAccord(essai + 1), 5000);
+      return;
+    }
+    if (d.resynchronise) {
+      afficher((d.message || 'Étude resynchronisée.') + ' Rechargement du bureau…');
+      setTimeout(() => location.replace('/desk'), 1800);
+      return;
+    }
+    if (d.attente) {
+      afficher(d.attente.message || d.message, {annuler: true});
+      minuteurAttente = setTimeout(() => verifierAccord(essai + 1), 15000);
+      return;
+    }
+    if (d.message) afficher(d.message);
+  }
+  setTimeout(() => verifierAccord(0), 3000);
+})();
 </script>
 
 <!-- Chantier G4-b-3d : bouton « Publier » sur event SSE recipe_done -->
