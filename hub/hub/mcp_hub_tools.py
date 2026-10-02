@@ -381,6 +381,58 @@ async def study_switch_handler(
         prev_sid = await studies.get_active_study_id(username)
         prev_pid = await studies.get_active_project_id(username)
 
+    default_p = await studies.get_default_project(sid)
+    default_pid = default_p["pid"] if default_p else None
+
+    # Activation atomique (2026-10-02, cf. hub/activation_etude.py) : pod
+    # pret, QGIS charge le projet AVANT que l'etude active ne change. QGIS
+    # occupe ou chargement en echec : l'etude ne change pas, et l'assistant
+    # le dit au lieu d'annoncer une bascule qui n'a pas eu lieu.
+    from hub import activation_etude
+    if await activation_etude.workspace_pret(username):
+        async def _sonde(u: str, code: str) -> str:
+            try:
+                return await execute_python_in_workspace_fn(
+                    u, code, timeout=activation_etude.DELAI_SONDE_S)
+            except TypeError:
+                return await execute_python_in_workspace_fn(u, code)
+        etat = await activation_etude.sonder_qgis(_sonde, username)
+        if etat is None:
+            raise ValueError(
+                activation_etude.message("qgis_occupe", s["name"])
+                + " L'étude active n'a pas changé : réessaie quand le calcul sera fini.")
+        sortant_sid = etat.get("sid") or prev_sid
+        sortant_pid = etat.get("pid") or prev_pid
+        if sortant_sid and (sortant_sid != sid or (sortant_pid and sortant_pid != default_pid)):
+            try:
+                await execute_python_in_workspace_fn(
+                    username,
+                    studies.save_active_project_pod_code(sortant_sid, sortant_pid),
+                )
+            except Exception as exc:
+                log.warning("study_switch: save sortante %s : %s", sortant_sid, exc)
+        verdict = await activation_etude.charger_dans_qgis(
+            execute_python_in_workspace_fn, username, sid, default_pid, changer_etude=True)
+        if not verdict["ok"]:
+            raise ValueError(activation_etude.message(verdict["motif"], s["name"]))
+        if mcp_session_id:
+            from hub import session_active_state as _sas
+            await _sas.set_active(mcp_session_id, sid, default_pid, username=username)
+        else:
+            await studies.set_active_study(username, sid)
+            if default_pid:
+                await studies.set_active_project(username, default_pid)
+            activation_etude.effacer_attente(username)
+        await studies.touch_study(sid)
+        if default_pid:
+            await studies.touch_project(default_pid)
+        return {
+            "active_sid": sid,
+            "active_pid": default_pid,
+            "name": s["name"],
+            "session_scoped": bool(mcp_session_id),
+        }
+
     if prev_sid and prev_sid != sid:
         # Save sortante avec dual-write pid-scope (Fix #1)
         try:
@@ -392,8 +444,6 @@ async def study_switch_handler(
             log.warning("study_switch: save sortante %s : %s", prev_sid, exc)
 
     # Ecriture active : session-scoped ou DB user selon mcp_session_id
-    default_p = await studies.get_default_project(sid)
-    default_pid = default_p["pid"] if default_p else None
     if mcp_session_id:
         from hub import session_active_state as _sas
         await _sas.set_active(mcp_session_id, sid, default_pid, username=username)

@@ -92,7 +92,10 @@ def test_un_rattachement_existant_n_est_pas_ecrase(monkeypatch, tmp_path) -> Non
     assert _run(memory.get_session_study("s1")) == "etude-A"
 
 
-def test_le_chat_rattache_tant_que_l_etude_est_absente() -> None:
-    """Le rattachement est tenté à chaque tour tant que la session est orpheline."""
+def test_le_chat_rattache_a_la_creation_et_plus_apres_coup() -> None:
+    """Conversation par étude (2026-10-02) : le rattachement se fait à la
+    création. L'ancienne règle « tant que la session est orpheline » rattachait
+    une conversation ancienne à l'étude active du moment où on la rouvrait."""
     src = (_ROOT / "agent" / "main.py").read_text(encoding="utf-8")
-    assert "if not await memory.get_session_study(session_id):" in src
+    assert "if not await memory.get_session_study(session_id):" not in src
+    assert "study_id=etude_creation" in src
