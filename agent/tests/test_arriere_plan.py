@@ -385,6 +385,39 @@ def test_un_delai_declare_long_part_directement(agent):
     assert "arriere_plan" in _noms(evts)
 
 
+def test_un_execute_async_emis_par_le_modele_passe_par_le_registre(agent):
+    """Live du 2026-10-02 : `execute_async(code=…)` appele par le modele
+    tournait hors du registre (ni suivi, ni message de fin)."""
+    evts = _tour(agent, "exécute ce script en arrière-plan", [
+        _appel_outil("execute_async", json.dumps(
+            {"code": "import time; time.sleep(90)", "timeout": 120})),
+    ])
+    (soumission,) = [a[1] for a in _appels("execute_async")]
+    assert soumission["tool"] == "execute_python"
+    assert soumission["arguments"] == {"code": "import time; time.sleep(90)",
+                                       "timeout": 300}
+    assert "client_id" in soumission
+    (tache,) = _Reseau.taches.values()
+    assert tache["statut"] in ap.ACTIFS
+    assert next(e for e in _taches_evts(evts) if e["tache"] == "arriere_plan")["direct"]
+
+
+@pytest.mark.parametrize("arguments, attendu", [
+    ({"tool": "run_processing", "arguments": {"algorithm": "native:buffer"}},
+     ("run_processing", {"algorithm": "native:buffer"})),
+    ({"action": "run_recipe", "params": {"id": "densite"}},
+     ("run_recipe", {"id": "densite"})),
+    ({"code": "x=1", "timeout": 900}, ("execute_python", {"code": "x=1", "timeout": 900})),
+    ({"code": "x=1"}, ("execute_python", {"code": "x=1", "timeout": 300})),
+])
+def test_soumission_du_modele_rend_l_outil_reel(arguments, attendu):
+    assert ap.soumission_du_modele("execute_async", arguments) == attendu
+
+
+def test_soumission_du_modele_laisse_les_autres_outils():
+    assert ap.soumission_du_modele("zoom_to", {"layer": "a"}) == ("zoom_to", {"layer": "a"})
+
+
 # ── 4. Tache perdue ─────────────────────────────────────────────────────────
 
 def test_une_tache_que_le_workspace_ne_connait_plus_est_interrompue(agent):
@@ -554,7 +587,8 @@ def test_une_coupure_du_suivi_reprend_le_suivi_sans_resoumettre(agent, monkeypat
 def test_les_outils_longs_sont_ceux_mesures_dans_le_code():
     for outil in ("execute_python", "run_processing", "run_recipe", "smart_load",
                   "clip_to_study_zone", "add_from_catalog", "export_flood_map",
-                  "export_web_map", "export_temporal_map", "export_qfield", "export_grist"):
+                  "export_web_map", "export_temporal_map", "export_qfield", "export_grist",
+                  "densite_par_maille", "compter_par_zone"):
         assert ap.est_long(outil), outil
     for outil in ("zoom_to", "get_project_info", "export_layer", "export_pdf"):
         assert not ap.est_long(outil), outil

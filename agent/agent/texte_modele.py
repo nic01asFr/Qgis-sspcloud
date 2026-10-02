@@ -242,6 +242,17 @@ _INTENTION = re.compile(
     r"|je m'apprete a|je procede a)\b",
 )
 _PLAN_ANNONCE = re.compile(r"\b(?:voici (?:mon|le) plan|mon plan ?:)")
+# Action donnee pour faite ou en cours, au passe compose ou au present. Constat
+# live du 2026-10-02 : « Script en cours d'execution en arriere-plan (job_id:
+# 2f10b2787483) » sans aucun appel d'outil, identifiant invente (imite du tour
+# precedent). Texte normalise.
+_ACTION_AFFIRMEE = re.compile(
+    r"\ben cours d'execution\b|\bjob[_ ]?id\b"
+    r"|\btourne (?:en|a l')arriere[- ]plan\b"
+    r"|\b(?:j'ai|je viens d'|je viens de)\s*(?:lanc|execut|charg|calcul|cree|decoup"
+    r"|export|demarr|appliqu|ajout)"
+    r"|\b(?:est|sont|a ete|ont ete)\s+(?:lance|execute|demarre)",
+)
 # Une etape de liste numerotee : « 1. », « 2) », « **3.** ».
 _ETAPE_NUMEROTEE = re.compile(r"^[ \t>]*(?:\*\*)?\d{1,2}[.)](?:\*\*)?[ \t]+\S", re.MULTILINE)
 # Un segment entre crochets qui ouvre une ligne ou suit une fin de phrase,
@@ -323,8 +334,9 @@ def plan_non_execute(texte: str | None, demande: str | None) -> str | None:
     """Motif de relance si le modele a decrit son action sans la faire.
 
     A appeler sur la reponse d'un tour qui n'a emis AUCUN appel d'outil.
-    Rend « plan numerote », « action entre crochets » ou « intention », ou
-    None quand il ne faut pas relancer :
+    Rend « action affirmee » (donnee pour faite ou en cours, alors que rien
+    n'a tourne), « plan numerote », « action entre crochets » ou
+    « intention », ou None quand il ne faut pas relancer :
     - la demande n'appelle pas d'action (question de connaissance) ;
     - une action a risque est en jeu (publication, suppression ou
       ecrasement, recette lourde, GeoAI, parametre metier) : le plan et la
@@ -339,6 +351,8 @@ def plan_non_execute(texte: str | None, demande: str | None) -> str | None:
     if action_a_risque(demande, texte):
         return None
     t = _normaliser(texte)
+    if _ACTION_AFFIRMEE.search(t):
+        return "action affirmee"
     if len(_ETAPE_NUMEROTEE.findall(texte)) >= 2 or _PLAN_ANNONCE.search(t):
         return "plan numerote"
     if _actions_entre_crochets(texte):

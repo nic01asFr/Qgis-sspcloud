@@ -149,6 +149,51 @@ def test_pas_de_relance_pour_les_contre_cas(agent, demande, reponse):
     assert not any(isinstance(e, dict) and e.get("phase") == "relance" for e in evenements)
 
 
+# ── Action affirmee sans outil (live du 2026-10-02) ─────────────────────────
+
+FAUX_JOB = ("Script en cours d'exécution en arrière-plan (job_id: 2f10b2787483). "
+            "Vérification dans 70 secondes.")
+DEMANDE_SCRIPT = ("Exécute dans QGIS ce script Python : import time; "
+                  "time.sleep(70); result = {'valeur': 'ok'}")
+
+
+@pytest.mark.parametrize("texte, demande", [
+    (FAUX_JOB, DEMANDE_SCRIPT),
+    ("J'ai lancé le calcul de densité, il tourne en arrière-plan.", "calcule la densité"),
+    ("Je viens de charger le bâti de Rousset.", "charge le bâti de Rousset"),
+    ("Le découpage a été lancé.", "découpe le bâti à la commune"),
+])
+def test_une_action_affirmee_sans_outil_est_reconnue(texte, demande):
+    assert tm.plan_non_execute(texte, demande) == "action affirmee"
+
+
+def test_une_action_affirmee_relance_avec_sa_consigne_et_disparait(agent):
+    evenements = _tour(agent, DEMANDE_SCRIPT, [
+        _reponse_texte(FAUX_JOB),
+        _appel_outil("get_project_info"),
+        _reponse_texte("Le script a tourné : il renvoie « ok »."),
+    ])
+    relance = _ClientModele.envois[1]["messages"]
+    assert relance[-1] == {"role": "user", "content": qa._PREFIXE_CONSIGNE
+                           + qa._CONSIGNE_ACTION_AFFIRMEE}
+    assert "job_id" not in agent.persistes[-1]
+    assert "renvoie « ok »" in agent.persistes[-1]
+
+
+def test_une_action_affirmee_que_la_relance_ne_fait_pas_est_retiree(agent):
+    evenements = _tour(agent, DEMANDE_SCRIPT, [
+        _reponse_texte(FAUX_JOB),
+        _reponse_texte("Le script est lancé (job_id: 9a9a9a)."),
+    ])
+    assert len(_ClientModele.envois) == 2
+    retraits = [e["retirer_texte"] for e in evenements
+                if isinstance(e, dict) and "retirer_texte" in e]
+    assert retraits and FAUX_JOB in retraits[-1] and "9a9a9a" in retraits[-1]
+    assert qa._MESSAGE_ACTION_NON_FAITE in _texte(evenements)
+    assert "job_id" not in agent.persistes[-1]
+    assert qa._MESSAGE_ACTION_NON_FAITE in agent.persistes[-1]
+
+
 def test_pas_de_relance_si_des_outils_ont_deja_tourne(agent):
     """Le recapitulatif apres action peut annoncer la suite : ce n'est pas un
     plan non execute."""

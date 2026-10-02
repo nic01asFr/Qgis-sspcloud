@@ -78,7 +78,8 @@ def test_la_liste_complete_est_celle_mesuree_en_live() -> None:
 def test_chaque_outil_reel_est_classe() -> None:
     """Un outil non classe reste expose (filet), mais coute des jetons a
     chaque tour : tout outil du workspace doit etre au socle ou en paquet."""
-    non_classes = sorted(n for n in _noms(outils_reels()) if po.paquet_de(n) is None)
+    non_classes = sorted(n for n in _noms(outils_reels())
+                         if po.paquet_de(n) is None and n not in po.OUTILS_MASQUES)
     assert not non_classes, f"a classer dans paquets_outils : {non_classes}"
 
 
@@ -256,6 +257,12 @@ def test_un_outil_inconnu_reste_expose() -> None:
     assert "outil_tout_neuf" in _noms(po.selectionner([nouveau], set()))
 
 
+def test_execute_async_n_est_jamais_montre_au_modele() -> None:
+    """La tache de fond est l'affaire de l'agent (live du 2026-10-02)."""
+    soumission = {"type": "function", "function": {"name": "execute_async"}}
+    assert "execute_async" not in _noms(po.selectionner([soumission], set(po.PAQUETS)))
+
+
 def test_l_ordre_du_profil_est_conserve() -> None:
     complets = outils_reels()
     sel = po.selectionner(complets, {"mise_en_page"})
@@ -291,7 +298,8 @@ def test_le_cache_par_signature(monkeypatch) -> None:
 def test_l_interrupteur_rend_la_liste_complete(monkeypatch) -> None:
     monkeypatch.setenv("AGENT_OUTILS_PAR_PAQUETS", "0")
     agent = _agent_hors_ligne("standard", None)
-    assert len(_run(agent._outils_exposes(set()))) == 92
+    # Toute la liste, hors outils masques (execute_async).
+    assert len(_run(agent._outils_exposes(set()))) == 92 - len(po.OUTILS_MASQUES)
 
 
 # ── Filet dans la vraie boucle chat_stream ──────────────────────────────────

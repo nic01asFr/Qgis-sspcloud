@@ -93,6 +93,23 @@ _CONSIGNE_PLAN_NON_EXECUTE = (
     "rends compte du résultat."
 )
 
+# Consigne de relance quand le modele AFFIRME une action (faite ou en cours)
+# sans aucun appel d'outil. Live du 2026-10-02 : « Script en cours
+# d'exécution en arrière-plan (job_id: 2f10b2787483) », identifiant invente.
+_CONSIGNE_ACTION_AFFIRMEE = (
+    "Tu as annoncé une action comme faite ou en cours, mais tu n'as appelé "
+    "aucun outil : rien n'a été exécuté. Fais-la maintenant réellement avec "
+    "les outils, puis rends compte du résultat obtenu. N'invente jamais un "
+    "résultat ni un identifiant."
+)
+
+# Message a l'utilisateur quand la relance n'agit pas non plus : on retire
+# l'affirmation fausse plutot que de la laisser croire.
+_MESSAGE_ACTION_NON_FAITE = (
+    "Je n'ai pas pu lancer cette action : rien n'a été exécuté. "
+    "Peux-tu reformuler ta demande, ou me la renvoyer ?"
+)
+
 # Consignes posees en cours de conversation (relances, memo des actions,
 # boucle d'erreur, conclusion forcee) : la boucle les ecrit en messages
 # `system`, mais le gabarit de conversation de Qwen3.6 (chat_template.jinja
@@ -1983,7 +2000,9 @@ class QGISAgent:
         """
         complets = await self._get_tools()
         if not self._filtrage_par_paquets():
-            return self._sans_documents_absents(complets)
+            return self._sans_documents_absents(
+                [o for o in complets
+                 if paquets_outils.nom_outil(o) not in paquets_outils.OUTILS_MASQUES])
         avec_documents = bool((self._documents_etude or {}).get("indexes"))
         cle = (self._outils_version, frozenset(paquets), avec_documents)
         sel = self._cache_selection.get(cle)
@@ -3224,6 +3243,7 @@ ne vient pas d'un outil cette session, la supprimer.
         # texte du plan reste affiche tant que la relance n'a pas agi : il
         # n'est retire (`retirer_texte`) que si elle emet un appel d'outil.
         relance_plan_faite = False
+        motif_relance: str | None = None
         plan_a_retirer: str | None = None
         # Tous les outils du profil, exposes ou non : un appel ecrit en texte
         # vers un outil masque par les paquets est aussi un appel manque.
@@ -3497,7 +3517,17 @@ ne vient pas d'un outil cette session, la supprimer.
                              "(session=%s)", self.session_id)
                 elif not tool_call_data:
                     log.warning("Plan non execute : la relance n'agit pas non plus "
-                                "(session=%s)", self.session_id)
+                                "(%s, session=%s)", motif_relance, self.session_id)
+                    if motif_relance == "action affirmee":
+                        # Ne jamais laisser une action fausse affichee.
+                        yield {"retirer_texte": plan_a_retirer + chunk_text}
+                        yield _MESSAGE_ACTION_NON_FAITE
+                        pos_plan = full_response.rfind(plan_a_retirer)
+                        if pos_plan >= 0:
+                            full_response = full_response[:pos_plan]
+                        full_response += _MESSAGE_ACTION_NON_FAITE
+                        chunk_brut = chunk_text = ""
+                        texte_emis = True
                 plan_a_retirer = None
             # Pas de tool calls → fin du turn LLM.
             # NB : on n'utilise PAS finish_reason="stop" pour break car Gemma4
@@ -3543,6 +3573,7 @@ ne vient pas d'un outil cette session, la supprimer.
                               else texte_modele.plan_non_execute(chunk_brut, user_message))
                 if motif_plan:
                     relance_plan_faite = True
+                    motif_relance = motif_plan
                     plan_a_retirer = chunk_text
                     log.warning(
                         "Plan decrit sans execution (%s, iter=%d, session=%s) : relance",
@@ -3551,7 +3582,9 @@ ne vient pas d'un outil cette session, la supprimer.
                     yield {"phase": "relance", "label": "Je passe à l'action…"}
                     messages.append({"role": "assistant", "content": chunk_brut})
                     messages.append({"role": "system",
-                                     "content": _CONSIGNE_PLAN_NON_EXECUTE})
+                                     "content": (_CONSIGNE_ACTION_AFFIRMEE
+                                                 if motif_plan == "action affirmee"
+                                                 else _CONSIGNE_PLAN_NON_EXECUTE)})
                     continue
                 # Budget du tour epuise par la reflexion, avant toute reponse.
                 #
@@ -3682,6 +3715,12 @@ ne vient pas d'un outil cette session, la supprimer.
                     fn_args = json.loads(tc["function"]["arguments"] or "{}")
                 except Exception:
                     fn_args = {}
+                # execute_async emis par le modele : ramene a l'outil reel,
+                # pour passer par le registre des taches de fond.
+                if fn_name == "execute_async":
+                    fn_name, fn_args = arriere_plan.soumission_du_modele(fn_name, fn_args)
+                    log.info("execute_async du modele ramene a %s (session=%s)",
+                             fn_name, self.session_id)
 
                 # ── Filet des paquets d'outils (lot L3) ──────────────────
                 # demander_outils : traite ici, sans hub ni affichage ; il

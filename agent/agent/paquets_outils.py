@@ -191,8 +191,10 @@ PAQUETS: dict[str, Paquet] = {p.nom: p for p in (
         r"\banimation", r"\bchronolog", r"time ?lapse", r"\bqfield\b",
         r"(?:sur le|releves? de|saisie de|collecte de|collecte sur le) terrain",
         r"\bmobile\b", r"\bgrist\b", r"\btableur")),
+    # execute_async n'y figure plus (2026-10-02) : la tache de fond est
+    # l'affaire de l'agent (arriere_plan), voir OUTILS_MASQUES.
     _p("traitement_long", "traitement long",
-       ("execute_async", "poll_job", "cancel_job"),
+       ("poll_job", "cancel_job"),
        (r"\basync", r"arriere[- ]plan", r"\bjobs?\b", r"tache de fond",
         r"\blourd", r"\bannule")),
     _p("fichiers", "fichiers, couche par URL",
@@ -286,6 +288,12 @@ OUTILS_INVALIDANTS: frozenset[str] = frozenset({
 })
 
 
+# Outils que l'agent appelle lui-meme et ne montre jamais au modele, qu'ils
+# soient classes ou non. execute_async : un appel direct du modele echappait
+# au registre des taches de fond (constat live du 2026-10-02).
+OUTILS_MASQUES: frozenset[str] = frozenset({"execute_async"})
+
+
 def paquet_de(nom_outil: str) -> str | None:
     """Le paquet d'un outil, ``"socle"`` s'il est au socle, None s'il est inconnu."""
     if nom_outil in SOCLE:
@@ -366,6 +374,8 @@ def selectionner(outils: list[dict], paquets: Iterable[str]) -> list[dict]:
     out = []
     for o in outils:
         nom = nom_outil(o)
+        if nom in OUTILS_MASQUES:
+            continue
         if nom in retenus or nom not in _PAQUET_DE:
             out.append(o)
     return out

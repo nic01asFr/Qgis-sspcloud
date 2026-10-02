@@ -55,6 +55,9 @@ OUTILS_LONGS: frozenset[str] = frozenset({
     "smart_load", "add_from_catalog", "clip_to_study_zone",
     "export_flood_map", "export_web_map", "export_temporal_map",
     "export_qfield", "export_grist",
+    # Vague E (2026-10-02) : 51 s mesures pour une maille de 50 m sur les
+    # 112 816 batiments d'Aix.
+    "densite_par_maille", "compter_par_zone",
 })
 
 # Lancees directement en arriere-plan, sans attendre le seuil : une recette
@@ -147,6 +150,33 @@ def lancement_direct(outil: str, arguments: dict | None) -> bool:
     return outil in ("execute_python", "run_processing") and delai >= _DELAI_DECLARE_LOURD_S
 
 
+def soumission_du_modele(outil: str, arguments: dict | None) -> tuple[str, dict]:
+    """Un `execute_async` emis par le modele, ramene a l'outil qu'il porte.
+
+    Constat live du 2026-10-02 : sur « traitement en arriere-plan », le modele
+    a appele `execute_async(code=…)` lui-meme. La tache a tourne, mais hors du
+    registre du hub : ni suivi, ni message de fin, ni garde « QGIS occupe ».
+    La tache de fond est l'affaire de l'agent : on rend l'outil reel, declare
+    lourd (delai d'au moins 5 min), qui part donc directement en
+    arriere-plan par le circuit commun. Tout autre outil est rendu tel quel.
+    """
+    if outil != "execute_async":
+        return outil, arguments or {}
+    args = dict(arguments or {})
+    if args.get("tool"):
+        return str(args["tool"]), dict(args.get("arguments") or {})
+    action = str(args.get("action") or "execute_python")
+    if action != "execute_python":
+        return action, dict(args.get("params") or {})
+    reel = {"code": args.get("code") or (args.get("params") or {}).get("code") or ""}
+    try:
+        delai = float(args.get("timeout") or 0)
+    except (TypeError, ValueError):
+        delai = 0
+    reel["timeout"] = max(delai, _DELAI_DECLARE_LOURD_S)
+    return "execute_python", reel
+
+
 # ── Libelles (francais courant, sans nom de fonction) ────────────────────────
 
 _LIBELLES = {
@@ -161,6 +191,8 @@ _LIBELLES = {
     "export_temporal_map": "Export de la carte temporelle",
     "export_qfield":       "Export pour QField",
     "export_grist":        "Export vers Grist",
+    "densite_par_maille":  "Calcul de la densité par maille",
+    "compter_par_zone":    "Comptage par zone",
 }
 
 
