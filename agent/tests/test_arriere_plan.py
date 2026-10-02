@@ -274,6 +274,22 @@ def test_au_dela_du_seuil_la_bascule_est_proposee_puis_automatique(agent):
     assert [a[0] for a in _Reseau.appels if a[0] not in ("execute_async", "poll_job")] == []
 
 
+def test_un_suivi_bloque_par_qgis_n_empeche_pas_la_proposition(agent, monkeypatch):
+    """Live du 2026-10-02 : un script PyQGIS occupe le fil principal de QGIS,
+    poll_job ne repond qu'a la fin ; la proposition n'arrivait jamais."""
+    async def _suivi_bloque(job_id):
+        await asyncio.sleep(30)
+        return dict(_FINI), []
+
+    monkeypatch.setattr(qa, "_suivre_tache", _suivi_bloque)
+    evts = _tour(agent, "calcule la densité", [_appel_outil("execute_python", _CODE)])
+    noms = _noms(evts)
+    assert noms.index("proposition") < noms.index("arriere_plan")
+    bascule = next(e for e in _taches_evts(evts) if e["tache"] == "arriere_plan")
+    assert bascule["automatique"] is True
+    assert len(_Reseau.envois) == 1
+
+
 def test_l_utilisateur_choisit_de_continuer_en_arriere_plan(agent, monkeypatch):
     monkeypatch.setenv("AGENT_BASCULE_AUTO_S", "60")
     _Reseau.suivis = [_EN_COURS]

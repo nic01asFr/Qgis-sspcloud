@@ -2995,6 +2995,8 @@ ne vient pas d'un outil cette session, la supprimer.
         arriere_plan.marquer_active(tache["id"])
         arriere_plan.ouvrir_attente(tache["id"])
         base = {"tache_id": tache["id"], "libelle": tache["libelle"]}
+        # Suivi en cours (poll_job), tourne a part : voir la boucle.
+        suivi: "asyncio.Future | None" = None
         try:
             yield {"tache": "soumise", **base}
             if arriere_plan.lancement_direct(fn_name, fn_args):
@@ -3013,11 +3015,27 @@ ne vient pas d'un outil cette session, la supprimer.
             echecs_suivi = 0
             seuil = arriere_plan.seuil_attente_s()
             delai_auto = arriere_plan.delai_bascule_auto_s()
+            # Le suivi tourne a part : un script PyQGIS occupe le fil principal
+            # de QGIS, et poll_job ne repond qu'a la fin (live du 2026-10-02 :
+            # aucune proposition a 45 s pour un calcul de 70 s). Le seuil, la
+            # bascule automatique et « Arreter » ne doivent pas l'attendre.
             while True:
-                etat, contenu = await _suivre_tache(job_id)
+                if suivi is None:
+                    suivi = asyncio.ensure_future(_suivre_tache(job_id))
+                await asyncio.wait({suivi}, timeout=arriere_plan.periode_suivi_s())
+                if suivi.done():
+                    try:
+                        etat, contenu = suivi.result()
+                    except Exception as exc:
+                        etat, contenu = {"suivi_impossible": str(exc) or type(exc).__name__}, []
+                    suivi = None
+                else:
+                    etat, contenu = {"suivi_en_attente": True}, []
                 maintenant = boucle.time()
                 ecoule = maintenant - debut
-                if "suivi_impossible" in etat:
+                if "suivi_en_attente" in etat:
+                    classe = arriere_plan.EN_COURS
+                elif "suivi_impossible" in etat:
                     echecs_suivi += 1
                     classe = arriere_plan.EN_COURS
                 else:
@@ -3119,9 +3137,12 @@ ne vient pas d'un outil cette session, la supprimer.
                 else:
                     yield {"tache": "progression", **base,
                            "ecoule_s": int(ecoule), "statut": classe}
-                await arriere_plan.patienter(tache["id"],
-                                             arriere_plan.periode_suivi_s())
+                if suivi is None:
+                    await arriere_plan.patienter(tache["id"],
+                                                 arriere_plan.periode_suivi_s())
         finally:
+            if suivi is not None and not suivi.done():
+                suivi.cancel()
             arriere_plan.fermer_attente(tache["id"])
 
     async def chat_stream(
