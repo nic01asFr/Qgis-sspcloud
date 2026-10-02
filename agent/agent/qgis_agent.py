@@ -71,6 +71,16 @@ _CONSIGNE_APPEL_ECRIT = (
     "réponds simplement à l'utilisateur en langage courant."
 )
 
+# Consigne de relance quand le modele DECRIT son action au lieu de la faire
+# (plan numerote, « je vais… », action entre crochets), sans aucun appel
+# d'outil. Production du 28 au 30/09 : « Voici mon plan : 1. … » puis arret,
+# l'utilisateur devait repondre « Ok », « continue », « alors ? ».
+_CONSIGNE_PLAN_NON_EXECUTE = (
+    "Tu as décrit ton plan sans l'exécuter : rien n'a été fait. Exécute-le "
+    "maintenant avec les outils, sans redemander ni réécrire le plan, puis "
+    "rends compte du résultat."
+)
+
 # Consignes posees en cours de conversation (relances, memo des actions,
 # boucle d'erreur, conclusion forcee) : la boucle les ecrit en messages
 # `system`, mais le gabarit de conversation de Qwen3.6 (chat_template.jinja
@@ -2825,6 +2835,11 @@ ne vient pas d'un outil cette session, la supprimer.
         relance_budget_faite = False
         # Une seule relance quand le modele ecrit un appel en texte (D1).
         relance_appel_ecrit_faite = False
+        # Une seule relance quand le modele decrit son plan sans agir. Le
+        # texte du plan reste affiche tant que la relance n'a pas agi : il
+        # n'est retire (`retirer_texte`) que si elle emet un appel d'outil.
+        relance_plan_faite = False
+        plan_a_retirer: str | None = None
         # Tous les outils du profil, exposes ou non : un appel ecrit en texte
         # vers un outil masque par les paquets est aussi un appel manque.
         noms_outils = noms_profil | {
@@ -3073,6 +3088,26 @@ ne vient pas d'un outil cette session, la supprimer.
             _flush_reasoning()
 
             final_finish_reason = finish_reason
+            # Iteration qui suit une relance « plan non execute » : si elle
+            # agit, le plan deja affiche disparait de la bulle et de la
+            # persistance ; le chat ne retire qu'un texte qui termine la
+            # bulle, on retire donc plan + texte de la relance, puis on
+            # reemet ce dernier.
+            if plan_a_retirer is not None:
+                if tool_call_data and plan_a_retirer:
+                    yield {"retirer_texte": plan_a_retirer + chunk_text}
+                    if chunk_text:
+                        yield chunk_text
+                    pos_plan = full_response.rfind(plan_a_retirer)
+                    if pos_plan >= 0:
+                        full_response = (full_response[:pos_plan]
+                                         + full_response[pos_plan + len(plan_a_retirer):])
+                    log.info("Plan non execute : la relance agit, plan retire "
+                             "(session=%s)", self.session_id)
+                elif not tool_call_data:
+                    log.warning("Plan non execute : la relance n'agit pas non plus "
+                                "(session=%s)", self.session_id)
+                plan_a_retirer = None
             # Pas de tool calls → fin du turn LLM.
             # NB : on n'utilise PAS finish_reason="stop" pour break car Gemma4
             # renvoie souvent "stop" même quand des tool_calls sont présents.
@@ -3107,6 +3142,26 @@ ne vient pas d'un outil cette session, la supprimer.
                     # Deuxieme echec : on sort, le garde-fou de fin de tour
                     # donnera un message clair a l'utilisateur.
                     break
+                # Plan DECRIT sans etre execute (production 28-30/09) : plan
+                # numerote, « je vais… », action entre crochets, alors que la
+                # demande appelle une action sans risque. Une relance par tour,
+                # seulement si aucun outil n'a tourne ; jamais pour une
+                # publication, une suppression, une recette lourde ni une
+                # vraie question de clarification (cf. regle 0).
+                motif_plan = (None if (relance_plan_faite or tool_calls_made or not tools)
+                              else texte_modele.plan_non_execute(chunk_brut, user_message))
+                if motif_plan:
+                    relance_plan_faite = True
+                    plan_a_retirer = chunk_text
+                    log.warning(
+                        "Plan decrit sans execution (%s, iter=%d, session=%s) : relance",
+                        motif_plan, iteration, self.session_id,
+                    )
+                    yield {"phase": "relance", "label": "Je passe à l'action…"}
+                    messages.append({"role": "assistant", "content": chunk_brut})
+                    messages.append({"role": "system",
+                                     "content": _CONSIGNE_PLAN_NON_EXECUTE})
+                    continue
                 # Budget du tour epuise par la reflexion, avant toute reponse.
                 #
                 # Les jetons de raisonnement comptent dans `max_tokens`. Un

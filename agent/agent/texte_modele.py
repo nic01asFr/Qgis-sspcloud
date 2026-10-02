@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 
 # ── Nettoyage du rendu de l'interface ───────────────────────────────────────
 
@@ -179,6 +180,139 @@ def appel_ecrit_en_texte(texte: str | None, noms_outils) -> str | None:
         m = re.search(motif, texte, re.MULTILINE)
         if m:
             return m.group(1)
+    return None
+
+
+# ── Plan decrit sans etre execute ───────────────────────────────────────────
+#
+# Production du 28 au 30/09 (28 tours) : le modele DECRIVAIT ce qu'il allait
+# faire au lieu de le faire, sans aucun appel d'outil :
+#   « Voici mon plan : 1. Lister les sources… 2. Charger… » puis arret ;
+#   « [Je lance d'abord la recherche de sources disponibles pour la TVB…] » ;
+#   « [Capture de la carte] », « [Code d'exécution] ».
+# L'utilisateur devait repondre « Ok », « continue », « alors ? », parfois
+# quatre fois. `plan_non_execute` reconnait ces reponses pour que la boucle
+# relance une fois le modele, comme pour un appel ecrit en texte (D1).
+
+
+def _normaliser(texte: str | None) -> str:
+    """Minuscules, sans accents, apostrophes droites, espaces simples."""
+    t = unicodedata.normalize("NFKD", texte or "")
+    t = "".join(c for c in t if not unicodedata.combining(c))
+    t = t.lower().replace("’", "'").replace("‘", "'")
+    return re.sub(r"\s+", " ", t).strip()
+
+
+# Intention future a la premiere personne, ou plan annonce. Les deux motifs
+# s'appliquent au texte normalise (minuscules, sans accents).
+_INTENTION = re.compile(
+    r"\b(?:voici (?:mon|le) plan|je vais|je lance|je commence par"
+    r"|je m'apprete a|je procede a)\b",
+)
+_PLAN_ANNONCE = re.compile(r"\b(?:voici (?:mon|le) plan|mon plan ?:)")
+# Une etape de liste numerotee : « 1. », « 2) », « **3.** ».
+_ETAPE_NUMEROTEE = re.compile(r"^[ \t>]*(?:\*\*)?\d{1,2}[.)](?:\*\*)?[ \t]+\S", re.MULTILINE)
+# Un segment entre crochets qui ouvre une ligne ou suit une fin de phrase,
+# et n'est pas un lien Markdown (`[texte](url)`) ni une case a cocher.
+_SEGMENT_CROCHETS = re.compile(
+    r"(?:^|(?<=[.!?:])[ \t]+)[ \t>*_-]*\[([^\[\]\n]{3,})\](?!\()", re.MULTILINE,
+)
+# Une question qui demande la permission d'agir n'est pas une clarification.
+_DEMANDE_D_ACCORD = re.compile(
+    r"(?:veux|voulez|souhaites|souhaitez)[- ](?:tu|vous)\s+(?:que\s+je|ajuster|valider"
+    r"|que\s+l'on|qu'on)|je\s+(?:lance|continue|commence|procede|m'y\s+mets)\s*\?"
+    r"|on\s+y\s+va|ou\s+je\s+lance|c'est\s+bon\s+pour\s+(?:toi|vous)"
+    r"|(?:tu\s+es|vous\s+etes)\s+d'accord|je\s+peux\s+(?:lancer|y\s+aller|commencer)",
+)
+
+# Demande qui appelle une action (apres normalisation : sans accents).
+_VERBES_ACTION = re.compile(
+    r"\b(?:affich|charg|decoup|clip|calcul|lanc|execut|fai[st]\b|fair|cre[ea]|ajout"
+    r"|montr|cartograph|analys|trac|export|telecharg|recherch|cherch|trouv|defini"
+    r"|import|styl|colori|zoom|centr|superpos|compt|mesur|extrai|filtr|selectionn"
+    r"|gener|produi|prepar|met[s]?\b|mettre|refai|relanc|continu|recharg|activ"
+    r"|appliqu|construi|dessin|visualis|recupere|ouvr|isol|croise|intersect"
+    r"|traite|traitement)",
+)
+# Relance d'un tour precedent : « Ok », « continue », « alors ? ».
+_ACQUIESCEMENT = re.compile(
+    r"^(?:ok|okay|oui|ouais|vas[- ]y|go|d'accord|daccord|alors|continue|lance"
+    r"|parfait|super|valide|c'est bon|allez|et alors|on y va|fais[- ]le)\b",
+)
+# Question de connaissance : on y repond, sans outil.
+_QUESTION_CONNAISSANCE = re.compile(
+    r"^(?:c'est quoi|qu'est[- ]ce|comment\b|pourquoi|que (?:signifie|veut dire)"
+    r"|quelle? (?:est|sont) la difference|explique|definis|definition|a quoi sert"
+    r"|quel(?:le)?s? (?:est|sont) (?:le|la|les) (?:role|interet|principe))",
+)
+# Actions a risque (regle 0 des essentiels) : le plan et la confirmation y
+# sont VOULUS, on ne relance jamais.
+_ACTION_A_RISQUE = re.compile(
+    r"\b(?:publi|partag|diffus|audience|supprim|effac|ecras|detrui|vider\b"
+    r"|run_recipe|recette|geoai|detection|segmentation|inference"
+    r"|t10\b|t100\b|t1000\b|scenario\s+(?:t|centennal|millennal|extreme))",
+)
+
+
+def demande_appelle_une_action(demande: str | None) -> bool:
+    """Vrai si l'utilisateur demande d'agir (et non une explication)."""
+    t = _normaliser(demande)
+    if not t:
+        return False
+    if _QUESTION_CONNAISSANCE.match(t):
+        return False
+    return bool(_ACQUIESCEMENT.match(t) or _VERBES_ACTION.search(t))
+
+
+def action_a_risque(*textes: str | None) -> bool:
+    """Vrai si une publication, une suppression, une recette lourde ou un
+    parametre metier sensible est en jeu dans l'un des textes."""
+    return any(_ACTION_A_RISQUE.search(_normaliser(t)) for t in textes if t)
+
+
+def _actions_entre_crochets(texte: str) -> list[str]:
+    """Segments « [Je lance…] » qui decrivent une action (deux mots au moins)."""
+    out = []
+    for m in _SEGMENT_CROCHETS.finditer(texte):
+        interieur = m.group(1).strip()
+        if len(interieur.split()) >= 2:
+            out.append(interieur)
+    return out
+
+
+def _question_de_clarification(texte: str) -> bool:
+    """Une seule question explicite, qui ne demande pas la permission d'agir."""
+    if texte.count("?") != 1:
+        return False
+    return not _DEMANDE_D_ACCORD.search(_normaliser(texte))
+
+
+def plan_non_execute(texte: str | None, demande: str | None) -> str | None:
+    """Motif de relance si le modele a decrit son action sans la faire.
+
+    A appeler sur la reponse d'un tour qui n'a emis AUCUN appel d'outil.
+    Rend « plan numerote », « action entre crochets » ou « intention », ou
+    None quand il ne faut pas relancer :
+    - la demande n'appelle pas d'action (question de connaissance) ;
+    - une action a risque est en jeu (publication, suppression ou
+      ecrasement, recette lourde, GeoAI, parametre metier) : le plan et la
+      confirmation y sont voulus par la regle 0 ;
+    - la reponse est une vraie question de clarification (une seule
+      question, sans plan numerote ni action entre crochets).
+    """
+    if not texte or not texte.strip():
+        return None
+    if not demande_appelle_une_action(demande):
+        return None
+    if action_a_risque(demande, texte):
+        return None
+    t = _normaliser(texte)
+    if len(_ETAPE_NUMEROTEE.findall(texte)) >= 2 or _PLAN_ANNONCE.search(t):
+        return "plan numerote"
+    if _actions_entre_crochets(texte):
+        return "action entre crochets"
+    if _INTENTION.search(t) and not _question_de_clarification(texte):
+        return "intention"
     return None
 
 
