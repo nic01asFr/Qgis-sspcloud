@@ -51,6 +51,17 @@ _ARTIFACT_MUTATING_TOOLS: frozenset[str] = native_tools_v2.NATIVE_TOOLS_V2_MUTAT
 # ── Config SSPCloud LLM ────────────────────────────────────────────────────────
 _LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://llm.lab.sspcloud.fr/api")
 
+# Budget de sortie d'un appel au modele, raisonnement compris.
+#
+# Mesure en production (28-30/09) : 7 tours sur 37 ont epuise le plafond de
+# 4 096 jetons a reflechir, sans appeler d'outil ni ecrire un mot ; mesure
+# directe : pour « 17 fois 23 », 400 jetons de reflexion et aucune reponse.
+_MAX_TOKENS_TOUR = int(os.getenv("AGENT_MAX_TOKENS", "12288"))
+# Desactive le raisonnement de qwen3 pour un appel (accepte par la
+# passerelle, verifie le 2026-10-02 : « 391 » en 0,2 s et 4 jetons au lieu
+# d'un budget epuise). Sert aux appels qui n'ont qu'a rediger ou agir.
+_SANS_REFLEXION = {"chat_template_kwargs": {"enable_thinking": False}}
+
 # Silence maximal tolere du modele pendant qu'il stream, en secondes.
 #
 # Le read timeout de httpx ne protege pas de ce cas : il se rearme au moindre
@@ -2917,6 +2928,9 @@ ne vient pas d'un outil cette session, la supprimer.
         # Une seule relance quand la reflexion epuise le budget du tour : au
         # dela, on previent l'utilisateur plutot que de le faire attendre encore.
         relance_budget_faite = False
+        # Apres un budget epuise par la reflexion, l'appel suivant se fait
+        # sans raisonnement : relancer avec la meme reflexion la reepuiserait.
+        couper_reflexion = False
         # Une seule relance quand le modele ecrit un appel en texte (D1).
         relance_appel_ecrit_faite = False
         # Une seule relance quand le modele decrit son plan sans agir. Le
@@ -2960,8 +2974,11 @@ ne vient pas d'un outil cette session, la supprimer.
                 "model":      model,
                 "messages":   _messages_pour_le_gabarit(messages),
                 "stream":     True,
-                "max_tokens": 4096,
+                "max_tokens": _MAX_TOKENS_TOUR,
             }
+            if couper_reflexion:
+                payload.update(_SANS_REFLEXION)
+                couper_reflexion = False
             if tools:
                 payload["tools"] = tools
                 # Laisser le modèle décider : auto sur 1ère itération,
@@ -3258,6 +3275,7 @@ ne vient pas d'un outil cette session, la supprimer.
                 if (not chunk_text.strip() and final_finish_reason == "length"
                         and not relance_budget_faite):
                     relance_budget_faite = True
+                    couper_reflexion = True
                     log.warning(
                         "Budget epuise par la reflexion (iter=%d, session=%s) : relance",
                         iteration, self.session_id,
@@ -3300,6 +3318,7 @@ ne vient pas d'un outil cette session, la supprimer.
                                         "messages": _messages_pour_le_gabarit(messages),
                                         "stream": True,
                                         "max_tokens": 600,
+                                        **_SANS_REFLEXION,
                                     },
                                     headers={
                                         "Authorization": f"Bearer {_llm_api_key()}",
@@ -3872,6 +3891,7 @@ ne vient pas d'un outil cette session, la supprimer.
                             "messages": _messages_pour_le_gabarit(messages),
                             "stream": True,
                             "max_tokens": 1024,
+                            **_SANS_REFLEXION,
                         },
                         headers={
                             "Authorization": f"Bearer {_llm_api_key()}",
