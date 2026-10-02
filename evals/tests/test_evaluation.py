@@ -266,18 +266,56 @@ _PLAN_PRODUCTION = ("Voici mon plan :\n1. Lister les sources disponibles\n"
                     "Tu veux ajuster un paramètre, ou je lance avec ces défauts ?")
 
 
+_CHARGEMENTS_C7 = [
+    AppelOutil("set_study_zone", {"target": "Rousset"}, resultat='{"success": true}'),
+    AppelOutil("smart_load", {"source": "bdtopo_cours_eau"},
+               resultat='{"success": true, "feature_count": 214}'),
+    AppelOutil("smart_load", {"source": "bdtopo_batiments"},
+               resultat='{"success": true, "feature_count": 5120}'),
+    AppelOutil("smart_load", {"source": "bdtopo_troncons_routes"},
+               resultat='{"success": true, "feature_count": 1873}')]
+
+_ETAT_C7 = (("cours_eau_rousset", 214), ("routes_rousset", 1873),
+            ("densite_batiment_rousset_200m", 512))
+
+
 def test_c7_agir_des_le_premier_tour_reussit():
     s = _scenario("C7-agir-tvb-rousset")
-    appels = [AppelOutil("set_study_zone", {"target": "Rousset"}, resultat='{"success": true}'),
-              AppelOutil("smart_load", {"source": "bdtopo_cours_eau"},
-                         resultat='{"success": true, "feature_count": 214}'),
-              AppelOutil("smart_load", {"source": "bdtopo_troncons_routes"},
-                         resultat='{"success": true, "feature_count": 1873}')]
-    ok = _tour(s.messages()[0], "J'ai pris les cours d'eau et les routes de la BD TOPO : "
-                                "214 cours d'eau et 1873 tronçons sont affichés sur Rousset.", appels, 4)
-    etat = _etat_rousset(("cours_eau_rousset", 214), ("routes_rousset", 1873))
-    r = evaluer(s, _execution(s.id, [ok], etat), BLANCHE)
+    appels = _CHARGEMENTS_C7 + [
+        AppelOutil("densite_par_maille", {"layer": "batiment_rousset"},
+                   resultat='{"success": true, "verification": {"mailles": 512, '
+                            '"taille_maille_m": 200, "total_compte": 5120}}')]
+    ok = _tour(s.messages()[0], "J'ai pris les cours d'eau, le bâti et les routes de la "
+                                "BD TOPO : 214 cours d'eau et 1873 tronçons sont affichés "
+                                "sur Rousset, avec la densité bâtie en mailles de 200 m.",
+               appels, 5)
+    r = evaluer(s, _execution(s.id, [ok], _etat_rousset(*_ETAT_C7)), BLANCHE)
     assert r.reussi, [c for c in r.criteres if not c.ok]
+
+
+def test_c7_densite_ecrite_en_pyqgis_echoue():
+    """Constat live du 2026-10-02 : trois execute_python pour la densite,
+    le dernier au-dela de 12 minutes, et aucun appel a l'outil dedie."""
+    s = _scenario("C7-agir-tvb-rousset")
+    boucle = [AppelOutil("execute_python", {"code": "for f in bati.getFeatures():"},
+                         resultat='{"success": true}') for _ in range(3)]
+    tour = _tour(s.messages()[0], "Les trames vertes et bleues, le bâti et les routes "
+                                  "sont affichés sur Rousset.", _CHARGEMENTS_C7 + boucle, 8)
+    etat = _etat_rousset(("cours_eau_rousset", 214), ("routes_rousset", 1873),
+                         ("grille_bati", 512))
+    echecs = _echecs(evaluer(s, _execution(s.id, [tour], etat), BLANCHE))
+    assert "trajectoire.attendu[un de (densite_par_maille | compter_par_zone)]" in echecs
+    assert "trajectoire.max_execute_python" in echecs
+
+
+def test_c7_le_nom_de_l_outil_ne_sort_pas_dans_la_reponse():
+    s = _scenario("C7-agir-tvb-rousset")
+    appels = _CHARGEMENTS_C7 + [AppelOutil("densite_par_maille", {"layer": "batiment_rousset"},
+                                           resultat='{"success": true}')]
+    tour = _tour(s.messages()[0], "J'ai lancé densite_par_maille sur le bâti de Rousset.",
+                 appels, 5)
+    r = evaluer(s, _execution(s.id, [tour], _etat_rousset(*_ETAT_C7)), BLANCHE)
+    assert _echecs(r) == {"reponse.mots_interdits"}
 
 
 @pytest.mark.parametrize("reponse", [
