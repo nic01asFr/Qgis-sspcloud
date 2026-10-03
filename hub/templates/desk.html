@@ -253,6 +253,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#1b1b35;
   border-radius:3px;cursor:pointer;font-family:inherit;font-weight:500}
 .study-dropdown .new-form button:hover{
   filter:brightness(1.1)}
+.study-dropdown .new-form button:disabled{opacity:.7;cursor:progress;filter:none}
 
 .desk-header .spacer{flex:1}
 .desk-header .user-chip{font-size:11.5px;color:var(--qs-discret);
@@ -5713,5 +5714,22 @@ setInterval(refreshGpuChip, 20000);
 
 <!-- Chantier G4-b-3d : bouton « Publier » sur event SSE recipe_done -->
 <script src="/static/recipe_stream.js" defer></script>
+<script>
+// Creation d'etude ou de projet : un seul envoi (2026-10-03). Le serveur met
+// plusieurs secondes a repondre (creation puis ouverture dans QGIS) ; sans
+// retour visible, un second clic creait un second projet identique.
+document.querySelectorAll('.study-dropdown .new-form').forEach(function (form) {
+  form.addEventListener('submit', function (e) {
+    if (form.dataset.envoye) { e.preventDefault(); return; }
+    form.dataset.envoye = '1';
+    var bouton = form.querySelector('button[type="submit"]');
+    if (bouton) {
+      bouton.disabled = true;
+      bouton.setAttribute('aria-busy', 'true');
+      bouton.textContent = 'Création…';
+    }
+  });
+});
+</script>
 </body>
 </html>
