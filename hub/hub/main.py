@@ -13364,12 +13364,40 @@ async def _auto_activate_active_study_after_wake(owner: str):
         active_sid = await studies.get_active_study_id(owner)
         if not active_sid:
             return
-        log.info("Auto-activate étude %s après wake (background)", active_sid)
-        await _execute_python_in_workspace(
-            owner, studies.activate_pod_code(active_sid), timeout=60,
-        )
+        active_pid = await studies.get_active_project_id(owner)
+        # Vecu le 2026-10-03 : ce hook part a CHAQUE POST /sessions, donc a
+        # chaque /workspace/wake -- et toute ouverture de projet en declenche
+        # un. Il rechargeait l'ETUDE (projet legacy, 20 couches) par-dessus le
+        # projet qu'on venait d'ouvrir, et occupait QGIS 30 a 40 s.
+        # Desormais : rien si QGIS a deja l'etude ET le projet actifs ; sinon
+        # le projet actif, par l'activation atomique (tampon hub_sid/hub_pid).
+        etat = await _attendre_qgis(owner, _DELAI_REVEIL_QGIS_S)
+        if etat is not None and etat.get("sid") == active_sid and (
+                not active_pid or etat.get("pid") == active_pid):
+            log.debug("Auto-activate post-wake : %s/%s deja charge", active_sid, active_pid)
+            return
+        etude = await studies.get_study(active_sid, owner)
+        if not etude:
+            return
+        log.info("Auto-activate etude %s, projet %s apres wake (background)",
+                 active_sid, active_pid)
+        await _activer_etude_atomique(owner, etude, active_pid)
     except Exception as exc:
         log.warning("Auto-activate post-wake : %s", exc)
+
+
+# Un pod qui demarre met jusqu'a 2 min avant que QGIS reponde.
+_DELAI_REVEIL_QGIS_S = 120
+
+
+async def _attendre_qgis(owner: str, delai_s: float) -> dict | None:
+    """Etat de QGIS des qu'il repond, ou None apres `delai_s`."""
+    fin = time.monotonic() + delai_s
+    while True:
+        etat = await activation_etude.sonder_qgis(_sonde_qgis_executeur, owner)
+        if etat is not None or time.monotonic() >= fin:
+            return etat
+        await asyncio.sleep(5)
 
 
 @app.post("/workspace/wake")
