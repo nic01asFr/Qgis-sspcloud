@@ -428,3 +428,24 @@ async def test_au_reveil_un_qgis_muet_n_est_pas_force(banc, monkeypatch):
     await hub_main._auto_activate_active_study_after_wake("u")
     assert [c for c in qgis.codes if c != "SONDE"] == []
     assert ae.en_attente("u")["pid"] == "p1", "l'ouverture est mise en attente"
+
+
+@pytest.mark.asyncio
+async def test_au_reveil_le_projet_actif_est_lu_apres_l_attente(banc, monkeypatch):
+    """Un projet ouvert pendant que le reveil attendait QGIS n'est pas remplace
+    par l'ancien (vecu le 2026-10-03 : aller-retour sur le projet precedent)."""
+    base, qgis = banc
+    base.sid, base.pid = "s1", "p-ancien"
+    base.projets["s1-ancien"] = {"pid": "p-ancien", "sid": "s1"}
+    base.projets["s1-nouveau"] = {"pid": "p-nouveau", "sid": "s1"}
+
+    async def _attendre(owner, delai):
+        # Pendant l'attente, l'utilisateur ouvre un nouveau projet.
+        base.pid = "p-nouveau"
+        qgis.ouvert = ("s1", "p-nouveau")
+        return {"sid": "s1", "pid": "p-nouveau", "fichier": "", "n_couches": 0}
+
+    monkeypatch.setattr(hub_main, "_attendre_qgis", _attendre)
+    await hub_main._auto_activate_active_study_after_wake("u")
+    assert [c for c in qgis.codes if c != "SONDE"] == []
+    assert qgis.ouvert == ("s1", "p-nouveau")
