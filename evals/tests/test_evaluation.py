@@ -65,7 +65,7 @@ def test_s1_incident_du_2026_09_24_echoue_sur_tous_les_axes(etat_incident_s1):
     assert attendus <= echecs, echecs
     assert any(n.startswith("trajectoire.interdit[execute_python") for n in echecs)
     # Ce qui a bien ete fait reste credite.
-    assert "trajectoire.attendu[set_study_zone]" not in echecs
+    assert "trajectoire.attendu[un de (set_study_zone | charger_sur_commune)]" not in echecs
 
 
 def test_s1_sans_etat_lu(etat_aix_reussi):
@@ -114,7 +114,58 @@ def test_s2_sans_clip_dans_la_trajectoire(etat_aix_reussi):
     appels = [AppelOutil("set_study_zone", {"target": "Aix"}), AppelOutil("smart_load", {"id": "x"})]
     r = evaluer(s, _execution(s.id, [_tour(s.messages()[0], "Chargé dans la commune.", appels)], etat_aix_reussi),
                 BLANCHE)
-    assert any(n.startswith("trajectoire.attendu[un de (clip_to_study_zone") for n in _echecs(r))
+    assert any(n.startswith("trajectoire.attendu[un de (charger_sur_commune | clip_to_study_zone")
+               for n in _echecs(r))
+
+
+def test_s2_charger_sur_commune_seul_reussit(etat_aix_reussi):
+    s = _scenario("S2-bati-aix-perimetre-communal")
+    appels = [AppelOutil("charger_sur_commune", {"id": "bdtopo_batiments", "commune": "Aix-en-Provence"},
+                         resultat='{"verification": {"feature_count": 68412}}')]
+    tour = _tour(s.messages()[0], "68 412 bâtiments dans le périmètre de la commune.", appels)
+    r = evaluer(s, _execution(s.id, [tour], etat_aix_reussi), BLANCHE)
+    assert r.reussi, _echecs(r)
+
+
+# ── S7 : le rendu en un appel (essai du 2026-10-03) ────────────────────────
+
+def _etat_s7(etat_aix_reussi):
+    etat = copy.deepcopy(etat_aix_reussi)
+    etat["couches"].append({"id": "c3", "nom": "Orthophotos IGN (WMTS)", "valide": True,
+                            "crs": "EPSG:3857", "fournisseur": "wms", "memoire": False,
+                            "source_type": "service", "type": "raster", "nombre_entites": None,
+                            "emprise_4326": None})
+    return etat
+
+
+def test_s7_un_appel_reussit(etat_aix_reussi):
+    s = _scenario("S7-bati-aix-un-appel")
+    appels = [AppelOutil("charger_sur_commune", {"id": "bdtopo_batiments", "commune": "Aix-en-Provence"},
+                         resultat='{"verification": {"feature_count": 68412}}')]
+    tour = _tour(s.messages()[0], "68 412 bâtiments dans la commune.", appels)
+    r = evaluer(s, _execution(s.id, [tour], _etat_s7(etat_aix_reussi)), BLANCHE)
+    assert r.reussi, _echecs(r)
+
+
+def test_s7_l_ancien_chemin_en_sept_etapes_echoue(etat_aix_reussi):
+    """Troisieme passage de l'essai : le bon chiffre, mais ni contour ni
+    fond, et un style gris que personne n'avait demande."""
+    s = _scenario("S7-bati-aix-un-appel")
+    etat = copy.deepcopy(etat_aix_reussi)
+    etat["couches"] = [c for c in etat["couches"] if c["nom"] != "commune_aix_en_provence"]
+    appels = [AppelOutil("execute_python", {"code": "result = helpers.get_study_zone()"}),
+              AppelOutil("set_study_zone", {"target": "Aix-en-Provence"}),
+              AppelOutil("list_datasources", {"search": "bati"}),
+              AppelOutil("smart_load", {"id": "bdtopo_batiments"}),
+              AppelOutil("clip_to_study_zone", {"layer_id": "l1"}),
+              AppelOutil("set_layer_style", {"layer_id": "l2", "color": "#888888"}),
+              AppelOutil("remove_layer", {"layer_id": "l1"})]
+    tour = _tour(s.messages()[0], "68 412 bâtiments dans la commune.", appels, iterations=7)
+    echecs = _echecs(evaluer(s, _execution(s.id, [tour], etat), BLANCHE))
+    assert {"trajectoire.attendu[charger_sur_commune]", "trajectoire.interdit[smart_load]",
+            "trajectoire.interdit[clip_to_study_zone]", "trajectoire.interdit[set_layer_style]",
+            "etat.couche[^commune].presente", "etat.couche[ortho].presente",
+            "cout.iterations_max"} <= echecs, echecs
 
 
 def _tour_s4(reponse: str) -> Tour:

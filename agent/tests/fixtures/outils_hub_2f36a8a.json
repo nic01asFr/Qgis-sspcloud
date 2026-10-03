@@ -731,6 +731,37 @@
   }
  },
  {
+  "name": "charger_sur_commune",
+  "description": "Le reflexe pour « charge / affiche <donnees> sur <commune> » : en UN appel, la zone d'etude (si commune donnee), le chargement du catalogue, le decoupage au contour administratif, le retrait de la couche rectangle intermediaire, le contour de la commune SEULE (trait, sans remplissage), le fond orthophoto IGN et le cadrage sur la commune. Aucun style thematique ni analyse : propose-les ensuite, ne les lance pas d'office. Le retour porte la couche produite, le contour, le fond et le bloc `verification` du decoupage (chiffre communal). Pour un raster, ou une zone sans contour, le chargement est garde tel quel et le retour dit pourquoi il n'est pas decoupe.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "id": {
+     "type": "string",
+     "description": "ID catalogue des donnees (ex. 'bdtopo_batiments', 'bdtopo_routes'). list_datasources pour les trouver."
+    },
+    "commune": {
+     "type": "string",
+     "description": "Nom de la commune (ou arrondissement). Facultatif si la zone d'etude est deja la bonne.",
+     "default": ""
+    },
+    "fond": {
+     "type": "boolean",
+     "description": "Ajouter le fond de plan (defaut : oui, une seule fois, sous les couches)",
+     "default": true
+    },
+    "fond_id": {
+     "type": "string",
+     "description": "ID catalogue du fond (defaut : ign_ortho_wmts, orthophoto IGN)",
+     "default": ""
+    }
+   },
+   "required": [
+    "id"
+   ]
+  }
+ },
+ {
   "name": "densite_par_maille",
   "description": "Densite d'une couche par maille carree, en quelques secondes par algorithmes natifs (native:creategrid + native:countpointsinpolygon sur les centroides, index spatial) : pour toute densite, grille ou carroyage, JAMAIS une boucle PyQGIS. Couche designee par layer_id ou nom exact (layer). Maille en metres (taille_m, defaut 200), calcul en projection metrique. Emprise : contour de la zone d'etude s'il est connu, sinon son rectangle. Mesure : nombre d'entites (defaut, avec densite_km2), surface (m2) ou part_surface (% de la maille), ces deux-la pour des polygones. Sortie : GeoPackage de l'etude, style gradue applique. Le retour porte un bloc `verification` (mailles, total compte = total dans l'emprise, mailles vides, min/max/mediane, `lecture`).",
   "inputSchema": {

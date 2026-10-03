@@ -1,0 +1,47 @@
+# Essai du 2026-10-03 sur nic01asfr, meme demande trois fois : deux passages
+# par charger_sur_commune (un message, ~30 s), un par smart_load puis
+# clip_to_study_zone (7 etapes, 1 min 11 s, ni contour ni fond, style gris
+# non demande). Ce scenario mesure le taux du chemin en un appel.
+id: S7-bati-aix-un-appel
+famille: fidelite_territoriale
+titre: « Charge les bâtiments d'Aix-en-Provence » en un appel
+source: essai du 2026-10-03 (QgisRemoteMCP #10 a #13)
+description: >
+  Demande directe sur une commune. Attendu : charger_sur_commune, qui rend
+  le bati decoupe au contour, la commune seule, le fond orthophoto et le
+  cadrage ; ni chargement sur rectangle, ni decoupage separe, ni style
+  thematique d'office.
+preconditions:
+  vider_projet: true
+tours:
+  - message: Charge les bâtiments d'Aix-en-Provence
+attentes:
+  trajectoire:
+    outils_attendus:
+      - charger_sur_commune
+    outils_interdits:
+      - smart_load
+      - add_from_catalog
+      - clip_to_study_zone
+      - set_layer_style
+    max_erreurs_outils: 1
+  etat:
+    zone:
+      nom_contient: Aix
+    couches:
+      - motif: "^commune"
+        nombre_entites: {min: 1, max: 1}
+        emprise_dans: [5.20, 43.40, 5.60, 43.70]
+      - motif: "b[aâ]ti"
+        nombre_entites: {min: 5000, max: 200000}
+        emprise_dans: [5.20, 43.40, 5.60, 43.70]
+        hors_zone_max: 0
+        reference_hors_zone: contour
+        contour_motif: "^commune"
+      - motif: "ortho"
+        presente: true
+  reponse:
+    chiffres_tracables: true
+  cout:
+    iterations_max: 4
+    duree_max_s: 180

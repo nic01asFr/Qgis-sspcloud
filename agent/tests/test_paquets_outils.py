@@ -47,9 +47,9 @@ _FIXTURE = _ROOT / "tests" / "fixtures" / "outils_hub_2f36a8a.json"
 
 
 def outils_reels() -> list[dict]:
-    """Les 92 outils du profil standard, au format envoye au modele (les 90
+    """Les 93 outils du profil standard, au format envoye au modele (les 90
     mesures en live le 2026-09-26, plus densite_par_maille et
-    compter_par_zone, 2026-10-02)."""
+    compter_par_zone, 2026-10-02, et charger_sur_commune, 2026-10-03)."""
     hub = json.loads(_FIXTURE.read_text(encoding="utf-8"))
     return ([qa._mcp_tool_to_openai(t) for t in hub]
             + list(qa._NATIVE_MEMORY_TOOLS) + list(qa._NATIVE_RECIPE_TOOLS)
@@ -69,7 +69,7 @@ def _exposes(message: str, **etat) -> list[dict]:
 
 def test_la_liste_complete_est_celle_mesuree_en_live() -> None:
     complets = outils_reels()
-    assert len(complets) == 92
+    assert len(complets) == 93
     # 19 300 mesures en live le 2026-09-26 (90 outils) : l'estimateur tombe
     # juste. Le paquet analyse (2026-10-02) y ajoute ~940 jetons.
     assert 19_400 <= cb.estimer_tokens_outils(complets) <= 21_000
@@ -95,7 +95,7 @@ def test_un_outil_n_est_que_dans_un_paquet() -> None:
 # ── Selection par intention ──────────────────────────────────────────────────
 
 SOCLE_ATTENDU = ("set_study_zone", "list_datasources", "smart_load",
-                 "add_from_catalog", "clip_to_study_zone", "get_project_info",
+                 "charger_sur_commune", "clip_to_study_zone", "get_project_info",
                  "get_features", "set_layer_style", "run_processing",
                  "execute_python", "memory_search", "restart_qgis_engine",
                  po.OUTIL_DEMANDER)
@@ -299,7 +299,7 @@ def test_l_interrupteur_rend_la_liste_complete(monkeypatch) -> None:
     monkeypatch.setenv("AGENT_OUTILS_PAR_PAQUETS", "0")
     agent = _agent_hors_ligne("standard", None)
     # Toute la liste, hors outils masques (execute_async).
-    assert len(_run(agent._outils_exposes(set()))) == 92 - len(po.OUTILS_MASQUES)
+    assert len(_run(agent._outils_exposes(set()))) == 93 - len(po.OUTILS_MASQUES)
 
 
 # ── Filet dans la vraie boucle chat_stream ──────────────────────────────────
@@ -381,7 +381,7 @@ def _reponse_texte(texte: str) -> list[str]:
 
 @pytest.fixture()
 def boucle(monkeypatch):
-    """Agent standard avec les 92 outils reels, modele et hub simules."""
+    """Agent standard avec les 93 outils reels, modele et hub simules."""
     appels: list[str] = []
     chargements = {"n": 0}
 
@@ -444,7 +444,7 @@ def test_le_premier_appel_n_envoie_que_le_socle(boucle) -> None:
     assert po.OUTIL_DEMANDER in envoyes and "smart_load" in envoyes
     assert "create_component" not in envoyes
     r = boucle.dernier_releve_contexte
-    assert r["n_outils_profil"] == 92 and r["outils_profil"] > 18_000
+    assert r["n_outils_profil"] == 93 and r["outils_profil"] > 18_000
     assert r["outils"] <= 4_500
 
 
