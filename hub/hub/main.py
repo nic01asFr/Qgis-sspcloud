@@ -13361,10 +13361,8 @@ async def _auto_activate_active_study_after_wake(owner: str):
     if not _STUDIES_AVAILABLE:
         return
     try:
-        active_sid = await studies.get_active_study_id(owner)
-        if not active_sid:
+        if not await studies.get_active_study_id(owner):
             return
-        active_pid = await studies.get_active_project_id(owner)
         # Vecu le 2026-10-03 : ce hook part a CHAQUE POST /sessions, donc a
         # chaque /workspace/wake -- et toute ouverture de projet en declenche
         # un. Il rechargeait l'ETUDE (projet legacy, 20 couches) par-dessus le
@@ -13372,6 +13370,13 @@ async def _auto_activate_active_study_after_wake(owner: str):
         # Desormais : rien si QGIS a deja l'etude ET le projet actifs ; sinon
         # le projet actif, par l'activation atomique (tampon hub_sid/hub_pid).
         etat = await _attendre_qgis(owner, _DELAI_REVEIL_QGIS_S)
+        # Etude et projet actifs relus APRES l'attente (jusqu'a 2 min) : lus
+        # avant, un projet ouvert entre-temps etait remplace par l'ancien
+        # (vecu le 2026-10-03, aller-retour de 4 s sur le projet precedent).
+        active_sid = await studies.get_active_study_id(owner)
+        if not active_sid:
+            return
+        active_pid = await studies.get_active_project_id(owner)
         if etat is not None and etat.get("sid") == active_sid and (
                 not active_pid or etat.get("pid") == active_pid):
             log.debug("Auto-activate post-wake : %s/%s deja charge", active_sid, active_pid)
