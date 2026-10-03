@@ -38,7 +38,17 @@ studies._DB_PATH = Path(_TMP_DIR) / "studies.db"
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Un test precedent qui passe par asyncio.run() laisse le fil principal
+    # sans boucle courante : get_event_loop() leve alors (CI du 2026-10-03,
+    # 12 erreurs a la preparation selon l'ordre des tests).
+    try:
+        boucle = asyncio.get_event_loop()
+        if boucle.is_closed():
+            raise RuntimeError("boucle fermee")
+    except RuntimeError:
+        boucle = asyncio.new_event_loop()
+        asyncio.set_event_loop(boucle)
+    return boucle.run_until_complete(coro)
 
 
 @pytest.fixture(autouse=True)
