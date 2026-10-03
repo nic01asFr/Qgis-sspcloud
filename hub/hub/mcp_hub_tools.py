@@ -599,7 +599,8 @@ async def study_project_create_handler(
     await studies.touch_project(new_pid)
     try:
         await execute_python_in_workspace_fn(
-            username, studies.activate_project_pod_code(sid, new_pid),
+            # Nouveau projet secondaire : jamais le projet d'etude legacy.
+            username, studies.activate_project_pod_code(sid, new_pid, migrer_ancien=False),
         )
     except Exception as exc:
         log.warning("study_project_create: activate pod %s : %s", new_pid, exc)

@@ -78,6 +78,10 @@ def test_lecture_de_l_etat_qgis():
     (("s1", "p1"), {"sid": "s0", "pid": "p0"}, None, (), ("desaccord", "resynchroniser")),
     (("s1", "p1"), {"sid": "s1", "pid": "p2"}, None, (), ("desaccord", "resynchroniser")),
     (("s1", "p1"), {"sid": "", "pid": ""}, None, (), ("non_marque", "aucune")),
+    # Projet d'etude (legacy) ouvert, la base designe un projet : desaccord
+    # (2026-10-03, « nouveau projet » reste sur le principal sans resync).
+    (("s1", "p1"), {"sid": "s1", "pid": ""}, None, (), ("desaccord", "resynchroniser")),
+    (("s1", None), {"sid": "s1", "pid": ""}, None, (), ("accord", "aucune")),
     (("s1", "p1"), None, None, (), ("inconnu", "aucune")),
     (("s1", "p1"), {"sid": "s9", "pid": "p9"}, None, ("s9",), ("desaccord_session_mcp", "aucune")),
     (("s0", "p0"), None, {"sid": "s1", "pid": "p1"}, (), ("en_attente", "patienter")),
@@ -145,8 +149,11 @@ class _Base:
     def activate_pod_code(sid):
         return f"ACTIVATE_STUDY {sid}"
 
+    migrations: list = []
+
     @staticmethod
-    def activate_project_pod_code(sid, pid):
+    def activate_project_pod_code(sid, pid, migrer_ancien=True):
+        _Base.migrations.append((pid, migrer_ancien))
         return f"ACTIVATE_PROJECT {sid} {pid}"
 
 
@@ -190,6 +197,12 @@ def banc(monkeypatch):
         return True
 
     monkeypatch.setattr(ae, "workspace_pret", _pret)
+
+    async def _aucun_calcul(username):
+        return False
+
+    monkeypatch.setattr(hub_main, "_calcul_en_cours", _aucun_calcul)
+    _Base.migrations.clear()
     # charger_dans_qgis importe `hub.studies` : on lui sert la meme base.
     import hub as _paquet
     monkeypatch.setitem(sys.modules, "hub.studies", base)
@@ -212,7 +225,9 @@ async def test_qgis_occupe_l_etude_active_ne_change_pas(banc):
     assert (base.sid, base.pid) == ("s0", "p0")
     assert ae.en_attente("u")["sid"] == "s1"
     # Aucune sauvegarde ni chargement tente sur un QGIS qui ne repond pas.
-    assert qgis.codes == ["SONDE"]
+    # Sans calcul inscrit au registre, une seconde sonde patiente a lieu
+    # avant de conclure (2026-10-03).
+    assert qgis.codes == ["SONDE", "SONDE"]
 
 
 @pytest.mark.asyncio
@@ -331,3 +346,51 @@ def test_le_bureau_affiche_l_attente_et_verifie_l_accord():
     # Contrat avec le chat (conversation par etude).
     assert "type: 'desk_etude_active'" in desk
     assert "d.type !== 'chat_etude_suivie'" in desk
+
+
+# ── Sonde patiente et projet secondaire (2026-10-03) ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_une_sonde_lente_sans_calcul_est_retentee_avant_de_conclure(banc, monkeypatch):
+    """Une sauvegarde du bureau occupe QGIS 13 s : la sonde de 8 s concluait
+    « QGIS occupe ». Sans calcul inscrit, une seconde sonde patiente."""
+    base, qgis = banc
+    appels = []
+
+    async def _sondes(executer, username):
+        appels.append(executer)
+        if len(appels) == 1:
+            return None
+        return {"sid": "s0", "pid": "p0", "fichier": "", "n_couches": 1}
+
+    monkeypatch.setattr(ae, "sonder_qgis", _sondes)
+    r = await hub_main._activer_etude_atomique("u", await base.get_study("s1"), None)
+    assert not hasattr(r, "status_code"), "l'activation aboutit"
+    assert appels == [hub_main._sonde_qgis_executeur, hub_main._sonde_qgis_patiente]
+    assert (base.sid, base.pid) == ("s1", "p1")
+
+
+@pytest.mark.asyncio
+async def test_un_calcul_inscrit_garde_la_conclusion_qgis_occupe(banc, monkeypatch):
+    base, qgis = banc
+    qgis.occupe = True
+
+    async def _calcul(username):
+        return True
+
+    monkeypatch.setattr(hub_main, "_calcul_en_cours", _calcul)
+    r = await hub_main._activer_etude_atomique("u", await base.get_study("s1"), None)
+    assert r.status_code == 409
+    assert qgis.codes.count("SONDE") == 1, "pas de seconde sonde pendant un calcul"
+
+
+@pytest.mark.asyncio
+async def test_un_projet_secondaire_ne_recoit_pas_le_projet_d_etude(banc):
+    base, qgis = banc
+    base.projets["s1b"] = {"pid": "p9", "sid": "s1", "is_default": 0}
+    base.projets["s1"]["is_default"] = 1
+    await hub_main._activer_etude_atomique("u", await base.get_study("s1"), "p9")
+    await hub_main._activer_etude_atomique("u", await base.get_study("s1"), None)
+    assert ("p9", False) in _Base.migrations
+    assert ("p1", True) in _Base.migrations

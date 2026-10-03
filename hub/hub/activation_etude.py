@@ -39,6 +39,10 @@ Executeur = Callable[[str, str], Awaitable[str]]
 # Delai de la sonde « QGIS repond-il ? ». Court : QGIS occupe ne repond pas,
 # inutile d'attendre les 30 s du chargement pour le savoir.
 DELAI_SONDE_S = 8
+# Seconde sonde, quand aucun calcul n'est inscrit au registre des taches :
+# une sauvegarde du bureau ou un controle de coherence occupent QGIS 10 a 13 s
+# (mesure du 2026-10-03), et la sonde de 8 s concluait a tort « QGIS occupe ».
+DELAI_SONDE_PATIENTE_S = 30
 
 _MARQUES_ECHEC = ("PROJECT_LOAD_ERR", "PROJECT_NEW_ERR", "PROJECT_LOAD_OK ok=False",
                   "STUDY_STAMP_ERR")
@@ -146,7 +150,11 @@ def diagnostic(
         # conclut rien, pour ne rien casser.
         return {"etat": "non_marque", "action": "aucune"}
     pid_qgis = etat_qgis.get("pid") or ""
-    if sid_qgis == hub_sid and (not hub_pid or not pid_qgis or pid_qgis == hub_pid):
+    # Un projet QGIS sans `hub_pid` n'est PAS en accord avec un projet designe
+    # par la base (2026-10-03) : c'est le projet d'etude (legacy), charge par
+    # une activation d'etude. Le tenir pour accord laissait la base sur un
+    # nouveau projet et QGIS sur le principal, sans resynchronisation.
+    if sid_qgis == hub_sid and (not hub_pid or pid_qgis == hub_pid):
         return {"etat": "accord", "action": "aucune"}
     if sid_qgis in set(sids_sessions_mcp or ()):
         return {"etat": "desaccord_session_mcp", "action": "aucune"}
@@ -192,17 +200,22 @@ async def sonder_qgis(executer: Executeur, username: str) -> dict | None:
 
 async def charger_dans_qgis(
     executer: Executeur, username: str, sid: str, pid: str | None,
-    changer_etude: bool,
+    changer_etude: bool, migrer_ancien: bool = True,
 ) -> dict:
-    """Charge l'etude/projet dans QGIS et rend le verdict (sans toucher la base)."""
+    """Charge l'etude/projet dans QGIS et rend le verdict (sans toucher la base).
+
+    `migrer_ancien=False` pour un projet secondaire : il ne recoit jamais le
+    projet d'etude legacy (cf. studies.activate_project_pod_code).
+    """
     from hub import studies
 
     sortie_etude: str | None = None
     try:
         if changer_etude:
             sortie_etude = await executer(username, studies.activate_pod_code(sid))
-        sortie_projet = (await executer(username, studies.activate_project_pod_code(sid, pid))
-                         if pid else "")
+        sortie_projet = (await executer(
+            username, studies.activate_project_pod_code(sid, pid, migrer_ancien=migrer_ancien))
+            if pid else "")
     except Exception as exc:
         return {**verdict_activation(sid, pid, sortie_etude, None,
                                      erreur=classer_erreur(exc)),

@@ -2084,7 +2084,14 @@ try:
     # /data/studies/{{sid}}/projects/{{pid}}/project.qgz pour que activate_project_
     # pod_code (qui lit ce path en priorite) charge l'etat courant, pas un etat
     # fige depuis la lazy migration.
-    if pid and n_layers > 0 and ok_legacy:
+    #
+    # Seulement si QGIS a ouvert CE projet (2026-10-03) : toute activation de
+    # projet pose `hub_pid`. Un `hub_pid` vide veut dire que QGIS a charge le
+    # projet d'etude (legacy) : l'ecrire dans `projects/{{pid}}` y copiait un
+    # autre contenu -- vecu sur un « nouveau projet » devenu copie du principal.
+    if pid and n_layers > 0 and ok_legacy and str(_proprio_pid) != str(pid):
+        print(f"STUDY_SAVE_PID_SKIP sid={{sid}} pid={{pid}} owner_pid={{_proprio_pid}}")
+    elif pid and n_layers > 0 and ok_legacy:
         try:
             pid_target = Path(f"/data/studies/{{sid}}/projects/{{pid}}/project.qgz")
             pid_target.parent.mkdir(parents=True, exist_ok=True)
@@ -2291,7 +2298,7 @@ print(f"PROJECT_CREATE_OK sid={{sid}} pid={{pid}} qgz_exists={{qgz.exists()}} co
 """
 
 
-def activate_project_pod_code(sid: str, pid: str) -> str:
+def activate_project_pod_code(sid: str, pid: str, migrer_ancien: bool = True) -> str:
     """Active un projet : sentinel + symlink + load QGIS proj.
 
     En complement de activate_pod_code (etude) :
@@ -2300,12 +2307,16 @@ def activate_project_pod_code(sid: str, pid: str) -> str:
       (active_study symlink doit deja etre en place)
     - QGIS proj.read(projects/{pid}/project.qgz) avec BadLayerHandler silent
       (meme pattern que activate_pod_code)
+
+    `migrer_ancien=False` : le projet n'est pas le principal de l'etude, il ne
+    recoit jamais le .qgz legacy (voir la migration ci-dessous).
     """
     return f"""
 import subprocess
 from pathlib import Path
 sid = {sid!r}
 pid = {pid!r}
+migrer_ancien = {bool(migrer_ancien)!r}
 Path("/data/.active_project").write_text(pid, encoding="utf-8")
 print(f"ACTIVE_PROJECT={{pid}}")
 
@@ -2365,10 +2376,17 @@ except Exception as _exc:
 # row study_projects a ete creee au boot hub, mais la copie effective du .qgz
 # attendait que le pod workspace soit UP pour s'executer).
 # Le legacy est conserve en .migrated.<ts> pour audit.
+#
+# Reservee aux projets anciens (2026-10-03) : un projet cree par le code
+# actuel a un meta.json, et un projet secondaire n'a jamais de legacy a
+# recuperer. Sans cette garde, tout nouveau projet recevait une copie du
+# legacy -- reecrit a chaque sauvegarde avec le projet courant -- : le
+# « nouveau projet » s'ouvrait avec le contenu du projet principal.
 import shutil as _sh
 import time as _t
 legacy_qgz = Path(f"/data/studies/{{sid}}/project.qgz")
-if not qgz.exists() and legacy_qgz.exists() and legacy_qgz.is_file():
+if (migrer_ancien and not (proj_dir / "meta.json").exists()
+        and not qgz.exists() and legacy_qgz.exists() and legacy_qgz.is_file()):
     try:
         sz = legacy_qgz.stat().st_size
         if sz > 0:

@@ -4353,6 +4353,35 @@ async def _sonde_qgis_executeur(owner: str, code: str) -> str:
     )
 
 
+async def _sonde_qgis_patiente(owner: str, code: str) -> str:
+    """Seconde sonde, quand aucun calcul n'occupe QGIS (cf. DELAI_SONDE_PATIENTE_S)."""
+    return await _execute_python_in_workspace(
+        owner, code, timeout=activation_etude.DELAI_SONDE_PATIENTE_S,
+    )
+
+
+async def _calcul_en_cours(username: str) -> bool:
+    """Une tache de fond est-elle inscrite comme active pour cet utilisateur ?"""
+    try:
+        return bool(await _REGISTRE_TACHES.lister(username, actives=True, limite=1))
+    except Exception as exc:
+        log.warning("Registre des taches illisible : %s", exc)
+        return True  # dans le doute, on garde la conclusion « occupe »
+
+
+async def _sonder_qgis_pour_activation(username: str) -> dict | None:
+    """Etat de QGIS, ou None s'il est vraiment occupe.
+
+    La sonde courte ne distingue pas un calcul d'une sauvegarde de quelques
+    secondes. Si aucun calcul n'est inscrit, on laisse a QGIS le temps de
+    finir avant de conclure.
+    """
+    etat = await activation_etude.sonder_qgis(_sonde_qgis_executeur, username)
+    if etat is None and not await _calcul_en_cours(username):
+        etat = await activation_etude.sonder_qgis(_sonde_qgis_patiente, username)
+    return etat
+
+
 def _reponse_activation_refusee(username: str, sid: str, pid: str | None,
                                 motif: str, nom: str) -> JSONResponse:
     """409 : l'etude active n'a pas change (regle A2).
@@ -4396,7 +4425,7 @@ async def _activer_etude_atomique(username: str, etude: dict, pid: str | None,
         projet = await studies.get_project(pid, username)
     pid = projet["pid"]
 
-    etat = await activation_etude.sonder_qgis(_sonde_qgis_executeur, username)
+    etat = await _sonder_qgis_pour_activation(username)
     if etat is None:
         log.warning("Activation %s/%s : QGIS ne repond pas -> en attente", sid, pid)
         return _reponse_activation_refusee(username, sid, pid, "qgis_occupe", nom)
@@ -4416,6 +4445,7 @@ async def _activer_etude_atomique(username: str, etude: dict, pid: str | None,
     verdict = await activation_etude.charger_dans_qgis(
         _execute_python_in_workspace, username, sid, pid,
         changer_etude=(prev_sid != sid or etat.get("sid") != sid),
+        migrer_ancien=bool(projet.get("is_default")),
     )
     if not verdict["ok"]:
         log.warning("Activation %s/%s refusee (%s) : %s", sid, pid, verdict["motif"],
@@ -4768,7 +4798,9 @@ async def activate_project_endpoint(
     await studies.touch_project(pid)
     try:
         await _execute_python_in_workspace(
-            user["username"], studies.activate_project_pod_code(sid, pid),
+            user["username"],
+            studies.activate_project_pod_code(
+                sid, pid, migrer_ancien=bool(p.get("is_default"))),
         )
     except Exception as exc:
         log.warning("Activation pod-side projet %s : %s", pid, exc)
@@ -13630,23 +13662,34 @@ async def workspace_create_project(sid: str, request: Request):
     label = (form.get("label") or "").strip() or "Nouveau projet"
     is_default = bool(form.get("is_default"))
     new_pid = None
+    erreur = ""
     try:
         api_key = await auth.create_or_get_api_key(_ONYXIA_USER)
         async with httpx.AsyncClient(timeout=60, base_url=_SELF_URL) as c:
-            r = await c.post(
-                f"/studies/{sid}/projects",
-                json={"label": label, "is_default": is_default},
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            if r.status_code in (200, 201):
-                new_pid = r.json().get("pid")
-                # Active le nouveau projet immediatement (effet 'on cree + on
-                # bascule' = comportement attendu UX).
-                if new_pid:
-                    await c.post(
-                        f"/studies/{sid}/projects/{new_pid}/activate",
-                        headers={"Authorization": f"Bearer {api_key}"},
-                    )
+            # Formulaire renvoye (second clic pendant une reponse lente) : on
+            # reprend le projet du meme nom cree a l'instant au lieu d'en
+            # creer un second -- vecu le 2026-10-03, deux projets a 3 s.
+            new_pid = await _projet_tout_juste_cree(sid, label)
+            if new_pid is None:
+                r = await c.post(
+                    f"/studies/{sid}/projects",
+                    json={"label": label, "is_default": is_default},
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                if r.status_code in (200, 201):
+                    new_pid = r.json().get("pid")
+            # Active le nouveau projet immediatement (effet 'on cree + on
+            # bascule' = comportement attendu UX).
+            if new_pid:
+                ar = await c.post(
+                    f"/studies/{sid}/projects/{new_pid}/activate",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                if ar.status_code == 409:
+                    # Le desk le dit, au lieu de rouvrir l'ancien projet en
+                    # silence (meme contrat que workspace_activate_project).
+                    erreur = "activation_en_attente" if (
+                        (ar.json() or {}).get("statut") == "en_attente") else "activation_refusee"
             try:
                 await c.post(
                     "/workspace/wake",
@@ -13658,7 +13701,29 @@ async def workspace_create_project(sid: str, request: Request):
         log.warning("workspace_create_project sid=%s: %s", sid, exc)
     return_to = request.query_params.get("return_to", "")
     target = "/desk" if return_to == "desk" else "/workspace"
+    if erreur:
+        target = f"{target}?error={erreur}"
     return RedirectResponse(target, status_code=302)
+
+
+# Fenetre pendant laquelle un second envoi du formulaire « nouveau projet »
+# reprend le projet du meme nom au lieu d'en creer un autre.
+_FENETRE_DOUBLON_PROJET_S = 30
+
+
+async def _projet_tout_juste_cree(sid: str, label: str) -> str | None:
+    """pid d'un projet `label` cree dans `sid` il y a moins de 30 s, sinon None."""
+    try:
+        projets = await studies.list_projects(sid)
+    except Exception:
+        return None
+    seuil = time.time() - _FENETRE_DOUBLON_PROJET_S
+    nom = label.strip()[:120]
+    recents = [p for p in projets
+               if p.get("label") == nom and (p.get("created_at") or 0) >= seuil]
+    if not recents:
+        return None
+    return max(recents, key=lambda p: p.get("created_at") or 0).get("pid")
 
 
 @app.post("/desk/study/{sid}/save")
