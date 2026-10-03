@@ -127,7 +127,7 @@ CLASSE_OUTIL: dict[str, str] = _classes(
     ecriture=(
         "set_study_zone", "smart_load", "add_from_catalog",
         "clip_to_study_zone", "densite_par_maille", "compter_par_zone",
-        "remove_layer", "run_processing",
+        "charger_sur_commune", "remove_layer", "run_processing",
         "save_project", "add_layer", "add_database_layer", "upload_file",
         "apply_layout_template", "create_component", "update_component",
         "create_assembly", "update_assembly", "clone_assembly",
