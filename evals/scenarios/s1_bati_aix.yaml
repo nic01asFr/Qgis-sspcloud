@@ -15,8 +15,9 @@ tours:
 attentes:
   trajectoire:
     outils_attendus:
-      - set_study_zone
-      - un_de: [smart_load, add_from_catalog]
+      # charger_sur_commune(id, commune) definit la zone et charge (2026-10-03)
+      - un_de: [set_study_zone, charger_sur_commune]
+      - un_de: [charger_sur_commune, smart_load, add_from_catalog]
     ordre:
       - [set_study_zone, {un_de: [smart_load, add_from_catalog]}]
     outils_interdits:

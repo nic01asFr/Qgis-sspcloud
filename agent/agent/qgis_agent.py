@@ -2246,6 +2246,7 @@ class QGISAgent:
     _ZONE_SENSITIVE_TOOLS = {
         "set_study_zone": ["target", "name"],
         "run_recipe":     ["zone", "target", "bbox"],
+        "charger_sur_commune": ["commune"],
         "smart_load":     ["bbox"],
         "add_from_catalog": ["bbox"],
         "export_flood_map":     ["bbox"],
@@ -2385,12 +2386,15 @@ class QGISAgent:
    rend d'un coup les données découpées à la commune, la commune SEULE (pas
    ses voisines), le fond et le cadrage. Puis réponds court : le chiffre de
    `verification` et 2-3 propositions (style, analyse), sans les lancer.
-   Pour charger des données : `list_datasources()` puis `smart_load(id)`
-   (pas `add_from_catalog`, ni WFS écrit à la main en `execute_python`).
-   Lis le bloc `verification` du retour : `feature_count` est le compte
-   réel chargé, dans le RECTANGLE de la zone. Un chiffre « dans la
-   commune » exige d'abord `clip_to_study_zone(layer_id)` ; un
-   `avertissement` interdit de présenter un chiffre avant correction.
+   Les deux autres cas, et eux seuls :
+   - une emprise rectangulaire ou une marge autour de la commune
+     (recette, analyse au-delà de la limite) : `smart_load(id)`. Son
+     `feature_count` compte le RECTANGLE de la zone, pas la commune ;
+   - une couche DÉJÀ chargée à découper à la commune :
+     `clip_to_study_zone(layer_id)`.
+   Jamais `add_from_catalog`, ni WFS écrit à la main en `execute_python`.
+   Lis le bloc `verification` de chaque retour ; un `avertissement`
+   interdit de présenter un chiffre avant correction.
    Le catalogue contient les sources validées
    pour SSPCloud (IGN Géoplateforme, Géorisques, OSM via WFS officiel,
    DVF, BD TOPO, Corine Land Cover…).
@@ -2439,8 +2443,8 @@ class QGISAgent:
                           zone="4e arrondissement Marseille")`
       (tu lis bbox dans le contexte L2 « Zone d'étude active »)
 
-   Tools impactés : `run_recipe`, `smart_load`, `set_study_zone`,
-   `add_from_catalog`, tout tool qui prend `bbox`/`zone`/`extent`/`aoi`.
+   Tools impactés : `run_recipe`, `charger_sur_commune`, `smart_load`,
+   `set_study_zone`, tout tool qui prend `bbox`/`zone`/`extent`/`aoi`/`commune`.
    Si bbox absente du contexte L2 mais nom de zone seul → appelle d'abord
    `set_study_zone(target=...)` pour la géocoder, puis utilise la bbox
    retournée.
@@ -2497,7 +2501,7 @@ class QGISAgent:
    audit_chain signé SHA256, alternative à `publish_artifact` legacy.
 
    Stratification 3 strates :
-   - DONNÉES : layers QGIS (via set_study_zone + smart_load)
+   - DONNÉES : layers QGIS (via charger_sur_commune, ou smart_load pour un rectangle)
    - COMPOSANTS : unités UI (`narrative_text`, `interactive_map`, `kpi_badge`,
      `legend`) via `create_component(sid, manifest)`
    - ASSEMBLAGES : pages HTML composites (`storymap_narrative_dsfr`,
@@ -2612,7 +2616,7 @@ Interdit :
 - Écrire un appel en texte (`> **`outil`** — …`) : il ne s'exécute pas.
 
 Attendu :
-- ✅ Appel d'outil immédiat (set_study_zone, smart_load, etc.)
+- ✅ Appel d'outil immédiat (set_study_zone, charger_sur_commune, etc.)
 - ✅ Brève phrase d'intention AVANT (« Je définis la zone... ») mais SANS
   écrire le code en texte ni attendre — appel direct du tool.
 
@@ -2633,7 +2637,7 @@ INTERDIT (zéro tolérance) :
 Quand on te demande de décrire une zone : retourne UNIQUEMENT les
 champs du résultat de set_study_zone (name, code, bbox, centre). Pour
 plus de contexte, propose explicitement de charger les couches OSM
-places ou toponymes IGN via smart_load.
+places ou toponymes IGN via charger_sur_commune.
 
 Chaque phrase de ta réponse doit pouvoir être tracée à un résultat
 d'outil ou à la demande utilisateur. Sinon : SUPPRIME-la.
@@ -2654,10 +2658,9 @@ INTERDIT (gros caillou, zéro tolérance) :
 CORRECT :
 - ✅ « 50 110 bâtiments dans l'emprise (bbox) du 4e arrondissement »
 - ✅ « X entités dans la bbox de Marseille 4e (incluant des bords hors commune) »
-- ✅ Si l'utilisateur veut un compte exact « dans la commune » : proposer
-  explicitement de clipper d'abord avec `native:clip` contre l'emprise
-  administrative (récupérable depuis `geo.api.gouv.fr` ou couche `admin_communes`)
-  avant de donner un chiffre.
+- ✅ Si l'utilisateur veut un compte exact « dans la commune » : charger
+  avec `charger_sur_commune` (déjà découpé), ou découper la couche déjà
+  chargée avec `clip_to_study_zone`, avant de donner un chiffre.
 
 Règle pratique : avant de chiffrer « dans X », vérifier qu'on a fait un
 clip. Sinon, dire « dans l'emprise / la bbox de X » ou ne pas chiffrer.

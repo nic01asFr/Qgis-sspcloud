@@ -143,15 +143,14 @@ pattern: |
   })
 note: Pour jointure spatiale (par intersection), utiliser native:joinattributesbylocation.
 
-## tip: native:clip (découpe par emprise administrative)
+## tip: Découpe au contour de la commune (outils, pas native:clip à la main)
 symptom: clip découpe limites administratives commune contour précis
 pattern: |
-  result = processing.run("native:clip", {
-      "INPUT": features_layer,
-      "OVERLAY": admin_polygon_layer,  # contour commune par exemple
-      "OUTPUT": "memory:clipped",
-  })
-note: Pour compter "dans la commune X" exact (vs bbox), TOUJOURS clip d'abord contre la couche admin (geo.api.gouv.fr ou IGN).
+  # Charger des données sur une commune, déjà découpées, en un appel
+  result = mcp_call("charger_sur_commune", {"id": "bdtopo_batiments", "commune": "Aix-en-Provence"})
+  # Découper une couche DÉJÀ chargée au contour mémorisé par set_study_zone
+  result = mcp_call("clip_to_study_zone", {"layer_id": layer_id})
+note: Le contour vient de set_study_zone : ne le cherche ni sur geo.api.gouv.fr ni dans une couche admin. native:clip seulement contre une autre couche de polygones que la commune.
 
 ## tip: native:fieldcalculator (ajouter ou transformer champ)
 symptom: calculer champ ajouter colonne expression densité ratio normalisation

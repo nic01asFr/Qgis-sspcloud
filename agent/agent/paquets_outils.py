@@ -122,7 +122,7 @@ SOCLE: frozenset[str] = frozenset({
     # Zone et catalogue
     "set_study_zone", "get_study_zone", "list_datasources",
     # Chargement et decoupage ; charger_sur_commune les enchaine (2026-10-03)
-    "smart_load", "add_from_catalog", "clip_to_study_zone", "charger_sur_commune",
+    "smart_load", "clip_to_study_zone", "charger_sur_commune",
     # Lecture de l'etat
     "get_project_info", "get_features", "get_screenshot",
     # Carte a l'ecran
@@ -291,7 +291,9 @@ OUTILS_INVALIDANTS: frozenset[str] = frozenset({
 # Outils que l'agent appelle lui-meme et ne montre jamais au modele, qu'ils
 # soient classes ou non. execute_async : un appel direct du modele echappait
 # au registre des taches de fond (constat live du 2026-10-02).
-OUTILS_MASQUES: frozenset[str] = frozenset({"execute_async"})
+# add_from_catalog : meme chemin que smart_load, un choix de chargement de
+# trop pour le modele (essai du 2026-10-03) ; QgisRemoteMCP ne le propose plus.
+OUTILS_MASQUES: frozenset[str] = frozenset({"execute_async", "add_from_catalog"})
 
 
 def paquet_de(nom_outil: str) -> str | None:

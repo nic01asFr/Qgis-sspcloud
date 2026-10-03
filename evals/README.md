@@ -25,7 +25,7 @@ evals/
     chiffres.py     chiffres traçables
     urls.py         liste blanche d'URL
     texte.py        jargon, motifs, question de clarification
-  scenarios/        S1 à S6 et huit scénarios de conversation
+  scenarios/        S1 à S7 et huit scénarios de conversation
   tests/            tests hors ligne et fixtures SSE fabriquées à la main
 ```
 

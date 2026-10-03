@@ -15,9 +15,11 @@ tours:
 attentes:
   trajectoire:
     outils_attendus:
-      - set_study_zone
-      - un_de: [smart_load, add_from_catalog]
+      # charger_sur_commune(id, commune) definit la zone, charge et decoupe (2026-10-03)
+      - un_de: [set_study_zone, charger_sur_commune]
+      - un_de: [charger_sur_commune, smart_load, add_from_catalog]
       - un_de:
+          - charger_sur_commune
           - clip_to_study_zone
           - {outil: run_processing, si_arguments: '(?i)clip|decoup'}
     ordre:
