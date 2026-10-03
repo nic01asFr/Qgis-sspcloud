@@ -394,3 +394,37 @@ async def test_un_projet_secondaire_ne_recoit_pas_le_projet_d_etude(banc):
     await hub_main._activer_etude_atomique("u", await base.get_study("s1"), None)
     assert ("p9", False) in _Base.migrations
     assert ("p1", True) in _Base.migrations
+
+
+# ── Reveil du workspace : ne pas ecraser le projet ouvert (2026-10-03) ───
+# Chaque POST /sessions (donc chaque /workspace/wake, appele a chaque
+# ouverture de projet) rechargeait le projet d'ETUDE legacy par-dessus le
+# projet qu'on venait d'ouvrir : le « nouveau projet » revenait au principal.
+
+
+@pytest.mark.asyncio
+async def test_au_reveil_rien_n_est_recharge_si_qgis_a_deja_le_projet(banc):
+    base, qgis = banc
+    await hub_main._auto_activate_active_study_after_wake("u")
+    assert [c for c in qgis.codes if c != "SONDE"] == []
+
+
+@pytest.mark.asyncio
+async def test_au_reveil_c_est_le_projet_actif_qui_est_recharge(banc):
+    base, qgis = banc
+    base.sid, base.pid = "s1", "p1"
+    qgis.ouvert = ("s1", "")          # projet d'etude legacy, sans hub_pid
+    await hub_main._auto_activate_active_study_after_wake("u")
+    assert "ACTIVATE_PROJECT s1 p1" in qgis.codes
+    assert qgis.ouvert == ("s1", "p1")
+
+
+@pytest.mark.asyncio
+async def test_au_reveil_un_qgis_muet_n_est_pas_force(banc, monkeypatch):
+    base, qgis = banc
+    base.sid, base.pid = "s1", "p1"
+    qgis.occupe = True
+    monkeypatch.setattr(hub_main, "_DELAI_REVEIL_QGIS_S", 0)
+    await hub_main._auto_activate_active_study_after_wake("u")
+    assert [c for c in qgis.codes if c != "SONDE"] == []
+    assert ae.en_attente("u")["pid"] == "p1", "l'ouverture est mise en attente"
