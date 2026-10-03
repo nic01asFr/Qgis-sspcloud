@@ -57,7 +57,7 @@ OUTILS_LONGS: frozenset[str] = frozenset({
     "export_qfield", "export_grist",
     # Vague E (2026-10-02) : 51 s mesures pour une maille de 50 m sur les
     # 112 816 batiments d'Aix.
-    "densite_par_maille", "compter_par_zone",
+    "densite_par_maille", "compter_par_zone", "charger_sur_commune",
 })
 
 # Lancees directement en arriere-plan, sans attendre le seuil : une recette
@@ -192,6 +192,7 @@ _LIBELLES = {
     "export_qfield":       "Export pour QField",
     "export_grist":        "Export vers Grist",
     "densite_par_maille":  "Calcul de la densité par maille",
+    "charger_sur_commune": "Chargement sur la commune",
     "compter_par_zone":    "Comptage par zone",
 }
 

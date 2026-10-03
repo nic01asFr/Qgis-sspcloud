@@ -411,6 +411,7 @@ LIBELLES_COURANTS = {
     "poll_job":             "le suivi du calcul",
     "run_processing":       "un traitement QGIS",
     "densite_par_maille":   "le calcul de densité par maille",
+    "charger_sur_commune":  "le chargement sur la commune",
     "compter_par_zone":     "le comptage par zone",
     "search_algorithms":    "la recherche d'un traitement",
     "run_recipe":           "l'exécution de la recette",

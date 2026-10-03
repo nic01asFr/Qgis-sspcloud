@@ -121,8 +121,8 @@ OUTIL_DEMANDER = "demander_outils"
 SOCLE: frozenset[str] = frozenset({
     # Zone et catalogue
     "set_study_zone", "get_study_zone", "list_datasources",
-    # Chargement et decoupage
-    "smart_load", "add_from_catalog", "clip_to_study_zone",
+    # Chargement et decoupage ; charger_sur_commune les enchaine (2026-10-03)
+    "smart_load", "add_from_catalog", "clip_to_study_zone", "charger_sur_commune",
     # Lecture de l'etat
     "get_project_info", "get_features", "get_screenshot",
     # Carte a l'ecran

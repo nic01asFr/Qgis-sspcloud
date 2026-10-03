@@ -1118,6 +1118,7 @@ async def _call_mcp_tool_raw(tool_name: str, arguments: dict, username: str = "u
         "run_recipe":          1800,  # 20+ min serveur, on prend large
         "smart_load":           600,  # WFS download lourds (BD TOPO commune)
         "clip_to_study_zone":   600,  # decoupe au contour (300 000 batis sur Marseille)
+        "charger_sur_commune":  900,  # chargement + decoupage + contour + fond
         "densite_par_maille":   600,  # natif : 100 000 batis en quelques secondes
         "compter_par_zone":     600,
         "execute_python":       900,  # spatial joins sur 100k+ features
@@ -1356,6 +1357,7 @@ def _mcp_tool_to_openai(tool: dict) -> dict:
 _MUTATING_TOOLS: frozenset[str] = frozenset({
     "smart_load",
     "clip_to_study_zone",
+    "charger_sur_commune",
     "densite_par_maille",
     "compter_par_zone",
     "add_layer",
@@ -1808,6 +1810,7 @@ _LIBELLES_OUTILS = {
     "execute_async":        "Calcul long lancé dans QGIS…",
     "poll_job":             "Suivi du calcul en cours…",
     "run_processing":       "Traitement QGIS en cours…",
+    "charger_sur_commune":  "Chargement et mise en forme sur la commune…",
     "densite_par_maille":   "Calcul de la densité par maille…",
     "compter_par_zone":     "Comptage par zone…",
     "search_algorithms":    "Recherche d'un traitement QGIS…",
@@ -2377,6 +2380,11 @@ class QGISAgent:
    et sont validées — `run_recipe(id, params)` plutôt que ré-écrire.
 
 2bis. 📚 **CATALOGUE d'abord — JAMAIS d'URL externe inventée** :
+   « Charge / affiche <données> sur <commune> » : `list_datasources()` pour
+   l'identifiant, puis UN SEUL appel `charger_sur_commune(id, commune)`. Il
+   rend d'un coup les données découpées à la commune, la commune SEULE (pas
+   ses voisines), le fond et le cadrage. Puis réponds court : le chiffre de
+   `verification` et 2-3 propositions (style, analyse), sans les lancer.
    Pour charger des données : `list_datasources()` puis `smart_load(id)`
    (pas `add_from_catalog`, ni WFS écrit à la main en `execute_python`).
    Lis le bloc `verification` du retour : `feature_count` est le compte
