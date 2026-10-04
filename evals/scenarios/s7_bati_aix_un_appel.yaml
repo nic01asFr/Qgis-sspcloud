@@ -29,7 +29,8 @@ attentes:
     zone:
       nom_contient: Aix
     couches:
-      - motif: "^commune"
+      # Couche de contour : nommee comme la commune (fichier commune_<nom>.gpkg).
+      - motif: "^Aix-en-Provence$"
         nombre_entites: {min: 1, max: 1}
         emprise_dans: [5.20, 43.40, 5.60, 43.70]
       - motif: "b[aâ]ti"
@@ -37,7 +38,7 @@ attentes:
         emprise_dans: [5.20, 43.40, 5.60, 43.70]
         hors_zone_max: 0
         reference_hors_zone: contour
-        contour_motif: "^commune"
+        contour_motif: "^Aix-en-Provence$"
       - motif: "ortho"
         presente: true
   reponse:

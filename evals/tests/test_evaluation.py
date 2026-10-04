@@ -130,11 +130,19 @@ def test_s2_charger_sur_commune_seul_reussit(etat_aix_reussi):
 # ── S7 : le rendu en un appel (essai du 2026-10-03) ────────────────────────
 
 def _etat_s7(etat_aix_reussi):
+    """Couches lues par la sonde apres charger_sur_commune, premier passage
+    reel du 2026-10-04 : le contour porte le nom de la commune."""
     etat = copy.deepcopy(etat_aix_reussi)
+    contour, bati = etat["couches"]
+    contour["nom"] = "Aix-en-Provence"
+    bati["nom"] = "batiments_bd_topo_aix_en_provence"
     etat["couches"].append({"id": "c3", "nom": "Orthophotos IGN (WMTS)", "valide": True,
                             "crs": "EPSG:3857", "fournisseur": "wms", "memoire": False,
                             "source_type": "service", "type": "raster", "nombre_entites": None,
                             "emprise_4326": None})
+    inspection = etat["inspections"].pop("bati_aix_en_provence")
+    inspection["contour"] = "Aix-en-Provence"
+    etat["inspections"]["batiments_bd_topo_aix_en_provence"] = inspection
     return etat
 
 
@@ -151,8 +159,9 @@ def test_s7_l_ancien_chemin_en_sept_etapes_echoue(etat_aix_reussi):
     """Troisieme passage de l'essai : le bon chiffre, mais ni contour ni
     fond, et un style gris que personne n'avait demande."""
     s = _scenario("S7-bati-aix-un-appel")
-    etat = copy.deepcopy(etat_aix_reussi)
-    etat["couches"] = [c for c in etat["couches"] if c["nom"] != "commune_aix_en_provence"]
+    etat = _etat_s7(etat_aix_reussi)
+    etat["couches"] = [c for c in etat["couches"]
+                       if c["nom"] not in ("Aix-en-Provence", "Orthophotos IGN (WMTS)")]
     appels = [AppelOutil("execute_python", {"code": "result = helpers.get_study_zone()"}),
               AppelOutil("set_study_zone", {"target": "Aix-en-Provence"}),
               AppelOutil("list_datasources", {"search": "bati"}),
@@ -164,7 +173,7 @@ def test_s7_l_ancien_chemin_en_sept_etapes_echoue(etat_aix_reussi):
     echecs = _echecs(evaluer(s, _execution(s.id, [tour], etat), BLANCHE))
     assert {"trajectoire.attendu[charger_sur_commune]", "trajectoire.interdit[smart_load]",
             "trajectoire.interdit[clip_to_study_zone]", "trajectoire.interdit[set_layer_style]",
-            "etat.couche[^commune].presente", "etat.couche[ortho].presente",
+            "etat.couche[^Aix-en-Provence$].presente", "etat.couche[ortho].presente",
             "cout.iterations_max"} <= echecs, echecs
 
 
